@@ -164,8 +164,10 @@ from pathlib import Path
 # lifecycle and cancellation/heap safety, fail-closed KV access diagnostics,
 # contract-derived performance geometry, deterministic Git-independent source
 # packaging, and conservative receipt-bound status checks. Ceiling moves to
-# the exact count after the merge.
-CEILING = 126517
+# the exact count after the merge. The merge-fallout fixes (residentd arena
+# handles, the cudart link on CUDA hosts, the scheduler test's reserve/commit
+# lifecycle, the PEP 706 fallback, the four phase-7 gate lines) add 13.
+CEILING = 126530
 
 ROOT = Path(__file__).resolve().parent.parent
 EXTENSIONS = {'.c', '.h', '.cu', '.cuh', '.py', '.mk', '.sh'}

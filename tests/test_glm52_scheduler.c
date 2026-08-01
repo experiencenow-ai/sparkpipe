@@ -1269,7 +1269,6 @@ static void SparkTestGlm52SchedulerRecordsNvmeResidencyConfidence(void)
     _Alignas(64) uint8_t tables[64u * 1024u];
     _Alignas(SPARK_TEST_NVME_BLOCK_BYTES) uint8_t staging[
         SPARK_TEST_NVME_STAGING_BUFFERS * SPARK_TEST_NVME_BLOCK_BYTES];
-    uint64_t device_offset;
     uint64_t table_bytes;
     uint64_t resident_hash;
     uint64_t absent_hash;
@@ -1299,12 +1298,21 @@ static void SparkTestGlm52SchedulerRecordsNvmeResidencyConfidence(void)
     table_bytes = SparkNvmeTierTableBytes(&tier_configuration);
     assert(table_bytes != 0u && table_bytes <= sizeof(tables));
     assert(SparkNvmeTierInitialize(
-        &tier,&tier_configuration,&device,tables,staging) ==
+        &tier,&tier_configuration,&device,tables,table_bytes,
+        staging,sizeof(staging)) ==
         SPARK_STATUS_OK);
     resident_hash = 0x5eed0001u;
     absent_hash = 0x5eed0002u;
-    assert(SparkNvmeTierPublish(&tier,resident_hash,&device_offset) ==
-        SPARK_STATUS_OK);
+    /* Phase 7's write lifecycle: reserve, then commit - a reservation is
+       never readable, so the oracle's ALL confidence only exists after
+       this commit. */
+    {
+        SparkNvmeTierWriteReservation reservation;
+        assert(SparkNvmeTierReserveWrite(&tier,resident_hash,&reservation) ==
+            SPARK_STATUS_OK);
+        assert(SparkNvmeTierCommitWrite(&tier,&reservation) ==
+            SPARK_STATUS_OK);
+    }
 
     SparkTestInitializePrefixCache(&cache,entries,bindings,128u,512u);
     SparkTestInitializeSchedulerConfiguration(
