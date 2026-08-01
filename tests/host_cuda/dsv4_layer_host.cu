@@ -9,6 +9,10 @@
 //   the KV latent GEMM must read the low-rank path's quantised input - the
 //     second quantise of the normed rows was deleted, so the activation
 //     pointer IS the query scratch or the dedup regressed;
+//   the o_proj up GEMM must read the concatenated per-group ranks
+//     (groups x rank wide), not the full attention width - the grouped
+//     low-rank form is the contract's, and a full-width K here means the
+//     lever regressed;
 //   the expert GEMMs must be grouped and see rows * top_k rows;
 //   the router must write f32 logits and read the full hidden;
 //   the routed result must survive into hidden AND the shared expert must
@@ -97,12 +101,18 @@ struct LmHostExpertFormat
 #define ROUTES (ROWS * DSV4_TOP_K)
 #define CONTEXT 4u
 // The attention kernel reads the query at a per-head stride of LATENT + ROPE;
-// that is the layout this buffer sizes, and the rope-span comment in
-// layer.cuh is the audit trail for why nothing in config.h names it.
-#define QUERY_ROW (DSV4_HEAD_DIM + DSV4_ROPE_DIM)
-#define QUERY_WIDTH (DSV4_ATTN_HEADS * QUERY_ROW)
+// config.h names that row now (DSV4_QUERY_ROW) and the layer guards the
+// binder-set up-projection width against it.
+#define QUERY_WIDTH DSV4_QUERY_ROW
 
 static const uint8_t dummy_weight[16] = {0};
+
+// The o_proj down factor is a REAL read here, not a recorder call:
+// LmPerHeadProjectKernel ships and runs on the host, so the weight must be
+// the full 8 x 1024 x 4096 BF16 tensor (zeros are fine - the down output's
+// value is not what this harness checks).
+static uint16_t output_down_weight_data[
+	DSV4_OUTPUT_GROUP_COUNT * DSV4_OUTPUT_LORA_RANK * DSV4_OUTPUT_GROUP_DIM];
 
 static uint16_t norm_weight[DSV4_HIDDEN], lowrank_norm_weight[DSV4_QUERY_LORA_RANK];
 static uint16_t hidden[ROWS * DSV4_HIDDEN], residual[ROWS * DSV4_HIDDEN];
@@ -111,6 +121,7 @@ static uint16_t query_bf16[ROWS * QUERY_WIDTH];
 static uint16_t kv_slot[ROWS * (DSV4_HEAD_DIM + DSV4_ROPE_DIM)];
 static uint16_t attention_latent[ROWS * DSV4_ATTN_HEADS * DSV4_HEAD_DIM];
 static uint16_t attention_out[ROWS * DSV4_HIDDEN];
+static uint16_t output_down[ROWS * DSV4_OUTPUT_RANK_WIDTH];
 static uint8_t packed_activation[ROWS * DSV4_ATTN_HEADS * DSV4_HEAD_DIM];
 static uint8_t packed_scale[ROWS * (DSV4_ATTN_HEADS * DSV4_HEAD_DIM / 128u)];
 static uint8_t lowrank_input_codes[ROWS * DSV4_HIDDEN];
@@ -167,8 +178,9 @@ int main(void)
 	b.query_scratch.dense_tile_prefix = dense_tiles;
 	b.kv_latent_weight = dummy_weight;
 	b.kv_latent_scale = dummy_weight;
-	b.output_weight = dummy_weight;
-	b.output_scale = dummy_weight;
+	b.output_down_weight = output_down_weight_data;
+	b.output_up_weight = dummy_weight;
+	b.output_up_scale = dummy_weight;
 	b.router_weight = dummy_weight;
 	b.expert_w1_weight = dummy_weight;
 	b.expert_w1_scale = dummy_weight;
@@ -185,6 +197,7 @@ int main(void)
 	b.kv_slot_bf16 = kv_slot;
 	b.attention_latent_bf16 = attention_latent;
 	b.attention_out_bf16 = attention_out;
+	b.output_down_bf16 = output_down;
 	b.packed_activation = packed_activation;
 	b.packed_scale = packed_scale;
 	b.gate_up_bf16 = gate_up;

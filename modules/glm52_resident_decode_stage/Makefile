@@ -72,13 +72,16 @@ SERVING_ADAPTER_DEPENDENCY := $(SERVING_ADAPTER_OBJECT:.o=.d)
 # recipe template and one bucket list, so a fix to a recipe reaches every
 # variant and a source edit cannot land in one variant only.
 #
-# A bucket is a capacity ceiling - the b8 archive serves 1-8 rows - so the
-# set {8, 64, 256, 1024} overlaps deliberately: B8 is the chat batch, B1024
-# the stage planner's maximum and the winner of any B64-vs-B1024 tradeoff.
-# Compile time is bounded by keeping the set at four and by emitting variants
-# only for families with resident stage modules (glm52 here; k3 adopts the
-# same contract when its module Makefile lands).
-GLM52_BATCH_VARIANT_BUCKETS ?= 8 64 256 1024
+# A bucket is a capacity ceiling - the b8 archive serves 1-8 rows - and the
+# set is every power of two from 1 to 1024: runtime selection takes the
+# tightest ceiling at or above the microbatch, so a live batch pads to at
+# most twice itself and the pools the bucket sizes stay within that factor.
+# Compile time is eleven archives times five translation units, the accepted
+# price of the tight fit (trim the set for local iteration through
+# GLM52_BATCH_VARIANT_BUCKETS, never by editing a variant). Variants are
+# emitted only for families with resident stage modules (glm52 here; k3
+# adopts the same contract when its module Makefile lands).
+GLM52_BATCH_VARIANT_BUCKETS ?= 1 2 4 8 16 32 64 128 256 512 1024
 GLM52_MODULE_ID_PREFIX := spark.glm52.resident_decode_stage.bf16.h6144.h64.d512.r64.k2048
 GLM52_MODULE_ID_SUFFIX := rv256.mtp6.v1
 GLM52_MODULE_ID := $(GLM52_MODULE_ID_PREFIX).b1024.$(GLM52_MODULE_ID_SUFFIX)
@@ -157,7 +160,7 @@ cold_archive:
 # The variant set. variants is the compile-only half of the variant contract:
 # every bucket's archive from the one template above. cold_variants mirrors
 # cold_archive. publish_variants is the publish half: each bucket validated
-# and published under its own module ID, so the module library holds four
+# and published under its own module ID, so the module library holds eleven
 # content-addressed identities the loader resolves between - the naming
 # convention SPEC.md's contract needs and nothing more.
 variants: require_sm121a $(GLM52_BATCH_VARIANT_ARCHIVES)

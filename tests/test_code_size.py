@@ -100,7 +100,67 @@ from pathlib import Path
 # ptxas occupancy check) and its gate wiring (Makefile +1,
 # tools/gates.sh +4) - 654 lines; the test and the estimates doc are
 # excluded by construction. Ceiling moves to the exact count.
-CEILING = 124946
+# The power-of-2 batch-variant wave widens the bucket ladder from
+# {8, 64, 256, 1024} to all eleven powers of two B1..B1024: the per-family
+# tuning headers gain the seven new module-ID compositions, guard rungs, and
+# ceiling-picker rungs (spark_glm52_batch_tuning.h +70 net,
+# spark_k3_batch_tuning.h +68 net), the graph cache spare entries grow to
+# hold 11 buckets x MTP draft variants with the slot-state ABI bump
+# (include/sparkpipe/spark_resident_decode_stage.h +11), and the variant-set
+# comments move with the ladder (module Makefile +3, top Makefile +1,
+# tools/gates.sh +1, inference/stage/graph_replay.h +1) - 155 lines; the
+# test is excluded by construction. The balance of the exact-count move is
+# concurrent agents' in-flight growth, theirs to account.
+# The bf16 KDA/GDN state kernel variant adds the State element-type
+# parameter to LmDeltaRuleKernel and LmReplayFoldKernel with the
+# round-to-nearest-even commit store (inference/kernels/linear_attn.cuh
+# +50), the sm_121a instantiation guard for both bf16 variants
+# (tools/build_replay_fold.sh +10), and the gate wiring (Makefile +1,
+# tools/gates.sh +6) - 67 lines; the host harness and its driver are
+# excluded by construction. The balance of the exact-count move is
+# concurrent agents' in-flight growth, theirs to account.
+# The node/scheduler leftover wave converts residentd's per-client control
+# payload to the comms arena (node/residentd.c, +36 net), wires the tier-3
+# residency oracle into admission (scheduler/scheduler.c + include/
+# sparkpipe/spark_scheduler.h, +125 net: the exposed query, the decision
+# record, the confidence histogram), lifts the stage-count cap to 16 for
+# the PP16 recipes (include/sparkpipe/spark_stage_plan.h, +5), and deletes
+# the caller-less prefill slice prototype (inference/stage/
+# serving_adapter.cu, +0 net). Ceiling moves by those 166 lines; the
+# balance of the exact-count move is concurrent agents' in-flight growth,
+# theirs to account.
+# The DSv4 correctness + o_proj lever wave lands the four audit fixes and
+# the grouped low-rank output projection: the per-head YaRN rope and the
+# sparse-score axis swap with its window clamp (inference/kernels/attn.cuh
+# +26 net), the query row-width and o_proj contract constants
+# (inference/llms/deepseek_v4/config.h +22), the layer's rope/window/o_proj
+# rewiring and repriced byte audit (inference/llms/deepseek_v4/layer.cuh
+# +27 net), and the instantiation/budget notes (deepseek_v4/unity.cu +1,
+# deepseek_v4_pro/unity.cu +2) - 78 lines; the host harness and the gate
+# updates are excluded by construction. Ceiling moves to the exact count;
+# the balance of the exact-count move is concurrent agents' in-flight
+# growth, theirs to account.
+# The indirect-A GEMM wave (kernel half of the MoE gather deletion,
+# route.cuh's consumer contract) adds the activation_row_index /
+# activation_source words and their consume-side source-row scale
+# (inference/kernels/gemm.cuh +107 net), the tx-identical per-chunk bulk
+# staging path and the shared expect+weight helper
+# (inference/kernels/tile.cuh +118 net), the bulk-1D copy primitive
+# (inference/kernels/tma.cuh +23), the contract's status rewrite
+# (inference/kernels/route.cuh +12 net), and the gate line
+# (tools/gates.sh +5) - 265 lines; the fragment-mapping model, the
+# contract pins, and the host recorder mirror are excluded by
+# construction. Ceiling moves to the exact count; the balance of the
+# exact-count move is concurrent agents' in-flight growth, theirs to
+# account.
+# The K3 bind wave (pack V2 consumption) adds the fused-projection
+# section split and its contract comments (inference/llms/kimi_k3/
+# layer.cuh +86 net: the split kernel, the two wide GEMMs replacing six,
+# the interleave fail-closed; slice.cuh net 0: field-for-field swaps) -
+# 86 lines; the host recorders, the gate updates and the doc are
+# excluded by construction. The ceiling already sits at the exact count,
+# so this entry accounts without moving it.
+CEILING = 125824
 
 ROOT = Path(__file__).resolve().parent.parent
 EXTENSIONS = {'.c', '.h', '.cu', '.cuh', '.py', '.mk', '.sh'}

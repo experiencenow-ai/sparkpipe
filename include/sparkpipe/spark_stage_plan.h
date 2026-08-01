@@ -25,8 +25,13 @@ typedef struct SparkStagePlanGeometry
 #define SPARK_STAGE_PLAN_PIPELINE_INFLIGHT_REQUEST_CAPACITY \
     (SPARK_STAGE_PLAN_CURRENT_SPARK_COUNT * \
      SPARK_STAGE_PLAN_MAX_BATCH_BUCKET)
-#define SPARK_STAGE_PLAN_MAX_STAGE_COUNT \
-    SPARK_STAGE_PLAN_CURRENT_SPARK_COUNT
+/* 16, not CURRENT_SPARK_COUNT: the July ring is 13 sparks but the recipe
+   generator emits PP16 plans for the 16-node ring, and every stage-count
+   consumer (the validation loops here, the balanced-plan DP, the
+   production-topology check) iterates stage_count rather than assuming
+   the current ring, so the capacity is the only thing that ever capped
+   them at 13. */
+#define SPARK_STAGE_PLAN_MAX_STAGE_COUNT 16u
 #define SPARK_STAGE_PLAN_DESCRIPTOR_BYTES \
     ((uint32_t)sizeof(SparkStagePlan))
 #define SPARK_STAGE_PLAN_MEASURED_PROFILE_20260701 20260701u

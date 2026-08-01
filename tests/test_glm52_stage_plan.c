@@ -286,10 +286,57 @@ static void SparkTestGlm52StagePlanMeasuredBalanced(void)
         &SparkTestGlm52StagePlanGeometry,
         SPARK_STAGE_PLAN_MEASURED_PROFILE_20260701,
         SPARK_STAGE_PLAN_BUCKET_B32,
-        SPARK_STAGE_PLAN_CURRENT_SPARK_COUNT + 1u,
+        SPARK_STAGE_PLAN_MAX_STAGE_COUNT + 1u,
         &stage_plan,
         error_buffer,
         sizeof(error_buffer)) == SPARK_STATUS_INVALID_ARGUMENT);
+}
+
+/* PP16: the recipe generator's 16-node-ring plans. The cap used to alias
+   CURRENT_SPARK_COUNT (13), so these builds were rejected before any cut
+   rule ran; with the cap at 16 they must plan and validate. */
+static void SparkTestGlm52StagePlanBuildsPp16Plans(void)
+{
+    const uint32_t pp16_layer_counts[16] =
+        {3u, 5u, 5u, 5u, 5u, 5u, 5u, 5u, 5u, 5u, 5u, 5u, 5u, 5u, 5u, 5u};
+    SparkStagePlan stage_plan;
+    uint64_t layer_cost_ns[SPARK_GLM52_MODEL_LAYER_COUNT];
+    char error_buffer[256];
+    uint32_t layer_index;
+
+    for (layer_index = 0u;
+         layer_index < SPARK_GLM52_MODEL_LAYER_COUNT;
+         ++layer_index)
+    {
+        layer_cost_ns[layer_index] = 1000u + (uint64_t)layer_index;
+    }
+    assert(SparkStagePlanBuildBalanced(
+        &SparkTestGlm52StagePlanGeometry,
+        layer_cost_ns,
+        16u,
+        &stage_plan,
+        error_buffer,
+        sizeof(error_buffer)) == SPARK_STATUS_OK);
+    assert(stage_plan.stage_count == 16u);
+    assert(stage_plan.stages[0].first_layer_index == 0u);
+    assert(stage_plan.stages[15].first_layer_index +
+        stage_plan.stages[15].layer_count ==
+            SPARK_GLM52_MODEL_LAYER_COUNT);
+    assert((stage_plan.stages[15].flags &
+        SPARK_STAGE_PLAN_STAGE_FLAG_FINAL_TOKEN) != 0u);
+
+    assert(SparkStagePlanBuildFromLayerCounts(
+        &SparkTestGlm52StagePlanGeometry,
+        pp16_layer_counts,
+        16u,
+        &stage_plan,
+        error_buffer,
+        sizeof(error_buffer)) == SPARK_STATUS_OK);
+    assert(stage_plan.stage_count == 16u);
+    assert(stage_plan.stages[0].layer_count == 3u);
+    assert(stage_plan.stages[1].first_layer_index == 3u);
+    assert(stage_plan.stages[15].first_layer_index == 73u);
+    assert(stage_plan.stages[15].layer_count == 5u);
 }
 
 static void SparkTestGlm52StagePlanMeasuredBalancedQuantizationModes(void)
@@ -420,6 +467,7 @@ int main(void)
     SparkTestGlm52StagePlanBuilderAndBuckets();
     SparkTestGlm52StagePlanMeasuredBalanced();
     SparkTestGlm52StagePlanMeasuredBalancedQuantizationModes();
+    SparkTestGlm52StagePlanBuildsPp16Plans();
     SparkTestGlm52StagePlanInvalidCuts();
     return 0;
 }

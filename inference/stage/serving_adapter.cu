@@ -10,14 +10,14 @@
 #define SPARK_SERVING_ADAPTER_INVALID_SLOT UINT32_MAX
 
 /* Defined in inference/llms/glm5_2/bind.cu. Declared rather than included
-   because bind.cu pulls the whole kernel library and this file needs two
-   symbols from it - an include here would make every edit to a kernel recompile
-   the serving adapter. */
-extern "C" int32_t Glm52StageSlicePrefill(
-    const SparkResidentDecodeStageNodeContext *const *node_contexts, void *layer_buffers,
-    uint32_t first_layer, uint32_t layer_count, uint32_t rows, uint32_t packed_rows,
-    uint32_t context, uint32_t multiprocessors, const uint32_t *row_positions, void *stream);
-
+   because bind.cu pulls the whole kernel library and this file needs one
+   symbol from it - an include here would make every edit to a kernel
+   recompile the serving adapter. The Glm52StageSlicePrefill prototype once
+   declared alongside is gone, not wired: the prefill path below launches
+   through the required-CUDA stage-slice bulk-prefill entry point, which
+   takes the prefill frame view and KV block tables - a different contract
+   than bind.cu's row_positions slice launcher, so there was no caller to
+   point at it. The dead definition in bind.cu is gone too. */
 extern "C" int32_t Glm52StageSlice(
     const SparkResidentDecodeStageNodeContext *const *node_contexts, void *layer_buffers,
     uint32_t first_layer, uint32_t layer_count, uint32_t rows,

@@ -26,12 +26,12 @@
 #include "sparkpipe/spark_request_api.h"
 #include "sparkpipe/spark_serving_engine.h"
 #include "sparkpipe/spark_hidden_transport.h"
+#include "runtime/arena.h"
 #include "runtime/net.h"
 
 #define SPARK_CUDA_RESIDENTD_DEFAULT_MAX_ACTIVE 1024u
 #define SPARK_CUDA_RESIDENTD_DEFAULT_PROGRAM "glm52.ring.rank.production"
 #define SPARK_CUDA_RESIDENTD_DEFAULT_SOCKET_PREFIX "/tmp/sparkpipe_glm52_cuda_resident_rank"
-#define SPARK_CUDA_RESIDENTD_INITIAL_CONTROL_PAYLOAD_BYTES (1024u * 1024u)
 #define SPARK_CUDA_RESIDENTD_WORK_QUEUE_CAPACITY 256u
 #define SPARK_CUDA_RESIDENTD_OUTPUT_QUEUE_CAPACITY \
     ((2u * SPARK_CUDA_RESIDENTD_WORK_QUEUE_CAPACITY) + 16u)
@@ -151,6 +151,16 @@ typedef struct SparkCudaResidentdRuntime
     int32_t listen_fd;
     SparkCudaResidentdClient
         clients[SPARK_CUDA_RESIDENTD_MAX_CLIENTS];
+	/* One arena, one class, one slot per client at the largest legal
+	   control payload. The per-client read buffer used to start at 1 MiB
+	   and double with realloc on the read path as message payloads grew:
+	   an allocator round trip (and a possible multi-MB move) in the middle
+	   of a pump, repeated log2(MAX/1MiB) times per client. A decode submit
+	   with a full KV block list can legally reach MAX, so the memory is
+	   owed anyway; paying it once at init makes the read path
+	   allocation-free. MAX_CLIENTS slots x MAX + links, one malloc, at
+	   init only. */
+	SparkArena control_payload_arena;
     int32_t wake_pipe_read_fd;
     int32_t wake_pipe_write_fd;
     pthread_mutex_t output_mutex;
@@ -199,32 +209,26 @@ static void SparkCudaResidentdSignal(int signal_number)
 }
 
 static SparkStatus SparkCudaResidentdEnsureClientPayloadCapacity(
+    SparkCudaResidentdRuntime *runtime,
     SparkCudaResidentdClient *client,
     uint32_t required_bytes)
 {
-    uint32_t grown_capacity;
-    uint8_t *grown_payload;
-    if (client == 0 || required_bytes >
+    if (runtime == 0 || client == 0 || required_bytes >
         SPARK_CUDA_RESIDENT_IPC_MAX_CONTROL_PAYLOAD_BYTES)
         return SPARK_STATUS_INVALID_ARGUMENT;
-    if (required_bytes <= client->payload_capacity)
+    if (client->payload != 0)
         return SPARK_STATUS_OK;
-    grown_capacity = client->payload_capacity;
-    if (grown_capacity == 0u)
-        grown_capacity =
-            SPARK_CUDA_RESIDENTD_INITIAL_CONTROL_PAYLOAD_BYTES;
-    while (grown_capacity < required_bytes &&
-        grown_capacity <=
-            SPARK_CUDA_RESIDENT_IPC_MAX_CONTROL_PAYLOAD_BYTES / 2u)
-        grown_capacity *= 2u;
-    if (grown_capacity < required_bytes)
-        grown_capacity = required_bytes;
-    grown_payload = (uint8_t *)realloc(
-        client->payload,grown_capacity);
-    if (grown_payload == 0)
+    /* Arena acquire, not realloc: the slot is the class maximum, so one
+       acquire covers every later message this client can legally send and
+       the read path never touches the allocator again. Exhaustion means
+       the MAX_CLIENTS sizing was wrong and fails loudly - no fall-through
+       to a quiet malloc. */
+    client->payload = (uint8_t *)SparkArenaAcquire(
+        &runtime->control_payload_arena,required_bytes);
+    if (client->payload == 0)
         return SPARK_STATUS_CAPACITY_EXCEEDED;
-    client->payload = grown_payload;
-    client->payload_capacity = grown_capacity;
+    client->payload_capacity =
+        SPARK_CUDA_RESIDENT_IPC_MAX_CONTROL_PAYLOAD_BYTES;
     return SPARK_STATUS_OK;
 }
 
@@ -237,10 +241,11 @@ static void SparkCudaResidentdResetClientMessage(
 }
 
 static SparkStatus SparkCudaResidentdReadClientMessage(
+    SparkCudaResidentdRuntime *runtime,
     SparkCudaResidentdClient *client)
 {
     SparkStatus status;
-    if (client == 0 || client->fd < 0)
+    if (runtime == 0 || client == 0 || client->fd < 0)
         return SPARK_STATUS_INVALID_ARGUMENT;
     status = SparkCudaResidentIpcReadHeader(
         &client->reader,client->fd,
@@ -248,7 +253,7 @@ static SparkStatus SparkCudaResidentdReadClientMessage(
     if (status != SPARK_STATUS_OK)
         return status;
     status = SparkCudaResidentdEnsureClientPayloadCapacity(
-        client,client->reader.header.payload_bytes);
+        runtime,client,client->reader.header.payload_bytes);
     if (status != SPARK_STATUS_OK)
         return status;
     return SparkCudaResidentIpcReadPayload(
@@ -1070,6 +1075,26 @@ static SparkStatus SparkCudaResidentdAttachBuilderDriver(
         runtime->output_transport_session);
 }
 
+static SparkStatus SparkCudaResidentdInitializeControlPayloadArena(
+    SparkCudaResidentdRuntime *runtime)
+{
+    SparkArenaClassDescriptor payload_class;
+
+    if (runtime == 0)
+        return SPARK_STATUS_INVALID_ARGUMENT;
+    if (runtime->control_payload_arena.backing != 0)
+        return SPARK_STATUS_OK;
+    /* One slot per client at the largest legal control payload, so the
+       arena can always back every connected client - no new exhaustion
+       mode relative to the realloc version. */
+    payload_class.slot_bytes =
+        SPARK_CUDA_RESIDENT_IPC_MAX_CONTROL_PAYLOAD_BYTES;
+    payload_class.slot_count = SPARK_CUDA_RESIDENTD_MAX_CLIENTS;
+    return SparkArenaInitialize(
+            &runtime->control_payload_arena,&payload_class,1u) == 0
+        ? SPARK_STATUS_OK : SPARK_STATUS_INTERNAL_ERROR;
+}
+
 static SparkStatus SparkCudaResidentdInitialize(
     SparkCudaResidentdRuntime *runtime,
     const SparkCudaResidentdConfiguration *configuration)
@@ -1105,6 +1130,9 @@ static SparkStatus SparkCudaResidentdInitialize(
         sizeof(runtime->work_queue[0u]));
     if (runtime->work_queue == 0)
         return SPARK_STATUS_INTERNAL_ERROR;
+    status = SparkCudaResidentdInitializeControlPayloadArena(runtime);
+    if (status != SPARK_STATUS_OK)
+        return status;
     status = SparkRingRuntimeValidateStageMoePackFiles(
         &runtime->rank_plan,
         configuration->moe_pack_root,
@@ -1145,7 +1173,8 @@ static void SparkCudaResidentdDestroy(
     {
         if (runtime->clients[slot].fd >= 0)
             close(runtime->clients[slot].fd);
-        free(runtime->clients[slot].payload);
+        /* Payload slots live in the arena backing block; destroying the
+           arena below reclaims them, so there is no per-client free. */
         runtime->clients[slot].payload = 0;
         runtime->clients[slot].payload_capacity = 0u;
         runtime->clients[slot].output_queue_head = 0u;
@@ -1180,6 +1209,7 @@ static void SparkCudaResidentdDestroy(
     free(runtime->work_queue);
     runtime->work_queue = 0;
     runtime->work_queue_count = 0u;
+    SparkArenaDestroy(&runtime->control_payload_arena);
     pthread_mutex_destroy(&runtime->output_mutex);
 }
 
@@ -2080,7 +2110,13 @@ static void SparkCudaResidentdDropClient(
         runtime->completion_client_fd = -1;
     close(fd);
     runtime->clients[slot].fd = -1;
-    free(runtime->clients[slot].payload);
+    /* Release back to the arena; the slot was acquired there by
+       construction, so a release failure cannot occur and the status is
+       discarded deliberately. */
+    if (runtime->clients[slot].payload != 0)
+        (void)SparkArenaRelease(
+            &runtime->control_payload_arena,
+            runtime->clients[slot].payload);
     runtime->clients[slot].payload = 0;
     runtime->clients[slot].payload_capacity = 0u;
     runtime->clients[slot].output_queue_head = 0u;
@@ -2112,7 +2148,7 @@ static uint32_t SparkCudaResidentdPumpClient(
     fd = client->fd;
     if (fd < 0)
         return 0u;
-    status = SparkCudaResidentdReadClientMessage(client);
+    status = SparkCudaResidentdReadClientMessage(runtime,client);
     if (status == SPARK_STATUS_BUSY)
         return 0u;
     if (status != SPARK_STATUS_OK)

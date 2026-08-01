@@ -14,6 +14,13 @@ struct LmRecordedGemm
     const void *output;
     LmScaleTensor activation_scale;
     LmScaleTensor weight_scale;
+    // Non-null when the launch reads A rows through a route map instead of a
+    // packed buffer - the indirect-A contract the K3 driver wave wires up.
+    // Recorded, not emulated: the recorder writes an index, so there is no
+    // gather for it to skip, but a harness can assert the launch CAME in
+    // indirect once the layer sets the words.
+    const uint32_t *activation_row_index;
+    const void *activation_source;
     uint32_t input_dimension;
     uint32_t output_dimension;
     uint32_t packed_rows;
@@ -54,6 +61,8 @@ static int32_t LmGemmLaunchAsymmetric(
         : args->output_bf16;
     record.activation_scale = args->scale_a;
     record.weight_scale = args->scale_b;
+    record.activation_row_index = args->activation_row_index;
+    record.activation_source = args->activation_source;
     record.input_dimension = input_dimension;
     record.output_dimension = output_dimension;
     record.packed_rows = packed_rows;

@@ -67,6 +67,16 @@
 #define DSV4_COMPRESS_ROPE_THETA 160000.0f     /* CONFIG compress_rope_theta */
 #define DSV4_SLIDING_WINDOW 128u               /* CONFIG sliding_window */
 
+// The query row the attention kernel strides by. Each head carries its latent
+// and its rope tail in one span, so a token's query is heads x (head_dim +
+// rope_dim) wide with each head's rope span at the tail of its own stride -
+// not heads x head_dim, which prices only the latent and is what the rope
+// launch passed before this had a name (63 of 64 heads unrotated, at the
+// wrong offset; see Dsv4LayerAttention). The up projection's output width is
+// binder-set, so the binder is checked against DSV4_QUERY_ROW at launch.
+#define DSV4_QUERY_HEAD_STRIDE (DSV4_HEAD_DIM + DSV4_ROPE_DIM)
+#define DSV4_QUERY_ROW (DSV4_ATTN_HEADS * DSV4_QUERY_HEAD_STRIDE)
+
 // Sparse selection, same mechanism as GLM 5.2's at a quarter the top-k. That it
 // is the same mechanism is the point: kernels/attn.cuh's LmSparseScoreKernel
 // serves both, and the difference is two arguments.
@@ -96,6 +106,18 @@
 // The low-rank query path: hidden -> 1024 -> norm -> heads. Half GLM 5.2's rank
 // on a model with two thirds its hidden size.
 #define DSV4_QUERY_LORA_RANK 1024u             /* CONFIG q_lora_rank */
+
+// The grouped low-rank output projection, from the same contract family
+// (dsv4_flash.json model.output_group_count / output_lora_rank; Pro's are 16
+// and 1024). The attention output splits into group_count slices of
+// group_dim, each projected down to rank and back up to hidden, and the group
+// results sum - 8x(4096x1024 + 1024x4096) weights against 32768x4096
+// full-width. Both contracts name the factors, so the full-width form is not
+// implemented anywhere.
+#define DSV4_OUTPUT_GROUP_COUNT 8u             /* CONFIG output_group_count */
+#define DSV4_OUTPUT_LORA_RANK 1024u            /* CONFIG output_lora_rank */
+#define DSV4_OUTPUT_GROUP_DIM ((DSV4_ATTN_HEADS * DSV4_HEAD_DIM) / DSV4_OUTPUT_GROUP_COUNT)
+#define DSV4_OUTPUT_RANK_WIDTH (DSV4_OUTPUT_GROUP_COUNT * DSV4_OUTPUT_LORA_RANK)
 
 // YaRN rope scaling, which neither GLM 5.2 nor MiMo 2.5 uses. Positions beyond
 // the original training length are interpolated rather than extrapolated, with

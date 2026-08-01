@@ -89,8 +89,15 @@ struct Dsv4LayerBuffers
 	LmLowRankScratch query_scratch;
 	const void *kv_latent_weight;
 	const void *kv_latent_scale;
-	const void *output_weight;
-	const void *output_scale;
+	// Grouped low-rank o_proj (contract output_group_count x output_lora_rank):
+	// the down factor is block-diagonal per group and ships BF16 - the tree's
+	// only block-diagonal projection is LmPerHeadProjectKernel, which is BF16,
+	// and the tensor-map GEMM cannot stride an activation by group, so an FP8
+	// down is a new kernel and a later wave. The up factor is FP8 like every
+	// non-expert weight.
+	const void *output_down_weight;
+	const void *output_up_weight;
+	const void *output_up_scale;
 	const void *mlp_norm_weight;
 	const void *router_weight;
 	const void *expert_w1_weight;
@@ -111,6 +118,10 @@ struct Dsv4LayerBuffers
 	uint16_t *kv_slot_bf16;
 	uint16_t *attention_latent_bf16;
 	uint16_t *attention_out_bf16;
+	// The concatenated per-group down projections, rows x (groups * rank): the
+	// up GEMM reads it as one K dimension because sum_g Up_g d_g is
+	// [d_0|...|d_G] @ [U_0;...;U_G].
+	uint16_t *output_down_bf16;
 	uint8_t *packed_activation;
 	uint8_t *packed_scale;
 	uint16_t *gate_up_bf16;
@@ -147,23 +158,24 @@ struct Dsv4LayerBuffers
 // output projection (output_lora_rank, output_group_count) was approximated as
 // full-width. The GEMMs below are the ground truth; every factor is config
 // geometry and tests/test_dsv4_driver_source_contracts.py recomputes the
-// figures from config.h and dsv4_pro.json, so a stale number fails a gate:
+// figures from config.h and the contracts, so a stale number fails a gate:
 //
-//     Flash, as coded (config.h):
+//     Flash, as coded (config.h, contract o_proj at 8 groups x rank 1024):
 //         q_down 4096x1024 + q_up 1024x32768 + kv_latent 4096x576
-//         + o_proj 32768x4096 = 174325760 weights/layer
-//         -> 7.50 GB/token FP8 over 43 layers   (roadmap 8.4 GB: 11.9% high)
-//     Pro, as coded (dsv4_pro.json geometry, same full-width o_proj):
+//         + o_down 8x(4096x1024) + o_up (8x1024)x4096 = 107216896 weights/layer
+//         140771328 bytes - the down factor ships BF16 (see the o_proj below)
+//         -> 6.05 GB/token over 43 layers    (full-width o_proj priced 7.50 GB)
+//     Pro, as coded (dsv4_pro.json geometry, contract o_proj 16 x 1024):
 //         q_down 7168x1536 + q_up 1536x65536 + kv_latent 7168x576
-//         + o_proj 65536x7168 = 585564160 weights/layer
-//         -> 35.72 GB/token over 61 layers      (roadmap 38.5 GB: 7.9% high)
-//     Pro, contract o_proj (output_group_count 16 x output_lora_rank 1024):
-//         16x(4096x1024 + 1024x7168) = 184549376, layer total 300351488
-//         -> 18.32 GB/token. UNIMPLEMENTED: this function launches one
-//         full-width o_proj GEMM. Landing the grouped low-rank form halves
-//         the Pro attention line and lifts the 80%-eta Pro ceiling from
-//         ~55 tok/s (52.1 GB/token coded: +14.1 experts, +1.9 head,
-//         +0.34 router) to ~82 tok/s (34.7 GB/token).
+//         + o_down 16x(4096x1024) + o_up (16x1024)x7168 = 300351488 weights/layer
+//         367460352 bytes with the BF16 down factor
+//         -> 22.42 GB/token over 61 layers   (full-width priced 35.72 GB)
+//         The o_proj factors alone are 184549376 weights; all-FP8 they would
+//         price 18.32 GB/token - the BF16 down factor pays double until a
+//         block-diagonal FP8 kernel exists. That is the remaining third of the
+//         lever: the full attention line is 22.42 + 14.1 experts + 1.9 head
+//         + 0.34 router = 38.76 GB/token, ~74 tok/s at the roadmap's 80% eta,
+//         from ~55 tok/s at the 52.1 GB/token full-width coding.
 //
 // The router is separate and BF16 (hidden x experts x 2 B per layer, read
 // every step): 90 MB/token Flash, 336 MB/token Pro, absent from the roadmap's
@@ -180,6 +192,14 @@ static int32_t Dsv4LayerAttention(const Dsv4LayerBuffers *b, uint32_t rows, uint
 	// effective set is whichever is smaller. Treating them as alternatives would
 	// attend outside the window on any context longer than 512.
 	uint32_t budget = context < DSV4_SLIDING_WINDOW ? context : DSV4_SLIDING_WINDOW;
+	// WINDOW: the attended set is the selection clamped to the trailing
+	// 128-token window, per the budget comment above - the effective set is
+	// the smaller of the two. The score kernel fails every position older
+	// than the window, and the top-k and the attention run at the clamped
+	// budget, so nothing outside the window can be selected or read. The
+	// first version attended the full top-k with no clamp.
+	uint32_t selected = DSV4_INDEX_TOP_K < DSV4_SLIDING_WINDOW
+		? DSV4_INDEX_TOP_K : DSV4_SLIDING_WINDOW;
 	// CAPTURE: this host branch on a runtime context length changes the launch
 	// sequence, so a CUDA graph of this layer is valid only for the (rows,
 	// sparse) shape it was captured at - the engine must key graphs on both.
@@ -187,6 +207,14 @@ static int32_t Dsv4LayerAttention(const Dsv4LayerBuffers *b, uint32_t rows, uint
 	LM_LAUNCH((LmFusedResidualRmsNormKernel<DSV4_LAYER_THREADS,uint16_t>), rows, DSV4_LAYER_THREADS, (DSV4_HIDDEN + 8u) * sizeof(float), stream,
 		b->hidden_bf16,b->residual_bf16,(const uint16_t *)b->attn_norm_weight, b->residual_bf16,b->normed_bf16,DSV4_HIDDEN,DSV4_HIDDEN,DSV4_RMS_EPSILON);
 	// Query through the low-rank path: hidden -> 1024 -> norm -> heads.
+	//
+	// WIDTH: the up projection's output width is binder-set, and the buffer
+	// it writes is DSV4_QUERY_ROW wide - heads x (latent + rope), with each
+	// head's rope span at the tail of its own stride. config.h names that row
+	// now, so the binder has a constant to be right with and is checked
+	// before anything writes the buffer.
+	if ( b->query.output_dimension != DSV4_QUERY_ROW )
+		return(LM_LAUNCH_ERR_SHAPE);
 	status = LmLowRankProject<Format>(&b->query,&b->query_scratch,b->normed_bf16,
 		b->query_bf16,rows,DSV4_LAYER_THREADS,sms,stream);
 	if ( status != LM_LAUNCH_OK )
@@ -202,21 +230,13 @@ static int32_t Dsv4LayerAttention(const Dsv4LayerBuffers *b, uint32_t rows, uint
 	// model trains them separately because the compressed path sees a different
 	// position distribution.
 	//
-	// SPAN: LmRopeYarnKernel rotates ONE rope_dim span per block at
-	// (blockIdx.x * row_stride) + rope_offset, and the grid is rows - so of
-	// the 64 rope spans a token carries (one per head), 63 are never rotated.
-	// glm5_2's per-head kernel is not YaRN and reads a separate heads x
-	// rope_dim buffer, so the correct call needs a YaRN per-head variant in
-	// kernels/attn.cuh, which this file does not own. Flagged, not patched.
-	//
-	// WIDTH: LmAttentionDecodeKernel below reads the query at a per-head
-	// stride of LATENT + ROPE = 576, so query_bf16 is heads x 576 wide with
-	// each head's rope tail at +512. config.h names no such row width and the
-	// up projection's output_dimension is binder-set, so the binder has no
-	// constant to be right with; ATTN_HEADS * HEAD_DIM (32768) below prices
-	// the rope span, not the buffer. Same owner, same fix.
-	LM_LAUNCH((LmRopeYarnKernel<DSV4_LAYER_THREADS,LM_ROPE_INTERLEAVED>), rows, DSV4_LAYER_THREADS, 0, stream,
-		b->query_bf16,b->positions,DSV4_ATTN_HEADS * DSV4_HEAD_DIM, (DSV4_ATTN_HEADS * DSV4_HEAD_DIM) - DSV4_ROPE_DIM,DSV4_ROPE_DIM, DSV4_ROPE_THETA,(float)DSV4_YARN_FACTOR, (float)DSV4_YARN_ORIGINAL_POSITIONS,1.0f,32.0f);
+	// SPAN: the query row is heads x (latent + rope) with each head's rope
+	// span at the tail of its own stride, so YaRN launches per (row, head)
+	// and rotates all 64 spans. The first version launched one block per row
+	// over a row priced at heads * head_dim: one head of sixty-four rotated,
+	// and at the wrong offset for every row after the first.
+	LM_LAUNCH((LmRopeYarnKernel<DSV4_LAYER_THREADS,LM_ROPE_INTERLEAVED>), dim3(rows,DSV4_ATTN_HEADS), DSV4_LAYER_THREADS, 0, stream,
+		b->query_bf16,b->positions,DSV4_ATTN_HEADS,DSV4_QUERY_HEAD_STRIDE,DSV4_ROPE_DIM, DSV4_ROPE_THETA,(float)DSV4_YARN_FACTOR, (float)DSV4_YARN_ORIGINAL_POSITIONS,1.0f,32.0f);
 	// NO SECOND QUANTISE OF THE NORMED ROWS. LmLowRankProject already ran
 	// LmQuantiseRowsKernel over this exact buffer into the query scratch - same
 	// kernel, same grid, same row-UE4M3 scale layout - so the KV latent GEMM
@@ -248,50 +268,57 @@ static int32_t Dsv4LayerAttention(const Dsv4LayerBuffers *b, uint32_t rows, uint
 	if ( status != LM_LAUNCH_OK )
 		return(status);
 	// YaRN, not plain rope. The compressed path uses its own theta, which is why
-	// the constant is separate rather than shared with the query's.
-	LM_LAUNCH((LmRopeYarnKernel<DSV4_LAYER_THREADS,LM_ROPE_INTERLEAVED>), rows, DSV4_LAYER_THREADS, 0, stream,
-		b->kv_slot_bf16,b->positions,DSV4_HEAD_DIM + DSV4_ROPE_DIM,DSV4_HEAD_DIM, DSV4_ROPE_DIM,DSV4_COMPRESS_ROPE_THETA,(float)DSV4_YARN_FACTOR, (float)DSV4_YARN_ORIGINAL_POSITIONS,1.0f,32.0f);
+	// the constant is separate rather than shared with the query's. The latent
+	// is one rope span per row - the per-head kernel at heads 1.
+	LM_LAUNCH((LmRopeYarnKernel<DSV4_LAYER_THREADS,LM_ROPE_INTERLEAVED>), dim3(rows,1u), DSV4_LAYER_THREADS, 0, stream,
+		b->kv_slot_bf16,b->positions,1u,DSV4_HEAD_DIM + DSV4_ROPE_DIM,DSV4_ROPE_DIM,DSV4_COMPRESS_ROPE_THETA,(float)DSV4_YARN_FACTOR, (float)DSV4_YARN_ORIGINAL_POSITIONS,1.0f,32.0f);
 	LM_LAUNCH((LmKvStoreKernel<Dsv4Kv,DSV4_LAYER_THREADS>), rows, DSV4_LAYER_THREADS, 0, stream,
 		b->cache,b->kv_slot_bf16,b->sequence_of_row,b->positions,rows, DSV4_HEAD_DIM + DSV4_ROPE_DIM);
 	if ( sparse )
 	{
-		// GRID LIMIT: LmSparseScoreKernel maps position to blockIdx.y, so
-		// grid.y = context and the launch fails with an invalid-configuration
-		// error - caught by the status checks on this path, never silent -
-		// once context passes 65,535, the y ceiling on every CUDA arch. The
-		// model sells 1M context; the fix is an axis swap in
-		// kernels/attn.cuh (position to the unbounded blockIdx.x) and belongs
-		// to that file's owner.
-		//
-		// WINDOW: in this branch the attended set is the full top-k selection
-		// with no 128-token window clamp, while the comment above `budget`
-		// describes selection AND window. Which the checkpoint means is a
-		// reference question, not one to guess at three days before bring-up -
-		// flagged, not changed.
-		LM_LAUNCH((LmSparseScoreKernel<Dsv4Kv,DSV4_LAYER_THREADS,DSV4_INDEX_DIM>), dim3(rows,context), DSV4_LAYER_THREADS, 0, stream,
-		b->query_bf16,b->cache,b->sequence_of_row,b->context_length, DSV4_INDEX_HEADS,b->selection_scores);
+		// GRID LIMIT, REMOVED: position rides grid.x now, not grid.y - the y
+		// axis tops out at 65,535 blocks on every CUDA arch and this grid
+		// spans the context, which the model sells at a million tokens. The
+		// row count is the batch and never nears the ceiling.
+		LM_LAUNCH((LmSparseScoreKernel<Dsv4Kv,DSV4_LAYER_THREADS,DSV4_INDEX_DIM>), dim3(context,rows), DSV4_LAYER_THREADS, 0, stream,
+		b->query_bf16,b->cache,b->sequence_of_row,b->context_length, DSV4_INDEX_HEADS,DSV4_SLIDING_WINDOW,b->selection_scores);
 		LM_LAUNCH((LmTopkHistogramKernel<DSV4_LAYER_THREADS>), rows, DSV4_LAYER_THREADS, 0, stream,
-		b->selection_scores,context,DSV4_INDEX_TOP_K,b->head_candidate_token);
+		b->selection_scores,context,selected,b->head_candidate_token);
 		LM_LAUNCH((LmTopkGatherKernel<DSV4_LAYER_THREADS>), rows, DSV4_LAYER_THREADS, 0, stream,
-		b->selection_scores,context,DSV4_INDEX_TOP_K,b->head_candidate_token,b->selected_positions,0);
+		b->selection_scores,context,selected,b->head_candidate_token,b->selected_positions,0);
 	}
 	LM_LAUNCH((LmAttentionDecodeKernel<Dsv4Kv,DSV4_LAYER_THREADS,DSV4_HEAD_DIM,DSV4_ROPE_DIM>), dim3(rows,DSV4_ATTN_HEADS), DSV4_LAYER_THREADS, 0, stream,
-		b->query_bf16,b->query_bf16,b->cache,b->sequence_of_row,b->context_length, sparse ? b->selected_positions : 0,sparse ? DSV4_INDEX_TOP_K : budget, DSV4_ATTN_HEADS,rsqrtf((float)DSV4_HEAD_DIM),b->attention_latent_bf16, 0);
-	LM_LAUNCH((LmQuantiseRowsKernel<Format,DSV4_LAYER_THREADS>), dim3(rows,(DSV4_ATTN_HEADS * DSV4_HEAD_DIM) / Format::kScaleGroup), DSV4_LAYER_THREADS, (Format::kScaleGroup + 8u) * sizeof(float), stream,
-		b->attention_latent_bf16,0,b->packed_activation,b->packed_scale, rows,DSV4_ATTN_HEADS * DSV4_HEAD_DIM);
+		b->query_bf16,b->query_bf16,b->cache,b->sequence_of_row,b->context_length, sparse ? b->selected_positions : 0,sparse ? selected : budget, DSV4_ATTN_HEADS,rsqrtf((float)DSV4_HEAD_DIM),b->attention_latent_bf16, 0);
+	// THE GROUPED LOW-RANK O_PROJ. out = sum_g Up_g (Down_g x_g) over
+	// DSV4_OUTPUT_GROUP_COUNT rank-DSV4_OUTPUT_LORA_RANK factors, x_g the g-th
+	// group_dim slice of the attention output - the contract's form
+	// (dsv4_flash.json and dsv4_pro.json both name output_group_count and
+	// output_lora_rank), at groups*(group_dim*rank + rank*hidden) weights
+	// against heads*dim x hidden full-width. The down half is block-diagonal
+	// per group, LmPerHeadProjectKernel's exact shape (k3 uses it for the MLA
+	// value path), and BF16 for want of a block-diagonal FP8 kernel; the up
+	// half is one dense FP8 GEMM over the concatenated ranks.
+	static_assert((DSV4_ATTN_HEADS * DSV4_HEAD_DIM) % DSV4_OUTPUT_GROUP_COUNT == 0u,
+		"the attention width must split into whole o_proj groups");
+	static_assert(DSV4_OUTPUT_RANK_WIDTH % Format::kScaleGroup == 0u,
+		"the concatenated o_proj ranks must fill whole scale groups");
+	LM_LAUNCH((LmPerHeadProjectKernel<DSV4_LAYER_THREADS,DSV4_OUTPUT_GROUP_DIM,DSV4_OUTPUT_LORA_RANK>), dim3(rows,DSV4_OUTPUT_GROUP_COUNT), DSV4_LAYER_THREADS, 0, stream,
+		b->attention_latent_bf16,(const uint16_t *)b->output_down_weight,b->output_down_bf16,DSV4_OUTPUT_GROUP_COUNT,rows);
+	LM_LAUNCH((LmQuantiseRowsKernel<Format,DSV4_LAYER_THREADS>), dim3(rows,DSV4_OUTPUT_RANK_WIDTH / Format::kScaleGroup), DSV4_LAYER_THREADS, (Format::kScaleGroup + 8u) * sizeof(float), stream,
+		b->output_down_bf16,0,b->packed_activation,b->packed_scale, rows,DSV4_OUTPUT_RANK_WIDTH);
 	gemm.scale_a = Dsv4Fp8ActivationScale(
 		b->packed_scale,
 		rows,
-		DSV4_ATTN_HEADS * DSV4_HEAD_DIM);
+		DSV4_OUTPUT_RANK_WIDTH);
 	gemm.scale_b = Dsv4Fp8WeightScale(
-		b->output_scale,
+		b->output_up_scale,
 		1u,
 		DSV4_HIDDEN,
-		DSV4_ATTN_HEADS * DSV4_HEAD_DIM);
+		DSV4_OUTPUT_RANK_WIDTH);
 	gemm.output_bf16 = b->attention_out_bf16;
 	return(LmGemmLaunch<Format,DSV4_LAYER_TILE_N,Format::kTileK,DSV4_LAYER_STAGES,DSV4_LAYER_WARPS>(
-		&gemm,b->packed_activation,b->output_weight,rows,rows,DSV4_TOP_K,1u,
-		DSV4_ATTN_HEADS * DSV4_HEAD_DIM,DSV4_HIDDEN,sms,false,stream));
+		&gemm,b->packed_activation,b->output_up_weight,rows,rows,DSV4_TOP_K,1u,
+		DSV4_OUTPUT_RANK_WIDTH,DSV4_HIDDEN,sms,false,stream));
 }
 
 // The MLP half, with the shared expert.

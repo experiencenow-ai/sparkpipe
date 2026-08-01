@@ -56,41 +56,63 @@ def main() -> None:
     layer = read("inference/llms/deepseek_v4/layer.cuh")
     flat = re.sub(r"\s+", " ", layer)
     config = read("inference/llms/deepseek_v4/config.h")
+    flash = json.loads(read("model_contracts/dsv4_flash.json"))
     pro = json.loads(read("model_contracts/dsv4_pro.json"))
 
     # -- exact attention weight bytes, recomputed from geometry ---------------
+    # The grouped low-rank o_proj is implemented (down block-diagonal per
+    # group, up one dense GEMM over the concatenated ranks), so the figures
+    # price that form: weights for the parameter count, bytes for the traffic
+    # - the down factor ships BF16 (no block-diagonal FP8 kernel exists), so
+    # bytes are not weights.
     hidden = define(config, "DSV4_HIDDEN")
     heads = define(config, "DSV4_ATTN_HEADS")
     head_dim = define(config, "DSV4_HEAD_DIM")
     rope_dim = define(config, "DSV4_ROPE_DIM")
     query_rank = define(config, "DSV4_QUERY_LORA_RANK")
-    flash_per_layer = (
+    layers = define(config, "DSV4_LAYERS")
+    fm = flash["model"]
+    f_groups = fm["output_group_count"]
+    f_rank = fm["output_lora_rank"]
+    if f_groups != define(config, "DSV4_OUTPUT_GROUP_COUNT"):
+        raise SystemExit("config.h DSV4_OUTPUT_GROUP_COUNT != dsv4_flash.json")
+    if f_rank != define(config, "DSV4_OUTPUT_LORA_RANK"):
+        raise SystemExit("config.h DSV4_OUTPUT_LORA_RANK != dsv4_flash.json")
+    f_base = (
         hidden * query_rank
         + query_rank * heads * head_dim
         + hidden * (head_dim + rope_dim)
-        + heads * head_dim * hidden
     )
-    require(layer, str(flash_per_layer), "Flash per-layer attention weights")
+    f_down = f_groups * (heads * head_dim // f_groups) * f_rank
+    f_up = f_groups * f_rank * hidden
+    require(layer, str(f_base + f_down + f_up), "Flash per-layer attention weights")
+    f_bytes = f_base + f_up + 2 * f_down
+    require(layer, str(f_bytes), "Flash per-layer attention bytes (BF16 down)")
+    require(layer, f"{f_bytes * layers / 1e9:.2f}", "Flash GB/token")
 
     pm = pro["model"]
     p_hidden = pm["hidden_dimension"]
     p_q_dim = pm["attention_head_count"] * pm["head_dimension"]
-    p_coded = (
+    p_layers = pm["layer_count"]
+    groups = pm["output_group_count"]
+    rank = pm["output_lora_rank"]
+    p_base = (
         p_hidden * pm["query_lora_rank"]
         + pm["query_lora_rank"] * p_q_dim
         + p_hidden * (pm["head_dimension"] + pm["qk_rope_head_dimension"])
-        + p_q_dim * p_hidden
     )
-    require(layer, str(p_coded), "Pro as-coded per-layer attention weights")
-    groups = pm["output_group_count"]
-    rank = pm["output_lora_rank"]
-    o_lowrank = groups * ((p_q_dim // groups) * rank + rank * p_hidden)
+    p_down = groups * (p_q_dim // groups) * rank
+    p_up = groups * rank * p_hidden
+    o_lowrank = p_down + p_up
     require(layer, str(o_lowrank), "Pro contract grouped low-rank o_proj")
     require(
         layer,
-        str(p_coded - p_q_dim * p_hidden + o_lowrank),
-        "Pro contract per-layer attention total",
+        str(p_base + o_lowrank),
+        "Pro as-coded per-layer attention weights",
     )
+    p_bytes = p_base + p_up + 2 * p_down
+    require(layer, str(p_bytes), "Pro per-layer attention bytes (BF16 down)")
+    require(layer, f"{p_bytes * p_layers / 1e9:.2f}", "Pro GB/token")
 
     # -- the KV latent GEMM reuses the low-rank quantised input ----------------
     require(
@@ -123,11 +145,13 @@ def main() -> None:
     # branch. Dense layer = (a_launches - 3) + a_gemms + 5 + m_*; sparse adds 3.
     dense = (a_launches - 3) + a_gemms + 5 + m_launches + m_gemms + m_routes
     sparse = dense + 3
-    if (dense, sparse) != (29, 32):
+    if (dense, sparse) != (30, 33):
         raise SystemExit(
             f"layer launch budget moved: dense {dense}, sparse {sparse} "
-            "(audited at 29/32 on 2026-08-01; update deepseek_v4_pro/unity.cu "
-            "and this gate together if the change is deliberate)"
+            "(audited at 29/32 on 2026-08-01, 30/33 once the grouped low-rank "
+            "o_proj's block-diagonal down projection landed; update "
+            "deepseek_v4_pro/unity.cu and this gate together if the change "
+            "is deliberate)"
         )
 
     # -- audit flags that must not be silently dropped -------------------------
@@ -136,6 +160,27 @@ def main() -> None:
     require(layer, "WINDOW:", "sparse window-clamp semantics flag")
     require(layer, "SPAN:", "query rope per-head span flag")
     require(layer, "WIDTH:", "query row-width flag")
+    # -- the fixes those flags became ------------------------------------------
+    require(
+        flat,
+        "dim3(context,rows)",
+        "sparse-score axis swap (position to grid.x)",
+    )
+    require(
+        flat,
+        "DSV4_INDEX_TOP_K < DSV4_SLIDING_WINDOW ? DSV4_INDEX_TOP_K : DSV4_SLIDING_WINDOW",
+        "window-clamped selection budget",
+    )
+    require(
+        flat,
+        "DSV4_INDEX_HEADS,DSV4_SLIDING_WINDOW,b->selection_scores",
+        "score kernel receives the window clamp",
+    )
+    require(
+        flat,
+        "b->query.output_dimension != DSV4_QUERY_ROW",
+        "query row-width binder guard",
+    )
     pro_unity = read("inference/llms/deepseek_v4_pro/unity.cu")
     require(pro_unity, "LAUNCH BUDGET", "Pro launch-budget audit note")
 

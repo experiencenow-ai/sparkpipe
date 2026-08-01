@@ -1,44 +1,36 @@
 {
-  "content_hash": "f8763913d8ef63d4",
+  "content_hash": "2b172ae60ea7168d",
   "contract": {
-    "path": "model_contracts/qwen36_authoritative.json",
-    "sha256": "e162bb750570d6435697ac0f9da5b021cffb29f2f5480ffc937d11a9603aa577"
+    "path": "model_contracts/glm52.json",
+    "sha256": "5161e491daa44201fe81c1d2a7d04aafbbeefc77f487b343c229024e40f4391d"
   },
-  "datafile": "qwen36.PP13.f8763913d8ef63d4.json",
-  "degree": 13,
-  "family": "qwen36",
-  "geometry_hash": "ff786ac12a1d6e13",
+  "datafile": "glm52.PP16.2b172ae60ea7168d.json",
+  "degree": 16,
+  "family": "glm52",
+  "geometry_hash": "0ce8da135ee079c6",
   "kind": "sparkpipe.model_recipe",
-  "kv_entry_prefix": "qwen36.PP13.ff786ac12a1d6e13/",
+  "kv_entry_prefix": "glm52.PP16.0ce8da135ee079c6/",
   "kv_geometry": {
-    "attention_period": 4,
-    "full_layer_count": 16,
-    "full_phase": 3,
-    "gdn_layer_count": 48,
-    "gdn_state": {
-      "key_dimension": 128,
-      "key_head_count": 16,
-      "short_conv_kernel": 4,
-      "state_element_type": "fp32",
-      "value_dimension": 128,
-      "value_head_count": 48
-    },
-    "head_dimension": 256,
-    "kv_element_bits": 16,
-    "kv_head_count": 4,
-    "kv_page_slots": 64,
-    "layer_count": 64,
-    "layout": "gqa_full_kv_bf16+gdn_recurrent_state_fp32",
-    "rope_convention": "partial_rotary_first_dims",
+    "dsa_index_head_count": 32,
+    "dsa_index_head_dimension": 128,
+    "dsa_rope_interleave": true,
+    "head_count": 64,
+    "kv_element_bits": 8,
+    "latent_dimension": 512,
+    "layer_count": 78,
+    "layout": "mla_compressed_fp8_e4m3",
+    "qk_nope_head_dimension": 192,
     "rope_dimension": 64,
-    "rope_theta": 10000000.0
+    "rope_interleave": true,
+    "rope_theta": 8000000.0,
+    "value_head_dimension": 256
   },
-  "model": "qwen36",
+  "model": "glm52",
   "pp": {
     "balance": {
-      "max_stage_cost": 2128609280,
-      "min_stage_cost": 1777336320,
-      "optimum_max_cost": 2128609280
+      "max_stage_cost": 2523791360,
+      "min_stage_cost": 2184052736,
+      "optimum_max_cost": 2523791360
     },
     "cost_model": "analytic_active_params_v1",
     "cost_model_status": "NOT_MEASURED - placement estimate only; measured profiles exist today only for glm52 on the 13-ring (scheduler/stage_plan.c)",
@@ -50,22 +42,23 @@
       "source": "scheduler/stage_plan.c"
     },
     "engine_cap_note": null,
-    "engine_stage_cap": 13,
+    "engine_stage_cap": 16,
     "stages": [
       {
-        "cost": 1777336320,
+        "cost": 2184052736,
         "first_layer_index": 0,
         "flags": [
           "INPUT_HIDDEN",
-          "OUTPUT_HIDDEN"
+          "OUTPUT_HIDDEN",
+          "DENSE_PREFIX"
         ],
         "layer_count": 5,
         "node": "spark-00",
-        "routed_layer_count": 0,
+        "routed_layer_count": 2,
         "stage": 0
       },
       {
-        "cost": 1777336320,
+        "cost": 2523791360,
         "first_layer_index": 5,
         "flags": [
           "INPUT_HIDDEN",
@@ -73,11 +66,11 @@
         ],
         "layer_count": 5,
         "node": "spark-01",
-        "routed_layer_count": 0,
+        "routed_layer_count": 5,
         "stage": 1
       },
       {
-        "cost": 1777336320,
+        "cost": 2523791360,
         "first_layer_index": 10,
         "flags": [
           "INPUT_HIDDEN",
@@ -85,11 +78,11 @@
         ],
         "layer_count": 5,
         "node": "spark-02",
-        "routed_layer_count": 0,
+        "routed_layer_count": 5,
         "stage": 2
       },
       {
-        "cost": 1798307840,
+        "cost": 2523791360,
         "first_layer_index": 15,
         "flags": [
           "INPUT_HIDDEN",
@@ -97,11 +90,11 @@
         ],
         "layer_count": 5,
         "node": "spark-03",
-        "routed_layer_count": 0,
+        "routed_layer_count": 5,
         "stage": 3
       },
       {
-        "cost": 1777336320,
+        "cost": 2523791360,
         "first_layer_index": 20,
         "flags": [
           "INPUT_HIDDEN",
@@ -109,11 +102,11 @@
         ],
         "layer_count": 5,
         "node": "spark-04",
-        "routed_layer_count": 0,
+        "routed_layer_count": 5,
         "stage": 4
       },
       {
-        "cost": 1777336320,
+        "cost": 2523791360,
         "first_layer_index": 25,
         "flags": [
           "INPUT_HIDDEN",
@@ -121,11 +114,11 @@
         ],
         "layer_count": 5,
         "node": "spark-05",
-        "routed_layer_count": 0,
+        "routed_layer_count": 5,
         "stage": 5
       },
       {
-        "cost": 1777336320,
+        "cost": 2523791360,
         "first_layer_index": 30,
         "flags": [
           "INPUT_HIDDEN",
@@ -133,11 +126,11 @@
         ],
         "layer_count": 5,
         "node": "spark-06",
-        "routed_layer_count": 0,
+        "routed_layer_count": 5,
         "stage": 6
       },
       {
-        "cost": 1798307840,
+        "cost": 2523791360,
         "first_layer_index": 35,
         "flags": [
           "INPUT_HIDDEN",
@@ -145,11 +138,11 @@
         ],
         "layer_count": 5,
         "node": "spark-07",
-        "routed_layer_count": 0,
+        "routed_layer_count": 5,
         "stage": 7
       },
       {
-        "cost": 1777336320,
+        "cost": 2523791360,
         "first_layer_index": 40,
         "flags": [
           "INPUT_HIDDEN",
@@ -157,56 +150,92 @@
         ],
         "layer_count": 5,
         "node": "spark-08",
-        "routed_layer_count": 0,
+        "routed_layer_count": 5,
         "stage": 8
       },
       {
-        "cost": 2128609280,
+        "cost": 2523791360,
         "first_layer_index": 45,
         "flags": [
           "INPUT_HIDDEN",
           "OUTPUT_HIDDEN"
         ],
-        "layer_count": 6,
+        "layer_count": 5,
         "node": "spark-09",
-        "routed_layer_count": 0,
+        "routed_layer_count": 5,
         "stage": 9
       },
       {
-        "cost": 1798307840,
-        "first_layer_index": 51,
+        "cost": 2523791360,
+        "first_layer_index": 50,
         "flags": [
           "INPUT_HIDDEN",
           "OUTPUT_HIDDEN"
         ],
         "layer_count": 5,
         "node": "spark-10",
-        "routed_layer_count": 0,
+        "routed_layer_count": 5,
         "stage": 10
       },
       {
-        "cost": 2128609280,
-        "first_layer_index": 56,
+        "cost": 2523791360,
+        "first_layer_index": 55,
         "flags": [
           "INPUT_HIDDEN",
           "OUTPUT_HIDDEN"
         ],
-        "layer_count": 6,
+        "layer_count": 5,
         "node": "spark-11",
-        "routed_layer_count": 0,
+        "routed_layer_count": 5,
         "stage": 11
       },
       {
-        "cost": 1994915840,
-        "first_layer_index": 62,
+        "cost": 2523791360,
+        "first_layer_index": 60,
+        "flags": [
+          "INPUT_HIDDEN",
+          "OUTPUT_HIDDEN"
+        ],
+        "layer_count": 5,
+        "node": "spark-12",
+        "routed_layer_count": 5,
+        "stage": 12
+      },
+      {
+        "cost": 2523791360,
+        "first_layer_index": 65,
+        "flags": [
+          "INPUT_HIDDEN",
+          "OUTPUT_HIDDEN"
+        ],
+        "layer_count": 5,
+        "node": "spark-13",
+        "routed_layer_count": 5,
+        "stage": 13
+      },
+      {
+        "cost": 2523791360,
+        "first_layer_index": 70,
+        "flags": [
+          "INPUT_HIDDEN",
+          "OUTPUT_HIDDEN"
+        ],
+        "layer_count": 5,
+        "node": "spark-14",
+        "routed_layer_count": 5,
+        "stage": 14
+      },
+      {
+        "cost": 2465857536,
+        "first_layer_index": 75,
         "flags": [
           "INPUT_HIDDEN",
           "FINAL_TOKEN"
         ],
-        "layer_count": 2,
-        "node": "spark-12",
-        "routed_layer_count": 0,
-        "stage": 12
+        "layer_count": 3,
+        "node": "spark-15",
+        "routed_layer_count": 3,
+        "stage": 15
       }
     ]
   },
@@ -228,9 +257,12 @@
       "spark-09",
       "spark-10",
       "spark-11",
-      "spark-12"
+      "spark-12",
+      "spark-13",
+      "spark-14",
+      "spark-15"
     ],
-    "nodes": 13,
+    "nodes": 16,
     "source": "examples/topologies/dual_switch_16node_production.json"
   }
 }

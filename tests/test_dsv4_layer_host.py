@@ -8,6 +8,9 @@ questions are the 2026-08-01 audit's:
   the KV latent GEMM must read the low-rank path's quantised input - the
     second quantise of the normed rows was deleted, so the recorded
     activation pointer IS the query scratch or the dedup regressed;
+  the o_proj up GEMM must read the concatenated per-group ranks (8 x 1024),
+    not the full 32768-wide attention output - the grouped low-rank o_proj
+    is the contract's form and the Pro byte lever;
   the expert GEMMs must be grouped and see rows * top_k rows;
   the router must read the full hidden and write f32 logits;
   hidden must be the routed result plus the shared expert's, checked
@@ -59,6 +62,14 @@ def main():
     if values.get("kv activation is query scratch") != "1":
         print("  FAIL the KV latent GEMM does not read the low-rank "
               "quantised input; the dedup regressed")
+        failures += 1
+    # GEMM 3 is the o_proj up projection: K must be the concatenated
+    # per-group ranks (8 groups x 1024), not the full 32768-wide attention
+    # output, or the grouped low-rank o_proj regressed to full-width.
+    if len(gemms) > 3 and (gemms[3]["dest"] != "attention_out" or
+                           gemms[3]["inp"] != 8192):
+        print(f"  FAIL the o_proj up GEMM is {gemms[3]}; expected "
+              "attention_out at K = 8 x 1024 = 8192 (grouped low-rank)")
         failures += 1
     grouped = [g for g in gemms if g["grouped"]]
     if len(grouped) != 2 or any(g["rows"] != 12 for g in grouped):

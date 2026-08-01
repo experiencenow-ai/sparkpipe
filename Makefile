@@ -292,6 +292,7 @@ PYTHON_TESTS := \
 	tests/test_k3_shard.py \
 	tests/test_k3_shard_table.py \
 	tests/test_k3_slice_host.py \
+	tests/test_kda_bf16_state.py \
 	tests/test_kda_decay.py \
 	tests/test_kda_host.py \
 	tests/test_kernel_algorithms.py \
@@ -868,10 +869,11 @@ cuda_glm52_resident_decode_stage:
 		$(MAKE) -C modules/glm52_resident_decode_stage archive NVCC=$(NVCC) CUDA_ARCH=sm_121a; \
 	fi
 
-# One source tree, four capacity-ceiling modules (b8 chat through b1024, the
-# planner maximum): the module Makefile's variants target compiles every
-# bucket from the single SPARK_GLM52_BATCH_VARIANT_RULES template. Trim the
-# set with GLM52_BATCH_VARIANT_BUCKETS="8 1024", never by editing a variant.
+# One source tree, eleven capacity-ceiling modules (every power of two from
+# b1 through b1024, the planner maximum): the module Makefile's variants
+# target compiles every bucket from the single SPARK_GLM52_BATCH_VARIANT_RULES
+# template. Trim the set with GLM52_BATCH_VARIANT_BUCKETS="8 1024", never by
+# editing a variant.
 cuda_glm52_resident_decode_stage_variants:
 	@if ! command -v $(NVCC) >/dev/null 2>&1; then \
 		echo "cuda_glm52_resident_decode_stage_variants skipped: nvcc unavailable"; \

@@ -707,6 +707,16 @@ static SparkStatus SparkSchedulerValidateConfiguration(const SparkSchedulerConfi
             configuration->prefix_cache->kv_cache_arena == 0)
             return SPARK_STATUS_INVALID_ARGUMENT;
     }
+    /* The residency oracle is optional; a wired tier must itself be a
+       valid, initialized tier so admission never consults a half-built
+       one. */
+    if (configuration->nvme_tier != 0 &&
+        (configuration->nvme_tier->configuration.abi_version !=
+            SPARK_NVME_TIER_ABI_VERSION ||
+         configuration->nvme_tier->configuration.descriptor_bytes !=
+            SPARK_NVME_TIER_CONFIGURATION_BYTES ||
+         configuration->nvme_tier->slots == 0))
+        return SPARK_STATUS_INVALID_ARGUMENT;
     return SPARK_STATUS_OK;
 }
 
@@ -745,7 +755,9 @@ static SparkStatus SparkSchedulerValidateRequest(
          SparkSchedulerCrossSequencePrefixReuseIsEnabled(scheduler) &&
          request->computed_prompt_token_count != 0u) ||
         (is_prefill &&
-         request->computed_prompt_token_count >= request->prompt_token_count))
+         request->computed_prompt_token_count >= request->prompt_token_count) ||
+        (request->nvme_block_content_hash_count != 0u &&
+         request->nvme_block_content_hashes == 0))
     {
         return SPARK_STATUS_INVALID_ARGUMENT;
     }
@@ -815,6 +827,7 @@ SparkStatus SparkSchedulerInitialize(
     scheduler->prefix_cache_block_tokens = prefix_cache_block_tokens;
     scheduler->configuration_flags = configuration_flags;
     scheduler->prefix_cache = configuration->prefix_cache;
+    scheduler->nvme_tier = configuration->nvme_tier;
     return SPARK_STATUS_OK;
 }
 
@@ -964,6 +977,49 @@ SparkStatus SparkSchedulerEstimateDecodeWorkNs(
         estimated_work_ns_out);
 }
 
+SparkStatus SparkSchedulerAssessNvmeResidency(
+    SparkScheduler *scheduler,
+    const SparkSchedulerRequest *request,
+    SparkNvmeTierResidencyAssessment *assessment_out)
+{
+    SparkStatus status;
+
+    if (scheduler == 0 || request == 0 || assessment_out == 0 ||
+        scheduler->abi_version != SPARK_SCHEDULER_ABI_VERSION ||
+        scheduler->descriptor_bytes != SPARK_SCHEDULER_DESCRIPTOR_BYTES ||
+        scheduler->nvme_tier == 0 ||
+        (request->nvme_block_content_hash_count != 0u &&
+         request->nvme_block_content_hashes == 0))
+    {
+        return SPARK_STATUS_INVALID_ARGUMENT;
+    }
+    status = SparkNvmeTierWillBeResidentBy(
+        scheduler->nvme_tier,
+        request->nvme_block_content_hashes,
+        request->nvme_block_content_hash_count,
+        request->nvme_step_now,
+        request->nvme_step_deadline,
+        assessment_out);
+    if (status != SPARK_STATUS_OK)
+    {
+        return status;
+    }
+    scheduler->nvme_residency_assessment_count += 1u;
+    if (assessment_out->confidence == SPARK_NVME_TIER_CONFIDENCE_ALL)
+    {
+        scheduler->nvme_confidence_all_count += 1u;
+    }
+    else if (assessment_out->confidence == SPARK_NVME_TIER_CONFIDENCE_PARTIAL)
+    {
+        scheduler->nvme_confidence_partial_count += 1u;
+    }
+    else
+    {
+        scheduler->nvme_confidence_none_count += 1u;
+    }
+    return SPARK_STATUS_OK;
+}
+
 SparkStatus SparkSchedulerAdmit(
     SparkScheduler *scheduler,
     const SparkSchedulerRequest *request,
@@ -986,8 +1042,10 @@ SparkStatus SparkSchedulerAdmit(
     uint32_t decision_flags;
     uint32_t decode_bypass_active;
     uint32_t dispatch_flags;
+    uint32_t residency_assessed;
     SparkPrefixCacheReservation prefix_cache_reservation;
     SparkPrefixCachePromptHash prefix_cache_parent_hash;
+    SparkNvmeTierResidencyAssessment residency_assessment;
     SparkStatus status;
 
     if (scheduler == 0 || request == 0 || decision == 0)
@@ -1007,6 +1065,26 @@ SparkStatus SparkSchedulerAdmit(
     }
 
     memset(decision, 0, sizeof(*decision));
+    /* The tier-3 residency opinion is read-only, so it runs before any
+       admission side effect: an oracle failure rejects cleanly instead of
+       stranding half-applied admission state. No tier wired or no hashes
+       supplied leaves the decision's assessed flag at its zeroed default
+       and admission proceeds exactly as before the hook existed. */
+    residency_assessed = 0u;
+    if (scheduler->nvme_tier != 0 &&
+        request->nvme_block_content_hash_count != 0u)
+    {
+        status = SparkSchedulerAssessNvmeResidency(
+            scheduler,
+            request,
+            &residency_assessment);
+        if (status != SPARK_STATUS_OK)
+        {
+            return SparkSchedulerReject(scheduler, decision, status);
+        }
+        residency_assessed = 1u;
+    }
+
     decision->abi_version = SPARK_SCHEDULER_ABI_VERSION;
     decision->descriptor_bytes = SPARK_SCHEDULER_DECISION_DESCRIPTOR_BYTES;
     decision->quantization_mode = scheduler->quantization_mode;
@@ -1186,6 +1264,12 @@ SparkStatus SparkSchedulerAdmit(
     }
     decision->sequence_id = request->sequence_id;
     decision->prompt_token_ids = request->prompt_token_ids;
+    if (residency_assessed != 0u)
+    {
+        decision->nvme_residency_assessed = 1u;
+        decision->nvme_residency_confidence =
+            (uint32_t)residency_assessment.confidence;
+    }
     if (SparkSchedulerRequestIsPrefill(request))
     {
         decision->total_scheduled_token_count =

@@ -62,11 +62,10 @@ DEFAULT_TOPOLOGY = (ROOT / "examples" / "topologies" /
 
 HASH_CHARS = 16
 # SPARK_STAGE_PLAN_MAX_ROUTED_LAYERS_PER_STAGE (include/sparkpipe/
-# spark_stage_plan.h). Stage plans above SPARK_STAGE_PLAN_MAX_STAGE_COUNT
-# (13, the current ring) are emittable recipes but need the engine constant
-# lifted before the 16-node ring can load them - see the recipe note.
+# spark_stage_plan.h). The engine's stage cap is 16 (spark_stage_plan.h,
+# lifted for the dual-switch ring); plans above it are refused.
 MAX_ROUTED_PER_STAGE = 8
-ENGINE_MAX_STAGE_COUNT = 13
+ENGINE_MAX_STAGE_COUNT = 16
 DEFAULT_DEGREES = (16, 13)
 DATAFILE_RE = re.compile(r"^[a-z0-9]+\.(?:TP|PP)\d+\.[0-9a-f]{16}\.json$")
 

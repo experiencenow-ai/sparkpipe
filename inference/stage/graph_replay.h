@@ -80,8 +80,9 @@
 #define SPARK_RESIDENT_DECODE_STAGE_GRAPH_MODE_CAPTURE 2u
 
 // Primary slot plus the spares the slot-state struct carries. The spare count
-// is sized by the MTP draft variants, which is also the honest upper bound on
-// simultaneously live decode shapes: batch bucket times speculation variant.
+// is the honest upper bound on simultaneously live decode shapes: every
+// power-of-2 batch bucket in B1..B1024 times every MTP draft variant (see
+// SPARK_RESIDENT_DECODE_STAGE_CUDA_GRAPH_SPARE_ENTRY_COUNT).
 #define SPARK_RESIDENT_DECODE_STAGE_GRAPH_ENTRY_COUNT \
     (1u + SPARK_RESIDENT_DECODE_STAGE_CUDA_GRAPH_SPARE_ENTRY_COUNT)
 

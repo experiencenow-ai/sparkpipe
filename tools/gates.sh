@@ -61,11 +61,22 @@ run "kda decay bound"      "python3 tests/test_kda_decay.py"
 run "kernel launches"      "python3 tests/test_kernel_launches.py"
 run "mla absorption"       "python3 tests/test_mla_absorption.py"
 run "expert grouping"      "python3 tests/test_expert_grouping.py"
+# The kernel half of the MoE gather deletion (route.cuh's row-indirection
+# contract): the row-map words, the ragged-tail clamp, source-following
+# scales, and both staging paths declaring the same barrier bytes. The
+# arithmetic model behind the pins is the mma fragment mapping gate above.
+run "grouped moe contracts" "python3 tests/test_grouped_moe_source_contracts.py"
 # The real kernels, run on a CPU. Not a reimplementation: kda_host.cu includes
 # inference/kernels/linear_attn.cuh unmodified and gives it a grid. Reverting
 # either of the two bugs this path had - the undecayed prediction, the dropped
 # dt_bias - takes the relative error from 2e-3 to 3e-1 and 6e-2.
 run "kda on host"          "python3 tests/test_kda_host.py"
+# The bf16-state variant of the same kernels, both instantiations run side by
+# side: bit-identical per-step math, the commit store exactly round-to-
+# nearest-even, the divergence from arbitrary fp32 state inside the geometric
+# envelope over 64 commits, and the replay fold byte-exact against serial
+# decode. This is the kernel-side contract the kda_state_bf16 flag waits on.
+run "kda bf16 state"       "python3 tests/test_kda_bf16_state.py"
 # The routing path had three defects, all found by reading and none by running.
 # Emitting the biased score as the weight produces 9 failures here; skipping the
 # renormalisation produces 17.
@@ -166,11 +177,12 @@ run "fast defaults"        "python3 tests/test_fast_defaults.py"
 run "node daemons compile"  "make -s build/sparkpipe_glm52_cuda_residentd build/sparkpipe_glm52_ring_rank_daemon"
 run "code size"           "python3 tests/test_code_size.py"
 run "dry naming law"       "python3 tests/test_dry_law.py"
-# The batch-variant contract: one source tree, four capacity-ceiling modules
-# per resident family from ONE recipe template, every per-bucket constant in
-# the family's tuning header, every name spelled once. A per-bucket fork, a
-# respelled module ID, or a .PHONY target nobody defined all fail here. The
-# ceiling/tile/module-ID selection runs compiled, per bucket, on the host.
+# The batch-variant contract: one source tree, eleven power-of-two
+# capacity-ceiling modules (b1..b1024) per resident family from ONE recipe
+# template, every per-bucket constant in the family's tuning header, every
+# name spelled once. A per-bucket fork, a respelled module ID, or a .PHONY
+# target nobody defined all fail here. The ceiling/tile/module-ID selection
+# runs compiled, per bucket, on the host.
 run "batch variants"       "python3 tests/test_batch_variants.py"
 # The grouped selection path has no model in this tree, so nothing instantiates
 # it and nothing would notice it failing to compile.

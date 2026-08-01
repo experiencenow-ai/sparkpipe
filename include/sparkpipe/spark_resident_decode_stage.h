@@ -135,9 +135,20 @@ extern "C" {
 #define SPARK_RESIDENT_DECODE_STAGE_PAGED_PREFILL_KEY_TILE_TOKENS 16u
 #define SPARK_RESIDENT_DECODE_STAGE_MTP_GRAPH_VARIANT_COUNT \
     ((SPARK_RESIDENT_DECODE_STAGE_MTP_DRAFT_TOKEN_COUNT * 2u) + 1u)
+// THE LIVE-GRAPH BOUND, batch bucket times MTP draft variant. Runtime
+// batch-variant selection maps every microbatch to the tightest power-of-2
+// bucket in B1..B1024 - eleven compiled variants - and a node's batch drifts
+// across the whole ladder as load changes, so one pipeline slot can have
+// every bucket's graph times every draft variant live at once. Sizing to
+// only the draft variants evicts a warm bucket graph the next step would
+// replay, and one recapture is the multi-thousand-launch host cost the graph
+// cache exists to remove. The spare arrays grow to hold the bound, which is
+// what slot-state ABI version 4 records.
+#define SPARK_RESIDENT_DECODE_STAGE_GRAPH_BATCH_VARIANT_BUCKET_COUNT 11u
 #define SPARK_RESIDENT_DECODE_STAGE_CUDA_GRAPH_SPARE_ENTRY_COUNT \
-    (SPARK_RESIDENT_DECODE_STAGE_MTP_GRAPH_VARIANT_COUNT - 1u)
-#define SPARK_RESIDENT_DECODE_STAGE_CUDA_SLOT_STATE_ABI_VERSION 3u
+    ((SPARK_RESIDENT_DECODE_STAGE_GRAPH_BATCH_VARIANT_BUCKET_COUNT * \
+      SPARK_RESIDENT_DECODE_STAGE_MTP_GRAPH_VARIANT_COUNT) - 1u)
+#define SPARK_RESIDENT_DECODE_STAGE_CUDA_SLOT_STATE_ABI_VERSION 4u
 #define SPARK_RESIDENT_DECODE_STAGE_SLICE_NODE_CONTEXT_ABI_VERSION 3u
 #define SPARK_RESIDENT_DECODE_STAGE_PIPELINE_SLOT_SCALAR_INDEX 0u
 #define SPARK_RESIDENT_DECODE_STAGE_INVALID_TOKEN_ID UINT32_MAX

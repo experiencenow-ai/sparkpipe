@@ -226,7 +226,12 @@ def validate_model_precision_contracts() -> None:
     forbid(glm, "LmQuantiseRowsKernel", "GLM BF16 activation path")
 
     require(k3, "LmGemmWeightOnlyLaunch<", "K3 BF16-activation/MXFP4-weight experts")
-    require(k3, "LmScaleTensorBlockUe8m0(", "K3 MXFP4 scale plane")
+    # Pack V2 interleaves the expert scales into the weight stream; no
+    # far-plane LmScaleTensor can address them, so the descriptor is None and
+    # the layer fails closed on the interleave flag until the grouped GEMM
+    # learns the 17-row cell (the kernels wave).
+    forbid(k3, "LmScaleTensorBlockUe8m0(", "K3 stale far-plane expert scale")
+    require(k3, "expert_interleave != 0u", "K3 interleaved experts fail closed")
     require(qwen_bind, "Qwen36LaunchSlice<LmBf16Format>", "Qwen 3.6 BF16 entry point")
 
     require(dsv4, "Dsv4Fp8ActivationScale(", "DSV4 dynamic FP8 activation scale")

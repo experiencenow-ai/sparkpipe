@@ -704,7 +704,11 @@ docs/BANDWIDTH_LEDGER.md:36-46). At B1 this is 16 rows x 3584 x 2 B x 2 =
 prefill width it matches the amortised weight stream. Fix: indirect-A
 variant of the weight-only GEMM. Effort: high; TMA-vs-cp.async occupancy is
 an open hardware question (ledger S1 "UPDATE B-16s"). Prioritise for batch,
-not for the B1 targets.
+not for the B1 targets. KERNEL SIDE LANDED (2026-08-01): the variant exists
+— `LmGemmArguments.activation_row_index` with the tx-identical per-chunk
+bulk staging of tile.cuh, contract in route.cuh. Remaining: the driver
+wiring (w1 launch + gather deletion) and the occupancy measurement that
+chooses between this variant and a per-thread cp.async one.
 
 ### D10. No CUDA graphs
 

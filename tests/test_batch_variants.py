@@ -2,11 +2,13 @@
 """The batch-variant contract, enforced at the source level.
 
 One source tree, N compiled modules: make emits
-libglm52_resident_decode_stage_b8/_b64/_b256/_b1024.a from the same five
-translation units with -DSPARK_BATCH_BUCKET=<n> the only difference, and every
-per-bucket constant lives in the family's spark_<model>_batch_tuning.h. A
-bucket is a capacity ceiling - b8 serves 1-8 rows - so B8 is the chat module
-and B1024, the stage planner's maximum, wins any B64-vs-B1024 tradeoff.
+libglm52_resident_decode_stage_b1/_b2/.../_b1024.a - one archive per power
+of two - from the same five translation units with -DSPARK_BATCH_BUCKET=<n>
+the only difference, and every per-bucket constant lives in the family's
+spark_<model>_batch_tuning.h. A bucket is a capacity ceiling - b8 serves 1-8
+rows - and runtime selection takes the tightest ceiling at or above the
+microbatch, so a live batch pads to at most twice itself; B1024, the stage
+planner's maximum, is the unflagged build.
 
 What fails here:
   * a per-bucket fork: a second recipe template, a hand-written bucket rule,
@@ -42,11 +44,14 @@ GLM52_FIRMWARE_JSON = os.path.join(
     "glm52_resident_decode_stage_firmware.json")
 TOP_MAKEFILE = os.path.join(ROOT, "Makefile")
 
-BUCKETS = (8, 64, 256, 1024)
+BUCKETS = (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024)
 # The grouped tile height at each bucket ceiling, LmLaunchGroupedTileM priced
-# at twice the mean group: both families land at 16/16/16/64 - only b1024's
-# busiest group outgrows the shortest tile.
-EXPECTED_TILE_M = {8: 16, 64: 16, 256: 16, 1024: 64}
+# at twice the mean group: both families land at 16 from b1 through b256, 32
+# at b512, 64 at b1024 - the peak-row count doubles with the bucket, so the
+# tile height climbs the ladder monotonically and never steps down.
+EXPECTED_TILE_M = {bucket: 16 for bucket in BUCKETS}
+EXPECTED_TILE_M[512] = 32
+EXPECTED_TILE_M[1024] = 64
 GLM52_ID_PREFIX = ("spark.glm52.resident_decode_stage.bf16."
                    "h6144.h64.d512.r64.k2048")
 GLM52_ID_SUFFIX = "rv256.mtp6.v1"
@@ -72,9 +77,10 @@ def check_makefile_variants():
 
     bucket_lists = re.findall(
         r"^GLM52_BATCH_VARIANT_BUCKETS \?= ([0-9 ]+)$", text, re.M)
-    if bucket_lists != ["8 64 256 1024"]:
+    expected_list = " ".join(str(bucket) for bucket in BUCKETS)
+    if bucket_lists != [expected_list]:
         report("bucket list", rel,
-               f"expected exactly one '8 64 256 1024', got {bucket_lists}")
+               f"expected exactly one '{expected_list}', got {bucket_lists}")
 
     if text.count("define SPARK_GLM52_BATCH_VARIANT_RULES") != 1:
         report("recipe template", rel, "template must be defined exactly once")
@@ -127,12 +133,14 @@ def check_tuning_header(path, family, id_prefix, id_suffix):
 
     if "#define SPARK_BATCH_BUCKET 1024u" not in text:
         report("default bucket", rel, "the unflagged build must be b1024")
-    guard = re.search(
-        r"#if SPARK_BATCH_BUCKET != 8u && SPARK_BATCH_BUCKET != 64u &&\s*\\\n"
-        r"\s*SPARK_BATCH_BUCKET != 256u && SPARK_BATCH_BUCKET != 1024u",
-        text)
-    if not guard:
-        report("bucket guard", rel, "the #error guard must name the four buckets")
+    # The guard closes the set: every bucket named exactly as the flag spells
+    # it, so a typo'd -DSPARK_BATCH_BUCKET is a build error, not a silent tune.
+    guard = re.search(r"#if SPARK_BATCH_BUCKET != 1u.*?#error", text, re.S)
+    if guard is None or any(
+            f"SPARK_BATCH_BUCKET != {bucket}u" not in guard.group(0)
+            for bucket in BUCKETS):
+        report("bucket guard", rel,
+               "the #error guard must name all eleven buckets")
     prefix_defs = re.findall(
         rf"^#define SPARK_{upper}_BATCH_VARIANT_MODULE_ID_PREFIX \\$",
         text, re.M)
@@ -207,26 +215,35 @@ PROBE_TEMPLATE = r"""
 
 // The ceiling contract, executed: smallest built bucket >= the request, 0
 // above b1024 (no silent oversubscription of the pools the ceiling sizes).
+static uint32_t expected_ceiling(uint32_t request)
+{
+    uint32_t bucket = 1u;
+    if (request == 0u || request > 1024u)
+        return(0u);
+    while (bucket < request)
+        bucket *= 2u;
+    return(bucket);
+}
+
 static void check_ceiling(uint32_t (*ceiling)(uint32_t),
                           const char *(*id_of)(uint32_t),
                           const char *prefix, const char *suffix)
 {
     char expected[128];
-    assert(ceiling(0u) == 0u);
-    assert(ceiling(1u) == 8u);
-    assert(ceiling(8u) == 8u);
-    assert(ceiling(9u) == 64u);
-    assert(ceiling(64u) == 64u);
-    assert(ceiling(65u) == 256u);
-    assert(ceiling(256u) == 256u);
-    assert(ceiling(257u) == 1024u);
-    assert(ceiling(1024u) == 1024u);
-    assert(ceiling(1025u) == 0u);
-    assert(id_of(32u) == 0);
+    uint32_t request;
+    uint32_t index;
+    // Every legal request, not just the rungs and their midpoints: a missed
+    // rung in the ladder silently serves a microbatch under a ceiling twice
+    // its size - the pool waste the eleven-bucket set exists to remove.
+    for (request = 0u; request <= 1025u; ++request)
+        assert(ceiling(request) == expected_ceiling(request));
+    assert(id_of(0u) == 0);
+    assert(id_of(3u) == 0);
+    assert(id_of(100u) == 0);
     {
-        const uint32_t buckets[4] = {8u, 64u, 256u, 1024u};
-        uint32_t index;
-        for (index = 0u; index < 4u; ++index)
+        const uint32_t buckets[11] = {1u, 2u, 4u, 8u, 16u, 32u, 64u, 128u,
+                                      256u, 512u, 1024u};
+        for (index = 0u; index < 11u; ++index)
         {
             snprintf(expected, sizeof(expected), "%s.b%u.%s",
                      prefix, buckets[index], suffix);
@@ -322,11 +339,11 @@ def check_selection_contract():
         with open(rogue_source, "w") as handle:
             handle.write(probe_source(8))
         built = subprocess.run(
-            [compiler, "-std=c11", f"-DSPARK_BATCH_BUCKET=32u",
+            [compiler, "-std=c11", f"-DSPARK_BATCH_BUCKET=3u",
              *include_flags, rogue_source, "-o", os.devnull],
             cwd=ROOT, capture_output=True, text=True)
         if built.returncode == 0:
-            report("probe guard", "-DSPARK_BATCH_BUCKET=32",
+            report("probe guard", "-DSPARK_BATCH_BUCKET=3",
                    "an unbuilt bucket compiled; the #error guard is broken")
     return 1
 
@@ -339,7 +356,7 @@ def main():
     check_firmware_identity()
     check_top_level_makefile()
     check_selection_contract()
-    print("glm52 + k3 batch variants: one source, buckets 8/64/256/1024")
+    print("glm52 + k3 batch variants: one source, eleven buckets B1..B1024")
     if FAILURES:
         print(f"\n{len(FAILURES)} batch-variant contract failure(s):")
         print("\n".join(FAILURES))

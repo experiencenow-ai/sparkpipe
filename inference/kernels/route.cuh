@@ -18,15 +18,20 @@
 // ROUTE ROW INDIRECTION CONSUMER CONTRACT
 //
 // Does the grouped GEMM read activation rows through route_source_token
-// directly? TODAY, NO. LmGemmArguments carries group_row_offset and
-// group_tile_prefix but no row map, and the A-operand stage is a plain TMA
-// 2D box load (LmPipelineProduce in tile.cuh), which needs its rows
-// contiguous. That contiguity is the whole reason LmGatherRowsKernel exists:
-// it expands rows x hidden activations into packed_rows x hidden purely so
-// the box load sees a dense tensor - a full write plus a full re-read of
-// packed_rows x hidden x 2 bytes (235 MB per routed projection at
-// B1024/top-8 over a 7164-wide latent) spent moving bytes the GEMM was
-// about to read from their original addresses.
+// directly? THE KERNEL NOW CAN. LmGemmArguments carries activation_row_index
+// and activation_source (gemm.cuh); when the index is set, the A-operand
+// stage switches from the TMA 2D box - affine, contiguous rows only - to
+// LmPipelineProduceIndirectA (tile.cuh), which stages each packed row from
+// the source tensor through the map with per-chunk bulk copies on the SAME
+// mbarrier-transaction protocol. What is NOT yet done is the driver: the K3
+// layer still runs LmGatherRowsKernel, which expands rows x hidden
+// activations into packed_rows x hidden purely so the box load sees a dense
+// tensor - a full write plus a full re-read of packed_rows x hidden x 2 bytes
+// (235 MB per routed projection at B1024/top-8 over a 7164-wide latent) spent
+// moving bytes the GEMM was about to read from their original addresses. The
+// driver wave sets gemm.activation_row_index = route_source_token and
+// gemm.activation_source = the un-gathered tensor on the w1 launch, then
+// deletes the gather, its buffer, and its recipe-gate check together.
 //
 // The producer side of the indirect form is ALREADY COMPLETE - this kernel
 // writes everything an indirect consumer needs, which is why the contract
@@ -62,7 +67,10 @@
 //     route_source_token[p], not by p. The BF16-activation MoE paths carry
 //     LmScaleTensorNone here and are unaffected; a quantized-activation
 //     consumer that forgets this applies another token's scale and nothing
-//     faults.
+//     faults. The kernel implements this in LmGemmConsume; note the launcher
+//     still validates scale_a against PACKED rows, so the first
+//     quantized-activation indirect consumer must widen that check to the
+//     source row count as it lands.
 //   - LIFETIME. The next step's route build rewrites these arrays on the
 //     same stream, so any consumer on that stream is ordered for free. A
 //     consumer on another stream, or a CUDA graph that captured the build

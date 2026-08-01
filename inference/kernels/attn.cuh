@@ -309,20 +309,35 @@ void LmLatentAttentionDecodeKernel(
 // once per group rather than once per layer.
 template<class Geometry, uint32_t THREADS, uint32_t INDEX_DIM>
 __global__ __launch_bounds__(THREADS, 1)
-void LmSparseScoreKernel(const uint16_t *__restrict__ index_query_bf16, LmKvView cache, const uint32_t *__restrict__ sequence_of_row, const uint32_t *__restrict__ context_length, uint32_t index_heads, float *__restrict__ scores)
+void LmSparseScoreKernel(const uint16_t *__restrict__ index_query_bf16, LmKvView cache, const uint32_t *__restrict__ sequence_of_row, const uint32_t *__restrict__ context_length, uint32_t index_heads, uint32_t window, float *__restrict__ scores)
 {
 	__shared__ float reduction[THREADS / LM_WARP_LANES];
-	uint32_t row = blockIdx.x,position = blockIdx.y;
+	// Position rides blockIdx.x, not .y: the y axis tops out at 65,535 blocks
+	// on every CUDA arch and this grid spans the context, which DeepSeek V4
+	// sells at a million tokens. The row count is the batch, which never
+	// nears the ceiling. The first version put position on .y and failed the
+	// launch - loudly, through the status checks - past 64K context.
+	uint32_t position = blockIdx.x,row = blockIdx.y;
 	uint32_t sequence = sequence_of_row[row],head,index;
 	const uint8_t *slot;
 	float total = 0.0f;
 	if ( position >= context_length[sequence] )
 		return;
+	// THE WINDOW IS A CLAMP ON THE SELECTION, not an alternative to it: a
+	// position older than the trailing window must lose every top-k no matter
+	// what it would have scored, so it scores low enough to lose. window 0 is
+	// no clamp, for a model that has none.
+	if ( window != 0u && position + window < context_length[sequence] )
+	{
+		if ( threadIdx.x == 0u )
+			scores[((uint64_t)row * gridDim.x) + position] = -INFINITY;
+		return;
+	}
 	slot = LmKvSlot<Geometry>(cache,sequence,position);
 	if ( slot == 0 )
 	{
 		if ( threadIdx.x == 0u )
-			scores[((uint64_t)row * gridDim.y) + position] = -INFINITY;
+			scores[((uint64_t)row * gridDim.x) + position] = -INFINITY;
 		return;
 	}
 	for (head = 0u; head < index_heads; ++head)
@@ -334,7 +349,7 @@ void LmSparseScoreKernel(const uint16_t *__restrict__ index_query_bf16, LmKvView
 		total += LmBlockSum<THREADS>(partial,reduction);
 	}
 	if ( threadIdx.x == 0u )
-		scores[((uint64_t)row * gridDim.y) + position] = total;
+		scores[((uint64_t)row * gridDim.x) + position] = total;
 }
 
 // -- YaRN rope ------------------------------------------------------------------
@@ -370,13 +385,24 @@ static __device__ __forceinline__ float LmYarnFrequency(uint32_t index, uint32_t
 	return((inverse * blend) + ((inverse / scale_factor) * (1.0f - blend)));
 }
 
+// Per-head geometry, LmRopePerHeadKernel's shape: a multi-head row carries one
+// rope span per head at the END of that head's stride, so the grid is
+// (row, head) and every head of every token is rotated. The first version of
+// this kernel took a caller-priced row_stride and rope_offset and rotated one
+// span per row - on DeepSeek V4's heads x (latent + rope) query that is one
+// head of sixty-four, and at the wrong offset for every row after the first,
+// because the launch priced the row at heads * head_dim rather than
+// heads * (head_dim + rope_dim). heads 1 recovers the single-span form, which
+// is what the compressed-KV latent (one rope span per row) takes.
 template<uint32_t THREADS, LmRopePairing PAIRING = LM_ROPE_HALF_SPLIT>
 __global__ __launch_bounds__(THREADS, 1)
-void LmRopeYarnKernel(uint16_t *__restrict__ rows_bf16, const uint32_t *__restrict__ positions, uint32_t row_stride, uint32_t rope_offset, uint32_t rope_dim, float theta, float scale_factor, float original_positions, float low_band, float high_band)
+void LmRopeYarnKernel(uint16_t *__restrict__ rows_bf16, const uint32_t *__restrict__ positions, uint32_t heads, uint32_t head_stride, uint32_t rope_dim, float theta, float scale_factor, float original_positions, float low_band, float high_band)
 {
-	uint64_t base = ((uint64_t)blockIdx.x * row_stride) + rope_offset;
-	uint32_t half = rope_dim / 2u,index;
-	float position = (float)positions[blockIdx.x];
+	uint32_t row = blockIdx.x,head = blockIdx.y,index;
+	uint32_t half = rope_dim / 2u;
+	uint64_t base = (((uint64_t)row * heads) + head) * head_stride
+		+ (head_stride - rope_dim);
+	float position = (float)positions[row];
 	for (index = threadIdx.x; index < half; index += THREADS)
 		LmRopeRotate<PAIRING>(rows_bf16,base,index,half,position *
 			LmYarnFrequency(index,rope_dim,theta,scale_factor,

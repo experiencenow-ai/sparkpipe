@@ -177,38 +177,6 @@ static int32_t Glm52LaunchSlice(
     return LM_LAUNCH_OK;
 }
 
-extern "C" int32_t Glm52StageSlicePrefill(
-    const SparkResidentDecodeStageNodeContext *const *node_contexts,
-    void *layer_buffers,
-    uint32_t first_layer,
-    uint32_t layer_count,
-    uint32_t rows,
-    uint32_t packed_rows,
-    uint32_t context,
-    uint32_t multiprocessors,
-    const uint32_t *row_positions,
-    void *stream)
-{
-    Glm52LayerBuffers prefill_buffers;
-
-    if (layer_buffers == 0 || row_positions == 0)
-    {
-        return LM_LAUNCH_ERR_SHAPE;
-    }
-    prefill_buffers = *(const Glm52LayerBuffers *)layer_buffers;
-    prefill_buffers.row_positions = row_positions;
-    return Glm52LaunchSlice(
-        node_contexts,
-        &prefill_buffers,
-        first_layer,
-        layer_count,
-        rows,
-        packed_rows,
-        context,
-        multiprocessors,
-        (cudaStream_t)(uintptr_t)stream);
-}
-
 extern "C" int32_t Glm52StageSlice(
     const SparkResidentDecodeStageNodeContext *const *node_contexts,
     void *layer_buffers,

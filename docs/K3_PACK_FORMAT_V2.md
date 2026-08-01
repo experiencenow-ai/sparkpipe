@@ -225,17 +225,30 @@ an E8M0 `0xff` anywhere in the scale stream.
   `expert_w{1,2}_weight` slice on the interleave grid above. Unknown names
   are still refused loudly, so nothing mis-slices.
 
-## What the bind wave consumes
+## What the bind consumes (LANDED, the bind wave)
 
-Per KDA layer, the new weight-table entries are: `kda_qkv_beta_weight` (+ its
+Per KDA layer, the weight-table entries are: `kda_qkv_beta_weight` (+ its
 section table), `kda_decay_gate_down_weight` (+ its table),
 `kda_{q,k,v}_conv_weight`, `kda_decay_up_weight`, `kda_decay_bias`,
 `kda_head_log_scale`, `kda_gate_up_weight`, `kda_out_norm_weight`,
 `kda_out_weight` — the V1 names `kda_{q,k,v,beta}_weight`,
 `kda_decay_down_weight`, `kda_gate_down_weight` no longer exist. Per MoE
 layer: `expert_w1_weight`, `expert_w2_weight` interleaved as above, no scale
-tensors. MLA layers and everything else are unchanged from V1. The stale
-callers — `K3LayerWeights`/`K3BindLayer`
-(`inference/llms/kimi_k3/slice.cuh:34-211`), the six-launch block at
-`inference/llms/kimi_k3/layer.cuh:417-440`, and the K3-PERF-003 comment
-itself — are the driver wave's to update against this document.
+tensors. MLA layers and everything else are unchanged from V1.
+
+The consumption that landed against this document:
+
+- `K3LayerWeights`/`K3BindLayer` (`inference/llms/kimi_k3/slice.cuh`) carry
+  the two fused tensors per KDA layer and propagate an `expert_interleave`
+  flag beside the interleaved expert pointers. Section offsets are
+  compile-time, derived from `K3_KDA_*_FUSED_ROWS` and asserted to tile them
+  exactly — no manifest JSON is parsed at run time.
+- The six-launch projection block is two wide GEMMs plus one section split
+  (`K3SplitFusedProjectionsKernel`, `inference/llms/kimi_k3/layer.cuh`),
+  K3-PERF-003 closed: the activation is read twice, not six times, and four
+  GEMM launches per KDA layer are gone.
+- The expert path is FAIL-CLOSED on `expert_interleave`: today's grouped
+  GEMM reads scales through `LmScaleTensor`'s separate plane and cannot
+  express the co-tiled scale row, so `scale_b` binds None and the layer
+  refuses the flag. The kernels wave that implements the TMA recipe above
+  removes the check and the flag together.

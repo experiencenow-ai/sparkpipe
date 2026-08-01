@@ -123,6 +123,17 @@ int main(void)
 	dense_offsets[0] = 0u; dense_offsets[1] = ROWS;
 	b.dense_row_offset = dense_offsets; b.dense_tile_prefix = dense_tiles;
 
+	// THE INTERLEAVED EXPERT STREAM MUST BE REFUSED. Pack V2 interleaves the
+	// expert scales into the weight stream and the grouped GEMM cannot read
+	// that grid yet, so the layer fails closed on the flag rather than run
+	// scales-as-payload. The recorder path below binds no weights and leaves
+	// the flag clear, which is the only way through today.
+	b.expert_interleave = 1u;
+	printf("interleave_refused %d\n",
+		K3LayerLatentMoe<LmHostRecorderFormat>(&b, ROWS, ROUTES, 1u, 0)
+			== LM_LAUNCH_ERR_SHAPE ? 1 : 0);
+	b.expert_interleave = 0u;
+
 	// bisect the fault: report before each launch the layer makes
 	printf("start\n"); fflush(stdout);
 	K3LayerLatentMoe<LmHostRecorderFormat>(&b, ROWS, ROUTES, 1u, 0);

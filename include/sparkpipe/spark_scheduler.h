@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "sparkpipe/spark_prefix_cache.h"
+#include "sparkpipe/spark_nvme_tier.h"
 #include "sparkpipe/spark_stage_plan.h"
 #include "sparkpipe/spark_status.h"
 
@@ -119,6 +120,11 @@ typedef struct SparkSchedulerConfiguration
     uint32_t configuration_flags;
     uint32_t reserved;
     SparkPrefixCache *prefix_cache;
+    // Optional tier-3 residency oracle. NULL (the memset default) means no
+    // tier opinion exists and admission proceeds exactly as before this
+    // field existed; when wired, a request carrying KV block content hashes
+    // gets a WillBeResidentBy confidence recorded in its decision.
+    const SparkNvmeTier *nvme_tier;
 } SparkSchedulerConfiguration;
 
 typedef struct SparkSchedulerRequest
@@ -134,6 +140,14 @@ typedef struct SparkSchedulerRequest
     uint32_t reserved;
     uint64_t sequence_id;
     const uint32_t *prompt_token_ids;
+    // Admission-side residency oracle inputs, all zero when unused. The
+    // hashes are the chained block content hashes cache/cache.h uses;
+    // step_now/step_deadline bound the "resident by the step that needs
+    // it" question SparkNvmeTierWillBeResidentBy answers.
+    const uint64_t *nvme_block_content_hashes;
+    uint32_t nvme_block_content_hash_count;
+    uint32_t nvme_step_now;
+    uint32_t nvme_step_deadline;
 } SparkSchedulerRequest;
 
 typedef struct SparkSchedulerBatchRequest
@@ -212,6 +226,12 @@ typedef struct SparkSchedulerDecision
     uint32_t kv_cached_physical_block_count;
     uint32_t kv_pending_physical_block_count;
     uint32_t kv_block_table_token_count;
+    // The tier-3 residency opinion recorded at admission. assessed is 0
+    // when no tier was wired or the request carried no hashes, so a zeroed
+    // decision never claims a confidence it did not earn; when 1,
+    // confidence holds a SparkNvmeTierConfidence value.
+    uint32_t nvme_residency_assessed;
+    uint32_t nvme_residency_confidence;
     uint64_t prefix_cache_reservation_epoch;
     uint64_t prefix_cache_parent_hash;
     uint64_t prefix_cache_result_hash;
@@ -335,6 +355,15 @@ typedef struct SparkScheduler
     uint64_t kv_block_reservation_count;
     uint64_t kv_block_reservation_token_count;
     uint64_t kv_block_cancel_count;
+    const SparkNvmeTier *nvme_tier;
+    // The admission-state record of the residency oracle: how often the
+    // query ran and the ALL/PARTIAL/NONE histogram it returned. Scoring
+    // admitted sequences on this confidence is a later wave; this wave
+    // exposes the query and keeps the record.
+    uint64_t nvme_residency_assessment_count;
+    uint64_t nvme_confidence_all_count;
+    uint64_t nvme_confidence_partial_count;
+    uint64_t nvme_confidence_none_count;
 } SparkScheduler;
 
 SparkStatus SparkSchedulerInitialize(
@@ -356,6 +385,18 @@ SparkStatus SparkSchedulerEstimateDecodeWorkNs(
 void SparkSchedulerSetPrefillDemand(
     SparkScheduler *scheduler,
     uint32_t prefill_demand);
+
+// The admission-side hook to the tier-3 residency oracle: runs
+// SparkNvmeTierWillBeResidentBy for the request's KV block hashes against
+// the scheduler's wired tier and records the confidence histogram in the
+// scheduler's admission state. Fails with INVALID_ARGUMENT when no tier
+// is wired - callers that treat the oracle as optional probe
+// scheduler->nvme_tier (or SparkSchedulerAdmit, which does) instead.
+SparkStatus SparkSchedulerAssessNvmeResidency(
+    SparkScheduler *scheduler,
+    const SparkSchedulerRequest *request,
+    SparkNvmeTierResidencyAssessment *assessment_out);
+
 SparkStatus SparkSchedulerAdmit(
     SparkScheduler *scheduler,
     const SparkSchedulerRequest *request,

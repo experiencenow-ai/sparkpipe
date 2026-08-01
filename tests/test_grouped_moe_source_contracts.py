@@ -80,6 +80,30 @@ def main() -> None:
     require(queue_header, "SparkGlm52ExpertQueueSealLayer", "seal API")
     require(queue_source, "queue->layer_sealed[layer_index]", "sealed layer state")
 
+    # -- the kernel half of the gather deletion (route.cuh's contract) --------
+    # The driver half (layer.cuh) belongs to another wave; these pins hold the
+    # kernel side it wires against: the row-map words, the ragged-tail clamp,
+    # source-following scales, and byte-identical barrier accounting between
+    # the TMA and the indirect staging paths.
+    gemm = read("inference/kernels/gemm.cuh")
+    tile = read("inference/kernels/tile.cuh")
+    tma = read("inference/kernels/tma.cuh")
+    require(gemm, "const uint32_t *activation_row_index;", "indirect-A row map word")
+    require(gemm, "const void *activation_source;", "indirect-A source base word")
+    require(gemm, "LmRouteSourceRow(activation_row_index", "scale follows the source row")
+    require(tile, "LmPipelineProduceIndirectA(", "indirect A staging path")
+    require(tile, "packed >= row_limit", "ragged tail clamp")
+    require(tile, "LmRouteSourceRow(row_index,packed)", "staged row through the route map")
+    require(tma, "cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes",
+            "tx-accounted bulk chunk copy")
+    # both staging paths declare the same bytes through the one helper, or the
+    # barrier's expected count can drift between them and deadlock one path
+    produce = tile[tile.index("static __device__ __forceinline__ void LmPipelineProduce("):]
+    indirect = tile[tile.index("LmPipelineProduceIndirectA("):]
+    for name, body in (("dense", produce), ("indirect", indirect)):
+        require(body[:body.index("\n}\n")], "LmPipelineProduceWeight(",
+                f"{name} path shares the expect+weight helper")
+
     print("PASS grouped-MoE source contracts")
 
 

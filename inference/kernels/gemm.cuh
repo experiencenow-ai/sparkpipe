@@ -31,8 +31,18 @@
 // the weight stream doubles. TILE_M is a template parameter selected per token
 // bucket, and rounding is one-directional: up wastes mma throughput on padded
 // rows, which is free here; down costs bandwidth, which is not.
+//
+// INDIRECT A. A grouped MoE GEMM used to need its activation rows materialised
+// expert-major by a gather kernel, because the A stage was a TMA box and a box
+// is affine. LmGemmArguments.activation_row_index retires that copy: the A
+// stage reads each packed row through the route build's source-row map
+// (LmPipelineProduceIndirectA, tile.cuh), the B side and the pipeline protocol
+// are untouched, and the fragments - and therefore the numerics - are identical
+// to the gathered form. The gather's 235 MB of write-plus-re-read per routed
+// projection at B1024/top-8 becomes dead code the driver wave deletes.
 
 #include "inference/kernels/formats/bf16.cuh"
+#include "inference/kernels/route.cuh"
 #include "inference/kernels/scale.cuh"
 #include "inference/kernels/tile.cuh"
 #include <cuda.h>
@@ -63,6 +73,19 @@ struct LmGemmArguments
 	// The caller provides group_count + 1 words of device scratch; the launcher
 	// prices them for the launch it is about to make.
 	uint32_t *group_tile_prefix;
+	// INDIRECT A - the MoE gather deletion, route.cuh's consumer contract.
+	// When activation_row_index is non-null, packed A row p of a group tile is
+	// staged from row LmRouteSourceRow(activation_row_index, p) of
+	// activation_source - the UN-gathered activation tensor, rows x
+	// input_dimension in FormatA - instead of row p of a packed buffer, and
+	// scale_a follows the source row. The staging switches from the TMA box to
+	// per-chunk bulk copies (LmPipelineProduceIndirectA in tile.cuh); the
+	// barrier protocol, the B side, and the numerics do not change. Both words
+	// are null on every dense path, which keeps the TMA box. The tensor map
+	// still describes activation_source (the launcher encodes the pointer it
+	// is handed); it is simply unused while the index is set.
+	const uint32_t *activation_row_index;
+	const void *activation_source;
 	void *output_bf16;
 	void *output_f32;
 	// Optional second life for the result: the epilogue ADDS it into this
@@ -89,6 +112,15 @@ struct LmGemmArguments
 // fragment spans two adjacent k, and the scale group is at least 16, so both
 // halves always share it. That is asserted rather than assumed.
 //
+// SCALE ROWS FOLLOW THE SOURCE. On the indirect path the staged row came from
+// activation_row_index[p], so its activation scale lives at the SOURCE row,
+// not the packed one - the route contract's exact rule, and a consumer that
+// indexes by p applies another token's scale with nothing faulting. The clamp
+// mirrors the staging clamp so a ragged-tail row's scale matches the row it
+// actually staged; those rows are dead either way. The lookup is skipped when
+// there is no index and when the scale tensor is empty, which is the whole of
+// the BF16-activation MoE path today.
+//
 // Formats that dequantise for free hand back raw BF16 bit patterns holding
 // code + bias, and the correction is applied here with the multiply that had to
 // happen anyway - (v - bias) * scale becomes one fma against a precomputed
@@ -101,8 +133,10 @@ static __device__ void LmGemmConsume(
     const uint8_t *stage_b,
     const LmScaleTensor &scale_a,
     const LmScaleTensor &scale_b,
+    const uint32_t *activation_row_index,
     uint32_t group_index,
     uint32_t row_base,
+    uint32_t row_limit,
     uint32_t neuron_base,
     uint32_t global_k_base,
     uint32_t warp,
@@ -137,10 +171,18 @@ static __device__ void LmGemmConsume(
                 const uint32_t local_row =
                     (mi * FormatA::kMmaM) + FormatA::OperandARow(lane, reg);
                 const uint32_t local_k = k_base + FormatA::OperandAK(lane, reg);
+                uint32_t scale_row = row_base + local_row;
+                if ( activation_row_index != 0 &&
+                    scale_a.encoding != LM_SCALE_ENCODING_NONE )
+                {
+                    if ( scale_row >= row_limit )
+                        scale_row = row_base;
+                    scale_row = LmRouteSourceRow(activation_row_index, scale_row);
+                }
                 const float scale = LmScaleTensorLoad(
                     &scale_a,
                     0u,
-                    row_base + local_row,
+                    scale_row,
                     global_k_base + local_k);
                 a[reg] = FormatA::Fragment(
                     stage_a,
@@ -223,6 +265,64 @@ static __device__ __forceinline__ void LmGemmZero(float (*acc)[4], uint32_t coun
 	for (i = 0u; i < count; ++i)
 		for (e = 0u; e < 4u; ++e)
 			acc[i][e] = 0.0f;
+}
+
+// One stage's produce on whichever A-staging path the arguments select. The
+// branch is launch-uniform so it predicts, and lifting it out of the k loop's
+// two call sites keeps the schedule readable next to the phase-parity comment
+// that explains it. The source row pitch is the full input width in FormatA
+// storage: the indirect path addresses the UN-gathered tensor, whose rows are
+// input_dimension wide, not the TILE_K-wide box the TMA descriptor paces out.
+template<class FormatA>
+static __device__ __forceinline__ void LmGemmProduce(
+    const LmGemmArguments &args,
+    const LmTileGeometry *geometry_a,
+    const LmTileGeometry *geometry_b,
+    const void *tensor_map_a,
+    const void *tensor_map_b,
+    void *stage_a,
+    void *stage_b,
+    uint64_t *barrier,
+    uint32_t row_base,
+    uint32_t row_limit,
+    uint32_t neuron_base,
+    uint32_t k_tile,
+    uint32_t group,
+    bool grouped)
+{
+    if ( args.activation_row_index != 0 )
+    {
+        LmPipelineProduceIndirectA(
+            geometry_a,
+            geometry_b,
+            tensor_map_b,
+            args.activation_source,
+            args.activation_row_index,
+            LmTileBytes(1u, args.input_dimension, FormatA::kStoredBits),
+            stage_a,
+            stage_b,
+            barrier,
+            row_base,
+            row_limit,
+            neuron_base,
+            k_tile,
+            group,
+            grouped);
+        return;
+    }
+    LmPipelineProduce(
+        geometry_a,
+        geometry_b,
+        tensor_map_a,
+        tensor_map_b,
+        stage_a,
+        stage_b,
+        barrier,
+        row_base,
+        neuron_base,
+        k_tile,
+        group,
+        grouped);
 }
 
 // The persistent grid walks tiles strided by gridDim, so it is sized to the
@@ -333,7 +433,8 @@ void LmGemmKernel(
              stage + 1u < STAGES && stage < k_tiles;
              ++stage)
         {
-            LmPipelineProduce(
+            LmGemmProduce<FormatA>(
+                args,
                 &geometry_a,
                 &geometry_b,
                 &tensor_map_a,
@@ -342,6 +443,7 @@ void LmGemmKernel(
                 stage_b[stage],
                 &barrier[stage],
                 row_base,
+                row_limit,
                 neuron_base,
                 stage,
                 group,
@@ -353,7 +455,8 @@ void LmGemmKernel(
             ahead = LmPipelineAhead(k, STAGES);
             if (ahead < k_tiles)
             {
-                LmPipelineProduce(
+                LmGemmProduce<FormatA>(
+                    args,
                     &geometry_a,
                     &geometry_b,
                     &tensor_map_a,
@@ -362,6 +465,7 @@ void LmGemmKernel(
                     stage_b[ahead % STAGES],
                     &barrier[ahead % STAGES],
                     row_base,
+                    row_limit,
                     neuron_base,
                     ahead,
                     group,
@@ -383,8 +487,10 @@ void LmGemmKernel(
                     stage_b[stage],
                     args.scale_a,
                     args.scale_b,
+                    args.activation_row_index,
                     group,
                     row_base,
+                    row_limit,
                     neuron_base,
                     k * TILE_K,
                     warp,

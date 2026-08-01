@@ -1227,6 +1227,198 @@ static void SparkTestGlm52SchedulerSelectsPipelineBatchWidth(void)
         &scheduler, 13312u, 256u) == 256u);
 }
 
+/* The residency oracle never touches the device - WillBeResidentBy reads
+   slot state only - but SparkNvmeTierInitialize requires a non-NULL
+   submit/poll pair, so these stubs satisfy the contract; being called at
+   all is the failure they report. */
+static SparkStatus SparkTestNvmeStubSubmitRead(
+    void *context,
+    uint64_t device_offset,
+    void *destination,
+    uint32_t bytes,
+    uint64_t *ticket_out)
+{
+    (void)context;
+    (void)device_offset;
+    (void)destination;
+    (void)bytes;
+    (void)ticket_out;
+    return SPARK_STATUS_INTERNAL_ERROR;
+}
+
+static SparkStatus SparkTestNvmeStubPollRead(
+    void *context,
+    uint64_t ticket)
+{
+    (void)context;
+    (void)ticket;
+    return SPARK_STATUS_INTERNAL_ERROR;
+}
+
+#define SPARK_TEST_NVME_BLOCK_BYTES 4096u
+#define SPARK_TEST_NVME_STAGING_BUFFERS 2u
+
+static void SparkTestGlm52SchedulerRecordsNvmeResidencyConfidence(void)
+{
+    SparkPrefixCache cache;
+    SparkPrefixCacheEntry entries[128u];
+    SparkPrefixCacheSequenceBinding bindings[512u];
+    SparkNvmeTierDevice device;
+    SparkNvmeTierConfiguration tier_configuration;
+    SparkNvmeTier tier;
+    _Alignas(64) uint8_t tables[64u * 1024u];
+    _Alignas(SPARK_TEST_NVME_BLOCK_BYTES) uint8_t staging[
+        SPARK_TEST_NVME_STAGING_BUFFERS * SPARK_TEST_NVME_BLOCK_BYTES];
+    uint64_t device_offset;
+    uint64_t table_bytes;
+    uint64_t resident_hash;
+    uint64_t absent_hash;
+    uint64_t mixed_hashes[2u];
+    SparkSchedulerConfiguration configuration;
+    SparkScheduler scheduler;
+    SparkSchedulerRequest request;
+    SparkSchedulerDecision decision;
+
+    memset(&device, 0, sizeof(device));
+    device.submit_read = SparkTestNvmeStubSubmitRead;
+    device.poll_read = SparkTestNvmeStubPollRead;
+    memset(&tier_configuration, 0, sizeof(tier_configuration));
+    tier_configuration.abi_version = SPARK_NVME_TIER_ABI_VERSION;
+    tier_configuration.descriptor_bytes = SPARK_NVME_TIER_CONFIGURATION_BYTES;
+    tier_configuration.budget_bytes = 8u * SPARK_TEST_NVME_BLOCK_BYTES;
+    tier_configuration.base_offset = 1u << 20;
+    tier_configuration.block_bytes = SPARK_TEST_NVME_BLOCK_BYTES;
+    tier_configuration.hash_bucket_count = 8u;
+    tier_configuration.staging_buffer_count = SPARK_TEST_NVME_STAGING_BUFFERS;
+    tier_configuration.demand_reserve_buffers = 0u;
+    tier_configuration.pending_capacity = 8u;
+    /* One block per step: a published block with an empty queue is
+       resident-confident whenever the deadline is at least one step out. */
+    tier_configuration.device_bytes_per_second = SPARK_TEST_NVME_BLOCK_BYTES;
+    tier_configuration.step_time_microseconds = 1000000u;
+    table_bytes = SparkNvmeTierTableBytes(&tier_configuration);
+    assert(table_bytes != 0u && table_bytes <= sizeof(tables));
+    assert(SparkNvmeTierInitialize(
+        &tier,&tier_configuration,&device,tables,staging) ==
+        SPARK_STATUS_OK);
+    resident_hash = 0x5eed0001u;
+    absent_hash = 0x5eed0002u;
+    assert(SparkNvmeTierPublish(&tier,resident_hash,&device_offset) ==
+        SPARK_STATUS_OK);
+
+    SparkTestInitializePrefixCache(&cache,entries,bindings,128u,512u);
+    SparkTestInitializeSchedulerConfiguration(
+        &configuration,
+        SPARK_STAGE_PLAN_QUANTIZATION_FP8_E4M3_8BIT,
+        &cache);
+    configuration.nvme_tier = &tier;
+    assert(SparkSchedulerInitialize(
+        &scheduler,&configuration) == SPARK_STATUS_OK);
+
+    /* ALL: the one block the sequence needs is on the drive and its ETA
+       lands inside the deadline. */
+    SparkTestInitializeDecodeRequest(&request,1u);
+    request.nvme_block_content_hashes = &resident_hash;
+    request.nvme_block_content_hash_count = 1u;
+    request.nvme_step_now = 3u;
+    request.nvme_step_deadline = 20u;
+    assert(SparkSchedulerAdmit(&scheduler,&request,&decision) ==
+        SPARK_STATUS_OK);
+    assert(decision.accepted != 0u);
+    assert(decision.nvme_residency_assessed != 0u);
+    assert(decision.nvme_residency_confidence ==
+        (uint32_t)SPARK_NVME_TIER_CONFIDENCE_ALL);
+    assert(SparkSchedulerComplete(&scheduler,&decision) == SPARK_STATUS_OK);
+
+    /* NONE: the block is not on the drive at all. */
+    SparkTestInitializeDecodeRequest(&request,1u);
+    request.nvme_block_content_hashes = &absent_hash;
+    request.nvme_block_content_hash_count = 1u;
+    request.nvme_step_now = 3u;
+    request.nvme_step_deadline = 20u;
+    assert(SparkSchedulerAdmit(&scheduler,&request,&decision) ==
+        SPARK_STATUS_OK);
+    assert(decision.accepted != 0u);
+    assert(decision.nvme_residency_assessed != 0u);
+    assert(decision.nvme_residency_confidence ==
+        (uint32_t)SPARK_NVME_TIER_CONFIDENCE_NONE);
+    assert(SparkSchedulerComplete(&scheduler,&decision) == SPARK_STATUS_OK);
+
+    /* PARTIAL: one block arrives in time, one is absent. */
+    mixed_hashes[0u] = resident_hash;
+    mixed_hashes[1u] = absent_hash;
+    SparkTestInitializeDecodeRequest(&request,1u);
+    request.nvme_block_content_hashes = mixed_hashes;
+    request.nvme_block_content_hash_count = 2u;
+    request.nvme_step_now = 3u;
+    request.nvme_step_deadline = 20u;
+    assert(SparkSchedulerAdmit(&scheduler,&request,&decision) ==
+        SPARK_STATUS_OK);
+    assert(decision.nvme_residency_assessed != 0u);
+    assert(decision.nvme_residency_confidence ==
+        (uint32_t)SPARK_NVME_TIER_CONFIDENCE_PARTIAL);
+    assert(SparkSchedulerComplete(&scheduler,&decision) == SPARK_STATUS_OK);
+
+    /* The admission-state histogram saw all three queries. */
+    assert(scheduler.nvme_residency_assessment_count == 3u);
+    assert(scheduler.nvme_confidence_all_count == 1u);
+    assert(scheduler.nvme_confidence_partial_count == 1u);
+    assert(scheduler.nvme_confidence_none_count == 1u);
+
+    /* No hashes supplied: admission proceeds with the oracle silent. */
+    SparkTestInitializeDecodeRequest(&request,1u);
+    assert(SparkSchedulerAdmit(&scheduler,&request,&decision) ==
+        SPARK_STATUS_OK);
+    assert(decision.nvme_residency_assessed == 0u);
+    assert(SparkSchedulerComplete(&scheduler,&decision) == SPARK_STATUS_OK);
+    assert(scheduler.nvme_residency_assessment_count == 3u);
+
+    /* A hash count without the hashes is a malformed request. */
+    SparkTestInitializeDecodeRequest(&request,1u);
+    request.nvme_block_content_hash_count = 1u;
+    assert(SparkSchedulerAdmit(&scheduler,&request,&decision) ==
+        SPARK_STATUS_INVALID_ARGUMENT);
+}
+
+static void SparkTestGlm52SchedulerLeavesOracleSilentWithoutTier(void)
+{
+    SparkPrefixCache cache;
+    SparkPrefixCacheEntry entries[128u];
+    SparkPrefixCacheSequenceBinding bindings[512u];
+    uint64_t hash;
+    SparkNvmeTierResidencyAssessment assessment;
+    SparkSchedulerConfiguration configuration;
+    SparkScheduler scheduler;
+    SparkSchedulerRequest request;
+    SparkSchedulerDecision decision;
+
+    SparkTestInitializePrefixCache(&cache,entries,bindings,128u,512u);
+    SparkTestInitializeSchedulerConfiguration(
+        &configuration,
+        SPARK_STAGE_PLAN_QUANTIZATION_FP8_E4M3_8BIT,
+        &cache);
+    assert(SparkSchedulerInitialize(
+        &scheduler,&configuration) == SPARK_STATUS_OK);
+
+    /* Hashes but no wired tier: the query is skipped, not failed, and the
+       decision says so. */
+    hash = 0x5eed0003u;
+    SparkTestInitializeDecodeRequest(&request,1u);
+    request.nvme_block_content_hashes = &hash;
+    request.nvme_block_content_hash_count = 1u;
+    request.nvme_step_now = 3u;
+    request.nvme_step_deadline = 20u;
+    assert(SparkSchedulerAdmit(&scheduler,&request,&decision) ==
+        SPARK_STATUS_OK);
+    assert(decision.accepted != 0u);
+    assert(decision.nvme_residency_assessed == 0u);
+    assert(scheduler.nvme_residency_assessment_count == 0u);
+
+    /* The standalone query without a tier is the caller's error. */
+    assert(SparkSchedulerAssessNvmeResidency(
+        &scheduler,&request,&assessment) == SPARK_STATUS_INVALID_ARGUMENT);
+}
+
 static void SparkTestGlm52SchedulerEstimatesExpandedDecodeWork(void)
 {
     SparkPrefixCache cache;
@@ -1285,6 +1477,8 @@ int main(void)
     SparkTestGlm52SchedulerBuildsBatchedPrefillKvTables();
     SparkTestGlm52SchedulerRejectsInvalidInputs();
     SparkTestGlm52SchedulerSelectsPipelineBatchWidth();
+    SparkTestGlm52SchedulerRecordsNvmeResidencyConfidence();
+    SparkTestGlm52SchedulerLeavesOracleSilentWithoutTier();
     SparkTestGlm52SchedulerEstimatesExpandedDecodeWork();
     return 0;
 }
