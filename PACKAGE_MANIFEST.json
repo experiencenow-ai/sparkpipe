@@ -33,8 +33,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "974613350e830669ae135a3908e96a505564f65f96a90613e39ed38195f9378a",
-      "size_bytes": 63915
+      "sha256": "d2a8f3c222fda9fadbf3edc48ec34c28a1eb86598f929d58937fc7fbb26665a3",
+      "size_bytes": 64148
     },
     {
       "path": "PROPOSED_IMPROVEMENTS_README.md",
@@ -1903,8 +1903,8 @@
     },
     {
       "path": "node/residentd.c",
-      "sha256": "7e04d5c0811c09b697d94d54161d1412030bf59bad0f339121d978766c8b9bf1",
-      "size_bytes": 100736
+      "sha256": "b8f78d3f39f68646dbcbad7901caff58071f875986154bfabc45ef283576bfba",
+      "size_bytes": 100968
     },
     {
       "path": "ring/distributed_work.c",
@@ -3348,12 +3348,12 @@
     },
     {
       "path": "tools/verify_source_archive.py",
-      "sha256": "7e5e96606643f32a01d787156ed552262d367d7625c63c69f677eb69c8e238a5",
-      "size_bytes": 3043
+      "sha256": "a0c0a0f4e6f1914545354c60153bfb8d5371df848358b2b766d7e3d04668d997",
+      "size_bytes": 3378
     }
   ],
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 7960909
+  "total_bytes": 7961709
 }
