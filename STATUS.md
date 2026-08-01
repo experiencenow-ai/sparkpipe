@@ -1,23 +1,25 @@
-# SparkPipe Status — Phase 6 Transactional Completion
+# SparkPipe Status — Phase 7 Foundational Safety
 
-The authoritative deployment targets are:
+This source tree is an implementation candidate for the following mandatory targets:
 
 - Kimi K3: MXFP4 routed-expert weights, BF16 expert activations, BF16 non-expert tensors, FP32 accumulation.
-- GLM 5.2: FP8 E4M3 routed-expert weights, BF16 expert activations, BF16 non-expert tensors, FP32 accumulation.
-- Qwen 3.6 27B: BF16 weights and activations, FP32 accumulation where required.
-- DeepSeek V4 Flash and Pro: checkpoint-native FP4 expert and FP8 non-expert formats, each with a separate generated geometry contract.
+- GLM 5.2: FP8 E4M3 routed-expert weights, BF16 activations and non-expert tensors, FP32 accumulation.
+- Qwen 3.6 27B: BF16 weights and activations, with FP32 accumulation where required.
+- DeepSeek V4 Flash and DeepSeek V4 Pro: separate checkpoint-derived contracts and separate execution packages.
 
-The complete clean host build and test inventory passes. The architecture gate reports 69 pass, 4 CUDA-only skips, and 0 failures. The skips are not passes: CUDA 13, `compute_121a` PTX, `sm_121a` assembly/device linking, Blackwell numerical execution, race checks, and performance remain unmeasured.
+Phase 7 closes the audited NVMe ownership/layout defects, replaces raw arena pointers with generation-carrying allocation handles, makes required KV-cache access fail closed, restores an explicit sliding-window position producer, removes global CUDA fast-math policy, derives the GLM estimator from the model contract, and replaces Git-dependent/circular package receipts with a deterministic source-package identity.
 
-Phase 4 repairs the shared scale ABI, TMA launch contract, sub-byte quantization write ownership, K3 exact speculative replay, GLM mixed-precision dispatch surfaces, Qwen BF16 source contract, and DSV4 Pro compile surface. It also removes generated build products from the authored-code-size metric.
-
-This tree is a host-validated source candidate, not a production-qualified GPU package:
+The source tree does not certify itself. Build, test, gate, archive, and extraction results are valid only when tied to the exact released archive SHA-256 by an external verification receipt.
 
 ```text
-HOST_BUILD_VALIDATED=true
-HOST_TEST_INVENTORY_VALIDATED=true
-ARCHITECTURE_GATES=69_PASS_4_CUDA_SKIP_0_FAIL
+SOURCE_PACKAGE_KIND=sparkpipe_source
+HOST_BUILD_STATUS=SEE_EXTERNAL_VERIFICATION_RECEIPT
+HOST_TEST_STATUS=SEE_EXTERNAL_VERIFICATION_RECEIPT
+ARCHITECTURE_GATE_STATUS=SEE_EXTERNAL_VERIFICATION_RECEIPT
 CUDA13_SM121A_COMPILE_NOT_RUN=true
 BLACKWELL_EXECUTION_NOT_MEASURED=true
+PHYSICAL_NETWORK_EXECUTION_NOT_MEASURED=true
 PRODUCTION_READY=false
 ```
+
+The remaining blockers are tracked in `docs/PHASE7_REMAINING_WORK.md`.

@@ -86,21 +86,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from glm52_model_contract import load_model_contract  # noqa: E402
 from nvme_kv_estimate import (  # noqa: E402
     GB, MODELS_BY_NAME, BATCHES, coverage, step_gb)
-
-import json  # noqa: E402
-from pathlib import Path  # noqa: E402
-
-# GLM geometry comes from its contract, not from literals - the
-# memory-contract gate flags model constants in tools/ that bypass it.
-_GLM52_CONTRACT = json.loads(
-    (Path(__file__).resolve().parent.parent
-     / "model_contracts" / "glm52.json").read_text())
-_GLM52_HIDDEN = _GLM52_CONTRACT["hidden_dimension"]
-_GLM52_SCORE_DIM = (_GLM52_CONTRACT["head_count"]
-                    * (_GLM52_CONTRACT["latent_dimension"]
-                       + _GLM52_CONTRACT["rope_dimension"]))
 
 # -- assumed constants (see module docstring) ---------------------------------
 LAUNCH_NS_DEFAULT = 2000.0
@@ -111,7 +99,8 @@ RING_HOP_FLOOR_US = 29.0
 MFU_LO = 0.35
 MFU_HI = 0.55
 MFU_DEFAULT = 0.45
-CHUNK_TOKENS = 256
+GLM52_CONTRACT = load_model_contract()
+CHUNK_TOKENS = GLM52_CONTRACT["max_prefill_tokens_per_dispatch"]
 REGS_PER_SM = 65536
 THREADS_PER_SM = 2048
 MAX_BLOCKS_PER_SM = 32
@@ -206,8 +195,18 @@ PERF = {
                full_layers=24, score_dim=96 * 192, payload_kb=126.0,
                launches_note="roadmap D1 counts 3,276 (PENDING gap)"),
     # 78 attn x 5 + 3 dense-MLP x 2 + 75 MoE x 5 + head 3 (glm5_2/layer.cuh)
-    "glm52": Perf(_GLM52_HIDDEN, 78, {"bf16": 30.5, "fp8": 45.2}, 774,
-                  full_layers=78, score_dim=_GLM52_SCORE_DIM),
+    "glm52": Perf(
+        GLM52_CONTRACT["hidden_dimension"],
+        GLM52_CONTRACT["layer_count"],
+        {"bf16": 30.5, "fp8": 45.2},
+        774,
+        full_layers=GLM52_CONTRACT["layer_count"],
+        score_dim=(
+            GLM52_CONTRACT["head_count"]
+            * (GLM52_CONTRACT["latent_dimension"]
+               + GLM52_CONTRACT["rope_dimension"])
+        ),
+    ),
     # 16 full-attn x 6 + 48 GDN x 6 + 64 dense-MLP x 2 + head 3
     # (qwen_3_6/layer.cuh; dense model, FFN every layer)
     "qwen36": Perf(5120, 64, {"bf16": 50.2}, 515,

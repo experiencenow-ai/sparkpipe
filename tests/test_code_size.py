@@ -160,11 +160,16 @@ from pathlib import Path
 # 86 lines; the host recorders, the gate updates and the doc are
 # excluded by construction. The ceiling already sits at the exact count,
 # so this entry accounts without moving it.
-CEILING = 125824
+# Phase 7 adds generation-carrying arena ownership, the explicit NVMe write
+# lifecycle and cancellation/heap safety, fail-closed KV access diagnostics,
+# contract-derived performance geometry, deterministic Git-independent source
+# packaging, and conservative receipt-bound status checks. Ceiling moves to
+# the exact count after the merge.
+CEILING = 126517
 
 ROOT = Path(__file__).resolve().parent.parent
 EXTENSIONS = {'.c', '.h', '.cu', '.cuh', '.py', '.mk', '.sh'}
-EXCLUDED_COMPONENTS = {'tests', '.git', 'docs', 'build', '__pycache__'}
+EXCLUDED_COMPONENTS = {'tests', '.git', 'docs', 'build', 'qualification', '__pycache__'}
 
 
 def main():

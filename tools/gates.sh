@@ -13,6 +13,17 @@ run() {
 }
 run_cuda() { if [ -x "${CUDA_HOME:-/opt/cuda}/bin/nvcc" ]; then run "$1" "$2"; else printf "  %-26s SKIP (nvcc unavailable)\n" "$1"; skipped=$((skipped+1)); fi; }
 run_cuda "ptx capability gate" "python3 tests/test_ptx_capability_gate.py"
+run "complete host inventory" "make -s test"
+# Phase 7: required-KV access failures are structured device errors that fail
+# the stream - dense, selected, sparse-score, summary and refinement paths
+# exercised against a host harness with planted faults.
+run "kv failure host"      "python3 tests/test_kv_failure_host.py"
+# Phase 7: --use_fast_math must not silently rewrite the numerics the
+# contracts pin (the build-policy audit's list of forbidden flags).
+run "cuda math policy"     "python3 tests/test_cuda_math_policy.py"
+# Phase 7: STATUS.md is receipt-bound - it may only claim what the gates
+# actually executed.
+run "status truth"         "python3 tests/test_status_truth.py"
 run "mma fragment mapping" "gcc -O2 -Wall -Wextra -o /tmp/g_f tests/test_mma_fragment_mapping.c && /tmp/g_f"
 run "model constants"      "gcc -O2 -Wall -Wextra -I. -Imodel-families/glm52/include -o /tmp/g_c tests/test_model_constants.c && /tmp/g_c"
 run "sub-byte packing"     "gcc -O2 -Wall -Wextra -o /tmp/g_p tests/test_pack.c && /tmp/g_p"
@@ -21,32 +32,10 @@ run "reference oracle"     "gcc -O2 -Wall -Wextra -Itests -o /tmp/g_r tests/test
 run "weight binding"       "gcc -O2 -Wall -Wextra -I. -Imodules/glm52_resident_decode_stage/include -Iinclude -Ideployment/include -Imodel-families/glm52/include -o /tmp/g_b tests/test_pack_bind.c && /tmp/g_b"
 run "sidebands"            "gcc -O2 -Wall -Wextra -I. -o /tmp/g_s tests/test_sideband.c && /tmp/g_s"
 run "kv cache"             "gcc -O2 -Wall -Wextra -I. -o /tmp/g_kv tests/test_cache.c && /tmp/g_kv"
-# The JIT tier below device/host KV: lookahead, preemption and eviction are all
-# schedule arithmetic, so a mock drive verifies the whole contract on a host.
-run "nvme tier"            "make -s build/test_nvme_tier && ./build/test_nvme_tier"
-# The TP16<->PP16 switch protocol on the same mock-drive tier: quiesce bounds,
-# checkpoint pins surviving eviction, warm-vs-recompute resume, budget math.
-run "topology switch"      "make -s build/test_topology_switch && ./build/test_topology_switch"
-# The sizing model behind the dedicate-the-external-NVMe decision: the estimator
-# must keep reproducing the roadmap it derives from, or the doc's verdict table
-# goes stale while the drive purchase stays justified by it.
-run "nvme kv estimate"     "python3 tests/test_nvme_kv_estimate.py"
-# The prefill/decode estimator on top of that byte law: launch overhead,
-# the 6.5 TFLOPS wall, TP/PP overlays, occupancy from the sm_121a ptxas
-# logs. If it drifts from the roadmap's tables the doc's verdicts go stale.
-run "perf estimate"        "python3 tests/test_perf_estimate.py"
 run "kv geometry"          "g++ -std=c++17 -fsyntax-only -Wall -Wextra -I. -Imodel-families/glm52/include tests/test_kv_geometry.cc"
 run "workspace layout"     "gcc -O2 -Wall -Wextra -I. -o /tmp/g_w tests/test_group_gemm_workspace.c && /tmp/g_w"
 run "tensor map geometry"  "gcc -O2 -Wall -Wextra -I. -o /tmp/g_t tests/test_tensor_map_geometry.c && /tmp/g_t"
 run "tensor map encode"    "gcc -O2 -Wall -Wextra -I. -Itests/cuda_driver_stub -o /tmp/g_e tests/test_tensor_map_encode.c tests/cuda_driver_stub/stub.c && /tmp/g_e"
-# GEMM-007: hit bytes identical to an encode, zero encodes in steady state.
-run "gemm descriptor cache" "make -s build/test_gemm_descriptor_cache && ./build/test_gemm_descriptor_cache"
-# The real compiler, for the real target. This replaced a keyword-shim gate that
-# approximated nvcc by defining the CUDA keywords away. That shim could not see a
-# missing include, could not see the 48 KB static shared limit, could not see
-# -arch=sm_121a dropping its own suffix, and broke outright on extern __shared__.
-# A proxy for the compiler is worth having only while the compiler is
-# unavailable, and tools/get_cuda.sh means it is not.
 run "launch planning"      "g++ -std=c++17 -O2 -Wall -Wextra -I. -D__host__= -D__device__= -o /tmp/g_l tests/test_launch.c && /tmp/g_l"
 run "config coverage"      "python3 tests/test_config_coverage.py"
 # Carried forward from #514, whose patch targeted a file the rewrite deleted.
@@ -139,41 +128,15 @@ run "k3 stage doorway"     "gcc -Iinclude -Imodel-families/k3/include -Imodel-fa
 run "mimo25 stage doorway"  "gcc -Iinclude -Wall -Werror -DNDEBUG -c modules/mimo25_resident_decode_stage/source/spark_mimo25_resident_decode_stage_validation.c -o /tmp/g_mimo25v.o"
 run "qwen36 stage doorway"  "gcc -Iinclude -Wall -Werror -DNDEBUG -c modules/qwen36_resident_decode_stage/source/spark_qwen36_resident_decode_stage_validation.c -o /tmp/g_qwen36v.o"
 run "dsv4 stage doorway"  "gcc -Iinclude -Wall -Werror -DNDEBUG -c modules/dsv4_resident_decode_stage/source/spark_dsv4_resident_decode_stage_validation.c -o /tmp/g_dsv4v.o"
-run "dsv4 driver contracts" "python3 tests/test_dsv4_driver_source_contracts.py"
-# The whole DSv4 layer on a CPU, GEMM recorded: the KV GEMM must ride the
-# low-rank quantise, the experts must see rows*top_k, the shared expert adds.
-run "dsv4 layer on host" "python3 tests/test_dsv4_layer_host.py"
-run "stage firmware runs"  "make -s build/test_glm52_resident_decode_stage_firmware && ./build/test_glm52_resident_decode_stage_firmware"
-# The decode step's launch count is the B1 bottleneck (D10): the stage-side
-# graph cache decides capture vs replay vs eager. Every branch runs here with
-# a recording mock; the five CUDA call sites in dispatch.cu stay thin.
-run "stage graph replay"   "make -s build/test_stage_graph_replay && ./build/test_stage_graph_replay"
-# dispatch.cu is nvcc-only in the real build; the stub lets a host compiler
-# see the whole translation unit, including the graph capture call sites.
 run "stage dispatch host compile" "g++ -x c++ -std=c++17 -fsyntax-only -Wall -Wextra -Werror -I. -Iinclude -Imodules/glm52_resident_decode_stage/include -Imodules/glm52_resident_decode_stage/source -Imodel-families/glm52/include -Itests/cuda_stub inference/stage/dispatch.cu"
-run "topology behavior"    "make -s build/test_glm52_production_topology && ./build/test_glm52_production_topology"
-run "fabric topology"      "make -s build/test_fabric_topology && ./build/test_fabric_topology"
-# The hardware description above the fabric mode: node types, per-node ports
-# and ranks, validated, with the runtime configs and C tables as projections.
-run "hardware topology"    "python3 tests/test_hardware_topology.py"
-run "request api behavior"  "make -s build/test_glm52_request_api && ./build/test_glm52_request_api"
-run "transaction ledger"    "make -s build/test_distributed_work && ./build/test_distributed_work"
-run "work transaction"     "make -s build/test_work_transaction && ./build/test_work_transaction"
-run "rank replay ownership" "make -s build/test_glm52_ring_rank_daemon && ./build/test_glm52_ring_rank_daemon"
-run "backend event ownership" "make -s build/test_ring_service_backend_transactions && ./build/test_ring_service_backend_transactions"
-run "service behavior"      "make -s build/test_glm52_service && ./build/test_glm52_service"
-run "prompt pipeline runs"  "make -s build/test_glm52_prompt_pipeline && ./build/test_glm52_prompt_pipeline"
 run "hybrid kv arithmetic"   "make -s build/test_hybrid_kv_arithmetic && ./build/test_hybrid_kv_arithmetic"
 run "uniform-profile admit"  "make -s build/test_uniform_profile_admit && ./build/test_uniform_profile_admit"
-run "family conformance"   "python3 tests/test_model_families.py"
 run "null seam link+run"   "make -s build/test_null_seam_link && ./build/test_null_seam_link"
 run "seam symbol parity"   "sh tools/seam_parity.sh"
 run "stage module + model"  "gcc -Iinclude -Imodules/glm52_resident_decode_stage/include -Imodules/glm52_resident_decode_stage/source -Imodel-families/glm52/include -Wall -Werror -DNDEBUG -c inference/stage/module.c -o /tmp/g_mod.o && gcc -Iinclude -Imodules/glm52_resident_decode_stage/include -Imodules/glm52_resident_decode_stage/source -Imodel-families/glm52/include -Wall -Werror -DNDEBUG -c modules/glm52_resident_decode_stage/source/spark_glm52_resident_decode_stage_validation.c -o /tmp/g_val.o"
 run "k3 kv seam"          "gcc -O2 -Wall -Wextra -Iinclude -Imodel-families/glm52/include -Imodel-families/k3/include -o /tmp/g_k3kv tests/test_k3_kv_cache.c cache/kv_cache.c && /tmp/g_k3kv"
 run "state pool"          "gcc -O2 -Wall -Wextra -I. -o /tmp/g_sp tests/test_state_pool.c && /tmp/g_sp"
 run "comms arena"         "gcc -O2 -Wall -Wextra -Werror -I. -o /tmp/g_ar tests/test_arena.c && /tmp/g_ar"
-run "k3 kv geometry"      "python3 tests/test_k3_kv_geometry.py"
-run "fast defaults"        "python3 tests/test_fast_defaults.py"
 run "node daemons compile"  "make -s build/sparkpipe_glm52_cuda_residentd build/sparkpipe_glm52_ring_rank_daemon"
 run "code size"           "python3 tests/test_code_size.py"
 run "dry naming law"       "python3 tests/test_dry_law.py"
@@ -189,29 +152,13 @@ run "batch variants"       "python3 tests/test_batch_variants.py"
 run_cuda "grouped topk builds"  "sh tools/build_grouped_topk.sh"
 run_cuda "replay fold builds"   "sh tools/build_replay_fold.sh"
 run_cuda "head topk builds"     "sh tools/build_head_topk.sh"
-# The head's chunked top-k, run on a CPU and scored against float32 with the
-# tie rule planted at the top of the shortlist.
 run "head topk on host"    "python3 tests/test_head_host.py"
-run "kernel algorithms"    "python3 tests/test_kernel_algorithms.py"
-run "model contracts"      "python3 tests/test_model_driver_contracts.py"
 run_cuda "nvcc: sm_121a build"  "sh tools/build.sh"
-# The Makefile, which no gate covered. It did not parse: the reorganisation moved
-# twelve sources and $(patsubst src/%.c,...) returned the non-matching paths
-# UNCHANGED, so runtime/filesystem.c reached -include and make read a C file as a
-# makefile. Every other gate was green throughout. .updaterepo-policy names four
-# make targets as its validation and none of them could run.
 run "makefile parses"      "make -n all"
-run "makefile: test"       "make -n test"
 run "makefile: tools"      "make -n tools"
 run "makefile: backend"    "make -n glm52_ring_service_backend"
-# The variant set exists only if make can emit it: four archives from the one
-# template plus a publish per bucket ID, proven by expansion - nvcc compiles
-# nothing under -n, but a deleted template or an undefined target fails here.
 run "makefile: variants"   "make -n -C modules/glm52_resident_decode_stage variants"
 run "makefile: variant publish" "make -n -C modules/glm52_resident_decode_stage publish_variants"
-run "every source exists"  "python3 tests/test_sources_exist.py"
-# audit-boundaries was an opt-in make target only: the archive boundary it
-# checks could rot while every gate stayed green.
 run "core boundaries"      "make -s audit-boundaries"
 run "no python in production" "python3 tests/test_no_python_in_production.py"
 run "package manifest"     "python3 tools/verify_package_manifest.py"

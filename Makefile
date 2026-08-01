@@ -34,7 +34,7 @@ CPPFLAGS ?= $(CORE_INCLUDE_FLAGS) $(MODEL_FAMILY_INCLUDE_FLAGS) -Ideployment/inc
 LDFLAGS ?=
 LDLIBS ?= -ldl -pthread
 CUDA_ARCH ?= sm_121a
-NVCCFLAGS ?= -O3 --use_fast_math -arch=$(CUDA_ARCH)
+NVCCFLAGS ?= -O3 -arch=$(CUDA_ARCH)
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 
@@ -263,6 +263,7 @@ PYTHON_TESTS := \
 	tests/test_code_size.py \
 	tests/test_config_coverage.py \
 	tests/test_cuda_performance_contracts.py \
+	tests/test_cuda_math_policy.py \
 	tests/test_dry_law.py \
 	tests/test_dsv4_contracts.py \
 	tests/test_dsv4_driver_source_contracts.py \
@@ -295,6 +296,7 @@ PYTHON_TESTS := \
 	tests/test_kda_bf16_state.py \
 	tests/test_kda_decay.py \
 	tests/test_kda_host.py \
+	tests/test_kv_failure_host.py \
 	tests/test_kernel_algorithms.py \
 	tests/test_kernel_launches.py \
 	tests/test_layer_dataflow.py \
@@ -309,6 +311,7 @@ PYTHON_TESTS := \
 	tests/test_model_families.py \
 	tests/test_must_work_targets.py \
 	tests/test_nvme_kv_estimate.py \
+	tests/test_package_manifest.py \
 	tests/test_perf_estimate.py \
 	tests/test_ptx_capability_gate.py \
 	tests/test_python_syntax.py \
@@ -320,7 +323,8 @@ PYTHON_TESTS := \
 	tests/test_router_host.py \
 	tests/test_router_precision_contract.py \
 	tests/test_situ_activation.py \
-	tests/test_sources_exist.py
+	tests/test_sources_exist.py \
+	tests/test_status_truth.py
 TEST_SUPPORT_OBJECT := build/test_support.o
 TEST_MODULE_OBJECTS := \
     build/test_modules/module_add_one.o \
