@@ -276,10 +276,22 @@ static void SparkTestInvalidConfigurationFailsClosed(void)
 
 int main(void)
 {
+    int device_count = 0;
+
     SparkTestFlashUsesExactAttentionClassReservations();
     SparkTestProUsesItsOwnLayerSchedule();
     SparkTestAggregateHistoryUsesCeilingDivision();
-    SparkTestExactArenaAllocationUsesPlanBytes();
+    /* The exact-allocation scenario spends real device memory: it runs on
+       hardware and under the stub (which reports one device), and skips on
+       a toolkit-only host where cudaMalloc can only fail. */
+    if (cudaGetDeviceCount(&device_count) == cudaSuccess && device_count > 0)
+    {
+        SparkTestExactArenaAllocationUsesPlanBytes();
+    }
+    else
+    {
+        printf("  skip exact arena allocation (no CUDA device)\n");
+    }
     SparkTestInvalidConfigurationFailsClosed();
     printf("test_dsv4_cache_plan PASS\n");
     return(0);

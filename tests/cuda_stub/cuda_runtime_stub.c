@@ -3,6 +3,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+cudaError_t cudaGetDeviceCount(int *count)
+{
+    if (count == 0)
+    {
+        return cudaErrorMemoryAllocation;
+    }
+    *count = 1;
+    return cudaSuccess;
+}
+
 cudaError_t cudaMalloc(void **pointer, size_t bytes)
 {
     if (pointer == 0 || bytes == 0u)

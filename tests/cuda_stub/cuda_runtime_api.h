@@ -41,6 +41,10 @@ typedef enum cudaStreamCaptureMode
 
 typedef void (*cudaHostFn_t)(void *user_data);
 
+/* The stub pretends one device exists: harnesses that skip device-only
+   scenarios on GPU-less hosts must keep exercising them under the stub,
+   where the allocation calls below fake success. */
+cudaError_t cudaGetDeviceCount(int *count);
 cudaError_t cudaMalloc(void **pointer, size_t bytes);
 cudaError_t cudaFree(void *pointer);
 cudaError_t cudaMemset(void *pointer, int value, size_t bytes);
