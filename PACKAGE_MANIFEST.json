@@ -2158,13 +2158,13 @@
     },
     {
       "path": "tests/cuda_stub/cuda_runtime_api.h",
-      "sha256": "9af09ca916047bc8c25947234eb09793e8b9db67674f9b62471fd309bb6362b6",
-      "size_bytes": 2897
+      "sha256": "55cf0a19187840debdf8d585dc17a4fa9028366b12ba8553ff680dbb2acb907b",
+      "size_bytes": 3139
     },
     {
       "path": "tests/cuda_stub/cuda_runtime_stub.c",
-      "sha256": "93dcff979e3bf73fca981b62699c70aac14ee34f3323e722006e85f5752ca90e",
-      "size_bytes": 4644
+      "sha256": "966ae69e6f53f44c615b420810e946509bbff786222455f83ea43deb57a14e56",
+      "size_bytes": 4806
     },
     {
       "path": "tests/fixtures/glm52_resident_decode_stage_fake_backend.c",
@@ -2403,8 +2403,8 @@
     },
     {
       "path": "tests/test_code_size.py",
-      "sha256": "813ae3e7c905bca223cc2d20b8c48f7f4e855a8418ad8eb3bfc763f48debd73d",
-      "size_bytes": 12063
+      "sha256": "b0438e63d20b2da8972bc2b1bbcde1fcc597659ac53dc83769447f8dcb35d234",
+      "size_bytes": 12254
     },
     {
       "path": "tests/test_config_coverage.py",
@@ -2443,8 +2443,8 @@
     },
     {
       "path": "tests/test_dsv4_cache_plan.c",
-      "sha256": "1d1850a9074d68822694f0da71a6ae13e7f29f72f219ff841160ff41d6a43059",
-      "size_bytes": 10919
+      "sha256": "aaa0c885dcd6bee087a5c2a6e2622a848c14ff1c8620c007d25f61b28029c2cc",
+      "size_bytes": 11342
     },
     {
       "path": "tests/test_dsv4_contracts.py",
@@ -2618,8 +2618,8 @@
     },
     {
       "path": "tests/test_glm52_scheduler.c",
-      "sha256": "920fc35f9a29f27314fc706d45d33960b5525528b5a9ff45bdcd7160a93aa99f",
-      "size_bytes": 58263
+      "sha256": "585ed74e77145237a5bc1e554765ef160c697dc2bf65367f58755dd1e3540783",
+      "size_bytes": 58608
     },
     {
       "path": "tests/test_glm52_service.c",
@@ -3355,5 +3355,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 7961709
+  "total_bytes": 7963072
 }
