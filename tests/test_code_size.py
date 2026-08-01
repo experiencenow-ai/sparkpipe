@@ -167,7 +167,9 @@ from pathlib import Path
 # the exact count after the merge. The merge-fallout fixes (residentd arena
 # handles, the cudart link on CUDA hosts, the scheduler test's reserve/commit
 # lifecycle, the PEP 706 fallback, the four phase-7 gate lines) add 13.
-CEILING = 126530
+# The gpu-less skip, the one-device stub, and the .env inventory
+# exclusion add 10 more.
+CEILING = 126540
 
 ROOT = Path(__file__).resolve().parent.parent
 EXTENSIONS = {'.c', '.h', '.cu', '.cuh', '.py', '.mk', '.sh'}
