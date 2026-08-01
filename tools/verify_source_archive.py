@@ -57,7 +57,13 @@ def main() -> int:
             expected_root = validate_member(member, expected_root)
         if expected_root is None:
             raise SystemExit("archive is empty")
-        archive.extractall(extraction_root, members=members, filter="data")
+        # PEP 706's data filter lands in 3.12 and the late 3.9-3.11 security
+        # backports; older interpreters reject the keyword outright, and the
+        # member validation above already enforces the same constraints.
+        try:
+            archive.extractall(extraction_root, members=members, filter="data")
+        except TypeError:
+            archive.extractall(extraction_root, members=members)
 
     package_root = extraction_root / expected_root
     verifier = package_root / "tools" / "verify_package_manifest.py"
