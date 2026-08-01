@@ -2398,8 +2398,8 @@
     },
     {
       "path": "tests/test_code_size.py",
-      "sha256": "b0438e63d20b2da8972bc2b1bbcde1fcc597659ac53dc83769447f8dcb35d234",
-      "size_bytes": 12254
+      "sha256": "e72aa92489e44ce38a1eb42d2b94ddd46d954f56aefc82933290ffbe9cfa9efa",
+      "size_bytes": 12344
     },
     {
       "path": "tests/test_config_coverage.py",
@@ -3350,5 +3350,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 7963358
+  "total_bytes": 7963448
 }
