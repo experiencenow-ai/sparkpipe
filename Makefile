@@ -16,6 +16,10 @@ SPARKPIPE_HOST_CUDA_STUB_SOURCE := tests/cuda_stub/cuda_runtime_stub.c
 else
 MODEL_COMMON_INCLUDE_FLAGS := $(CORE_INCLUDE_FLAGS) -I$(CUDA_HOME)/include
 SPARKPIPE_HOST_CUDA_STUB_SOURCE :=
+# Real headers mean real symbols: stage_module_common.c calls
+# cudaGetErrorString when CUDA is present, so every host link that pulls
+# the model-common library needs the runtime library too.
+LDLIBS += -L$(CUDA_HOME)/lib64 -lcudart
 endif
 GLM52_INCLUDE_FLAGS := $(MODEL_COMMON_INCLUDE_FLAGS) -Imodel-families/glm52/include
 QWEN36_INCLUDE_FLAGS := $(MODEL_COMMON_INCLUDE_FLAGS) -Imodel-families/qwen36/include
