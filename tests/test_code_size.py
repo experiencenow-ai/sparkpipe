@@ -100,11 +100,18 @@ from pathlib import Path
 # ptxas occupancy check) and its gate wiring (Makefile +1,
 # tools/gates.sh +4) - 654 lines; the test and the estimates doc are
 # excluded by construction. Ceiling moves to the exact count.
-CEILING = 124946
+# Phase 7 adds generation-carrying arena ownership, the explicit NVMe write
+# lifecycle and cancellation/heap safety, fail-closed KV access diagnostics,
+# contract-derived performance geometry, deterministic Git-independent source
+# packaging, and conservative receipt-bound status checks. The test and
+# documentation and raw qualification-evidence lines are excluded by
+# construction; 125577 is the exact authored non-test source count in the
+# deterministic Phase 7 source package.
+CEILING = 125577
 
 ROOT = Path(__file__).resolve().parent.parent
 EXTENSIONS = {'.c', '.h', '.cu', '.cuh', '.py', '.mk', '.sh'}
-EXCLUDED_COMPONENTS = {'tests', '.git', 'docs', 'build', '__pycache__'}
+EXCLUDED_COMPONENTS = {'tests', '.git', 'docs', 'build', 'qualification', '__pycache__'}
 
 
 def main():
