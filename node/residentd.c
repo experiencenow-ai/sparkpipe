@@ -128,6 +128,7 @@ typedef struct SparkCudaResidentdClient
 {
     SparkCudaResidentIpcReader reader;
     uint8_t *payload;
+    SparkArenaAllocation payload_allocation;
     uint32_t payload_capacity;
     SparkCudaResidentdOutputMessage
         output_queue[SPARK_CUDA_RESIDENTD_OUTPUT_QUEUE_CAPACITY];
@@ -222,11 +223,13 @@ static SparkStatus SparkCudaResidentdEnsureClientPayloadCapacity(
        acquire covers every later message this client can legally send and
        the read path never touches the allocator again. Exhaustion means
        the MAX_CLIENTS sizing was wrong and fails loudly - no fall-through
-       to a quiet malloc. */
-    client->payload = (uint8_t *)SparkArenaAcquire(
-        &runtime->control_payload_arena,required_bytes);
-    if (client->payload == 0)
+       to a quiet malloc. The handle is generation-carrying (phase 7): the
+       release below proves it owns this exact slot, not a recycled one. */
+    if (SparkArenaAcquire(
+            &runtime->control_payload_arena,required_bytes,
+            &client->payload_allocation) != 0)
         return SPARK_STATUS_CAPACITY_EXCEEDED;
+    client->payload = client->payload_allocation.pointer;
     client->payload_capacity =
         SPARK_CUDA_RESIDENT_IPC_MAX_CONTROL_PAYLOAD_BYTES;
     return SPARK_STATUS_OK;
@@ -2116,7 +2119,7 @@ static void SparkCudaResidentdDropClient(
     if (runtime->clients[slot].payload != 0)
         (void)SparkArenaRelease(
             &runtime->control_payload_arena,
-            runtime->clients[slot].payload);
+            &runtime->clients[slot].payload_allocation);
     runtime->clients[slot].payload = 0;
     runtime->clients[slot].payload_capacity = 0u;
     runtime->clients[slot].output_queue_head = 0u;
