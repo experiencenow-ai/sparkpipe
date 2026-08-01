@@ -1,11 +1,6 @@
 {
-  "file_count": 670,
+  "file_count": 669,
   "files": [
-    {
-      "path": ".env",
-      "sha256": "182b3da8f65969626b410cb8d59fafc9e185830dae976a3151c7d5e51872f6dc",
-      "size_bytes": 106
-    },
     {
       "path": ".gitattributes",
       "sha256": "eccfbbc68e2f3fb43b0eddb4af1a0466376b875ff93f74d0228e76742e1bc17f",
@@ -3283,8 +3278,8 @@
     },
     {
       "path": "tools/package_inventory.py",
-      "sha256": "bf6578d26c055f02acfa1bb2920dc32b566a23929efe9228c06abfa57f9f3eed",
-      "size_bytes": 5679
+      "sha256": "9d37ec5d14ea0b68beec48bc4a12bf35e23c70e90a9506c4ff0b7540bbe25b06",
+      "size_bytes": 6071
     },
     {
       "path": "tools/package_source.py",
@@ -3355,5 +3350,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 7963072
+  "total_bytes": 7963358
 }

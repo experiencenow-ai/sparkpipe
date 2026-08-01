@@ -33,11 +33,19 @@ EXCLUDED_FILE_SUFFIXES = {
     ".a",
     ".dylib",
     ".dll",
+
     ".o",
     ".obj",
     ".pyc",
     ".pyo",
     ".so",
+}
+# Local secrets never ship, tracked or not: a source package that walks the
+# filesystem (Git-independent by design) will otherwise pick up whatever
+# credentials a developer's checkout happens to hold. This exact case was
+# caught by the verify gate after a local .env landed in SHA256SUMS.
+EXCLUDED_FILE_NAMES = {
+    ".env",
 }
 FORBIDDEN_ARCHIVE_SUFFIXES = (
     ".7z",
@@ -83,6 +91,8 @@ def has_excluded_directory_prefix(relative_path: str) -> bool:
 def is_excluded_relative_path(relative_path: str) -> bool:
     pure = PurePosixPath(relative_path)
     if relative_path in METADATA_NAMES:
+        return True
+    if pure.name in EXCLUDED_FILE_NAMES:
         return True
     if any(part in EXCLUDED_DIRECTORY_NAMES for part in pure.parts):
         return True
