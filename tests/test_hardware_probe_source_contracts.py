@@ -85,6 +85,10 @@ def main() -> int:
             "--cuda-host-only",
             "-nocudainc",
             "-nocudalib",
+            # The syntax check reads tests/hardware_cuda_stub, not the
+            # installed toolkit; whatever CUDA clang auto-detects locally
+            # (and possibly rejects as too new) is not the input here.
+            "-Wno-unknown-cuda-version",
             "-Wall",
             "-Wextra",
             "-Werror",
