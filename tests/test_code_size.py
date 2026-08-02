@@ -116,7 +116,14 @@ from pathlib import Path
 # hygiene correction adds explicit qualification-evidence file classification
 # (+16 authored lines); 134623 is the exact authored non-test source count at
 # the Phase 10 handoff landing.
-CEILING = 134623
+# The runtime-completion overlay adds the all-participant staged transaction
+# controller, acknowledged final-event ownership, bounded selective-ACK
+# transmission window, exact model-provider operation/precision contracts,
+# deterministic overlay application, and the no-undefined GLM final-artifact
+# receipt tools. The model-specific contracts remain under their family
+# directories rather than contaminating the neutral runtime. 136791 is the
+# exact authored non-test count for this overlay.
+CEILING = 136812
 
 ROOT = Path(__file__).resolve().parent.parent
 EXTENSIONS = {'.c', '.h', '.cu', '.cuh', '.py', '.mk', '.sh'}
