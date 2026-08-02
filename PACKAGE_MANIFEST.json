@@ -3158,8 +3158,8 @@
     },
     {
       "path": "tests/test_code_size.py",
-      "sha256": "fca48f237c6429c43becec6a501209945a07fb188c83fcd159ad53c5cc5f02c1",
-      "size_bytes": 12739
+      "sha256": "19a4b39d837d0bd753c3d8f2cb6808ef8f1ca9eb3e9422db06204cb494903083",
+      "size_bytes": 12833
     },
     {
       "path": "tests/test_config_coverage.py",
@@ -3883,8 +3883,8 @@
     },
     {
       "path": "tests/test_tp_collective.c",
-      "sha256": "f6a9abee1458f4e665f01e62f2c07af8ab76de43e0cd46efb3bc39772dabb8a0",
-      "size_bytes": 29004
+      "sha256": "b4c55620d84a94e4d1ed29408a8afe4a45eb0eeab59aab5a570b728ce4bed92c",
+      "size_bytes": 29275
     },
     {
       "path": "tests/test_uniform_profile_admit.c",
@@ -4240,5 +4240,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 9886143
+  "total_bytes": 9886508
 }
