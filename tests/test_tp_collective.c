@@ -19,8 +19,12 @@
 #define SPARK_TEST_TPC_MAX_DEGREE 16u
 #define SPARK_TEST_TPC_STANDARD_ELEMENTS (6u * 1024u)
 #define SPARK_TEST_TPC_LARGE_ELEMENTS (16u * SPARK_TEST_TPC_STANDARD_ELEMENTS)
-#define SPARK_TEST_TPC_CONNECT_TIMEOUT_MILLI 2000u
-#define SPARK_TEST_TPC_OPERATION_TIMEOUT_MILLI 10000u
+/* 16 localhost ranks connect through the loopback while the rest of the
+   suite runs; 2 s was enough on an idle host and an IO_ERROR under full
+   gate load. The timeouts bound infrastructure, not correctness - the
+   assertions below check the numbers either way. */
+#define SPARK_TEST_TPC_CONNECT_TIMEOUT_MILLI 10000u
+#define SPARK_TEST_TPC_OPERATION_TIMEOUT_MILLI 30000u
 #define SPARK_TEST_TPC_FAILURE_TIMEOUT_MILLI 200u
 #define SPARK_TEST_TPC_PORT_MINIMUM 24000u
 #define SPARK_TEST_TPC_PORT_MAXIMUM 60000u

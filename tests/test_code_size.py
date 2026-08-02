@@ -174,8 +174,9 @@ from pathlib import Path
 # topology probes, deterministic runner configuration, exact cell execution,
 # node preflight, and the CUDA 13 sm_121a compile gate, plus the
 # qualification-evidence file classification. Ceiling moves to the exact
-# count after the merge.
-CEILING = 135586
+# count after the merge. Merge fallout (probe compiler choice,
+# CUDA 13 attribute API, tp timeout robustness) adds 8.
+CEILING = 135594
 
 ROOT = Path(__file__).resolve().parent.parent
 EXTENSIONS = {'.c', '.h', '.cu', '.cuh', '.py', '.mk', '.sh'}
