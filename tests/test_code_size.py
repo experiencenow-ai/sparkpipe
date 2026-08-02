@@ -107,7 +107,16 @@ from pathlib import Path
 # documentation and raw qualification-evidence lines are excluded by
 # construction; 125577 is the exact authored non-test source count in the
 # deterministic Phase 7 source package.
-CEILING = 125577
+# Phase 10 adds the hardware-truth system: exact question/plan/policy/closure
+# tooling, GB10 CUDA and NVMe probes, production-provider wrappers, PMTU and
+# topology probes, deterministic runner configuration, exact cell execution,
+# node preflight, and the CUDA 13 sm_121a compile gate. The implementation
+# increase is the qualification surface needed to replace hard-coded GB10 and
+# network assumptions with retained measurements. The final source-package
+# hygiene correction adds explicit qualification-evidence file classification
+# (+16 authored lines); 134623 is the exact authored non-test source count at
+# the Phase 10 handoff landing.
+CEILING = 134623
 
 ROOT = Path(__file__).resolve().parent.parent
 EXTENSIONS = {'.c', '.h', '.cu', '.cuh', '.py', '.mk', '.sh'}

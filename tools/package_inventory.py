@@ -27,7 +27,10 @@ EXCLUDED_DIRECTORY_NAMES = {
 }
 EXCLUDED_DIRECTORY_PREFIXES = (
     "docs/validation-logs/",
-    "qualification/",
+    "qualification/raw/",
+    "qualification/receipts/",
+    "qualification/runs/",
+    "qualification/evidence/",
 )
 EXCLUDED_FILE_SUFFIXES = {
     ".a",
@@ -38,6 +41,10 @@ EXCLUDED_FILE_SUFFIXES = {
     ".pyc",
     ".pyo",
     ".so",
+}
+QUALIFICATION_EVIDENCE_SUFFIXES = {
+    ".log",
+    ".receipt",
 }
 FORBIDDEN_ARCHIVE_SUFFIXES = (
     ".7z",
@@ -80,6 +87,16 @@ def has_excluded_directory_prefix(relative_path: str) -> bool:
     )
 
 
+def is_qualification_evidence_file(relative_path: str) -> bool:
+    pure = PurePosixPath(relative_path)
+    if not relative_path.startswith("qualification/"):
+        return False
+    return (
+        pure.suffix.lower() in QUALIFICATION_EVIDENCE_SUFFIXES
+        or pure.name.lower().startswith("evidence.")
+    )
+
+
 def is_excluded_relative_path(relative_path: str) -> bool:
     pure = PurePosixPath(relative_path)
     if relative_path in METADATA_NAMES:
@@ -87,6 +104,8 @@ def is_excluded_relative_path(relative_path: str) -> bool:
     if any(part in EXCLUDED_DIRECTORY_NAMES for part in pure.parts):
         return True
     if has_excluded_directory_prefix(relative_path):
+        return True
+    if is_qualification_evidence_file(relative_path):
         return True
     if pure.suffix.lower() in EXCLUDED_FILE_SUFFIXES:
         return True
@@ -162,7 +181,7 @@ def find_forbidden_packaged_paths(root: Path) -> list[str]:
         if any(part in EXCLUDED_DIRECTORY_NAMES for part in pure.parts):
             failures.append(f"excluded build/cache path: {relative_path}")
             continue
-        if has_excluded_directory_prefix(relative_path):
+        if has_excluded_directory_prefix(relative_path) or is_qualification_evidence_file(relative_path):
             failures.append(f"qualification evidence in source package: {relative_path}")
             continue
         if not absolute_path.is_file():
