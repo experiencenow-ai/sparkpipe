@@ -1851,7 +1851,15 @@ static bool SparkCudaProbeRunQuestion(
     if (std::strcmp(options.question_id, "GB10-IDENTITY-001") == 0)
     {
         bool identity_pass;
+        // CUDA 13 removed memoryClockRate/memoryBusWidth from cudaDeviceProp;
+        // the same values live behind the device-attribute API.
+        int memory_clock_khz = 0;
+        int memory_bus_width_bits = 0;
 
+        (void)cudaDeviceGetAttribute(
+            &memory_clock_khz, cudaDevAttrMemoryClockRate, 0);
+        (void)cudaDeviceGetAttribute(
+            &memory_bus_width_bits, cudaDevAttrGlobalMemoryBusWidth, 0);
         identity_pass = properties.major == 12 && properties.minor == 1 &&
             std::strstr(properties.name, "GB10") != nullptr;
         SparkCudaProbeWriteReceiptPrefix(output, options, "measured", "{}");
@@ -1873,8 +1881,8 @@ static bool SparkCudaProbeRunQuestion(
             runtime_version,
             properties.totalGlobalMem,
             properties.multiProcessorCount,
-            properties.memoryClockRate,
-            properties.memoryBusWidth,
+            memory_clock_khz,
+            memory_bus_width_bits,
             identity_pass ? "true" : "false",
             identity_pass ? "true" : "false",
             identity_pass ? "true" : "false");
