@@ -177,6 +177,10 @@ from pathlib import Path
 # count after the merge. Merge fallout (probe compiler choice,
 # CUDA 13 attribute API, tp timeout robustness) adds 8.
 CEILING = 135594
+# Runtime completion overlay: the distributed-work controller,
+# selective-ack window, model runtime contracts, and the glm52 final
+# artifact tools. Ceiling moves to the exact count.
+CEILING = 137783
 
 ROOT = Path(__file__).resolve().parent.parent
 EXTENSIONS = {'.c', '.h', '.cu', '.cuh', '.py', '.mk', '.sh'}

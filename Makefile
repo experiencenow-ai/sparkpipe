@@ -215,6 +215,8 @@ TEST_NAMES := \
     test_gemm_descriptor_cache \
     test_arena \
     test_work_transaction \
+    test_runtime_completion \
+    test_model_runtime \
     test_distributed_work \
     test_json \
     test_hidden_transport \
@@ -283,6 +285,7 @@ PYTHON_TESTS := \
 	tests/test_glm52_dspark_trace_quality.py \
 	tests/test_glm52_firmware_package.py \
 	tests/test_glm52_fp8_pack_layout.py \
+	tests/test_glm52_final_artifact_tools.py \
 	tests/test_glm52_layer_host.py \
 	tests/test_glm52_prompt_pipeline_input.py \
 	tests/test_glm52_quantized_cuda_contract.py \
@@ -371,7 +374,7 @@ GLM52_RESIDENT_DECODE_STAGE_TEST_DEPENDENCIES := \
 GLM52_RESIDENT_DECODE_STAGE_TEST_ARCHIVE := \
     $(GLM52_RESIDENT_DECODE_STAGE_TEST_DIRECTORY)/libglm52_resident_decode_stage_test.a
 
-.PHONY: all clean test tools hardware_tools hardware_cuda_tools hardware_handoff demo FORCE \
+.PHONY: all clean test tools hardware_tools hardware_cuda_tools hardware_handoff runtime_completion_tests demo FORCE \
     cuda_glm52_resident_decode_stage \
     cuda_glm52_resident_decode_stage_variants \
     cuda_glm52_resident_decode_stage_publish \
@@ -731,6 +734,17 @@ build/test_arena: tests/test_arena.c runtime/arena.h
 
 build/test_work_transaction: tests/test_work_transaction.c $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY)
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_work_transaction.c $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@
+
+build/test_runtime_completion: tests/test_runtime_completion.c $(RUNTIME_LIBRARY) $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY)
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_runtime_completion.c $(RUNTIME_LIBRARY) $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@
+
+build/test_model_runtime: tests/test_model_runtime.c $(RUNTIME_LIBRARY) $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY)
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_model_runtime.c $(RUNTIME_LIBRARY) $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@
+
+runtime_completion_tests: build/test_runtime_completion build/test_model_runtime
+	./build/test_runtime_completion
+	./build/test_model_runtime
+	python3 tests/test_glm52_final_artifact_tools.py
 
 # Header-only cache plus a mock encode; the driver stub's cuda.h is what lets
 # runtime/tensor_map.h compile with no CUDA toolkit, and its stub.c stands in
