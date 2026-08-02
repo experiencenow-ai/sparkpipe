@@ -203,7 +203,11 @@ TOOL_NAMES := \
     sparkpipe_prevcp \
     sparkpipe_nextcp \
     sparkpipe_release_manager \
-    sparkpipe_dsv4_cache_plan_report
+    sparkpipe_dsv4_cache_plan_report \
+    spark_model_kernel_characterize \
+    spark_transport_characterize \
+    spark_topology_characterize \
+    spark_pmtu_characterize
 
 TOOL_BINARIES := $(addprefix build/,$(TOOL_NAMES))
 
@@ -287,6 +291,17 @@ PYTHON_TESTS := \
 	tests/test_gqa_host.py \
 	tests/test_grouped_moe_source_contracts.py \
 	tests/test_hardware_topology.py \
+	tests/test_hardware_assumption_bindings.py \
+	tests/test_hardware_job_runner.py \
+	tests/test_hardware_handoff_preflight.py \
+	tests/test_hardware_policy_closure.py \
+	tests/test_hardware_probe_coverage.py \
+	tests/test_hardware_probe_source_contracts.py \
+	tests/test_hardware_runner_configs.py \
+	tests/test_spark_model_kernel_probe.py \
+	tests/test_spark_transport_probe.py \
+	tests/test_spark_topology_probe.py \
+	tests/test_spark_pmtu_probe.py \
 	tests/test_k3_driver_contracts.py \
 	tests/test_k3_engine.py \
 	tests/test_k3_kv_geometry.py \
@@ -356,7 +371,7 @@ GLM52_RESIDENT_DECODE_STAGE_TEST_DEPENDENCIES := \
 GLM52_RESIDENT_DECODE_STAGE_TEST_ARCHIVE := \
     $(GLM52_RESIDENT_DECODE_STAGE_TEST_DIRECTORY)/libglm52_resident_decode_stage_test.a
 
-.PHONY: all clean test tools demo FORCE \
+.PHONY: all clean test tools hardware_tools hardware_cuda_tools hardware_handoff demo FORCE \
     cuda_glm52_resident_decode_stage \
     cuda_glm52_resident_decode_stage_variants \
     cuda_glm52_resident_decode_stage_publish \
@@ -509,6 +524,46 @@ build/sparkpipe_glm52_pipesim: tests/studies/sparkpipe_glm52_pipesim.c $(COMMON_
 
 build/sparkpipe_dsv4_cache_plan_report: tests/studies/sparkpipe_dsv4_cache_plan_report.c $(DSV4_HOST_LIBRARY) $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY)
 	$(CC) $(DSV4_INCLUDE_FLAGS) $(CFLAGS) $< $(DSV4_HOST_LIBRARY) $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@
+
+build/spark_model_kernel_characterize: tools/hardware/spark_model_kernel_characterize.c include/sparkpipe/spark_hardware_kernel_probe.h
+	@mkdir -p build
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LDFLAGS) $(LDLIBS) -lm -o $@
+
+build/spark_transport_characterize: tools/hardware/spark_transport_characterize.c include/sparkpipe/spark_hardware_transport_probe.h
+	@mkdir -p build
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LDFLAGS) $(LDLIBS) -lm -o $@
+
+build/spark_topology_characterize: tools/hardware/spark_topology_characterize.c include/sparkpipe/spark_hardware_topology_probe.h
+	@mkdir -p build
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LDFLAGS) $(LDLIBS) -lm -o $@
+
+build/spark_pmtu_characterize: tools/hardware/spark_pmtu_characterize.c tools/hardware/spark_probe_common.h
+	@mkdir -p build
+	$(CC) -Itools/hardware $(CFLAGS) $< $(LDFLAGS) -o $@
+
+hardware_tools: build/spark_model_kernel_characterize build/spark_transport_characterize build/spark_topology_characterize build/spark_pmtu_characterize
+
+hardware_cuda_tools:
+	@if ! command -v $(NVCC) >/dev/null 2>&1; then \
+		echo "hardware_cuda_tools skipped: nvcc unavailable"; \
+	else \
+		mkdir -p build; \
+		$(NVCC) -std=c++17 -O3 -arch=sm_121a -Xptxas=-v -Itools/hardware tools/hardware/spark_cuda_characterize.cu -o build/spark_cuda_characterize; \
+		$(NVCC) -std=c++17 -O3 -arch=sm_121a -Xptxas=-v -Itools/hardware -Xcompiler=-pthread tools/hardware/spark_nvme_characterize.cu -o build/spark_nvme_characterize -lpthread; \
+	fi
+
+hardware_handoff: hardware_tools
+	python3 tests/test_hardware_probe_coverage.py
+	python3 tests/test_hardware_assumption_bindings.py
+	python3 tests/test_hardware_policy_closure.py
+	python3 tests/test_hardware_job_runner.py
+	python3 tests/test_hardware_handoff_preflight.py
+	python3 tests/test_hardware_runner_configs.py
+	python3 tests/test_hardware_probe_source_contracts.py
+	python3 tests/test_spark_model_kernel_probe.py
+	python3 tests/test_spark_transport_probe.py
+	python3 tests/test_spark_topology_probe.py
+	python3 tests/test_spark_pmtu_probe.py
 
 build/test_dsv4_cache_plan: tests/test_dsv4_cache_plan.c $(DSV4_HOST_LIBRARY) $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY)
 	$(CC) $(DSV4_INCLUDE_FLAGS) $(CFLAGS) $< $(DSV4_HOST_LIBRARY) $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@

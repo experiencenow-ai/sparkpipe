@@ -169,7 +169,13 @@ from pathlib import Path
 # lifecycle, the PEP 706 fallback, the four phase-7 gate lines) add 13.
 # The gpu-less skip, the one-device stub, and the .env inventory
 # exclusion add 10 more.
-CEILING = 126540
+# Phase 10 adds the hardware-truth system: exact question/plan/policy/closure
+# tooling, GB10 CUDA and NVMe probes, production-provider wrappers, PMTU and
+# topology probes, deterministic runner configuration, exact cell execution,
+# node preflight, and the CUDA 13 sm_121a compile gate, plus the
+# qualification-evidence file classification. Ceiling moves to the exact
+# count after the merge.
+CEILING = 135586
 
 ROOT = Path(__file__).resolve().parent.parent
 EXTENSIONS = {'.c', '.h', '.cu', '.cuh', '.py', '.mk', '.sh'}

@@ -1,25 +1,36 @@
-# SparkPipe Status — Phase 7 Foundational Safety
+# SparkPipe Status — Phase 10 Hardware Handoff
 
-This source tree is an implementation candidate for the following mandatory targets:
+This source tree is an implementation and qualification handoff candidate for:
 
 - Kimi K3: MXFP4 routed-expert weights, BF16 expert activations, BF16 non-expert tensors, FP32 accumulation.
 - GLM 5.2: FP8 E4M3 routed-expert weights, BF16 activations and non-expert tensors, FP32 accumulation.
-- Qwen 3.6 27B: BF16 weights and activations, with FP32 accumulation where required.
-- DeepSeek V4 Flash and DeepSeek V4 Pro: separate checkpoint-derived contracts and separate execution packages.
+- Qwen 3.6 27B: BF16 weights and activations.
+- DeepSeek V4 Flash and DeepSeek V4 Pro: separate checkpoint-derived contracts and execution packages.
 
-Phase 7 closes the audited NVMe ownership/layout defects, replaces raw arena pointers with generation-carrying allocation handles, makes required KV-cache access fail closed, restores an explicit sliding-window position producer, removes global CUDA fast-math policy, derives the GLM estimator from the model contract, and replaces Git-dependent/circular package receipts with a deterministic source-package identity.
+Phase 10 adds a fail-closed Spark hardware truth suite. Thirty-three named questions cover GB10 memory and launch behavior, exact production kernels, NVMe, TCP/RDMA, physical ring and one-switch behavior, PP degree, transport window, and stage placement. Every production decision must trace to exact source-bound cells, retained receipts, a generated policy, and a closure report.
 
-The source tree does not certify itself. Build, test, gate, archive, and extraction results are valid only when tied to the exact released archive SHA-256 by an external verification receipt.
+The release supports the initial direct single-rail ring and the first one-switch single-rail topology. Dual-switch/dual-rail operation remains disabled until single-rail ownership, ordering, retry, and failure behavior are measured and closed.
+
+The source tree does not certify itself. Build, test, CUDA, network, and production claims are valid only when tied to the exact released archive SHA-256 by an external verification receipt or hardware receipt.
 
 ```text
 SOURCE_PACKAGE_KIND=sparkpipe_source
 HOST_BUILD_STATUS=SEE_EXTERNAL_VERIFICATION_RECEIPT
 HOST_TEST_STATUS=SEE_EXTERNAL_VERIFICATION_RECEIPT
 ARCHITECTURE_GATE_STATUS=SEE_EXTERNAL_VERIFICATION_RECEIPT
+HARDWARE_QUESTION_COUNT=33
 CUDA13_SM121A_COMPILE_NOT_RUN=true
 BLACKWELL_EXECUTION_NOT_MEASURED=true
 PHYSICAL_NETWORK_EXECUTION_NOT_MEASURED=true
+PHYSICAL_RING_NOT_MEASURED=true
+SINGLE_SWITCH_NOT_MEASURED=true
+DUAL_RAIL_ENABLED=false
 PRODUCTION_READY=false
 ```
 
-The remaining blockers are tracked in `docs/PHASE7_REMAINING_WORK.md`.
+See:
+
+- `docs/SPARK_HARDWARE_HANDOFF.md`
+- `docs/PHASE10_HARDWARE_HANDOFF_RELEASE.md`
+- `docs/PHASE10_VALIDATION_STATUS.md`
+- `docs/PHASE10_REMAINING_WORK.md`
