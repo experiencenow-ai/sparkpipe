@@ -160,3 +160,91 @@ window, (c) the soak receipts from this lane's rig as the stability bar.
 - 19a6462 epoch semantics: code-reviewed only, no independent repro.
 - rank-6 boundary SIGSEGV: open on both branches, core + backtrace captured.
 - Client proceed-on-failed-lease: open on both branches (S1 tail), follow-up lane.
+
+## 10. Continuation (same clone, later window): map-teardown client bug FIXED + the killer caught live
+
+Follow-on window on the same lane. Three results, all on spark0 only, receipts
+in `runs/d1-weightd-stability/`:
+
+### 10.1 Unconditional client bug: every lazy-map teardown returned IO_ERROR (FIXED)
+
+`SparkWeightdMapCreate` reserves `span_bytes + chunk_bytes` (the eviction-epoch
+control chunk, a08eb8e) but `SparkWeightdMapDestroy` freed
+`cuMemAddressFree(map->base, span_bytes)` — a partial-size free of a VMM
+reservation, which CUDA rejects. Every clean lazy-map teardown — every module
+shutdown, every `SparkWeightdLazyPackDestroy` — returned
+`SPARK_STATUS_IO_ERROR` (`ERRSITE runtime/spark_weightd_map.c:221 status=4`),
+100% reproducible on real CUDA (spark0, CUDA 13), independent of any daemon
+health. The stub tests could not see it: the stub accepts any free size. This
+is a third instance of the S1 "lease/map IO_ERROR" surface, distinct from the
+socket-death S1 and from the still-open proceed-on-failed-lease bug: this one
+fired even with a perfectly healthy daemon.
+
+Fix (this PR, `runtime/spark_weightd_map.c` only): `map_free_initial` returns
+the full-size `cuMemAddressFree` status (epoch unmap first); Destroy drops the
+partial free and propagates it. No wire/ABI change, daemon untouched.
+
+Repairs required to make the covering test runnable at all:
+`tests/test_weightd_working_set.c` still called the 3-arg MapCreate (not
+compiled since a08eb8e); the cuda stub's `cudaErrorNotReady` was 34 vs real
+CUDA's 600, poisoning real-toolchain builds of the same test. Both fixed here.
+The repaired test passes its full map-lifetime section and reaches a
+PRE-EXISTING final `outstanding_allocs` failure (reproduced with HEAD's
+map.c too) — separate test-infra follow-up, not touched here.
+
+Proof on spark0 (`runs/d1-weightd-stability/d1_receipt_A.json`): 50/50
+synthetic full-execute lifecycles + 50/50 real-pack lease
+acquire/read/record/release waves against the placed qwenmax.nvfp4.tp16
+rank0 pack (98 GB, 2944 experts, pack sha
+3896939f…d3fe4), daemon alive at exit, zero daemon error lines.
+
+### 10.2 The S3 killer extended: the deaths did NOT stop after 09-12
+
+Section 3 attributed the 09-12 window to fleet-agent kill/recycle. The
+deaths continued on 09-13/09-14 under the current build (49b8e01e) — ~28
+`weightd: starting` watchdog lines on spark3 alone on 09-14 KST — and the
+agent's own kill paths do not explain them: install_core (the only weightd
+kill path) always logs "deliberate restart" and always flips the sha16;
+neither happened in these waves. recycle (unload_root) kills residentd only.
+
+New evidence (read-only journals plus a live /proc watcher trap on spark3;
+spark3's daemon itself untouched):
+
+- Every death lands 11-13 s after a `glm53flash.fp8.tp16: manifest changed;
+  syncing` journal line — 20+ exact pairs on 09-14 00:00-04:40 KST.
+- Deaths are same-second fleet-wide (spark0-spark5 checked:
+  03:26:45/46, 03:52:59, 04:00:43, 04:10:09-11, 04:19:37-38).
+- bash reports SIGKILL ("Killed"); kernel journal has zero weightd
+  segfault/trap/OOM records; no coredumps; weightd.log ends mid-ship with
+  no shutdown line.
+- The trap caught `tar -C /home/spark3/sparkdata/glm53flash.fp8.tp16 -xf -`
+  (a stream-deploy over SSH, not any repo tool) 9 s before the 04:49:50
+  KST kill.
+
+Verdict: an out-of-repo uid-1000/root automation republishes the glm53flash
+root every ~10-30 min and SIGKILLs the fleet's weightd daemons as part of
+that flow. This is the availability killer behind S1/S2/S3 in EVERY window,
+including today. It must be traced from the workstation/hub side (the owning
+release loop is not in this repository) — mgr2 action.
+
+### 10.3 Execute-receipt rig (the serve-gate prerequisite check)
+
+`tools/weightd_execute_receipt.py` + engine `tools/weightd_execute_probe.c`:
+spawns a node-PRIVATE daemon, runs N synthetic full-execute lifecycles, then
+real-pack lease waves against a placed pack, optional soak; fails on any
+probe failure, daemon death, or daemon error line; prints a JSON receipt.
+Complements the section-4 reconnect rig (residentd-level, hill1 gate):
+this one gates code health of the weightd execute path per node per pack.
+
+Soak receipt (`runs/d1-weightd-stability/d1_receipt_B.json`): 1200/1200
+real-pack execute waves green in 478 s (~2.5 executes/s sustained, pool
+reclaim cycling throughout), daemon alive, zero errors, zero restarts.
+Together with 10.1's 50/50: 100 consecutive-plus waves and 1250+ lease
+cycles with zero IO_ERROR after the fix.
+
+### 10.4 Serve-gate delta
+
+Same bar as section 8 plus: (d) a PASS execute-receipt on the target node
+against the target pack (this rig), and (e) the section-10.2 killer
+retired or quiesced for the gate window — no code health survives a
+mid-execute fleet SIGKILL wave.
