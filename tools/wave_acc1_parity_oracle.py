@@ -56,7 +56,12 @@ def read_sidecar_digest(path: Path) -> str | None:
 def load_receipt(path: Path | None) -> dict:
     if path is None or not Path(path).is_file():
         return {}
-    return json.loads(Path(path).read_text())
+    receipt = json.loads(Path(path).read_text())
+    source = receipt.get("source")
+    if isinstance(source, dict):
+        receipt.setdefault("source_index_sha256", source.get("index_sha256"))
+        receipt.setdefault("source_config_sha256", source.get("config_sha256"))
+    return receipt
 
 
 def source_identity(checkpoint: Path) -> tuple[str | None, str | None, str | None]:
