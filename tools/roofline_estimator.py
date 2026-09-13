@@ -157,8 +157,11 @@ def parse_formats(repo_root: str) -> dict[str, Any]:
 
 def special_kind_ids(kinds: dict[int, str]) -> dict[str, set[int]]:
     wanted = {"embedding": "EMBEDDING", "lm_head": "LM_HEAD", "moe": ("MOE_W1", "MOE_W3", "MOE_DOWN")}
-    ids: dict[str, set[int]] = {"embedding": set(), "lm_head": set(), "moe": set()}
+    ids: dict[str, set[int]] = {"embedding": set(), "lm_head": set(), "moe": set(), "lookup": set()}
     for value, name in kinds.items():
+        if "_PLE_" in name or "_NGRAM" in name:
+            ids["lookup"].add(value)
+            continue
         for key, token in wanted.items():
             tokens = token if isinstance(token, tuple) else (token,)
             if any(name.endswith("_" + item) for item in tokens):
@@ -272,13 +275,16 @@ def decode_pack(pack: dict[str, Any], formats: dict[str, Any]) -> dict[str, Any]
         offset += width
     directory = base64.b64decode(pack["directory_b64"])
     ids = special_kind_ids(family["kinds"])
-    totals = {"embedding": 0, "lm_head": 0, "moe": 0, "spine": 0}
+    totals = {"embedding": 0, "lm_head": 0, "moe": 0, "spine": 0, "lookup": 0}
     layers: set[int] = set()
     moe_layers: set[int] = set()
+    lookup_rows = 0
+    lookup_row_bytes_sum = 0.0
     accounted = pack["header_bytes"] + pack["tensor_count"] * pack["entry_bytes"]
     for index in range(pack["tensor_count"]):
         base = index * pack["entry_bytes"]
         tensor_kind, layer_index = struct.unpack_from("<II", directory, base)
+        rows = struct.unpack_from("<I", directory, base + 12)[0]
         payload_bytes = struct.unpack_from("<Q", directory, base + 32)[0]
         scale_bytes = struct.unpack_from("<Q", directory, base + 48)[0]
         total = payload_bytes + scale_bytes
@@ -287,6 +293,11 @@ def decode_pack(pack: dict[str, Any], formats: dict[str, Any]) -> dict[str, Any]
             totals["embedding"] += total
         elif tensor_kind in ids["lm_head"]:
             totals["lm_head"] += total
+        elif tensor_kind in ids["lookup"]:
+            totals["lookup"] += total
+            if rows:
+                lookup_rows += rows
+                lookup_row_bytes_sum += payload_bytes / rows
         elif tensor_kind in ids["moe"]:
             totals["moe"] += total
             moe_layers.add(layer_index)
@@ -300,6 +311,8 @@ def decode_pack(pack: dict[str, Any], formats: dict[str, Any]) -> dict[str, Any]
         "totals": totals,
         "tensor_layers": len(layers),
         "moe_layer_count": len(moe_layers),
+        "lookup_rows": lookup_rows,
+        "lookup_row_bytes": lookup_row_bytes_sum / lookup_rows if lookup_rows else 0.0,
         "accounted_bytes": accounted,
         "gap_bytes": gap,
         "gap_fatal": gap > padding_slack,
@@ -366,6 +379,7 @@ def roofline(args: argparse.Namespace, pack: dict[str, Any], decoded: dict[str, 
 
     touched_fraction = 1.0 - (1.0 - experts_per_token / routed_experts) ** batch if routed_experts else 0.0
     expert_bytes = totals["moe"] * touched_fraction
+    lookup_bytes = decoded["lookup_rows"] and args.lookup_rows_per_token * decoded["lookup_row_bytes"] or 0.0
     kv_read = context * local_kv_heads * head_dim * args.kv_element_bytes * attn_layers
     kv_append = local_kv_heads * head_dim * args.kv_element_bytes * attn_layers
     gdn_state = gdn_layers * local_gdn_heads * gdn_key_dim * gdn_value_dim * args.gdn_state_bytes * 2
@@ -376,6 +390,7 @@ def roofline(args: argparse.Namespace, pack: dict[str, Any], decoded: dict[str, 
         embedding_row
         + (totals["spine"] + totals["lm_head"]) * amortize
         + expert_bytes
+        + lookup_bytes
         + kv_read
         + kv_append
         + gdn_state
@@ -395,6 +410,7 @@ def roofline(args: argparse.Namespace, pack: dict[str, Any], decoded: dict[str, 
         "spine_stream": totals["spine"] * amortize,
         "lm_head": totals["lm_head"] * amortize,
         "experts_touched_hot": expert_bytes,
+        "lookup_touched": lookup_bytes,
         "kv_read": kv_read,
         "kv_append": kv_append,
         "gdn_state_rw": gdn_state,
@@ -479,6 +495,8 @@ def main() -> int:
     parser.add_argument("--tp-degree", type=int, default=None)
     parser.add_argument("--kv-element-bytes", type=float, default=2.0)
     parser.add_argument("--gdn-state-bytes", type=float, default=4.0)
+    parser.add_argument("--lookup-rows-per-token", type=float, default=2048.0,
+                        help="rows touched per token in lookup tables (PLE/ngram); default = the qwen4-flash indexer budget")
     parser.add_argument("--activation-roundtrips", type=int, default=len(ACTIVATION_TOUCH_NAMES),
                         help="hidden-row R+W pairs per layer: " + ", ".join(ACTIVATION_TOUCH_NAMES))
     parser.add_argument("--json", action="store_true")
