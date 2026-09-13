@@ -92,6 +92,7 @@ typedef struct SparkGlm52ExecutionSlot
 	uint32_t *group_tile_prefix_w2;
 	uint32_t *group_row_offset_host;
 	void *route_ready_event;
+	void *expert_done_event;
 	uint32_t route_recorded;
 	void *kv_access_error;
 } SparkGlm52ExecutionSlot;
