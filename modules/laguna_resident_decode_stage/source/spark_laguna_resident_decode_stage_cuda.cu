@@ -179,7 +179,7 @@ extern "C" cudaError_t SparkLagunaLaunchHeadMaxlocPack(cudaStream_t stream,const
 {
 	if ( scores == 0 || token_ids == 0 || maxloc == 0 || row_count == 0u )
 		return(cudaErrorInvalidValue);
-	SparkLagunaHeadMaxlocPackKernel<<<(row_count + 255u) / 256u,256u,0u,stream>>>(scores,token_ids,maxloc,row_count,rank_offset);
+	SparkLagunaHeadMaxlocPackKernel<<<(row_count + SPARK_LAGUNA_CUDA_THREADS - 1u) / SPARK_LAGUNA_CUDA_THREADS,SPARK_LAGUNA_CUDA_THREADS,0u,stream>>>(scores,token_ids,maxloc,row_count,rank_offset);
 	return(cudaPeekAtLastError());
 }
 
@@ -187,7 +187,7 @@ extern "C" cudaError_t SparkLagunaLaunchHeadMaxlocUnpack(cudaStream_t stream,con
 {
 	if ( maxloc == 0 || token_ids == 0 || row_count == 0u )
 		return(cudaErrorInvalidValue);
-	SparkLagunaHeadMaxlocUnpackKernel<<<(row_count + 255u) / 256u,256u,0u,stream>>>(maxloc,token_ids,row_count);
+	SparkLagunaHeadMaxlocUnpackKernel<<<(row_count + SPARK_LAGUNA_CUDA_THREADS - 1u) / SPARK_LAGUNA_CUDA_THREADS,SPARK_LAGUNA_CUDA_THREADS,0u,stream>>>(maxloc,token_ids,row_count);
 	return(cudaPeekAtLastError());
 }
 
@@ -200,7 +200,7 @@ extern "C" cudaError_t SparkLagunaLaunchDirectSum(cudaStream_t stream,void *dest
 		return(cudaErrorInvalidValue);
 	for (rank=0u; rank<SPARK_TP_DEVICE_COLLECTIVE_DIRECT_ALL_TO_ALL_RANK_COUNT; rank++)
 		inputs.rank[rank] = (const uint16_t *)(rank == local_rank ? destination : rank_devices[rank]);
-	LmTpBf16SumKernel<<<rows,256u,0u,stream>>>((uint16_t *)destination,inputs,rows,width);
+	LmTpBf16SumKernel<<<rows,SPARK_LAGUNA_CUDA_THREADS,0u,stream>>>((uint16_t *)destination,inputs,rows,width);
 	error = cudaPeekAtLastError();
 	return(error);
 }
@@ -209,7 +209,7 @@ extern "C" cudaError_t SparkLagunaLaunchAccumAdd(cudaStream_t stream,void *desti
 {
 	if ( destination_bf16 == 0 || source_bf16 == 0 || row_count == 0u || width == 0u || (width & 1u) != 0u )
 		return(cudaErrorInvalidValue);
-	SparkLagunaAccumAddKernel<<<row_count,256u,0u,stream>>>(destination_bf16,source_bf16,row_count,width);
+	SparkLagunaAccumAddKernel<<<row_count,SPARK_LAGUNA_CUDA_THREADS,0u,stream>>>(destination_bf16,source_bf16,row_count,width);
 	return(cudaPeekAtLastError());
 }
 
@@ -217,7 +217,7 @@ extern "C" cudaError_t SparkLagunaLaunchAccumU64Max(cudaStream_t stream,uint64_t
 {
 	if ( destination == 0 || source == 0 || element_count == 0u )
 		return(cudaErrorInvalidValue);
-	SparkLagunaAccumU64MaxKernel<<<(element_count + 255u) / 256u,256u,0u,stream>>>(destination,source,element_count);
+	SparkLagunaAccumU64MaxKernel<<<(element_count + SPARK_LAGUNA_CUDA_THREADS - 1u) / SPARK_LAGUNA_CUDA_THREADS,SPARK_LAGUNA_CUDA_THREADS,0u,stream>>>(destination,source,element_count);
 	return(cudaPeekAtLastError());
 }
 
