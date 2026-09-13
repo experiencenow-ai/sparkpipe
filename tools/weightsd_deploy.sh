@@ -39,6 +39,7 @@ STATE=$(sudo -n systemctl is-active sparkpipe_weightsd || true)
 if [ "$STATE" = active ] && [ "${WEIGHTSD_DEPLOY_RESTART:-0}" != 1 ]; then
 	echo "weightsd-deploy: service already active; refusing restart (set WEIGHTSD_DEPLOY_RESTART=1 for an announced upgrade)"
 else
+	sudo -n systemctl reset-failed sparkpipe_weightsd 2>/dev/null || true
 	sudo -n systemctl restart sparkpipe_weightsd
 fi
 

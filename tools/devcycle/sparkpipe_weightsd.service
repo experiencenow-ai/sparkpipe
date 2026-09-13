@@ -7,7 +7,7 @@ StartLimitBurst=3
 [Service]
 Type=simple
 EnvironmentFile=/etc/sparkpipe/weightsd.env
-ExecStart=${WEIGHTSD_BIN} --socket ${WEIGHTSD_SOCKET} ${WEIGHTSD_EXTRA_ARGS}
+ExecStart=/bin/sh -c 'exec ${WEIGHTSD_BIN} --socket ${WEIGHTSD_SOCKET} ${WEIGHTSD_EXTRA_ARGS}'
 RuntimeDirectory=sparkpipe-weightsd
 RuntimeDirectoryMode=0750
 StateDirectory=sparkpipe-weightsd

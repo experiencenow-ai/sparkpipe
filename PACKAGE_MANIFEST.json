@@ -63,8 +63,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "2bb6d25aeeb5c15b3cd8e569fbaedf76fdc899938eb421391f4cdb9b3e7e6203",
-      "size_bytes": 109504
+      "sha256": "207f09c6abde1a19982a1cad04a83cfbb51d0e1e487a661b77cfb00fece8a739",
+      "size_bytes": 109758
     },
     {
       "path": "NCCL_16WIDE_RECEIPTS.md",
@@ -9123,8 +9123,8 @@
     },
     {
       "path": "tools/devcycle/sparkpipe_weightsd.service",
-      "sha256": "6089cc252ea7924043c7e90ffe1d1cbb4a5d9e834c1e98342be986dc1aedc2b3",
-      "size_bytes": 686
+      "sha256": "bec27a187d70e942380c2392b1cb9ecf0e18451aff13e71b84af3e931a24f701",
+      "size_bytes": 704
     },
     {
       "path": "tools/devcycle/split_ship_pro.sh",
@@ -10873,8 +10873,8 @@
     },
     {
       "path": "tools/weightd_execute_receipt.py",
-      "sha256": "7e9be442f61dd0e43e3736e783db1e2f2b422500e9812e4e9fa10bf5f1f195a7",
-      "size_bytes": 8733
+      "sha256": "7672bdd4e4cb59f23c998a5c4b588dfc16c56d94a21b1ebec9139108f0e56d2b",
+      "size_bytes": 8961
     },
     {
       "path": "tools/weightd_expert_segments.c",
@@ -10918,8 +10918,8 @@
     },
     {
       "path": "tools/weightsd_deploy.sh",
-      "sha256": "ada072505aba9876575c1c3a40394773a2580a39eec9b2a819d27da2b947bb8f",
-      "size_bytes": 2263
+      "sha256": "94040f7fb5209e3dbd948b681bbff562a3e7ff4a7570f4058b96418864e6ddf6",
+      "size_bytes": 2334
     },
     {
       "path": "validation/spark_gemma4_reference.c",
@@ -10930,5 +10930,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 35403193
+  "total_bytes": 35403764
 }
