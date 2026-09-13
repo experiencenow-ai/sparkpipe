@@ -117,13 +117,12 @@ def main() -> int:
     digest_ok = None if expected is None or digest is None else digest == expected
 
     index_sha = config_sha = None
-    if args.checkpoint is not None and args.checkpoint.is_dir():
+    checkpoint_present = args.checkpoint is not None and args.checkpoint.is_dir()
+    if checkpoint_present:
         index_sha, config_sha, _ = source_identity(args.checkpoint)
-    identity_ok = None
-    if receipt:
-        recorded_index = receipt.get("source_index_sha256")
-        identity_ok = (recorded_index is None or index_sha is None
-                       or recorded_index == index_sha)
+    recorded_index = receipt.get("source_index_sha256")
+    identity_ok = (checkpoint_present and index_sha is not None
+                   and recorded_index == index_sha)
 
     content: dict = {"status": "SKIP", "detail": "no family verifier given"}
     if args.family_verify is not None:
@@ -149,7 +148,7 @@ def main() -> int:
                 bool(digest_ok),
                 {"expected_sha256": expected, "recomputed_sha256": digest}),
             "packer_equals_checkpoint": leg_status(
-                bool(receipt.get("source_index_sha256")),
+                bool(recorded_index) and checkpoint_present,
                 bool(identity_ok),
                 {"receipt_source_index_sha256": receipt.get("source_index_sha256"),
                  "live_index_sha256": index_sha,
