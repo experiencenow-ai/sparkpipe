@@ -1,5 +1,5 @@
 {
-  "file_count": 2176,
+  "file_count": 2174,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -3585,16 +3585,6 @@
       "path": "model-families/common/include/sparkpipe/spark_serving_adapter_decl_common.h",
       "sha256": "388282b639a0a50ef7afa99672f26014b79821b304558b07d9202090f3cc9379",
       "size_bytes": 221
-    },
-    {
-      "path": "model-families/common/include/sparkpipe/spark_tp_mesh_kernels.cuh",
-      "sha256": "74b52426beca6c2d6ab06ae4695eeb1946ccb644773e117b83222ae315856304",
-      "size_bytes": 9334
-    },
-    {
-      "path": "model-families/common/include/sparkpipe/spark_tp_mesh_register.h",
-      "sha256": "40fae88b379001ad0bd9dd1b1eed65955a119461b6da4e1e9392dc9c0fccf913",
-      "size_bytes": 4183
     },
     {
       "path": "model-families/common/include/sparkpipe/spark_work_control_common.h",
@@ -10885,5 +10875,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 35314892
+  "total_bytes": 35301375
 }
