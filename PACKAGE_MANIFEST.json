@@ -1,5 +1,5 @@
 {
-  "file_count": 2182,
+  "file_count": 2185,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -63,8 +63,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "ed0adcf674c2e758132ac6ce3ff26a233714ffd1b9d94aa2b609eb2df0b6ed96",
-      "size_bytes": 109201
+      "sha256": "2bb6d25aeeb5c15b3cd8e569fbaedf76fdc899938eb421391f4cdb9b3e7e6203",
+      "size_bytes": 109504
     },
     {
       "path": "NCCL_16WIDE_RECEIPTS.md",
@@ -1150,6 +1150,11 @@
       "path": "docs/WEIGHTD_SUPERVISED_STARTUP.md",
       "sha256": "f74b63ae372964f5af5f7bf561c7ec8266718814a04e0b476b44d5ef45ff0cc2",
       "size_bytes": 1563
+    },
+    {
+      "path": "docs/WEIGHTSD.md",
+      "sha256": "cb4a16cb65c6da917363cefedb47e1de5bcd9421f9fb66c3e09e69401c3f434b",
+      "size_bytes": 4915
     },
     {
       "path": "docs/archive/AUDIT_2026-07-29_BANDWIDTH_PATH.md",
@@ -9117,6 +9122,11 @@
       "size_bytes": 2027
     },
     {
+      "path": "tools/devcycle/sparkpipe_weightsd.service",
+      "sha256": "6089cc252ea7924043c7e90ffe1d1cbb4a5d9e834c1e98342be986dc1aedc2b3",
+      "size_bytes": 686
+    },
+    {
       "path": "tools/devcycle/split_ship_pro.sh",
       "sha256": "28a4edfaae09e012dcf455bb59b9c8d62d723403017e9562e4c9cb4e8c311d0d",
       "size_bytes": 1305
@@ -10907,6 +10917,11 @@
       "size_bytes": 4938
     },
     {
+      "path": "tools/weightsd_deploy.sh",
+      "sha256": "ada072505aba9876575c1c3a40394773a2580a39eec9b2a819d27da2b947bb8f",
+      "size_bytes": 2263
+    },
+    {
       "path": "validation/spark_gemma4_reference.c",
       "sha256": "791dbe16ea5917eff2c02a8710b9ec17a4f8f9a4e2e6640c5c1f99b6840ec997",
       "size_bytes": 31712
@@ -10915,5 +10930,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 35395026
+  "total_bytes": 35403193
 }
