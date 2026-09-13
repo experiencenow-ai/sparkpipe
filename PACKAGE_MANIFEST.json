@@ -1,5 +1,5 @@
 {
-  "file_count": 2168,
+  "file_count": 2169,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -3688,8 +3688,8 @@
     },
     {
       "path": "model-families/glm5_next/include/sparkpipe/spark_glm5_next_model.h",
-      "sha256": "5f3180ae2a5d5a15015067a34efcdfe72c5791fa34552dbb95d2c2e27ca98584",
-      "size_bytes": 9047
+      "sha256": "3ca10501900da81db47c8ff757a041c60ac38e2a12d4b2658e0fba28d512e76b",
+      "size_bytes": 9052
     },
     {
       "path": "model-families/glm5_next/name_map.json",
@@ -4313,8 +4313,8 @@
     },
     {
       "path": "modules/glm5_next_resident_decode_stage/include/sparkpipe/spark_glm5_next_resident_decode_stage_firmware.h",
-      "sha256": "adc2aa5deec89807f0d078252f5b3fe21431745582a32571366312a9e982fc25",
-      "size_bytes": 9068
+      "sha256": "a6208f7da8dfd9185b43680e68854faa0b412a675e63ca5ea0ea9367481f4b66",
+      "size_bytes": 9373
     },
     {
       "path": "modules/glm5_next_resident_decode_stage/include/sparkpipe/spark_glm5_next_serving_adapter.h",
@@ -4363,8 +4363,8 @@
     },
     {
       "path": "modules/glm5_next_resident_decode_stage/source/spark_glm5_next_resident_decode_stage_module.c",
-      "sha256": "079784c7487451e1631f1f1d79712f26395d9f96a57767beebc7667140db14bb",
-      "size_bytes": 186176
+      "sha256": "148d0e0e82839c217a96d3238bdbe165519ef4d64a9391022548e2a36b477671",
+      "size_bytes": 187415
     },
     {
       "path": "modules/glm5_next_resident_decode_stage/source/spark_glm5_next_serving_adapter.c",
@@ -8742,6 +8742,11 @@
       "size_bytes": 2310
     },
     {
+      "path": "tools/constant_audit_scan.py",
+      "sha256": "d9c41ee6af32c8f660cf57b1b2787e4f3af4251bd1bb2edac1430f8d9479669a",
+      "size_bytes": 3271
+    },
+    {
       "path": "tools/cuda13_sm121a_compile_gate.sh",
       "sha256": "ed9e0931bc75e9634d1bb94a7ca4f629f05248ba16d3897441047fc4e405d9b0",
       "size_bytes": 9451
@@ -10845,5 +10850,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 35251641
+  "total_bytes": 35256461
 }
