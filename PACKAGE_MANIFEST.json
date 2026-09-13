@@ -1,5 +1,5 @@
 {
-  "file_count": 2171,
+  "file_count": 2172,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -4698,8 +4698,8 @@
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_resident_decode_stage_cuda.cu",
-      "sha256": "39ff2be8ff0b17399492741fdac431110036e7269b6729bfe02280dc694501e3",
-      "size_bytes": 24751
+      "sha256": "908e9990867ae1f31f525d1aff079d47413af4de86c5807ba79a74152ebae743",
+      "size_bytes": 24997
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_resident_decode_stage_internal.h",
@@ -10107,6 +10107,11 @@
       "size_bytes": 2608
     },
     {
+      "path": "tools/laguna_decode_roofline.py",
+      "sha256": "82231f0fceb51d3e6754e5d74a1e7014d06f4aed67136e09fa25d4ef06e5c93a",
+      "size_bytes": 7412
+    },
+    {
       "path": "tools/laguna_gen_deployment.py",
       "sha256": "ef8cc9f493e5d541ea283d23f482ddd295e544905c48ada7cce6c3b55973bb88",
       "size_bytes": 9890
@@ -10860,5 +10865,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 35277369
+  "total_bytes": 35285027
 }
