@@ -1,5 +1,5 @@
 {
-  "file_count": 2170,
+  "file_count": 2171,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -4778,8 +4778,8 @@
     },
     {
       "path": "modules/ling_resident_decode_stage/source/cuda/config.h",
-      "sha256": "ce8b5e50eb5d8b42a4ff79e90f57feb6752019eb2ecd7818e737ca7115f4833f",
-      "size_bytes": 2993
+      "sha256": "628c9c2779dc76eb0e6de87bc30830b4e1a71e550e174e18f6ccc196bcb42b0d",
+      "size_bytes": 3643
     },
     {
       "path": "modules/ling_resident_decode_stage/source/cuda/launch_shape.h",
@@ -10132,6 +10132,11 @@
       "size_bytes": 1088
     },
     {
+      "path": "tools/ling_decode_roofline.py",
+      "sha256": "652da0b0d4e8ed2ce5b8a952440ce3dfc98adf24032d0ae4af87f1018a4819d8",
+      "size_bytes": 8891
+    },
+    {
       "path": "tools/ling_gen_deployment.py",
       "sha256": "9d2f478f465eff10d7b578d041b38fc6a140817b056a7f3a8e63d3c99a8e752b",
       "size_bytes": 6804
@@ -10855,5 +10860,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 35261811
+  "total_bytes": 35271352
 }
