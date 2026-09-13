@@ -1,5 +1,5 @@
 {
-  "file_count": 2171,
+  "file_count": 2172,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -800,6 +800,11 @@
       "path": "docs/BUG_LEDGER.md",
       "sha256": "7d3a31a4fc6db2d1a173830d5aa074a6a0ee74678a0c1d5c443568345558120c",
       "size_bytes": 13809
+    },
+    {
+      "path": "docs/COMMON_MODULE_ARCHITECTURE.md",
+      "sha256": "9eb5312f06a8fa1c8e402a1fa76d42de22111ad9b4d41ee7671ab9d599de6611",
+      "size_bytes": 13892
     },
     {
       "path": "docs/CONSTANT_AUDIT.md",
@@ -10860,5 +10865,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 35277369
+  "total_bytes": 35291261
 }
