@@ -2,6 +2,8 @@
 #include <cuda_bf16.h>
 
 #include "sparkpipe/spark_gemma4_resident_decode_stage_firmware.h"
+#include "sparkpipe/spark_hybrid_state.h"
+#include "sparkpipe/spark_rope_plan.h"
 #include "sparkpipe/spark_lm_kernels.cuh"
 #include "inference/kernels/frame_error.cuh"
 #include "inference/kernels/kv.cuh"
@@ -16,24 +18,21 @@
 #define SPARK_GEMMA4_CUDA_THREADS 256u
 #define SPARK_GEMMA4_CUDA_PAGE_SLOTS SPARK_GEMMA4_RESIDENT_DECODE_STAGE_KV_BLOCK_TOKENS
 
-typedef LmKvGeometry<SPARK_GEMMA4_MODEL_KV_SLOT_BYTES_PER_HEAD(SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION),SPARK_GEMMA4_CUDA_PAGE_SLOTS,true> SparkGemma4SlidingGeometry1;
-typedef LmKvGeometry<SPARK_GEMMA4_MODEL_KV_SLOT_BYTES_PER_HEAD(SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION) * 2u,SPARK_GEMMA4_CUDA_PAGE_SLOTS,true> SparkGemma4SlidingGeometry2;
-typedef LmKvGeometry<SPARK_GEMMA4_MODEL_KV_SLOT_BYTES_PER_HEAD(SPARK_GEMMA4_MODEL_FULL_HEAD_DIMENSION),SPARK_GEMMA4_CUDA_PAGE_SLOTS,true> SparkGemma4FullGeometry1;
+typedef LmKvGeometry<SPARK_HYBRID_KV_HEAD_SLOT_BYTES(SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION,SPARK_GEMMA4_MODEL_BF16_ELEMENT_BYTES),SPARK_GEMMA4_CUDA_PAGE_SLOTS,true> SparkGemma4SlidingGeometry1;
+typedef LmKvGeometry<SPARK_HYBRID_KV_SLOT_BYTES(2u,SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION,SPARK_GEMMA4_MODEL_BF16_ELEMENT_BYTES),SPARK_GEMMA4_CUDA_PAGE_SLOTS,true> SparkGemma4SlidingGeometry2;
+typedef LmKvGeometry<SPARK_HYBRID_KV_HEAD_SLOT_BYTES(SPARK_GEMMA4_MODEL_FULL_HEAD_DIMENSION,SPARK_GEMMA4_MODEL_BF16_ELEMENT_BYTES),SPARK_GEMMA4_CUDA_PAGE_SLOTS,true> SparkGemma4FullGeometry1;
 
 static_assert(SparkGemma4SlidingGeometry1::kSlotBytes ==
-		(SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION +
-		 SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION) *
-		    SPARK_GEMMA4_MODEL_BF16_ELEMENT_BYTES,
+		SPARK_HYBRID_KV_HEAD_SLOT_BYTES(SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION,
+		    SPARK_GEMMA4_MODEL_BF16_ELEMENT_BYTES),
 	"one sliding kv head stores a bf16 k and v row");
 static_assert(SparkGemma4SlidingGeometry2::kSlotBytes ==
-		2u * (SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION +
-		      SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION) *
-		    SPARK_GEMMA4_MODEL_BF16_ELEMENT_BYTES,
+		SPARK_HYBRID_KV_SLOT_BYTES(2u,SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION,
+		    SPARK_GEMMA4_MODEL_BF16_ELEMENT_BYTES),
 	"two sliding kv heads store bf16 k and v rows");
 static_assert(SparkGemma4FullGeometry1::kSlotBytes ==
-		(SPARK_GEMMA4_MODEL_FULL_HEAD_DIMENSION +
-		 SPARK_GEMMA4_MODEL_FULL_HEAD_DIMENSION) *
-		    SPARK_GEMMA4_MODEL_BF16_ELEMENT_BYTES,
+		SPARK_HYBRID_KV_HEAD_SLOT_BYTES(SPARK_GEMMA4_MODEL_FULL_HEAD_DIMENSION,
+		    SPARK_GEMMA4_MODEL_BF16_ELEMENT_BYTES),
 	"one full-attention kv head stores a bf16 shared k/v row pair");
 
 static int32_t SparkGemma4BuildKvView(LmKvView *view, void *pool, const uint32_t *page_table, uint32_t page_table_stride, uint32_t sequence_count, uint32_t pool_page_count, LmKvAccessError *access_error)
@@ -164,15 +163,11 @@ extern "C" cudaError_t SparkGemma4LaunchGatedGelu(cudaStream_t stream, void *gat
 	return(cudaGetLastError());
 }
 
-extern "C" cudaError_t SparkGemma4LaunchSlidingRope(cudaStream_t stream, void *q_bf16, const uint32_t *positions, uint32_t row_count, uint32_t heads, uint32_t head_dimension, uint32_t rope_dimension, float theta)
+extern "C" cudaError_t SparkGemma4LaunchRope(cudaStream_t stream, void *q_bf16, const uint32_t *positions, uint32_t row_count, uint32_t heads, const SparkRopeDomain *domain)
 {
-	LmRopePerHeadKernel<SPARK_GEMMA4_CUDA_THREADS><<<dim3(row_count,heads),SPARK_GEMMA4_CUDA_THREADS,0,stream>>>((uint16_t *)q_bf16,positions,heads,head_dimension,rope_dimension,theta);
-	return(cudaGetLastError());
-}
-
-extern "C" cudaError_t SparkGemma4LaunchFullRope(cudaStream_t stream, void *q_bf16, const uint32_t *positions, const float *inv_freq_table, uint32_t row_count, uint32_t heads, uint32_t head_dimension, uint32_t rope_dimension)
-{
-	LmRopePerHeadKernel<SPARK_GEMMA4_CUDA_THREADS><<<dim3(row_count,heads),SPARK_GEMMA4_CUDA_THREADS,0,stream>>>((uint16_t *)q_bf16,positions,heads,head_dimension,rope_dimension,SPARK_GEMMA4_MODEL_SLIDING_ROPE_THETA,inv_freq_table,SPARK_GEMMA4_MODEL_QK_SCALE);
+	if ( domain == 0 || domain->head_dimension < domain->rope_dimension )
+		return(cudaErrorInvalidValue);
+	LmRopePerHeadKernel<SPARK_GEMMA4_CUDA_THREADS><<<dim3(row_count,heads),SPARK_GEMMA4_CUDA_THREADS,0,stream>>>((uint16_t *)q_bf16,positions,heads,domain->head_dimension,domain->rope_dimension,domain->theta,domain->inv_freq_table,domain->attention_scale,domain->rope_offset);
 	return(cudaGetLastError());
 }
 
