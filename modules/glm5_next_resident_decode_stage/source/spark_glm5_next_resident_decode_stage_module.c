@@ -13,6 +13,12 @@
 #include "sparkpipe/spark_tp_chain_ordinal.h"
 
 #include "sparkpipe/spark_glm5_next_resident_decode_stage_firmware.h"
+#include "sparkpipe/spark_weightd.h"
+#include "sparkpipe/spark_glm5_next_model.h"
+_Static_assert((uint64_t)SPARK_GLM5_NEXT_MODEL_HIDDEN_DIMENSION *
+    SPARK_GLM5_NEXT_MODEL_HC_MULT * 2u <=
+    SPARK_WEIGHTD_MESH_ROW_BYTES_MAX,
+    "widest model row must fit the mesh row law");
 
 #define SPARK_GLM5_NEXT_PROBE_CONNECT_TIMEOUT_SCALE 4u
 #define SPARK_GLM5_NEXT_PROBE_OPERATION_TIMEOUT_SCALE 8u
@@ -194,6 +200,8 @@ struct SparkGlm5NextModuleState
 	SparkTpDeviceCollective tp_device_collective_hc;
 	uint32_t tp_device_collective_hc_initialized;
 	uint32_t tp_device_collective_initialized;
+	uint32_t tp_chain_active;
+	uint32_t tp_lane;
 	SparkTpDeviceCollectiveCreditBinding tp_credit_bindings[SPARK_TP_DEVICE_COLLECTIVE_MAX_BINDING_COUNT];
 	uint32_t tp_credit_binding_count;
 	void *tp_credit_send_bf16;
@@ -216,7 +224,8 @@ struct SparkGlm5NextModuleState
 	uint32_t *decode_cover_device;
 	uint32_t *decode_miss_host;
 	SparkWeightdExpertKey decode_lease_keys[SPARK_WEIGHTD_LEASE_GROUPS_MAX];
-	SparkWeightdExpertKey decode_union_keys[2400u];
+	SparkWeightdExpertKey
+	    decode_union_keys[SPARK_GLM5_NEXT_ROUTE_UNION_MAX];
 	const uint8_t *decode_lease_base_saved;
 	const void *epoch_device;
 	uint64_t epoch_validated;
@@ -236,7 +245,7 @@ static SparkStatus SparkGlm5NextModuleConfigure(
 	context = (const SparkGlm5NextResidentDecodeStageNodeContext *)host_services->node_context;
 	if ( context->abi_version != SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_NODE_CONTEXT_ABI_VERSION || context->descriptor_bytes != SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_NODE_CONTEXT_BYTES )
 		SPARK_FAIL(SPARK_STATUS_ABI_MISMATCH);
-	if ( SparkGlm5NextResidentDecodeStageSpanIsValid(context->stage_count,context->stage_index,context->first_layer_index,context->layer_count) == 0u || context->layer_count > SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_LAYERS_PER_STAGE || context->expert_weight_codec != GLM5_NEXT_EXPERT_WEIGHT_CODEC || context->resident_sequence_capacity == 0u || context->resident_sequence_capacity > SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT || context->pipeline_slot_count == 0u || context->pipeline_slot_count > SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT || context->max_sequence_positions == 0u || context->max_sequence_positions > SPARK_GLM5_NEXT_MODEL_MAXIMUM_CONTEXT_TOKENS || context->execution_row_capacity == 0u || context->execution_row_capacity > SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_INPUT_ROW_COUNT || context->decode_split_context_threshold > context->max_sequence_positions || context->tp_degree == 0u || context->tp_rank >= context->tp_degree || (context->flags & ~SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_NODE_CONTEXT_KNOWN_FLAGS) != 0u || context->stage_pack_path == 0 || context->stage_pack_path[0] == '\0' || context->model_revision == 0 || context->model_revision[0] == '\0' || strlen(context->model_revision) >= sizeof(state->model_revision) )
+	if ( SparkGlm5NextResidentDecodeStageSpanIsValid(context->stage_count,context->stage_index,context->first_layer_index,context->layer_count) == 0u || context->layer_count > SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_LAYERS_PER_STAGE || context->expert_weight_codec != GLM5_NEXT_EXPERT_WEIGHT_CODEC || context->resident_sequence_capacity == 0u || context->resident_sequence_capacity > SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT || context->pipeline_slot_count == 0u || context->pipeline_slot_count > SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT || context->max_sequence_positions == 0u || context->max_sequence_positions > SPARK_GLM5_NEXT_MODEL_MAXIMUM_CONTEXT_TOKENS || context->execution_row_capacity == 0u || context->execution_row_capacity > SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_INPUT_ROW_COUNT || context->execution_row_capacity > SPARK_WEIGHTD_MESH_MAX_BATCH_ROWS || context->decode_split_context_threshold > context->max_sequence_positions || context->tp_degree == 0u || context->tp_rank >= context->tp_degree || (context->flags & ~SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_NODE_CONTEXT_KNOWN_FLAGS) != 0u || context->stage_pack_path == 0 || context->stage_pack_path[0] == '\0' || context->model_revision == 0 || context->model_revision[0] == '\0' || strlen(context->model_revision) >= sizeof(state->model_revision) )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	if ( SparkWeightCodecIsKnown(context->expert_weight_codec) == 0u || context->expert_weight_codec == SPARK_WEIGHT_CODEC_BF16 )
 		SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
@@ -1623,6 +1632,10 @@ typedef struct SparkGlm5NextTpChain
 	uint32_t stage;
 	uint32_t next_layer;
 	uint32_t active;
+	uint32_t union_fed;
+	uint32_t sweep_submitted;
+	uint32_t sweep_retries;
+
 	uint32_t spec_verify;
 	uint32_t tp_op_index;
 	uint32_t tp_hc_op_index;
@@ -1800,6 +1813,22 @@ static SparkStatus SparkGlm5NextModuleInitializeTpCollective(
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	if ( state->tp_degree == 1u || state->tp_collective_disabled != 0u )
 		return(SPARK_STATUS_OK);
+	{
+		SparkWeightdClient *lane_client;
+		const char *socket = getenv("SPARK_WEIGHTD_SOCKET");
+		if ( socket == 0 || socket[0] == '\0' )
+			SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
+		if ( SparkWeightdClientConnect(socket,&lane_client,0) != SPARK_STATUS_OK )
+			SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+		status = SparkWeightdClientLaneAcquire(lane_client,&state->tp_lane,
+			(uint64_t)context->tp_connect_timeout_milli * 1000000ull);
+		(void)SparkWeightdClientClose(lane_client);
+		if ( status != SPARK_STATUS_OK )
+		{
+			fprintf(stderr,"GLM mesh lane acquire failed: no free lane (status=%d)\n",(int32_t)status);
+			SPARK_RETURN(status);
+		}
+	}
 	probe_connect_timeout_milli = context->tp_connect_timeout_milli;
 	if ( SparkGlm5NextProbeEnabled() )
 	{
@@ -1827,8 +1856,9 @@ static SparkStatus SparkGlm5NextModuleInitializeTpCollective(
 	configuration.max_active_sequence_count = state->execution_row_capacity;
 	configuration.connect_timeout_milli = probe_connect_timeout_milli;
 	configuration.operation_timeout_milli = probe_operation_timeout_milli;
-	configuration.control_port_base = context->tp_collective_control_port_base;
-	configuration.collective_identifier = context->tp_collective_identifier;
+	configuration.control_port_base = context->tp_collective_control_port_base +
+		2u * state->tp_lane;
+	configuration.collective_identifier = 2u * state->tp_lane;
 	configuration.backend_module_path = context->tp_collective_backend_module_path;
 	configuration.registration_cuda_stream = state->execution_stream;
 	status = SparkTpDeviceCollectiveApplyTopology(&context->tp_collective_topology,&configuration);
@@ -1853,8 +1883,8 @@ static SparkStatus SparkGlm5NextModuleInitializeTpCollective(
 	configuration_hc.connect_timeout_milli = probe_connect_timeout_milli;
 	configuration_hc.operation_timeout_milli = probe_operation_timeout_milli;
 	configuration_hc.control_port_base = context->tp_collective_control_port_base +
-		SPARK_GLM5_NEXT_TP_COLLECTIVE_HC_PORT_STRIDE;
-	configuration_hc.collective_identifier = context->tp_collective_identifier + 1u;
+		SPARK_GLM5_NEXT_TP_COLLECTIVE_HC_PORT_STRIDE + 2u * state->tp_lane;
+	configuration_hc.collective_identifier = 2u * state->tp_lane + 1u;
 	configuration_hc.backend_module_path = context->tp_collective_backend_module_path;
 	configuration_hc.registration_cuda_stream = state->execution_stream;
 	status = SparkTpDeviceCollectiveApplyTopology(&context->tp_collective_topology,&configuration_hc);
@@ -1872,7 +1902,7 @@ static SparkStatus SparkGlm5NextModuleInitializeTpCollective(
 		configuration_hc.combine_tp4_bf16_function = SparkGlm5NextModuleCombineDirectBf16;
 		configuration_hc.combine_context = state;
 	}
-	if ( configuration.connect_timeout_milli == 0u || configuration.operation_timeout_milli == 0u || configuration.collective_identifier == 0u || configuration.backend_kind != SPARK_TP_DEVICE_COLLECTIVE_BACKEND_HIDDEN_TRANSPORT )
+	if ( configuration.connect_timeout_milli == 0u || configuration.operation_timeout_milli == 0u || configuration.backend_kind != SPARK_TP_DEVICE_COLLECTIVE_BACKEND_HIDDEN_TRANSPORT )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	status = SparkTpDeviceCollectiveCreate(&configuration,&state->tp_device_collective);
 	if ( status != SPARK_STATUS_OK )
@@ -2194,6 +2224,7 @@ static void SparkGlm5NextTpChainFail(SparkGlm5NextTpChain *chain,SparkStatus sta
 	{
 		chain->retained_status = status;
 		fprintf(stderr,"GLM chain drain failed; retaining slot %u and CUDA resources for teardown retry\n",chain->slot_index);
+		state->tp_chain_active = 0u;
 		atomic_store_explicit(&state->lazy_retained[chain->slot_index],chain,memory_order_release);
 		return;
 	}
@@ -2292,9 +2323,28 @@ static SparkStatus SparkGlm5NextLazyExperts(SparkGlm5NextTpChain *chain)
 	chain->expert_lease_begun = 1u;
 	chain->wave.expert_lease_base = (const uint8_t *)address;
 	chain->wave.expert_lease_local_layer = chain->next_layer;
+	if ( chain->state->decode_lease_base_saved == 0 )
+		chain->state->decode_lease_base_saved = (const uint8_t *)address;
 	if ( SparkGlm5NextLaunchCudaLayerMlpExperts(&chain->wave,chain->next_layer) != 0 )
 		SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
 	return(SPARK_STATUS_OK);
+}
+
+static void SparkGlm5NextGraphLeaseTrim(SparkGlm5NextModuleState *state);
+static SparkStatus SparkGlm5NextGraphRouteSweep(
+    SparkGlm5NextTpChain *chain);
+static void SparkGlm5NextSweepWork(void *context)
+{
+	SparkGlm5NextTpChain *chain = (SparkGlm5NextTpChain *)context;
+	SparkStatus status = SparkGlm5NextGraphRouteSweep(chain);
+	if ( status == SPARK_STATUS_BUSY )
+		status = SparkGlm5NextGraphRouteSweep(chain);
+	if ( status != SPARK_STATUS_OK && status != SPARK_STATUS_BUSY )
+	{
+		SparkGlm5NextTpChainFail(chain,status);
+		return;
+	}
+	SparkGlm5NextTpChainAdvance(chain,SPARK_STATUS_OK);
 }
 
 static void SparkGlm5NextLazyWork(void *context)
@@ -2304,14 +2354,49 @@ static void SparkGlm5NextLazyWork(void *context)
 	fprintf(stderr,"LAZY enter slot=%u layer=%u\n",chain->slot_index,chain->next_layer);
 	status = SparkGlm5NextLazyExperts(chain);
 	fprintf(stderr,"LAZY experts slot=%u layer=%u status=%d\n",chain->slot_index,chain->next_layer,(int32_t)status);
+	if ( status == SPARK_STATUS_OK && chain->state->decode_cover_host != 0 )
+	{
+		SparkGlm5NextModuleState *st = chain->state;
+		SparkWeightdExpertKey ukeys[SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT];
+		uint32_t ucount = 0u,index,bit,appended = 0u;
+		SparkWeightdRouteKeys(chain->wave.first_layer_index + chain->next_layer,
+			chain->slot->host_group_row_offset +
+			    (chain->wave.first_layer_index + chain->next_layer) *
+			        (SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT + 1u),
+			SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT,
+			chain->wave.row_count * SPARK_GLM5_NEXT_MODEL_MOE_TOP_K,
+			ukeys,SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT,&ucount);
+		for (index=0u; index<ucount; index++)
+		{
+			bit = ukeys[index].layer *
+			    SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT +
+			    ukeys[index].expert;
+			if ( (st->decode_cover_host[bit / 32u] &
+			        (UINT32_C(1) << (bit % 32u))) != 0u )
+				continue;
+			if ( st->decode_union_count >=
+			     SPARK_GLM5_NEXT_ROUTE_UNION_TRIM )
+				SparkGlm5NextGraphLeaseTrim(st);
+			if ( st->decode_union_count >=
+			     SPARK_GLM5_NEXT_ROUTE_UNION_MAX )
+				break;
+			st->decode_union_keys[st->decode_union_count] =
+				ukeys[index];
+			st->decode_union_count++;
+			st->decode_cover_host[bit / 32u] |=
+				UINT32_C(1) << (bit % 32u);
+			appended++;
+		}
+		chain->union_fed = appended;
+	}
 	cleanup = SparkGlm5NextLazyRelease(chain);
-	fprintf(stderr,"LAZY release slot=%u layer=%u status=%d\n",chain->slot_index,chain->next_layer,(int32_t)cleanup);
 	if ( cleanup == SPARK_STATUS_IO_ERROR || cleanup == SPARK_STATUS_BUSY )
 		cleanup = SparkGlm5NextLazyRelease(chain);
 	if ( cleanup != SPARK_STATUS_OK )
 	{
 		chain->retained_status = status != SPARK_STATUS_OK ? status : cleanup;
 		fprintf(stderr,"GLM expert cleanup failed: slot=%u lease=%llu status=%d; retaining slot and lease for teardown retry\n",chain->slot_index,(unsigned long long)chain->expert_lease,(int32_t)cleanup);
+		chain->state->tp_chain_active = 0u;
 		atomic_store_explicit(&chain->state->lazy_retained[chain->slot_index],chain,memory_order_release);
 		return;
 	}
@@ -2406,7 +2491,8 @@ static void SparkGlm5NextGraphRecord(SparkGlm5NextTpChain *chain,
 		return;
 	if ( state->epoch_device != 0 &&
 	     SparkGlm5NextLaunchEpochSample(stream,state->epoch_device,
-	         (void *)((uint64_t *)state->decode_miss_host + 64u)) !=
+	         (void *)((uint64_t *)state->decode_miss_host +
+		             SPARK_GLM5_NEXT_MODEL_MISS_EPOCH_WORD_U64)) !=
 	             cudaSuccess )
 		failed = 1u;
 	if ( SparkGlm5NextLaunchCudaWaveBegin(wave) != 0 )
@@ -2499,7 +2585,9 @@ static void SparkGlm5NextGraphLeaseTrim(
 	uint32_t bit;
 	uint32_t index;
 	while ( state->decode_route_lease_count > 1u &&
-	        state->decode_union_count + 512u > 2400u )
+	        state->decode_union_count +
+		        SPARK_GLM5_NEXT_ROUTE_UNION_TRIM_CHUNK >
+		        SPARK_GLM5_NEXT_ROUTE_UNION_MAX )
 	{
 		(void)SparkWeightdMapRelease(map,
 			state->decode_route_leases[0],
@@ -2509,8 +2597,10 @@ static void SparkGlm5NextGraphLeaseTrim(
 		    state->decode_route_leases + 1u,
 		    (size_t)state->decode_route_lease_count *
 		        sizeof(state->decode_route_leases[0]));
-		dropped = state->decode_union_count < 512u ?
-		    state->decode_union_count : 512u;
+		dropped = state->decode_union_count <
+		    SPARK_GLM5_NEXT_ROUTE_UNION_TRIM_CHUNK ?
+		    state->decode_union_count :
+		    SPARK_GLM5_NEXT_ROUTE_UNION_TRIM_CHUNK;
 		for ( index = 0u; index < dropped; index++ )
 		{
 			bit = state->decode_union_keys[index].layer *
@@ -2551,12 +2641,14 @@ static SparkStatus SparkGlm5NextGraphRouteSweep(
 		         (size_t)words * sizeof(uint32_t),
 		         cudaHostAllocMapped) != cudaSuccess ||
 		     cudaHostAlloc((void **)&state->decode_miss_host,
-		         512u,cudaHostAllocMapped) != cudaSuccess ||
+		         SPARK_GLM5_NEXT_MODEL_MISS_RING_BYTES,
+		         cudaHostAllocMapped) != cudaSuccess ||
 		     cudaMalloc((void **)&state->decode_cover_device,
 		         (size_t)words * sizeof(uint32_t)) != cudaSuccess )
 			SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
 		memset(state->decode_cover_host,0,(size_t)words * sizeof(uint32_t));
-		memset(state->decode_miss_host,0,512u);
+		memset(state->decode_miss_host,0,
+		    SPARK_GLM5_NEXT_MODEL_MISS_RING_BYTES);
 		state->decode_cover_words = words;
 	}
 	if ( chain->slot->route_recorded == 0u )
@@ -2565,19 +2657,23 @@ static SparkStatus SparkGlm5NextGraphRouteSweep(
 		uint32_t recorded = state->decode_miss_host[1];
 		uint32_t miss_index;
 		for ( miss_index = 0u;
-		      miss_index < recorded && miss_index < 64u;
+		      miss_index < recorded && miss_index <
+		      SPARK_GLM5_NEXT_MODEL_MISS_RING_CAPACITY;
 		      miss_index++ )
 		{
 			uint32_t packed =
 			    state->decode_miss_host[2u + miss_index];
 			SparkWeightdExpertKey *key;
 			if ( delta >= SPARK_WEIGHTD_LEASE_GROUPS_MAX ||
-			     state->decode_union_count + delta >= 2400u )
+			     state->decode_union_count + delta >=
+			         SPARK_GLM5_NEXT_ROUTE_UNION_MAX )
 				break;
 			key = &state->decode_union_keys[
 			    state->decode_union_count + delta];
-			key->layer = packed / 512u;
-			key->expert = packed % 512u;
+			key->layer = packed /
+		    SPARK_GLM5_NEXT_MODEL_MISS_PACK_STRIDE;
+			key->expert = packed %
+		    SPARK_GLM5_NEXT_MODEL_MISS_PACK_STRIDE;
 			bit = key->layer *
 			    SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT +
 			    key->expert;
@@ -2619,9 +2715,11 @@ static SparkStatus SparkGlm5NextGraphRouteSweep(
 				continue;
 			if ( delta >= SPARK_WEIGHTD_LEASE_GROUPS_MAX )
 				break;
-			if ( state->decode_union_count + delta >= 1888u )
+			if ( state->decode_union_count + delta >=
+			     SPARK_GLM5_NEXT_ROUTE_UNION_TRIM )
 				SparkGlm5NextGraphLeaseTrim(state);
-			if ( state->decode_union_count + delta >= 2400u )
+			if ( state->decode_union_count + delta >=
+			         SPARK_GLM5_NEXT_ROUTE_UNION_MAX )
 				break;
 			state->decode_union_keys[state->decode_union_count +
 			    delta] = *key;
@@ -2673,7 +2771,8 @@ static SparkStatus SparkGlm5NextGraphRouteSweep(
 			}
 			state->decode_lease_base_saved = (const uint8_t *)address;
 		}
-		memset(state->decode_miss_host,0,512u);
+		memset(state->decode_miss_host,0,
+		    SPARK_GLM5_NEXT_MODEL_MISS_RING_BYTES);
 		if ( cudaMemcpyAsync(state->decode_cover_device,
 		         state->decode_cover_host,
 		         (size_t)state->decode_cover_words * sizeof(uint32_t),
@@ -2691,7 +2790,8 @@ static SparkStatus SparkGlm5NextGraphRouteSweep(
 	else if ( state->decode_union_count != 0u )
 	{
 		if ( state->decode_miss_host[0] != 0u )
-			memset(state->decode_miss_host,0,512u);
+			memset(state->decode_miss_host,0,
+		    SPARK_GLM5_NEXT_MODEL_MISS_RING_BYTES);
 		chain->wave.expert_lease_base = chain->state->decode_lease_base_saved;
 		chain->wave.expert_lease_local_layer = 0u;
 		chain->wave.expert_lease_all = 1u;
@@ -2731,7 +2831,8 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 	if ( status == SPARK_STATUS_OK && state->epoch_device != 0 )
 	{
 		uint64_t seen =
-		    ((volatile uint64_t *)state->decode_miss_host)[64];
+		    ((volatile uint64_t *)state->decode_miss_host)[
+		        SPARK_GLM5_NEXT_MODEL_MISS_EPOCH_WORD_U64];
 		if ( seen != state->epoch_validated )
 		{
 			fprintf(stderr,
@@ -2883,8 +2984,12 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 		if ( chain_trace_count < 1000000000u )
 		{
 			chain_trace_count++;
-			fprintf(stderr,"CHAIN slot=%u stage=%u layer=%u rows=%u\n",
-				chain->slot_index,chain->stage,chain->next_layer,chain->wave_rows);
+			fprintf(stderr,"CHAIN slot=%u stage=%u layer=%u rows=%u mi=%llu hi=%llu\n",
+				chain->slot_index,chain->stage,chain->next_layer,chain->wave_rows,
+				state->tp_device_collective_initialized != 0u ?
+					(unsigned long long)SparkTpDeviceCollectiveRoundIndex(&state->tp_device_collective) : 0ull,
+				state->tp_device_collective_hc_initialized != 0u ?
+					(unsigned long long)SparkTpDeviceCollectiveRoundIndex(&state->tp_device_collective_hc) : 0ull);
 		}
 	}
 	switch ( chain->stage )
@@ -2922,6 +3027,19 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 				(int32_t)graph_status);
 		}
 		SparkGlm5NextBuildWave(chain);
+		if ( state->lazy_pack != 0 && state->tp_degree > 1u &&
+		     chain->slot->route_recorded != 0u &&
+		     chain->sweep_submitted == 0u )
+		{
+			SparkStatus submit_status;
+			chain->sweep_submitted = 1u;
+			submit_status = SparkWeightdWorkerSubmit(
+				state->lazy_pack->worker,
+				SparkGlm5NextSweepWork,chain);
+			if ( submit_status != SPARK_STATUS_OK )
+				SparkGlm5NextTpChainFail(chain,submit_status);
+			return;
+		}
 		if ( SparkGlm5NextLaunchCudaWaveBegin(&chain->wave) != 0 )
 		{
 			SparkGlm5NextTpChainFail(chain,SPARK_STATUS_INTERNAL_ERROR);
@@ -2956,12 +3074,56 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 	case SPARK_GLM5_NEXT_CHAIN_STAGE_MLP:
 		if ( state->lazy_pack != 0 && (chain->wave.first_layer_index + chain->next_layer) >= SPARK_GLM5_NEXT_MODEL_FIRST_ROUTED_LAYER )
 		{
-			if ( SparkGlm5NextLaunchCudaLayerMlpRoute(&chain->wave,chain->next_layer) != 0 )
+			if ( chain->wave.expert_lease_all != 0u &&
+			     chain->wave_rows == 1u )
 			{
-				SparkGlm5NextTpChainFail(chain,SPARK_STATUS_INTERNAL_ERROR);
-				return;
+				SparkStatus submit_status;
+				if ( SparkGlm5NextLaunchCudaLayerMlpRoute(&chain->wave,chain->next_layer) != 0 ||
+				     cudaStreamSynchronize((cudaStream_t)chain->slot->stream) != cudaSuccess )
+				{
+					SparkGlm5NextTpChainFail(chain,SPARK_STATUS_INTERNAL_ERROR);
+					return;
+				}
+				if ( state->decode_miss_host != 0 &&
+				     state->decode_miss_host[0] != 0u )
+				{
+					if ( chain->sweep_retries <
+					     SPARK_GLM5_NEXT_ROUTE_SWEEP_RETRY_MAX )
+					{
+						chain->sweep_retries++;
+						submit_status =
+						    SparkWeightdWorkerSubmit(
+						        state->lazy_pack->worker,
+						        SparkGlm5NextSweepWork,
+						        chain);
+						if ( submit_status != SPARK_STATUS_OK )
+							SparkGlm5NextTpChainFail(
+							    chain,submit_status);
+						return;
+					}
+					chain->wave.expert_lease_all = 0u;
+				}
+				else
+				{
+					if ( SparkGlm5NextLaunchCudaLayerMlpExperts(&chain->wave,chain->next_layer) != 0 )
+					{
+						SparkGlm5NextTpChainFail(chain,SPARK_STATUS_INTERNAL_ERROR);
+						return;
+					}
+					SparkGlm5NextTpChainReduceMlp(chain);
+					return;
+				}
 			}
-			launch_status = SparkWeightdWorkerSubmit(state->lazy_pack->worker,SparkGlm5NextLazyWork,chain);
+			{
+				const uint32_t *cover_saved = chain->wave.expert_cover;
+				void *miss_saved = chain->wave.expert_miss;
+				chain->wave.expert_cover = 0;
+				chain->wave.expert_miss = 0;
+				launch_status = SparkGlm5NextLaunchCudaLayerMlpRoute(&chain->wave,chain->next_layer) != 0 ?
+				    SPARK_STATUS_INTERNAL_ERROR : SparkWeightdWorkerSubmit(state->lazy_pack->worker,SparkGlm5NextLazyWork,chain);
+				chain->wave.expert_cover = cover_saved;
+				chain->wave.expert_miss = miss_saved;
+			}
 			if ( launch_status != SPARK_STATUS_OK )
 				SparkGlm5NextTpChainFail(chain,launch_status);
 			return;
@@ -2980,6 +3142,7 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 			return;
 		}
 		chain->next_layer++;
+		chain->sweep_retries = 0u;
 		if ( chain->next_layer < chain->wave.layer_count )
 		{
 			chain->stage = SPARK_GLM5_NEXT_CHAIN_STAGE_ATTENTION;
@@ -3151,8 +3314,9 @@ static SparkStatus SparkGlm5NextCaptureRecurrent(SparkGlm5NextModuleState *state
 	status = SparkKvPageStoreWriteback(&state->recurrent_store,page,resident,generation,(uintptr_t)state->recurrent_staging,state->recurrent_page_bytes,0u,0u);
 	while ( status == SPARK_STATUS_BUSY )
 	{
-		if ( SparkKvPageStoreWaitForTransfers(&state->recurrent_store) != SPARK_STATUS_OK )
-			SPARK_FAIL(SPARK_STATUS_BUSY);
+		SparkStatus wait = SparkKvPageStoreWaitForTransfers(&state->recurrent_store);
+		if ( wait != SPARK_STATUS_OK )
+			SPARK_RETURN(wait);
 		status = SparkKvPageStoreWriteback(&state->recurrent_store,page,resident,generation,(uintptr_t)state->recurrent_staging,state->recurrent_page_bytes,0u,0u);
 	}
 	SPARK_RETURN(status);
@@ -3202,7 +3366,10 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 	SparkModelDriverCompletion completion;
 	SparkModelDriverCompletionFunction complete;
 	void *complete_context;
-	if ( state == 0 || async->slot_index >= state->pipeline_slot_count )
+	if ( state == 0 )
+		return;
+	state->tp_chain_active = 0u;
+	if ( async->slot_index >= state->pipeline_slot_count )
 		return;
 	slot = &state->slots[async->slot_index];
 	if ( slot->host_kv_access_error[0] != 0u )
@@ -3211,11 +3378,6 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 		async->completion.status = SPARK_STATUS_INTERNAL_ERROR;
 	}
 	async->completion.status = SparkGlm5NextFinishCacheLanes(async);
-	if ( async->completion.status == SPARK_STATUS_BUSY )
-	{
-		fprintf(stderr,"GLM checkpoint completion not quiescent; retaining lane and slot ownership\n");
-		return;
-	}
 	if ( async->completion.status == SPARK_STATUS_OK )
 	{
 		if ( async->output_token_destination != 0 )
@@ -3244,7 +3406,10 @@ static void CUDART_CB SparkGlm5NextCompleteAsync(void *context)
 		return;
 	status = SparkWeightdWorkerSubmit(async->state->completion_worker,SparkGlm5NextCompleteOnWorker,async);
 	if ( status != SPARK_STATUS_OK )
-		fprintf(stderr,"GLM completion handoff failed: status %d; retaining lane and slot ownership\n",(int32_t)status);
+	{
+		fprintf(stderr,"GLM completion handoff failed: status %d; completing inline\n",(int32_t)status);
+		SparkGlm5NextCompleteOnWorker(async);
+	}
 }
 
 static SparkStatus SparkGlm5NextEnqueueAsyncCompletion(
@@ -3320,8 +3485,9 @@ static SparkStatus SparkGlm5NextRestoreRecurrent(SparkGlm5NextModuleState *state
 	status = SparkKvPageStoreReadback(&state->recurrent_store,page,generation,(uintptr_t)state->recurrent_staging,state->recurrent_page_bytes);
 	while ( status == SPARK_STATUS_BUSY )
 	{
-		if ( SparkKvPageStoreWaitForTransfers(&state->recurrent_store) != SPARK_STATUS_OK )
-			SPARK_FAIL(SPARK_STATUS_BUSY);
+		SparkStatus wait = SparkKvPageStoreWaitForTransfers(&state->recurrent_store);
+		if ( wait != SPARK_STATUS_OK )
+			SPARK_RETURN(wait);
 		status = SparkKvPageStoreReadback(&state->recurrent_store,page,generation,(uintptr_t)state->recurrent_staging,state->recurrent_page_bytes);
 	}
 	if ( status == SPARK_STATUS_OK )
@@ -3347,6 +3513,8 @@ static SparkStatus SparkGlm5NextStartClaimedBatch(SparkGlm5NextModuleState *stat
 	SparkGlm5NextTpChain *chain;
 	SparkStatus status;
 	cudaError_t error;
+	if ( state->tp_chain_active != 0u )
+		SPARK_FAIL(SPARK_STATUS_BUSY);
 	chain = (SparkGlm5NextTpChain *)calloc(1u,sizeof(*chain));
 	if ( chain == 0 )
 		SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
@@ -3367,7 +3535,13 @@ static SparkStatus SparkGlm5NextStartClaimedBatch(SparkGlm5NextModuleState *stat
 	chain->stage = SPARK_GLM5_NEXT_CHAIN_STAGE_BEGIN;
 	chain->active = 1u;
 	atomic_fetch_add_explicit(&state->submitted_count,1u,memory_order_relaxed);
-	status = SparkGlm5NextRestoreCacheLanes(state,&state->completions[slot_index]);
+	state->tp_chain_active = 1u;
+	if ( state->tp_device_collective_initialized != 0u )
+		status = SparkTpDeviceCollectiveChainKey(&state->tp_device_collective,chain->frame->request_id & SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK);
+	if ( status == SPARK_STATUS_OK && state->tp_device_collective_hc_initialized != 0u )
+		status = SparkTpDeviceCollectiveChainKey(&state->tp_device_collective_hc,chain->frame->request_id & SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK);
+	if ( status == SPARK_STATUS_OK )
+		status = SparkGlm5NextRestoreCacheLanes(state,&state->completions[slot_index]);
 	if ( status == SPARK_STATUS_OK )
 		status = SparkGlm5NextUploadPageTables(state,&state->completions[slot_index],slot->stream);
 	if ( status == SPARK_STATUS_OK )

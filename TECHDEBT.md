@@ -212,3 +212,76 @@ retained as a progress diary.
   fabric enhancement under the same API and scheduler.
 - Retain upgrade and rollback receipts so a failed expansion returns to the
   prior ready deployment without mixed topology state.
+
+## Multi-model serving (parallel inference on shared Sparks)
+
+Assessed 2026-09-13 against the lane/mesh/weightd architecture (PRs
+#959-#973). Handled today: per-model lanes (weightd-assigned, fail-closed),
+weight arenas shared by content identity (same model never loads twice),
+per-connection collectives (two engines of one model get distinct mesh
+pathways), swap-in loads that run daemon-side (a serving model does not
+stop while another loads), and per-engine continuous batching at
+MAXBATCHSIZE=128 with per-request completion. The gaps below are required
+for seamless production multi-model.
+
+- Lane-priority over-subscription policy: eviction is LRU plus epoch with
+  no lane awareness. Required rule: lane X may swap in only by evicting
+  weights whose owning lane is greater than X; when the evictable set
+  belongs to a lane currently executing, wait for its batch boundary, then
+  evict; when nothing greater than X is resident, the acquire errors
+  rather than thrashes.
+- Request queueing behind not-yet-live models: lane exhaustion fails the
+  residentd load closed and requests for that model see connection
+  refused at the router. Required: warm request queue that drains when the
+  model finishes loading (swap starts, requester waits, serving model
+  continues).
+- Load bandwidth fairness: swap-in reads run at full readahead with no
+  QoS; the serving model's page-cache and mesh traffic compete
+  unbounded. Required: a fair-share cap on loader throughput while any
+  lane is serving.
+- Output chunking for GPU fairness: decode chains hold the GPU for whole
+  tokens and cross-model sharing relies on driver time-slicing (no MPS).
+  Required: bounded output quanta analogous to prefill chunks so a lane
+  cannot lock the GPU for many tokens.
+- Pause and resume of output batches: token-boundary resume is structural
+  (sequence positions, prefix cache) but there is no pause/resume API, the
+  NVMe KV tier is disabled (kv_backing_maximum_bytes=0), and active-KV
+  protection is transaction-scoped rather than batch-scoped. Required:
+  resume without recomputation, with boundary-flushed KV protected from
+  eviction until the batch completes.
+- Same-model multi-engine has never been exercised end-to-end: two
+  residentds on one model (shared arena via identity match, distinct
+  lanes per connection) needs a live verification run, including the
+  MTP-debug use case.
+- Fleet tooling is single-model: the agent accepts multiple runtime roots
+  but release sync, health, and measurement lanes are per-root; no
+  multi-model deploy or update has been tested.
+- Deployed lane count is two; the eight-lane geometry is blocked on the
+  engine-side cudaHostRegister invalid-argument at the 4 GB mapping (lane
+  handoff Addendum 54).
+
+## Topology-aware lane sub-allocation
+
+- LANE_ACQUIRE today hands one whole lane (two mesh bands, sixteen rank
+  slots) to one engine. Extend the acquire to carry topology and rank
+  range: a residentd states TP degree plus the contiguous rank range it
+  occupies, and the allocator packs sub-ranges into bands (4xTP4, 2xTP8,
+  TP8+2xTP4 per lane), constraining TP8 ranges to start at rank 0 or 8.
+- Doorbell entries, mesh slots, and per-round ring positions are already
+  rank-indexed within a band, so sub-range packing is an allocator change
+  plus collective band/rank wiring; four TP4 drivers in one band must not
+  share sequence spaces (derive chain keys per sub-range owner).
+- Lane count verification: two lanes (1 GB page) proven; four lanes is one
+  define change and untested; the eight-lane attempt fails engine-side
+  cudaHostRegister with invalid argument on the 4 GB mapping while the
+  same registration shape succeeds standalone — isolate the in-engine
+  condition before assuming a size ceiling.
+
+## MPS evaluation on GB10
+
+- The CUDA MPS control and server binaries are present on the sparks.
+  Run a live evaluation: start the control daemon, run two CUDA
+  processes concurrently, confirm overlapping kernel execution and
+  per-process contexts. If GB10 supports MPS, cross-driver GPU
+  concurrency replaces driver time-slicing and the output-chunking
+  requirement shrinks to memory-bandwidth fairness.

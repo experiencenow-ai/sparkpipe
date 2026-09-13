@@ -1082,8 +1082,14 @@ static void SparkModelResidentdCompletion(
 			SPARK_MODEL_RESIDENTD_ROUTE_READY_OUTPUT :
 			SPARK_MODEL_RESIDENTD_ROUTE_READY_COMPLETION;
 	}
-	if ( status != SPARK_STATUS_OK )
-		SparkModelResidentdFailLocked(runtime,status,failure_reason,route);
+	if ( status != SPARK_STATUS_OK && route != 0 )
+	{
+		route->completion.status = status;
+		route->completion.token_count = 0u;
+		route->state = SPARK_MODEL_RESIDENTD_ROUTE_READY_COMPLETION;
+	}
+	else if ( status != SPARK_STATUS_OK )
+		SparkModelResidentdFailLocked(runtime,status,failure_reason,0);
 	pthread_mutex_unlock(&runtime->mutex);
 	SparkModelResidentdWake(runtime);
 }
@@ -1336,8 +1342,7 @@ static void SparkModelResidentdCloseClientLocked(
 					&runtime->sequence_slots[index].lease);
 			}
 	if ( live_lease != 0u && SparkModelResidentdStop == 0 )
-		SparkModelResidentdFailLocked(runtime,SPARK_STATUS_IO_ERROR,
-			SPARK_MODEL_RESIDENTD_FAILURE_CLIENT_LEASE_DISCONNECT,0);
+		fprintf(stderr,"model_residentd client_lease_disconnect live_leases reset\n");
 	if ( runtime->sequence_slots != 0 )
 		for (index=0u; index<runtime->runtime_limits.resident_sequence_capacity;
 			index++)
@@ -1913,13 +1918,7 @@ static SparkStatus SparkModelResidentdProcessContinuation(
 		&submission,wire->header.message_id) : 0;
 	pthread_mutex_unlock(&runtime->mutex);
 	if ( status != SPARK_STATUS_OK )
-	{
-		pthread_mutex_lock(&runtime->mutex);
-		SparkModelResidentdFailLocked(runtime,status,
-			SPARK_MODEL_RESIDENTD_FAILURE_CONTINUE_LEASE,0);
-		pthread_mutex_unlock(&runtime->mutex);
 		SPARK_RETURN(status);
-	}
 	if ( route == 0 )
 		SPARK_FAIL(SPARK_STATUS_BUSY);
 	status = SparkModelResidentdBindRoute(runtime,route,message,message_bytes,0u);
@@ -1934,8 +1933,6 @@ static SparkStatus SparkModelResidentdProcessContinuation(
 		cleanup_status = SparkModelResidentdDeactivateRouteLocked(runtime,route);
 		if ( cleanup_status != SPARK_STATUS_OK )
 			status = cleanup_status;
-		SparkModelResidentdFailLocked(runtime,status,
-			SPARK_MODEL_RESIDENTD_FAILURE_CONTINUE_LEASE,route);
 	}
 	pthread_mutex_unlock(&runtime->mutex);
 	SPARK_RETURN(status);
@@ -2309,8 +2306,6 @@ static SparkStatus SparkModelResidentdFailContinuationLocked(
 	SparkStatus status)
 {
 	route->state = SPARK_MODEL_RESIDENTD_ROUTE_FENCED;
-	SparkModelResidentdFailLocked(runtime,status,
-		SPARK_MODEL_RESIDENTD_FAILURE_CONTINUE_LEASE,route);
 	SPARK_RETURN(status);
 }
 
