@@ -8308,8 +8308,8 @@
     },
     {
       "path": "tests/test_code_size.py",
-      "sha256": "a2f365b0c3cc186866128d2a7898a5b16836557fe57201c001cd13764403ec97",
-      "size_bytes": 104933
+      "sha256": "053a6432080ac5250395666f1b24682e75817a4f5739c50690a5b5eb0a68caeb",
+      "size_bytes": 105476
     },
     {
       "path": "tests/test_common_glm_cuda_tree.c",
@@ -15685,5 +15685,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 65088964
+  "total_bytes": 65089507
 }
