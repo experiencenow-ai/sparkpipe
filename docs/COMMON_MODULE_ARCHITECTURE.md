@@ -197,3 +197,121 @@ module. Its merge to main is a separate lane decision.
   13 clusters, role-level clone method, minimax branch survey).
 - DRY-1: #976 (packbuilder/verifier consolidation, 13,748 LOC corpus).
 - Constant audit: #979, `docs/CONSTANT_AUDIT.md`, generative set G1-G6.
+
+## 11. Interface details (the no-audit contract)
+
+Every module's complete public surface. A dev reads this section and `llm_specifics.h`;
+nothing else. Signatures use the transport/module C conventions (compact Allman,
+stdint, `SparkStatus` returns). Modules marked *(shim)* wrap existing shared seams.
+
+### M-0 `spark_tp_mesh_kernels.cuh` + `spark_tp_mesh_register.h` — TP combine kernels *(LIVE)*
+The fused FP32 allreduce (100us path, piece 1) + publish/wait/guard + u64 maxloc.
+```c
+/* kernels.cuh (CUDACC only): launchers take (cudaStream_t, ...) */
+cudaError_t SparkGlm5NextLaunchSumRanksF32(stream, void *dest,
+    const void *const *sources, uint32_t source_count, uint32_t element_count);
+cudaError_t SparkGlm5NextLaunchSeedF32(stream, float *dest, const void *a,
+    const void *b, uint32_t element_count);          /* fallback path */
+cudaError_t SparkGlm5NextLaunchAddF32(stream, float *dest, const void *b, uint32_t n);
+cudaError_t SparkGlm5NextLaunchRoundF32(stream, void *dest, const float *src, uint32_t n);
+cudaError_t SparkGlm5NextLaunchAccumU64Max(stream, uint64_t *dest, const uint64_t *src, uint32_t n);
+cudaError_t SparkGlm5NextLaunchMeshPublish/Wait/Guard(stream, ...);  /* transport-internal */
+/* register.h (host C): ONE call fills the transport config */
+void SparkTpMeshRegisterCommonCombines(SparkTpDeviceCollectiveConfig *configuration);
+```
+Params (llm_defines): none beyond `SPARK_LLM_TILE_THREADS`-class constants. Adoption:
+delete the private kernel copies in cuda.cu (glm5_next done; glm52/dsv4/ling/laguna/
+qwen38_27b carry the same copies with the OLD bf16-per-step precision bug — adopting
+this module FIXES their numerics class).
+
+### M-1 `common_gdn_stage_kernels.cu` — qwen decode kernel suite
+Entry points mirror the 22-kernel suite (AttnDecode/Prepare/ChunkStep/MoE gather/
+scatter/router); names normalize `Qwen38Max<X>` -> `SparkLlm<X>`. Interface:
+```c
+int SparkLlmStageKernelsRegister(SparkLlmKernelTable *table);  /* fills fn ptrs */
+```
+The module consumes `SPARK_LLM_MLA_*`, `SPARK_LLM_MOE_*`, `SPARK_LLM_TILE_*` keys.
+Seed: qwen38_max cuda.cu. Identity: renamed-symbol link-equal + one correctness vector.
+
+### M-2 `common_glm_cuda_tree` — GLM kernel tree
+`config.h` + `unity.cu` + `layer.cuh` with the family prefix parameterized by
+`SPARK_LLM_FAMILY_TAG` include-path resolution (glm52/glm5_next include trees already
+87.4% rename-only). Interface = the existing `Glm5<Lm>Launch*` surface, unchanged
+names after adoption. Params: 60 keys (tile config, KDA/MLA geometry, HC).
+
+### M-3 `common_serving_tp_config` *(shim over the adapter template)*
+```c
+SparkStatus SparkServingAdapterTemplateLoadTpCollective(
+    const SparkServingAdapterTemplateConfiguration *configuration,
+    SparkServingAdapterTemplateRuntime *runtime);   /* the missing loader; seed: glm52 */
+```
+Deletes the 370-LOC hand-rolled TP JSON parsers (ling/laguna/glm5_next/qwen38-27b).
+
+### M-4 `common_serving_frame` *(shim)* — deployment-config handler skeleton.
+12 params; seed glm52 adapter. qwen38-27b's 2,322-LOC frame server collapses onto it.
+
+### M-5 `common_stagepack_format_ext.h`
+```c
+typedef struct { char magic[8]; uint32_t abi_version, kind_table_id, entry_count;
+                 uint64_t entry_bytes; } SparkStagepackHeader;   /* 64B entry proven */
+SparkStatus SparkStagepackValidate(const void *mapping, size_t bytes,
+    uint32_t family_kind_table_id, SparkStagepackView *out);
+```
+25 params incl. the per-family tensor-kind table (generated from llm_defines).
+
+### M-6 `common_pack_load_bind` *(shim over spark_pack_load_common.h)*
+```c
+SparkStatus SparkCommonPackLoadBind(const SparkLlmPackPlan *plan,   /* 12 macro keys */
+    SparkLlmPackBinding *out);
+```
+
+### M-7 `common_kv_frame`
+```c
+SparkStatus SparkModuleKvPrepareFrame(SparkLlmKvFrameRequest *request,
+    SparkLlmKvFrame *out);   /* qwen38_max/qwen4_flash copies are BYTE-identical */
+```
+
+### M-8 `common_kv_geometry.h` — capacity fillers + asserts (glm twins differ by 7 keys).
+
+### M-9 `spark_hybrid_state.h` — KDA/GDN/sliding ordinal builder + slot algebra.
+```c
+uint64_t SparkHybridStateOrdinal(const SparkLlmHybridPlan *plan, uint32_t layer);
+uint64_t SparkHybridSlotBytes(const SparkLlmHybridPlan *plan);
+```
+
+### M-10 `spark_rope_plan.h` — theta/yarn table builder + upload (8 params; kernels stay shared).
+
+### M-11 `common_glm_stage_module` — the 26 shared GLM module functions (glm52 strict subset).
+
+### M-12 `spark_resident_decode_stage_firmware_common.h` — ABI constants + per-family value table.
+
+### M-13 `common_validation_oracle` — oracle twins + GPU gates + rigs, per-family tables.
+
+### M-14 `common_pack_synthesizer` — in-module pack_synthesize (ling/laguna 20.6% divergence).
+
+### M-15 `common_deployment_generator` — gen_deployment + per-family key table (4 params).
+
+### M-16 batch-tuning ladder shim (5 params) — k3, dsv5.
+
+### M-17 Makefile wrappers over rules.mk (7 params).
+
+## 12. llm_specifics.h / llm_defines.h — the mechanism (LIVE)
+
+- `model-families/common/include/sparkpipe/llm_specifics.h` — the specimen, 52
+  sentinel keys, every value `SET_ME_*` (intentionally uncompilable). A new driver
+  copies it to its include path as `llm_defines.h`, fills values from the model card,
+  and the compiler errors ARE the remaining-work checklist.
+- `model-families/glm5_next/include/sparkpipe/llm_defines.h` — the first real seed
+  (verified: covers 52/52 specimen keys).
+- Family headers (`spark_<family>_model.h` etc.) become thin shims including it —
+  adoption is include-path only, no call-site changes.
+- The generators (gen_geometry_header.py), `_Static_assert` chains, and CI identity
+  checks all key off this file per section 7's pyramid.
+
+## 13. Mesh-kernel adoption status (the pilot)
+
+M-0 is the pilot of this system: extracted from glm5_next (fused FP32 sum by-value
+16-source kernel, seed/add/round fallback, u64 max, mesh publish/wait/guard), one-call
+registration via `SparkTpMeshRegisterCommonCombines`, glm5_next converted (private
+copies deleted). Remaining adopters with the OLD precision bug: glm52, dsv4, ling,
+laguna, qwen38_27b — each is: add include, call register, delete private kernels.
