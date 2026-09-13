@@ -551,3 +551,62 @@ SparkStatus SparkDsv41FlashEngramAccessRows(
 	memcpy(rows_out,assembled,sizeof(assembled));
 	return(SPARK_STATUS_OK);
 }
+
+SparkStatus SparkDsv41FlashEngramAccessStep(
+	SparkDsv41FlashEngramAccess *access,
+	uint32_t layer_index,
+	const int64_t *ids,
+	uint64_t seq_value,
+	uint64_t timeout_ns,
+	uint8_t *rows_out)
+{
+	SparkDsv41FlashEngramLease lease;
+	uint8_t assembled[SPARK_DSV41_FLASH_ENGRAM_ROWS_OUT_BYTES];
+	uint8_t row[SPARK_DSV41_FLASH_ENGRAM_ACCESS_ROW_BYTES];
+	uint64_t deadline,now,offset;
+	SparkStatus status;
+	uint32_t col;
+	if ( access == 0 || access->shard == 0 || ids == 0 || rows_out == 0 ||
+		layer_index >= SPARK_DSV41_FLASH_ENGRAM_ACCESS_LAYERS )
+		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	for (col = 0u; col < SPARK_DSV41_FLASH_ENGRAM_ACCESS_COLS; col++)
+		if ( ids[col] < 0 || (uint64_t)ids[col] >= access->layer_entries[layer_index] )
+			SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
+	memset(assembled,0,sizeof(assembled));
+	status = SparkDsv41FlashEngramLeaseAcquire(access,layer_index,ids,&lease);
+	if ( status != SPARK_STATUS_OK )
+		SPARK_RETURN(status);
+	for (col = 0u; col < SPARK_DSV41_FLASH_ENGRAM_ACCESS_COLS; col++)
+	{
+		if ( lease.local[col] == UINT64_MAX )
+			continue;
+		SparkDsv41FlashEngramRowLoad(access,layer_index,&lease,col,row);
+		memcpy(assembled + (size_t)col * SPARK_DSV41_FLASH_ENGRAM_ACCESS_ROW_BYTES,
+		    row,SPARK_DSV41_FLASH_ENGRAM_ACCESS_ROW_BYTES);
+		offset = SparkDsv41FlashEngramStagingOffset(layer_index,col);
+		memcpy((void *)(access->mesh + offset),row,
+		    SPARK_DSV41_FLASH_ENGRAM_ACCESS_ROW_BYTES);
+		status = SparkWeightdClientMeshBroadcast(access->shard->client,
+		    ((UINT32_C(1) << access->mesh_ranks) - 1u) &
+		    ~(UINT32_C(1) << access->mesh_rank),
+		    offset,offset,SPARK_DSV41_FLASH_ENGRAM_ACCESS_ROW_BYTES,seq_value,
+		    SparkDsv41FlashEngramDoorbellOffset(layer_index,col),
+		    SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
+		if ( status != SPARK_STATUS_OK )
+		{
+			(void)SparkDsv41FlashEngramLeaseFinish(access,&lease);
+			SPARK_RETURN(status);
+		}
+	}
+	status = SparkDsv41FlashEngramLeaseFinish(access,&lease);
+	if ( status != SPARK_STATUS_OK )
+		SPARK_RETURN(status);
+	now = SparkDsv41FlashEngramNowNs();
+	deadline = (now == 0 ? timeout_ns : now + timeout_ns);
+	status = SparkDsv41FlashEngramPollRemotes(access,layer_index,ids,seq_value,
+	    deadline,assembled);
+	if ( status != SPARK_STATUS_OK )
+		SPARK_RETURN(status);
+	memcpy(rows_out,assembled,sizeof(assembled));
+	return(SPARK_STATUS_OK);
+}

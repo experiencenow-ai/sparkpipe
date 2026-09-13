@@ -212,6 +212,32 @@ int main(int argc,char **argv)
 					failures++;
 					break;
 				}
+			memset(rows,0,sizeof(rows));
+			status = SparkDsv41FlashEngramAccessStep(&access,layer,ids,
+			    UINT64_C(4000) + layer * 131u + g_positions[pos],PROBE_TIMEOUT_NS,rows);
+			if ( status != SPARK_STATUS_BUSY )
+			{
+				(void)fprintf(stderr,"FAIL step-busy layer=%u pos=%u status=%d\n",layer,
+				    g_positions[pos],(int)status);
+				failures++;
+			}
+			for (col = 0u; col < PROBE_COLS * PROBE_ROW_BYTES; col++)
+				if ( rows[col] != 0u )
+				{
+					(void)fprintf(stderr,"FAIL step partial fill layer=%u pos=%u\n",layer,
+					    g_positions[pos]);
+					failures++;
+					break;
+				}
+			ids[0] = (int64_t)fixture.entries[layer];
+			status = SparkDsv41FlashEngramAccessStep(&access,layer,ids,
+			    UINT64_C(5000) + layer * 131u + g_positions[pos],PROBE_TIMEOUT_NS,rows);
+			if ( status != SPARK_STATUS_SCHEMA_ERROR )
+			{
+				(void)fprintf(stderr,"FAIL step id fail-closed layer=%u pos=%u status=%d\n",
+				    layer,g_positions[pos],(int)status);
+				failures++;
+			}
 			ids[0] = (int64_t)fixture.entries[layer];
 			status = SparkDsv41FlashEngramAccessRows(&access,layer,ids,
 			    UINT64_C(3000) + layer * 131u + g_positions[pos],PROBE_TIMEOUT_NS,rows);

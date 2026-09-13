@@ -83,6 +83,14 @@ SparkStatus SparkDsv41FlashEngramAccessRows(
 	uint64_t timeout_ns,
 	uint8_t *rows_out);
 
+SparkStatus SparkDsv41FlashEngramAccessStep(
+	SparkDsv41FlashEngramAccess *access,
+	uint32_t layer_index,
+	const int64_t *ids,
+	uint64_t seq_value,
+	uint64_t timeout_ns,
+	uint8_t *rows_out);
+
 #ifdef __cplusplus
 }
 #endif
