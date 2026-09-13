@@ -5,6 +5,7 @@
 #include "sparkpipe/spark_hybrid_state.h"
 #include "sparkpipe/spark_rope_plan.h"
 #include "sparkpipe/spark_lm_kernels.cuh"
+#include "sparkpipe/spark_tp_mesh_kernels.cuh"
 #include "inference/kernels/frame_error.cuh"
 #include "inference/kernels/kv.cuh"
 #include "inference/kernels/norm.cuh"
@@ -223,23 +224,6 @@ extern "C" cudaError_t SparkGemma4LaunchAttentionDecodeFull(cudaStream_t stream,
 	return(cudaGetLastError());
 }
 
-static __global__ void SparkGemma4TpCombineAddKernel(void *destination_bf16, const void *source_bf16, uint32_t row_count, uint32_t width)
-{
-	uint32_t row = blockIdx.x;
-	uint64_t pair_base = ((uint64_t)row * width) >> 1u;
-	uint64_t pair_count = width >> 1u;
-	uint64_t pair;
-	float2 dst,src;
-	if ( row >= row_count )
-		return;
-	for (pair = threadIdx.x; pair < pair_count; pair += blockDim.x)
-	{
-		dst = SparkLmLoadBf16Pair(destination_bf16,pair_base + pair);
-		src = SparkLmLoadBf16Pair(source_bf16,pair_base + pair);
-		SparkLmStoreBf16Pair(destination_bf16,pair_base + pair,dst.x + src.x,dst.y + src.y);
-	}
-}
-
 static __global__ void SparkGemma4LayerScaleKernel(void *hidden_bf16, const void *scalar_bf16, uint32_t dimension)
 {
 	float scale = SparkLmBf16ToFloat(scalar_bf16,0u);
@@ -256,14 +240,6 @@ extern "C" cudaError_t SparkGemma4LaunchLayerScale(cudaStream_t stream, void *hi
 	if ( hidden_bf16 == 0 || scalar_bf16 == 0 || row_count == 0u || dimension == 0u )
 		return(cudaErrorInvalidValue);
 	SparkGemma4LayerScaleKernel<<<row_count,SPARK_LM_CTA_THREADS,0,stream>>>(hidden_bf16,scalar_bf16,dimension);
-	return(cudaGetLastError());
-}
-
-extern "C" cudaError_t SparkGemma4LaunchTpCombineAdd(cudaStream_t stream, void *destination_bf16, const void *source_bf16, uint32_t row_count, uint32_t width)
-{
-	if ( destination_bf16 == 0 || source_bf16 == 0 || row_count == 0u || width == 0u || (width & 1u) != 0u )
-		return(cudaErrorInvalidValue);
-	SparkGemma4TpCombineAddKernel<<<row_count,SPARK_LM_CTA_THREADS,0,stream>>>(destination_bf16,source_bf16,row_count,width);
 	return(cudaGetLastError());
 }
 
@@ -300,26 +276,6 @@ extern "C" cudaError_t SparkGemma4LaunchHeadMaxLocPack(cudaStream_t stream, cons
 extern "C" cudaError_t SparkGemma4LaunchHeadMaxLocUnpack(cudaStream_t stream, const uint64_t *keys_u64, uint32_t *token_ids_u32, uint32_t row_count)
 {
 	SparkGemma4HeadMaxLocUnpackKernel<<<row_count,1u,0,stream>>>(keys_u64,token_ids_u32,row_count);
-	return(cudaGetLastError());
-}
-
-static __global__ void SparkGemma4TpCombineU64MaxKernel(uint64_t *destination, const uint64_t *source, uint32_t element_count)
-{
-	uint64_t index = ((uint64_t)blockIdx.x * blockDim.x) + threadIdx.x;
-	uint64_t value;
-	if ( index >= (uint64_t)element_count )
-		return;
-	value = source[index];
-	if ( value > destination[index] )
-		destination[index] = value;
-}
-
-extern "C" cudaError_t SparkGemma4LaunchTpCombineU64Max(cudaStream_t stream, uint64_t *destination, const uint64_t *source, uint32_t element_count)
-{
-	uint32_t blocks = (element_count + SPARK_LM_CTA_THREADS - 1u) / SPARK_LM_CTA_THREADS;
-	if ( destination == 0 || source == 0 || element_count == 0u )
-		return(cudaErrorInvalidValue);
-	SparkGemma4TpCombineU64MaxKernel<<<blocks == 0u ? 1u : blocks,SPARK_LM_CTA_THREADS,0,stream>>>(destination,source,element_count);
 	return(cudaGetLastError());
 }
 

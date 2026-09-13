@@ -18,6 +18,7 @@
 #include "sparkpipe/spark_stage_module_common.h"
 #include "sparkpipe/spark_stage_module_lifecycle.h"
 #include "sparkpipe/spark_tp_device_collective.h"
+#include "sparkpipe/spark_tp_mesh_register.h"
 #include "spark_gemma4_stagepack_format.h"
 
 #define SPARK_GEMMA4_MODULE_TAG "gemma4_stage"
@@ -459,9 +460,6 @@ static SparkStatus SparkGemma4ModuleAllocateSlot(SparkGemma4ModuleState *state, 
 static SparkStatus SparkGemma4ModuleAllocateSlotHostMirrors(SparkGemma4ModuleState *state, SparkGemma4ModuleSlot *slot);
 static SparkStatus SparkGemma4ModuleExecuteFrame(void *module_state, SparkModelDriverFrame *frame);
 
-extern cudaError_t SparkGemma4LaunchTpCombineAdd(cudaStream_t stream, void *destination_bf16, const void *source_bf16, uint32_t row_count, uint32_t width);
-extern cudaError_t SparkGemma4LaunchTpCombineU64Max(cudaStream_t stream, uint64_t *destination, const uint64_t *source, uint32_t element_count);
-
 static SparkStatus SparkGemma4ModuleOpenKvTier(SparkGemma4ModuleState *state, const SparkFirmwareModuleHostServices *host_services)
 {
 	const char *provider;
@@ -477,18 +475,6 @@ static SparkStatus SparkGemma4ModuleOpenKvTier(SparkGemma4ModuleState *state, co
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	}
 	return(SPARK_STATUS_OK);
-}
-
-static SparkStatus SparkGemma4ModuleTpCombineBf16(void *combine_context, void *destination_device, const void *source_device, uint32_t active_sequence_count, uint32_t hidden_dimension, void *cuda_stream)
-{
-	(void)combine_context;
-	return(SparkStageModuleCudaStatus(SPARK_GEMMA4_MODULE_TAG,SparkGemma4LaunchTpCombineAdd((cudaStream_t)cuda_stream,destination_device,source_device,active_sequence_count,hidden_dimension),"tp_combine"));
-}
-
-static SparkStatus SparkGemma4ModuleTpCombineU64Max(void *combine_context, uint64_t *destination_device, const uint64_t *source_device, uint32_t element_count, void *cuda_stream)
-{
-	(void)combine_context;
-	return(SparkStageModuleCudaStatus(SPARK_GEMMA4_MODULE_TAG,SparkGemma4LaunchTpCombineU64Max((cudaStream_t)cuda_stream,destination_device,source_device,element_count),"tp_combine_u64_max"));
 }
 
 static SparkStatus SparkGemma4ModuleInitializeTpCollective(SparkGemma4ModuleState *state)
@@ -533,9 +519,7 @@ static SparkStatus SparkGemma4ModuleInitializeTpCollective(SparkGemma4ModuleStat
 	configuration.backend_module_path = state->tp_backend_path;
 	configuration.local_host = state->tp_local_host;
 	configuration.registration_cuda_stream = state->slots[0].cuda_stream;
-	configuration.combine_bf16_function = SparkGemma4ModuleTpCombineBf16;
-	configuration.combine_u64_max_function = SparkGemma4ModuleTpCombineU64Max;
-	configuration.combine_context = state;
+	SparkTpMeshRegisterCommonCombines(&configuration);
 	status = SparkTpDeviceCollectiveApplyTopology(&topology,&configuration);
 	if ( status != SPARK_STATUS_OK )
 	{
