@@ -117,7 +117,7 @@ def parse_tensor_kind_names(text: str, name_value: dict[str, int]) -> dict[str, 
                 name_value[piece.group(1)] = value
     for match in re.finditer(r"^#define\s+(\w+)\s+(\w+)\s*$", text, re.M):
         source, target = match.group(1), match.group(2)
-        if "_TENSOR_" in source and target in name_value:
+        if "_TENSOR_" in source and target in name_value and source not in local:
             local[source] = name_value[target]
             name_value[source] = name_value[target]
     return local
@@ -275,12 +275,14 @@ def decode_pack(pack: dict[str, Any], formats: dict[str, Any]) -> dict[str, Any]
     totals = {"embedding": 0, "lm_head": 0, "moe": 0, "spine": 0}
     layers: set[int] = set()
     moe_layers: set[int] = set()
+    accounted = pack["header_bytes"] + pack["tensor_count"] * pack["entry_bytes"]
     for index in range(pack["tensor_count"]):
         base = index * pack["entry_bytes"]
         tensor_kind, layer_index = struct.unpack_from("<II", directory, base)
         payload_bytes = struct.unpack_from("<Q", directory, base + 32)[0]
         scale_bytes = struct.unpack_from("<Q", directory, base + 48)[0]
         total = payload_bytes + scale_bytes
+        accounted += total
         if tensor_kind in ids["embedding"]:
             totals["embedding"] += total
         elif tensor_kind in ids["lm_head"]:
@@ -291,11 +293,16 @@ def decode_pack(pack: dict[str, Any], formats: dict[str, Any]) -> dict[str, Any]
         else:
             totals["spine"] += total
             layers.add(layer_index)
+    padding_slack = pack["tensor_count"] * 256 + 4096
+    gap = pack["file_bytes"] - accounted
     return {
         "header": header,
         "totals": totals,
         "tensor_layers": len(layers),
         "moe_layer_count": len(moe_layers),
+        "accounted_bytes": accounted,
+        "gap_bytes": gap,
+        "gap_fatal": gap > padding_slack,
     }
 
 
@@ -496,7 +503,15 @@ def main() -> int:
         if args.cache:
             with open(args.cache, "w", encoding="utf-8") as handle:
                 json.dump(packs, handle, indent=1)
-    entries = [roofline(args, pack, decode_pack(pack, formats)) for pack in packs]
+    entries = []
+    for pack in packs:
+        decoded = decode_pack(pack, formats)
+        if decoded["gap_fatal"]:
+            raise SystemExit(
+                "byte accounting gap in %s: parsed %d of %d bytes"
+                % (pack["path"], decoded["accounted_bytes"], pack["file_bytes"])
+            )
+        entries.append(roofline(args, pack, decoded))
     if args.json:
         print(json.dumps({"format_magics": sorted(formats["defines"].items()), "lanes": entries}, indent=1))
     else:
