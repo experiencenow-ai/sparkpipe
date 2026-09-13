@@ -1,5 +1,5 @@
 {
-  "file_count": 2203,
+  "file_count": 2198,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -115,31 +115,6 @@
       "path": "cache/cache.h",
       "sha256": "d9923684f16b1103831914a0a254e366a5cb6851726884a41dbc8e1afccc3a1b",
       "size_bytes": 14044
-    },
-    {
-      "path": "cache/dsv41_warm/DeepSeek_V41_Tech_Report.pdf",
-      "sha256": "ba68e2e40408125ae6d2f63a9a241b61c73910691c74ec1a2a7023c851eac08d",
-      "size_bytes": 1809802
-    },
-    {
-      "path": "cache/dsv41_warm/model.safetensors.index.json",
-      "sha256": "74b0686a3d2891980d5e303251b075a3bccae2c2ff650747db2620a649b98fa8",
-      "size_bytes": 7470294
-    },
-    {
-      "path": "cache/dsv41_warm/ref/engram.py",
-      "sha256": "11f35ecbead8150c35aa002b3d180ef290b05a25afe883a11884f94d476d3897",
-      "size_bytes": 8138
-    },
-    {
-      "path": "cache/dsv41_warm/ref/kernel.py",
-      "sha256": "1236c3507019ed176f5dba5e04bcea58867cf654818c6cf138ed4845398c2455",
-      "size_bytes": 23790
-    },
-    {
-      "path": "cache/dsv41_warm/ref/model.py",
-      "sha256": "4e9ae23620edc8028ccc5d5fef552ab7fdc7dcd6f79608754fe9f67644056f65",
-      "size_bytes": 61549
     },
     {
       "path": "cache/kv_cache.c",
@@ -4088,13 +4063,13 @@
     },
     {
       "path": "modules/dsv41_flash_resident_decode_stage/source/spark_dsv41_flash_engram_access.c",
-      "sha256": "8010629aa239c008b40cf3f899236fc9783be3704627f3444a745cd7da040f83",
-      "size_bytes": 19901
+      "sha256": "ad9e807db135a3385cb1d4dd585f18934eec83619d9501e47d9eb5529addbe75",
+      "size_bytes": 22252
     },
     {
       "path": "modules/dsv41_flash_resident_decode_stage/source/spark_dsv41_flash_engram_access.h",
-      "sha256": "4e166d5442e82a48e7dd38c7f4bf09edaf524f7363daa3f29d38646bf98357cb",
-      "size_bytes": 2963
+      "sha256": "1d75a8db7f4214facbfe0e0081f0b94917ac1179e1f36a6b0963c9a4a1398aa0",
+      "size_bytes": 3155
     },
     {
       "path": "modules/dsv41_flash_resident_decode_stage/source/spark_dsv41_flash_resident_decode_stage_cuda.cu",
@@ -4123,8 +4098,8 @@
     },
     {
       "path": "modules/dsv41_flash_resident_decode_stage/tools/dsv41_flash_engram_probe.c",
-      "sha256": "5955c6fdac8944ea27a2c93cc0f67356ca70a5af2a8f6b29a2ee2ceb74ed0005",
-      "size_bytes": 7158
+      "sha256": "a945eeb3a22ab45b16086bae9a150061d297c5a5493bd0f1e8897003eebdc710",
+      "size_bytes": 8132
     },
     {
       "path": "modules/dsv41_flash_resident_decode_stage/tools/dsv41_flash_experts_manifest.c",
@@ -11020,5 +10995,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 44977594
+  "total_bytes": 35607538
 }
