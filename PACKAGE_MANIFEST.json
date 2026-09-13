@@ -1,5 +1,5 @@
 {
-  "file_count": 2169,
+  "file_count": 2170,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -3633,18 +3633,18 @@
     },
     {
       "path": "model-families/gemma4/include/sparkpipe/spark_gemma4_model.h",
-      "sha256": "a2c2e3a3a9d59e8140aa8a38169c1335e25aab73dec92f31aa91c44b3bc4487b",
-      "size_bytes": 3731
+      "sha256": "239eb418abe7e32b9674f35e9c262696033cacd209e6153cdd982f144be3382d",
+      "size_bytes": 3854
     },
     {
       "path": "model-families/gemma4/include/sparkpipe/spark_gemma4_moe_model.h",
-      "sha256": "6693599fb7dc1786c270612e5ce9551fc802f75f6c6054dcb055dc1688f30177",
-      "size_bytes": 3444
+      "sha256": "1d4558bcdf72e0e89fa757122eeed74e1ddc319dfbddfd785ca7af300b74ce34",
+      "size_bytes": 3563
     },
     {
       "path": "model-families/gemma4/include/sparkpipe/spark_gemma4_moe_model_aliases.h",
-      "sha256": "e1debf31dc9c30456ec2a45fa437b0269e98c679adb96fc470d3b7ddd4515acb",
-      "size_bytes": 4050
+      "sha256": "b9bd4c24787764ae0f83ce7e191e6125eb1200311911e40b99eee412cab44641",
+      "size_bytes": 4162
     },
     {
       "path": "model-families/glm52/include/sparkpipe/spark_glm52_chat_template.h",
@@ -4153,8 +4153,8 @@
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_resident_decode_stage_cuda.cu",
-      "sha256": "ce79b02e5c0ef67108f98856f144fdd450e9e066653b16bdb429922219c02f72",
-      "size_bytes": 24495
+      "sha256": "5f05d67378f785dd9317a9118ec6557a8d7e2225f5be6b7468af4d60d8400194",
+      "size_bytes": 25374
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_resident_decode_stage_module.c",
@@ -9317,6 +9317,11 @@
       "size_bytes": 2108
     },
     {
+      "path": "tools/gemma4_decode_roofline.py",
+      "sha256": "bf2dc58170afe63572219acaf5ab719bd26598d975a040344099fb286ba9c5b6",
+      "size_bytes": 7430
+    },
+    {
       "path": "tools/gemma4_stagepack.py",
       "sha256": "9eeaec82d516dd228f1352fd32bf369fcc9bb74977f6ed9e5eab51d0044649ef",
       "size_bytes": 37137
@@ -10850,5 +10855,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 35256461
+  "total_bytes": 35265124
 }
