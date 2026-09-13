@@ -1,5 +1,5 @@
 {
-  "file_count": 2171,
+  "file_count": 2173,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -63,8 +63,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "b1374e6d75582c93e15d61972fbafc41184826386f26483f45add2f39bc96473",
-      "size_bytes": 108007
+      "sha256": "359a72c683d564b7f38ea3041b3d180802ce76f0b4403a080040744158230fc5",
+      "size_bytes": 108925
     },
     {
       "path": "NCCL_16WIDE_RECEIPTS.md",
@@ -410,6 +410,11 @@
       "path": "docs/AGENT_LANE_BRIEFS/reports/coordinator-log.md",
       "sha256": "810f9cbf1c0e9df1120bec01b18e8db3850cc4f019c9c5ff5a82096a344706c2",
       "size_bytes": 425656
+    },
+    {
+      "path": "docs/AGENT_LANE_BRIEFS/reports/d1-weightd-stability-2026-09-13.md",
+      "sha256": "8ff4003181af6381a00269501f4851b93f44c9164f2fe724581a48be3e00a843",
+      "size_bytes": 9513
     },
     {
       "path": "docs/AGENT_LANE_BRIEFS/reports/debts-2026-08-29.md",
@@ -5118,8 +5123,8 @@
     },
     {
       "path": "node/model_residentd.c",
-      "sha256": "13ae74bff37f5651b65969f42b91716cdda8dbcbd206a7b7b370c6e038702f02",
-      "size_bytes": 113960
+      "sha256": "c122daa75959576b3b67ebeb507aa7ad55b8accb008413d7491ba7a3496813b9",
+      "size_bytes": 113906
     },
     {
       "path": "node/weightd.c",
@@ -8197,6 +8202,11 @@
       "size_bytes": 16262
     },
     {
+      "path": "tests/test_model_resident_reconnect.c",
+      "sha256": "9000b5143244c50857bef7a8466439dee181414a38cf859f44da06952a72ff4d",
+      "size_bytes": 13194
+    },
+    {
       "path": "tests/test_model_runtime.c",
       "sha256": "92d53c7d9218e7cb5f5e5ee962ab70789b74d7d75ae58328e2f90e8f18b84a42",
       "size_bytes": 10488
@@ -10860,5 +10870,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 35274665
+  "total_bytes": 35298236
 }
