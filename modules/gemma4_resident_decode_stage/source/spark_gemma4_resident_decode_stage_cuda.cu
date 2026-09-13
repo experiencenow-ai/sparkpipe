@@ -16,9 +16,25 @@
 #define SPARK_GEMMA4_CUDA_THREADS 256u
 #define SPARK_GEMMA4_CUDA_PAGE_SLOTS SPARK_GEMMA4_RESIDENT_DECODE_STAGE_KV_BLOCK_TOKENS
 
-typedef LmKvGeometry<SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION * 4u,SPARK_GEMMA4_CUDA_PAGE_SLOTS,true> SparkGemma4SlidingGeometry1;
-typedef LmKvGeometry<SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION * 8u,SPARK_GEMMA4_CUDA_PAGE_SLOTS,true> SparkGemma4SlidingGeometry2;
-typedef LmKvGeometry<SPARK_GEMMA4_MODEL_FULL_HEAD_DIMENSION * 4u,SPARK_GEMMA4_CUDA_PAGE_SLOTS,true> SparkGemma4FullGeometry1;
+typedef LmKvGeometry<SPARK_GEMMA4_MODEL_KV_SLOT_BYTES_PER_HEAD(SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION),SPARK_GEMMA4_CUDA_PAGE_SLOTS,true> SparkGemma4SlidingGeometry1;
+typedef LmKvGeometry<SPARK_GEMMA4_MODEL_KV_SLOT_BYTES_PER_HEAD(SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION) * 2u,SPARK_GEMMA4_CUDA_PAGE_SLOTS,true> SparkGemma4SlidingGeometry2;
+typedef LmKvGeometry<SPARK_GEMMA4_MODEL_KV_SLOT_BYTES_PER_HEAD(SPARK_GEMMA4_MODEL_FULL_HEAD_DIMENSION),SPARK_GEMMA4_CUDA_PAGE_SLOTS,true> SparkGemma4FullGeometry1;
+
+static_assert(SparkGemma4SlidingGeometry1::kSlotBytes ==
+		(SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION +
+		 SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION) *
+		    SPARK_GEMMA4_MODEL_BF16_ELEMENT_BYTES,
+	"one sliding kv head stores a bf16 k and v row");
+static_assert(SparkGemma4SlidingGeometry2::kSlotBytes ==
+		2u * (SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION +
+		      SPARK_GEMMA4_MODEL_SLIDING_HEAD_DIMENSION) *
+		    SPARK_GEMMA4_MODEL_BF16_ELEMENT_BYTES,
+	"two sliding kv heads store bf16 k and v rows");
+static_assert(SparkGemma4FullGeometry1::kSlotBytes ==
+		(SPARK_GEMMA4_MODEL_FULL_HEAD_DIMENSION +
+		 SPARK_GEMMA4_MODEL_FULL_HEAD_DIMENSION) *
+		    SPARK_GEMMA4_MODEL_BF16_ELEMENT_BYTES,
+	"one full-attention kv head stores a bf16 shared k/v row pair");
 
 static int32_t SparkGemma4BuildKvView(LmKvView *view, void *pool, const uint32_t *page_table, uint32_t page_table_stride, uint32_t sequence_count, uint32_t pool_page_count, LmKvAccessError *access_error)
 {
