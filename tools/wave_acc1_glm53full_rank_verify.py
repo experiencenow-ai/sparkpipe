@@ -43,11 +43,10 @@ class FullEntryReader(PackReader):
     def __init__(self, path: Path):
         super().__init__(path)
         with open(path, "rb") as handle:
-            handle.seek(0)
             head = handle.read(packer_mod.HEADER_BYTES)
-        directory_offset = struct.unpack_from("<2Q", head, 80)[0]
-        handle.seek(directory_offset)
-        raw = handle.read(self.tensor_count * packer_mod.ENTRY_BYTES)
+            directory_offset = struct.unpack_from("<2Q", head, 80)[0]
+            handle.seek(directory_offset)
+            raw = handle.read(self.tensor_count * packer_mod.ENTRY_BYTES)
         self.full = {}
         for i in range(self.tensor_count):
             e = ENTRY_STRUCT.unpack_from(raw, i * packer_mod.ENTRY_BYTES)
