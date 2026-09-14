@@ -392,7 +392,7 @@ static SparkStatus SparkQwen38MaxModuleConfigure(SparkQwen38MaxModuleState *stat
 #define SPARK_PACK_LOAD_SEEN_FORMAT "%08x"
 #define SPARK_PACK_LOAD_SEEN_ARG(value) (value)
 #define SPARK_PACK_LOAD_BYTES_MATCH(entry) \
-	((entry)->payload_bytes == SparkQwen38MaxStagePackPayloadBytes((entry)->weight_format,(entry)->rows,(entry)->columns) && (entry)->scale_bytes == SparkQwen38MaxStagePackScaleBytes((entry)->weight_format,(entry)->rows,(entry)->columns))
+	((entry)->payload_bytes == SparkQwen38MaxStagePackPayloadBytes((entry)->weight_format,(entry)->rows,(entry)->columns) && (entry)->scale_bytes == SparkQwen38MaxStagePackScaleBytesFor((entry)->tensor_kind,(entry)->weight_format,(entry)->rows,(entry)->columns))
 #define SPARK_PACK_LOAD_EXPECT_GEOMETRY(state,expected) SparkQwen38MaxStagePackExpectedGeometryWire((expected),(state)->first_layer_index,(state)->layer_count)
 #define SPARK_PACK_LOAD_GEOMETRY_MISMATCH(state,header,expected) (SparkQwen38MaxStagePackHeaderMatches((header),(expected)) != 0 || (header)->directory_offset != (header)->header_bytes)
 #define SPARK_PACK_LOAD_LOG_GEOMETRY_MISMATCH(state,header,expected) fprintf(stderr,"%s pack_geometry_mismatch\n",SPARK_QWEN38_MAX_MODULE_TAG)
@@ -413,7 +413,7 @@ static SparkStatus SparkQwen38MaxModuleValidateEntry(SparkQwen38MaxModuleState *
 		if ( (shape.natural_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_MXFP4_E2M1 && shape.natural_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_FP8_E4M3_F32B128) || entry->weight_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_BF16 )
 			SPARK_FAIL(SPARK_STATUS_VALIDATION_FAILED);
 	}
-	if ( entry->weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_MXFP4_E2M1 ? entry->scale_group_size != SPARK_QWEN38_MAX_MODEL_MXFP4_GROUP_SIZE : (entry->weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_FP8_E4M3_F32B128 ? entry->scale_group_size != 128u : entry->scale_group_size != 0u) )
+	if ( entry->weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_MXFP4_E2M1 ? entry->scale_group_size != SPARK_QWEN38_MAX_MODEL_MXFP4_GROUP_SIZE : (entry->weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_FP8_E4M3_F32B128 ? entry->scale_group_size != 128u : (entry->weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_NVFP4_PACKED ? entry->scale_group_size != 16u : entry->scale_group_size != 0u)) )
 		SPARK_FAIL(SPARK_STATUS_VALIDATION_FAILED);
 	return(SparkQwen38MaxModuleValidateEntryPlacement(state,entry,file_bytes,is_global));
 }
