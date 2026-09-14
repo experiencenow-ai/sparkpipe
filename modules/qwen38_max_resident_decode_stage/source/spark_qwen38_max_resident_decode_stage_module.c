@@ -229,6 +229,14 @@ typedef struct SparkQwen38MaxModuleState
 	uint32_t kv_evict_cursor;
 	void *kv_block_staging;
 	void *kv_gdn_staging;
+	uint32_t t1_dump_enable;
+	char t1_dump_dir[256];
+	uint32_t t1_position;
+	uint16_t *t1_stage_hidden;
+	uint32_t *t1_stage_route_ids;
+	float *t1_stage_route_weights;
+	float *t1_stage_score;
+	float *t1_score_device;
 } SparkQwen38MaxModuleState;
 
 static SparkStatus SparkQwen38MaxModuleConfigure(SparkQwen38MaxModuleState *state)
@@ -319,6 +327,25 @@ static SparkStatus SparkQwen38MaxModuleConfigure(SparkQwen38MaxModuleState *stat
 	}
 	state->debug_skip_gdn = getenv("SPARK_QWEN38_MAX_STAGE_DEBUG_SKIP_GDN") != 0 ? 1u : 0u;
 	state->debug_skip_moe = getenv("SPARK_QWEN38_MAX_STAGE_DEBUG_SKIP_MOE") != 0 ? 1u : 0u;
+	if ( getenv("SPARK_QWEN38_MAX_T1_DUMP") != 0 )
+	{
+		const char *t1_dump_dir;
+		status = SparkStageModuleEnvironmentText(SPARK_QWEN38_MAX_MODULE_TAG,"SPARK_QWEN38_MAX_T1_DUMP",&t1_dump_dir);
+		if ( status != SPARK_STATUS_OK )
+			SPARK_RETURN(status);
+		if ( snprintf(state->t1_dump_dir,sizeof(state->t1_dump_dir),"%s",t1_dump_dir) >= (int)sizeof(state->t1_dump_dir) )
+			SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+		state->t1_dump_enable = 1u;
+		state->t1_stage_hidden = (uint16_t *)malloc(SPARK_QWEN38_MAX_MODEL_HIDDEN_BF16_BYTES);
+		state->t1_stage_route_ids = (uint32_t *)malloc(SPARK_QWEN38_MAX_MODEL_EXPERTS_PER_TOKEN * sizeof(uint32_t));
+		state->t1_stage_route_weights = (float *)malloc(SPARK_QWEN38_MAX_MODEL_EXPERTS_PER_TOKEN * sizeof(float));
+		state->t1_stage_score = (float *)malloc(sizeof(float));
+		if ( state->t1_stage_hidden == 0 || state->t1_stage_route_ids == 0 ||
+			state->t1_stage_route_weights == 0 || state->t1_stage_score == 0 )
+			SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
+		if ( cudaMalloc(&state->t1_score_device,sizeof(float)) != cudaSuccess )
+			SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
+	}
 	status = SparkStageModuleStageTimingEnable(&state->stage_timing,"q38stage",SPARK_QWEN38_MAX_MODULE_STAGE_NAMES,SPARK_QWEN38_MAX_MODULE_STAGE_COUNT);
 	if ( status == SPARK_STATUS_OK )
 	status = SparkStageModuleEnvironmentUnsigned(SPARK_QWEN38_MAX_MODULE_TAG,"SPARK_QWEN38_MAX_STAGE_COUNT",1u,SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_MAX_STAGE_COUNT,&state->stage_count);
@@ -1060,6 +1087,7 @@ extern cudaError_t SparkQwen38MaxLaunchHeadArgmax(cudaStream_t stream, const voi
 extern cudaError_t SparkQwen38MaxLaunchHeadShadowQuantize(cudaStream_t stream, const void *head_bf16, uint8_t *shadow_payload, uint8_t *shadow_scale, float *error_norm, uint32_t candidate_count, uint32_t hidden_dimension);
 extern cudaError_t SparkQwen38MaxLaunchHeadScreenedArgmax(cudaStream_t stream, const void *hidden_bf16, const void *head_weight_bf16, const uint8_t *shadow_payload, const uint8_t *shadow_scale, const float *error_norm, void *logits_bf16, uint32_t *candidate_ids, uint32_t *candidate_counts, uint32_t *output_token_ids, uint32_t row_count, uint32_t candidate_count);
 extern cudaError_t SparkQwen38MaxLaunchTpCombineAdd(cudaStream_t stream, void *destination_bf16, const void *source_bf16, uint32_t row_count, uint32_t width);
+extern cudaError_t SparkQwen38MaxLaunchHeadTopScore(cudaStream_t stream, const void *normalized_bf16, const void *head_weight_bf16, const uint32_t *token_ids, float *score_f32, uint32_t dimension);
 
 
 static SparkStatus SparkQwen38MaxModuleTpCombineBf16(void *combine_context, void *destination_device, const void *source_device, uint32_t active_sequence_count, uint32_t hidden_dimension, void *cuda_stream)
@@ -1294,6 +1322,12 @@ static void SparkQwen38MaxModuleStateTeardown(void *module_state)
 		cudaFree(state->kv_table_indices_device);
 	if ( state->kv_table_counts_device != 0 )
 		cudaFree(state->kv_table_counts_device);
+	free(state->t1_stage_hidden);
+	free(state->t1_stage_route_ids);
+	free(state->t1_stage_route_weights);
+	free(state->t1_stage_score);
+	if ( state->t1_score_device != 0 )
+		cudaFree(state->t1_score_device);
 }
 
 static SparkStatus SparkQwen38MaxModuleAdmit(
@@ -1611,6 +1645,86 @@ static SparkStatus SparkQwen38MaxModuleRunMoe(SparkQwen38MaxModuleState *state, 
 }
 
 
+static SparkStatus SparkQwen38MaxModuleT1WriteFile(const SparkQwen38MaxModuleState *state,const char *name,const void *data,size_t bytes)
+{
+	char path[512];
+	FILE *file;
+	size_t written;
+	if ( snprintf(path,sizeof(path),"%s/%s",state->t1_dump_dir,name) >= (int)sizeof(path) )
+		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	file = fopen(path,"wb");
+	if ( file == 0 )
+		SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+	written = fwrite(data,1,bytes,file);
+	if ( written != bytes )
+	{
+		fclose(file);
+		SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+	}
+	if ( fclose(file) != 0 )
+		SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+	return(SPARK_STATUS_OK);
+}
+
+
+static SparkStatus SparkQwen38MaxModuleT1DumpLayer(SparkQwen38MaxModuleState *state,SparkQwen38MaxModuleSlot *slot,uint32_t layer)
+{
+	char name[64];
+	cudaStream_t stream = (cudaStream_t)slot->cuda_stream;
+	cudaError_t error;
+	SparkStatus status;
+	if ( state->t1_dump_enable == 0u || state->tp_rank != 0u )
+		return(SPARK_STATUS_OK);
+	error = cudaMemcpyAsync(state->t1_stage_hidden,slot->hidden_bf16,SPARK_QWEN38_MAX_MODEL_HIDDEN_BF16_BYTES,cudaMemcpyDeviceToHost,stream);
+	if ( error == cudaSuccess )
+		error = cudaMemcpyAsync(state->t1_stage_route_ids,slot->moe_indices_u32,SPARK_QWEN38_MAX_MODEL_EXPERTS_PER_TOKEN * sizeof(uint32_t),cudaMemcpyDeviceToHost,stream);
+	if ( error == cudaSuccess )
+		error = cudaMemcpyAsync(state->t1_stage_route_weights,slot->moe_weights_f32,SPARK_QWEN38_MAX_MODEL_EXPERTS_PER_TOKEN * sizeof(float),cudaMemcpyDeviceToHost,stream);
+	if ( error == cudaSuccess )
+		error = cudaStreamSynchronize(stream);
+	if ( error != cudaSuccess )
+		SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+	snprintf(name,sizeof(name),"pos%04u_layer%04u_streams.u16",state->t1_position,layer);
+	status = SparkQwen38MaxModuleT1WriteFile(state,name,state->t1_stage_hidden,SPARK_QWEN38_MAX_MODEL_HIDDEN_BF16_BYTES);
+	if ( status == SPARK_STATUS_OK )
+	{
+		snprintf(name,sizeof(name),"pos%04u_layer%04u_route_ids.u32",state->t1_position,layer);
+		status = SparkQwen38MaxModuleT1WriteFile(state,name,state->t1_stage_route_ids,SPARK_QWEN38_MAX_MODEL_EXPERTS_PER_TOKEN * sizeof(uint32_t));
+	}
+	if ( status == SPARK_STATUS_OK )
+	{
+		snprintf(name,sizeof(name),"pos%04u_layer%04u_route_weights.f32",state->t1_position,layer);
+		status = SparkQwen38MaxModuleT1WriteFile(state,name,state->t1_stage_route_weights,SPARK_QWEN38_MAX_MODEL_EXPERTS_PER_TOKEN * sizeof(float));
+	}
+	SPARK_RETURN(status);
+}
+
+
+static cudaError_t SparkQwen38MaxModuleT1DumpHead(SparkQwen38MaxModuleState *state,SparkQwen38MaxModuleSlot *slot)
+{
+	char name[64];
+	cudaStream_t stream = (cudaStream_t)slot->cuda_stream;
+	uint32_t token;
+	cudaError_t error;
+	error = SparkQwen38MaxLaunchHeadTopScore(stream,slot->normalized_bf16,state->lm_head_weight_bf16,slot->output_token_ids,state->t1_score_device,SPARK_QWEN38_MAX_MODEL_HIDDEN_DIMENSION);
+	if ( error == cudaSuccess )
+		error = cudaMemcpyAsync(state->t1_stage_score,state->t1_score_device,sizeof(float),cudaMemcpyDeviceToHost,stream);
+	if ( error == cudaSuccess )
+		error = cudaMemcpyAsync(&token,slot->output_token_ids,sizeof(token),cudaMemcpyDeviceToHost,stream);
+	if ( error == cudaSuccess )
+		error = cudaStreamSynchronize(stream);
+	if ( error != cudaSuccess )
+		return(error);
+	snprintf(name,sizeof(name),"pos%04u_head_top1_token.u32",state->t1_position);
+	if ( SparkQwen38MaxModuleT1WriteFile(state,name,&token,sizeof(token)) != SPARK_STATUS_OK )
+		return(cudaErrorInvalidValue);
+	snprintf(name,sizeof(name),"pos%04u_head_top1_score.f32",state->t1_position);
+	if ( SparkQwen38MaxModuleT1WriteFile(state,name,state->t1_stage_score,sizeof(float)) != SPARK_STATUS_OK )
+		return(cudaErrorInvalidValue);
+	return(cudaSuccess);
+}
+
+
 static SparkStatus SparkQwen38MaxModuleRunLayer(SparkQwen38MaxModuleState *state, SparkQwen38MaxModuleSlot *slot, const SparkQwen38MaxKvBlockTableView *table, uint32_t layer, uint32_t rows)
 {
 	SparkQwen38MaxAttnRowsView rows_view;
@@ -1629,6 +1743,8 @@ static SparkStatus SparkQwen38MaxModuleRunLayer(SparkQwen38MaxModuleState *state
 		status = SPARK_QWEN38_MAX_MODEL_LAYER_IS_GDN(layer) != 0u ? SparkQwen38MaxModuleRunGdnLayer(state,slot,layer,rows) : SparkQwen38MaxModuleRunAttnLayer(state,slot,table,&state->attn_by_layer[layer],state->attn_ordinal_by_layer[layer],&rows_view,rows);
 	if ( status == SPARK_STATUS_OK && state->debug_skip_moe == 0u )
 		status = SparkQwen38MaxModuleRunMoe(state,slot,state->mlp_norm_by_layer[layer],&state->moe_by_layer[layer],layer,rows);
+	if ( status == SPARK_STATUS_OK )
+		status = SparkQwen38MaxModuleT1DumpLayer(state,slot,layer);
 	SPARK_RETURN(status);
 }
 
@@ -1827,6 +1943,8 @@ static cudaError_t SparkQwen38MaxModuleEmitHead(SparkQwen38MaxModuleState *state
 		error = SparkQwen38MaxLaunchHeadArgmax(stream,slot->normalized_bf16,state->lm_head_weight_bf16,slot->input_token_ids,slot->output_token_ids,rows,SPARK_QWEN38_MAX_MODEL_OUTPUT_VOCAB_COUNT);
 	if ( error == cudaSuccess )
 		error = cudaMemcpyAsync(frame->buffers[out_index].address,slot->output_token_ids,rows * sizeof(uint32_t),cudaMemcpyDeviceToHost,stream);
+	if ( error == cudaSuccess && state->t1_dump_enable != 0u && state->tp_rank == 0u )
+		error = SparkQwen38MaxModuleT1DumpHead(state,slot);
 	return(error);
 }
 
@@ -1995,6 +2113,7 @@ static SparkStatus SparkQwen38MaxModuleExecuteFrame(
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	}
 	slot = &state->slots[0];
+	state->t1_position = frame->sequence_position;
 	if ( slot->cuda_stream == 0 )
 		SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
 	for (row = 0; row < rows; row++)

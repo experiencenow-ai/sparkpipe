@@ -1338,6 +1338,37 @@ extern "C" cudaError_t SparkQwen38MaxLaunchHeadArgmax(cudaStream_t stream, const
 	SparkLmHeadArgmaxKernel<<<row_count,SPARK_LM_CTA_THREADS,0,stream>>>(hidden_bf16,head_weight_bf16,token_ids,output_token_ids,row_count,SPARK_QWEN38_MAX_MODEL_HIDDEN_DIMENSION,candidate_count);
 	return(cudaGetLastError());
 }
+
+
+static __global__ void SparkQwen38HeadTopScoreKernel(const void *normalized_bf16, const void *head_weight_bf16, const uint32_t *token_ids, float *score_f32, uint32_t dimension)
+{
+	__shared__ float reduce[SPARK_LM_CTA_WARPS];
+	uint32_t warp = threadIdx.x / SPARK_LM_WARP_LANES,lane = threadIdx.x % SPARK_LM_WARP_LANES;
+	uint64_t row_offset;
+	uint32_t element;
+	float partial;
+	partial = 0.0f;
+	row_offset = (uint64_t)token_ids[0] * (uint64_t)dimension;
+	for ( element = threadIdx.x; element < dimension; element += blockDim.x )
+		partial += SparkLmBf16ToFloat(normalized_bf16,element) * SparkLmBf16ToFloat(head_weight_bf16,row_offset + (uint64_t)element);
+	partial = SparkLmWarpReduceSum(partial);
+	if ( lane == 0u )
+		reduce[warp] = partial;
+	__syncthreads();
+	if ( warp != 0u )
+		return;
+	partial = lane < SPARK_LM_CTA_WARPS ? reduce[lane] : 0.0f;
+	partial = SparkLmWarpReduceSum(partial);
+	if ( lane == 0u )
+		score_f32[0] = partial;
+}
+
+
+extern "C" cudaError_t SparkQwen38MaxLaunchHeadTopScore(cudaStream_t stream, const void *normalized_bf16, const void *head_weight_bf16, const uint32_t *token_ids, float *score_f32, uint32_t dimension)
+{
+	SparkQwen38HeadTopScoreKernel<<<1u,SPARK_LM_CTA_THREADS,0,stream>>>(normalized_bf16,head_weight_bf16,token_ids,score_f32,dimension);
+	return(cudaGetLastError());
+}
 _Static_assert((SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT & (SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT - 1u)) == 0u,"router sort capacity needs a power-of-two expert count");
 #define SPARK_QWEN38_ROUTER_SORT_CAPACITY SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT
 
