@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 AGENT=tools/fleet_node_agent.sh
-ROOT=glm53flash.fp8.tp16
+ROOT=example.fp8.tp16
 SB=$(mktemp -d /tmp/deploy_scope.XXXXXX)
 trap 'rm -rf "$SB"' EXIT
 PASS=0
@@ -191,7 +191,7 @@ import json, sys
 data = json.load(open(sys.argv[1]))
 assert data["epoch"] > 0, "epoch missing"
 assert "load" in data and "mem_avail_gb" in data, "host fields missing"
-root = data["roots"]["glm53flash.fp8.tp16"]
+root = data["roots"]["example.fp8.tp16"]
 assert root["pid"] == 4242, "pid missing"
 assert root["rss_mb"] == 512, "rss_mb missing"
 assert root["log_age_s"] == 3, "log_age_s missing"
@@ -211,7 +211,7 @@ echo transport > "$TREE/build/libhidden_transport_spark_host_rdma_verbs.so"
 echo adapter > "$TREE/build/modules/fam/codec/libglm5_next_serving_adapter_codec.so"
 echo driver > "$HOME/sparkdata/out/stages/stage_000/model_driver.so"
 echo stagecfg-live > "$PUBREL/config/stage_00.json"
-echo '{"runtime_root":"sparkdata/glm53flash.fp8.tp16"}' > "$PUBREL/model_resident.json"
+echo '{"runtime_root":"sparkdata/example.fp8.tp16"}' > "$PUBREL/model_resident.json"
 if bash tools/publish_local.sh fam codec "$ROOT"; then
     ok "publish_local: exited clean"
 else

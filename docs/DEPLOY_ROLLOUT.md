@@ -7,8 +7,9 @@ in `tools/fleet_node_agent.sh`, `tools/publish_local.sh`,
 `tools/weightsd_announce.sh`, `tools/fleet_release_hygiene.sh`). This
 runbook is NOT executed by the PR that lands the code: the hub steps
 below touch live fleet state and need coredev informed beforehand (the
-operator owns that notification, including the retirement of the
-out-of-band `tools_local/{p,b}` deploy session).
+operator owns that notification, covering the mgr2-lane retirement in
+step 1 and the weightsd handoff in step 5 — never his glm53flash
+channel, see Isolation ruling).
 
 Scope of the landed code, for reference during rollout:
 
@@ -38,33 +39,51 @@ Scope of the landed code, for reference during rollout:
   and the node agent never kills or starts weightd; `ensure_weightd`
   remains a down-state watchdog only.
 
+## Isolation ruling (read first)
+
+glm53flash = coredev's channel. mgr2 tooling neither deploys, restarts,
+nor monitors it — isolation is bidirectional. mgr2's rollout, cut-over,
+proofs and defaults below cover mgr2's lanes only; nothing in this
+runbook subscribes a mgr2 node to the glm53flash root by default, and
+nothing in mgr2's publish tooling writes to `~/release/glm53flash.*`.
+
 ## Step 0 — Preconditions
 
 1. PR `lane/deploy-protocol-multi-dev` merged to main; hub build tree
    updated (`git -C ~/sparkpipe-build fetch && git reset --hard main`).
 2. `bash tests/test_deploy_restart_scope.sh` green on the hub checkout
    (52 checks; needs no GPU or fleet access).
-3. coredev informed: W58/`tools_local` retirement (this step 1) and the
-   weightsd handoff ceremony (step 4).
+3. coredev informed: the mgr2-lane retirement in this step, and the
+   weightsd handoff ceremony (step 5). His glm53flash channel and his
+   `tools_local/{p,b}` deploy path are HIS — they are not touched by
+   this rollout (see Isolation ruling).
 4. Snapshot rollback material (see Rollback): the deployed agent
    `71ec91d332f2f076` still exists on sparkf at
    `~/sparkpipe-build-958/tools_local/fleet_node_agent.sh` — copy it to
    `~/release/core/bin/fleet_node_agent.sh.rollback-71ec91d3` BEFORE
    the first `publish_core.sh` run overwrites `~/release/core/bin/`.
 
-## Step 1 — Hub reconcile (retire out-of-band path)
+## Step 1 — Hub reconcile (retire only the mgr2-lane pieces)
 
 Coordinate with coredev (operator informs him). Then on sparkf:
 
-1. Retire the out-of-band deploy tools:
-   `mv ~/sparkpipe-build-958/tools_local/{p,b,fullbuild_once.sh,module_build_release.sh} \
+1. Retire ONLY the out-of-band pieces that touch mgr2's lanes:
+   `mkdir -p ~/sparkpipe-build-958/tools_local/retired-$(date +%Y%m%d)`
+   `mv ~/sparkpipe-build-958/tools_local/{fullbuild_once.sh,module_build_release.sh} \
    ~/sparkpipe-build-958/tools_local/retired-$(date +%Y%m%d)/`
-   From this point the only deploy path is the repo publish tooling
-   (in-band, per-channel). Nothing streams tarballs or kills by
-   exe/cwd pattern anymore.
+   `p` and `b` REMAIN: they are coredev's glm53flash deploy path until
+   HE migrates that channel onto the in-band per-root tooling. mgr2
+   tooling neither invokes nor modifies them. From this point the only
+   mgr2 deploy path is the repo publish tooling (in-band, per-root);
+   mgr2 publishes never stream tarballs or kill by exe/cwd pattern.
+   Known residual coupling until coredev migrates: per the evidence
+   map (2.3), a `p`/`b` glm53flash deploy kills weightd fleet-wide —
+   that is an action of coredev's channel, outside mgr2 tooling; the
+   weightsd stable-channel carve-out (step 5) keeps mgr2 publishes from
+   starting or inheriting such waves.
 2. Reconcile the core channel with installed reality (map 0.2): the
    hub `~/release/core/bin/sparkpipe_weightd` (mtime Sep 14, pushed by
-   the retired `p` without a MANIFEST regen) is a CANDIDATE. Leave it;
+   a `p`-path run without a MANIFEST regen) is a CANDIDATE. Leave it;
    do NOT announce it (`WEIGHTSD_BIN` must be absent — verify:
    `ssh sparkf 'cat ~/release/core/WEIGHTSD_BIN'` must fail). The new
    agent installs core-channel weightd only when the sha equals the
@@ -92,13 +111,14 @@ manifest.
      `/summary` `age_s` becomes meaningful (staleness detection).
    - `systemctl --user status fleet-agent` active; residentd state
      `ready`; api healthy on :8433.
-   - Live weightd-no-restart proof: touch a stage config into the glm
-     release root (`publish_local.sh` with only a config change, or
-     edit `~/release/glm53flash.fp8.tp16/config/stage_05.json`), then
-     within ~15s check spark0's heartbeat: residentd `pid` unchanged,
-     root state stays `ready`, `weightd` sha unchanged. Receipts via
-     D-1's execute rig (spark_queue dispatch, per-command exit + log
-     receipt) if operator wants the paper trail.
+   - Live weightd-no-restart proof: touch a stage config into one of
+     mgr2's lane roots (`publish_local.sh` with only a config change,
+     or edit `~/release/example.fp8.tp16/config/stage_05.json` — any
+     mgr2 lane root, never a glm53flash root), then within ~15s check
+     spark0's heartbeat: residentd `pid` unchanged, root state stays
+     `ready`, `weightd` sha unchanged. Receipts via D-1's execute rig
+     (spark_queue dispatch, per-command exit + log receipt) if operator
+     wants the paper trail.
 
 ## Step 3 — Fleet agent rollout
 
@@ -112,26 +132,30 @@ manifest.
 3. Confirm all 16 heartbeats show the new `agent` sha and the new
    schema fields.
 
-## Step 4 — Per-root layout cut-over (items 1+2 acceptance)
+## Step 4 — Per-root layout cut-over (items 1+2 acceptance; mgr2 lanes only)
 
-Per-driver release roots already exist for the active driver. For each
-additional driver (k3, laguna, ...):
+The cut-over covers mgr2's lanes. glm53flash is coredev's channel and
+gets NO root subscription from mgr2 nodes' default ROOTS configs; any
+glm53flash subscription a node carries today is retired only as part of
+coredev's glm53flash migration, never by this step.
 
-1. Create its hub root: driver's lane publishes with its own root name
-   (`tools/module_build_release.sh FAMILY CODEC <driver-root> ...`).
-   The per-root flock makes concurrent publishes by different devs on
-   different roots safe; the same root serializes.
-2. Point each node's unit at its driver's root only:
+1. Create each mgr2 lane's hub root: that lane publishes with its own
+   root name (`tools/module_build_release.sh FAMILY CODEC <lane-root>
+   ...`). The per-root flock makes concurrent publishes by different
+   devs on different roots safe; the same root serializes.
+2. Point each mgr2 node's unit at its own lane's root only:
    edit `~/.config/systemd/user/fleet-agent.service` ExecStart arg 1
-   (CSV for multi-root/coredev-style nodes), `daemon-reload`, restart
-   the unit. Default = the node's own driver root.
-3. Isolation proof (the acceptance gate): publish to the
-   glm53flash.fp8.tp16 root, then verify k3- and laguna-subscribed
-   nodes did NOTHING: their heartbeats' residentd pids, residentd shas,
-   driver shas and weightd shas byte-identical before/after, and their
-   journals show no "manifest changed" line (their roots' MANIFESTs
-   were untouched — per-channel by construction, since a publish only
-   ever writes `~/release/<root>/`).
+   (CSV for the multi-root nodes), `daemon-reload`, restart the unit.
+   Default = the node's own lane root; no glm53flash entry.
+3. Isolation proof (the acceptance gate): publish to one mgr2 lane's
+   root, then verify the OTHER mgr2 lanes' nodes did NOTHING: their
+   heartbeats' residentd pids, residentd shas, driver shas and weightd
+   shas byte-identical before/after, and their journals show no
+   "manifest changed" line (their roots' MANIFESTs were untouched —
+   per-channel by construction, since a publish only ever writes
+   `~/release/<root>/`). Bidirectionally: a glm53flash publish happens
+   entirely on coredev's side (`p`/`b`); mgr2 tooling neither deploys,
+   restarts, nor monitors that channel.
 4. Restart-scope proof on a subscribed node: config-only publish ->
    zero daemon restarts (pids unchanged); driver .so publish -> one
    residentd drain/restart (TERM first — journal shows the drain, not
@@ -200,12 +224,15 @@ additional driver (k3, laguna, ...):
    unchanged in heartbeats).
 3. Driver .so publish: exactly 16 residentd restarts, 0 weightd
    restarts, 0 api restarts off rank 0.
-4. Per-channel isolation: a glm53flash.fp8.tp16 publish does not
-   restart k3's or laguna's residentd or weightd on any node.
+4. Per-channel isolation (mgr2 lanes): a publish to one mgr2 lane root
+   does not restart another mgr2 lane's residentd or weightd on any
+   node. Bidirectional glm53flash isolation: glm53flash is coredev's
+   channel; mgr2 tooling neither deploys, restarts, nor monitors it,
+   and no mgr2 node's default ROOTS subscribes to it.
 5. Core publish with no WEIGHTSD_BIN: weightd pids/shas unchanged on
    all 16 (install_core inert).
-6. Two devs publish different roots concurrently: both succeed (per-
-   root locks independent), both MANIFESTs well-formed, no interleaved
-   trees (`.staging` never visible in a MANIFEST).
+6. Two devs publish different mgr2 roots concurrently: both succeed
+   (per-root locks independent), both MANIFESTs well-formed, no
+   interleaved trees (`.staging` never visible in a MANIFEST).
 7. Hygiene dry run reviewed by the operator; nothing deleted without
    an explicit `--apply` + DELETE confirmation.

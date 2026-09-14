@@ -828,8 +828,8 @@
     },
     {
       "path": "docs/DEPLOY_ROLLOUT.md",
-      "sha256": "def4602768af8ec39214271e0988d2879e1fee7f318e42be31dde7402debc58e",
-      "size_bytes": 11439
+      "sha256": "7a152388dd26e1ceccaf885ce64c5805bf252bec10ff8b4ddfcbad310b16c09e",
+      "size_bytes": 13227
     },
     {
       "path": "docs/DEVCYCLE.md",
@@ -7383,8 +7383,8 @@
     },
     {
       "path": "tests/test_deploy_restart_scope.sh",
-      "sha256": "ec71ad85ad8de38a2e58cc99f2aa969c3da03d92cbbf60322c9a5a49433799f1",
-      "size_bytes": 10835
+      "sha256": "244cd98648edd8baa6cb2656e4835e5f5512a4d2c0351005f0a86384c49d55f0",
+      "size_bytes": 10826
     },
     {
       "path": "tests/test_deployment_config_drift.py",
@@ -9248,8 +9248,8 @@
     },
     {
       "path": "tools/fleet-agent.service",
-      "sha256": "5429ac65cbdd827aeb2887e4f8d4ed35bc27815a4b7f8a94f02f71baa09fada7",
-      "size_bytes": 220
+      "sha256": "9d8a998dc81ef907805ebb924f095f16f1ba59fe376d9f6d909eeecc1f8283ee",
+      "size_bytes": 217
     },
     {
       "path": "tools/fleet_node_agent.sh",
@@ -10890,5 +10890,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 35331071
+  "total_bytes": 35332847
 }
