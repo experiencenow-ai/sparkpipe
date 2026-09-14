@@ -67,8 +67,7 @@ stage_build() {
 	scp -q "$SCRATCH/t1qmax.bundle" "$BUILD_NODE:$STAGE_DIR/"
 	ssh "$BUILD_NODE" "rm -rf $STAGE_DIR/tree && git clone -q -b lane/t1-qmax $STAGE_DIR/t1qmax.bundle $STAGE_DIR/tree"
 	say "building on $BUILD_NODE"
-	sed 's|/tmp/t1qmax/tree|/tmp/t1qmax_stage/tree|g; s|/tmp/t1qmax/make_|/tmp/t1qmax_stage/make_|g' "$REPO/tools/t1_qmax_build.sh" > "$SCRATCH/t1_qmax_build.sh"
-	scp -q "$SCRATCH/t1_qmax_build.sh" "$BUILD_NODE:$STAGE_DIR/"
+	scp -q "$REPO/tools/t1_qmax_build.sh" "$BUILD_NODE:$STAGE_DIR/"
 	ssh "$BUILD_NODE" "sh $STAGE_DIR/t1_qmax_build.sh"
 	say "build green on $BUILD_NODE"
 }
