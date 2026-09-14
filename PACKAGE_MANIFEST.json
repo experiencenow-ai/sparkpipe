@@ -1,5 +1,5 @@
 {
-  "file_count": 2223,
+  "file_count": 2226,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -63,8 +63,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "94df45fd712a395120c397d2743163fc5edc62f84c8d907c63f3eb51700286b0",
-      "size_bytes": 111253
+      "sha256": "339187c3bf009ff4bdd05030635dea5a6fa058c579107f307e2b766f1d445674",
+      "size_bytes": 111810
     },
     {
       "path": "NCCL_16WIDE_RECEIPTS.md",
@@ -1160,6 +1160,11 @@
       "path": "docs/WEIGHTD_SUPERVISED_STARTUP.md",
       "sha256": "f74b63ae372964f5af5f7bf561c7ec8266718814a04e0b476b44d5ef45ff0cc2",
       "size_bytes": 1563
+    },
+    {
+      "path": "docs/WEIGHTSD.md",
+      "sha256": "cb4a16cb65c6da917363cefedb47e1de5bcd9421f9fb66c3e09e69401c3f434b",
+      "size_bytes": 4915
     },
     {
       "path": "docs/archive/AUDIT_2026-07-29_BANDWIDTH_PATH.md",
@@ -9267,6 +9272,11 @@
       "size_bytes": 2027
     },
     {
+      "path": "tools/devcycle/sparkpipe_weightsd.service",
+      "sha256": "bec27a187d70e942380c2392b1cb9ecf0e18451aff13e71b84af3e931a24f701",
+      "size_bytes": 704
+    },
+    {
       "path": "tools/devcycle/split_ship_pro.sh",
       "sha256": "28a4edfaae09e012dcf455bb59b9c8d62d723403017e9562e4c9cb4e8c311d0d",
       "size_bytes": 1305
@@ -11068,8 +11078,8 @@
     },
     {
       "path": "tools/weightd_execute_receipt.py",
-      "sha256": "7e9be442f61dd0e43e3736e783db1e2f2b422500e9812e4e9fa10bf5f1f195a7",
-      "size_bytes": 8733
+      "sha256": "7672bdd4e4cb59f23c998a5c4b588dfc16c56d94a21b1ebec9139108f0e56d2b",
+      "size_bytes": 8961
     },
     {
       "path": "tools/weightd_expert_segments.c",
@@ -11112,6 +11122,11 @@
       "size_bytes": 4938
     },
     {
+      "path": "tools/weightsd_deploy.sh",
+      "sha256": "94040f7fb5209e3dbd948b681bbff562a3e7ff4a7570f4058b96418864e6ddf6",
+      "size_bytes": 2334
+    },
+    {
       "path": "validation/spark_gemma4_reference.c",
       "sha256": "791dbe16ea5917eff2c02a8710b9ec17a4f8f9a4e2e6640c5c1f99b6840ec997",
       "size_bytes": 31712
@@ -11120,5 +11135,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 35895064
+  "total_bytes": 35903802
 }
