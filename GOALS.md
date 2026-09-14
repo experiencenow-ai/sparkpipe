@@ -31,7 +31,8 @@ D4. (secondary, standing) Common-code contribution: adopt the shared modules
 | Engine wedge (1 request/boot, silent spin) reproduced 2x, routed to coredev | − |  | + | − |  | D1− | production serving blocker, not mine to fix |
 | T1 dump hook (G5N-T1) built + GPU-validator PASS | + | + | + |  | + | D1+,D3+ | serving-gated half now exists |
 | main adapter-vs-header tap drift + hub stage_count=16 found (TP8 parked) |  |  | + |  | + | D4+ | findings for PR |
-| (pending) lane TP16 decode + compare receipt | + | + | + | + | + | D1,D3 | pending run |
+| Offline adjudication: reference CLEAN, fixture ckpt != served ckpt (packs = bf16-official-class, router fingerprint 0.984/0.925) | + | + | + | + | + | D3+ | fixture invalidated as-committed; operator canonical-snapshot ruling requested |
+| (pending) one-snapshot T1 rerun (decode + streams/routes compare) | + | + | + | + | + | D1,D3 | staged, blocked on incident + ruling |
 | (pending) MEASURED B1 tok/s + hillclimb delta | + |  | + |  |  | D2 | pending run |
 
 ## Update rule
