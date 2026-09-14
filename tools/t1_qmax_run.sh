@@ -61,35 +61,13 @@ stage_build() {
 	say "bundling lane/t1-qmax for $BUILD_NODE"
 	rm -rf "$SCRATCH"
 	mkdir -p "$SCRATCH"
+	ssh "$BUILD_NODE" "mkdir -p $SCRATCH"
 	git -C "$REPO" bundle create "$SCRATCH/t1qmax.bundle" lane/t1-qmax
 	scp -q "$SCRATCH/t1qmax.bundle" "$BUILD_NODE:$SCRATCH/"
 	ssh "$BUILD_NODE" "rm -rf $SCRATCH/tree && git clone -q -b lane/t1-qmax $SCRATCH/t1qmax.bundle $SCRATCH/tree"
 	say "building on $BUILD_NODE"
-	contract_sha=$(ssh "$BUILD_NODE" "sha256sum $SCRATCH/tree/model_contracts/qwen38_authoritative.json" | cut -d' ' -f1)
-	ssh "$BUILD_NODE" "cd $SCRATCH/tree && \
-		nvcc -std=c++17 -O2 -I. -Iinclude -Imodel-families/common/include \
-		-Imodel-families/qwen38_max/include \
-		-Imodules/qwen38_max_resident_decode_stage/include \
-		-Imodules/qwen38_max_resident_decode_stage/source \
-		-DSPARK_QWEN38_MAX_MODULE_BUILD=1 \
-		-DSPARK_QWEN38_MAX_MODEL_MTP_LAYER_COUNT=0u \
-		-DQWEN38_MODEL_REVISION=\\\"$REVISION\\\" \
-		-DQWEN38_CONTRACT_SHA256=\\\"$contract_sha\\\" \
-		tools/t1_qmax_harness.c \
-		modules/qwen38_max_resident_decode_stage/source/spark_qwen38_max_resident_decode_stage_cuda.cu \
-		modules/qwen38_max_resident_decode_stage/source/spark_qwen38_max_resident_decode_stage_module.c \
-		runtime/stage_module_lifecycle.c runtime/stagepack_format.c \
-		runtime/spark_weightd.c runtime/spark_weightd_manifest.c runtime/spark_weightd_lease.c \
-		runtime/spark_weightd_attach.c runtime/spark_weightd_map.c runtime/spark_weightd_spine.c \
-		runtime/spark_weightd_worker.c runtime/spark_weightd_lazy_pack.c \
-		cache/store/stage_kv_client.c cache/store/kv_store.c \
-		model-families/qwen38_max/src/spark_qwen38_max_work_control.c \
-		ring/transport/hidden_transport.c ring/transport/tp_collective.c \
-		ring/transport/tp_device_collective.c \
-		-L/usr/local/cuda/lib64 -lcudart -o $SCRATCH/t1_qmax_harness && \
-		make build/libhidden_transport_spark_host_rdma_verbs.so build/sparkpipe_weightd >/dev/null 2>$SCRATCH/make.err && \
-		cp build/libhidden_transport_spark_host_rdma_verbs.so build/sparkpipe_weightd $SCRATCH/ && \
-		chmod +x $SCRATCH/t1_qmax_harness $SCRATCH/sparkpipe_weightd && ls -la $SCRATCH"
+	scp -q "$REPO/tools/t1_qmax_build.sh" "$BUILD_NODE:$SCRATCH/"
+	ssh "$BUILD_NODE" "sh $SCRATCH/t1_qmax_build.sh"
 	say "build green on $BUILD_NODE"
 }
 
