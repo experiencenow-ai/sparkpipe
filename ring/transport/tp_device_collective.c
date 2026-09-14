@@ -601,7 +601,10 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
                 round_seq & (uint64_t)(SPARK_WEIGHTD_MESH_SLOTS_PER_RANK - 1u),
                 implementation->tp_rank,implementation->tp_degree,
                 implementation->error_word,
-                (unsigned long long)implementation->round_timeout_ns) != 0 )
+                (unsigned long long)(implementation->round_timeout_ns <
+                    SPARK_TP_DEVICE_COLLECTIVE_ROUND_SPIN_TIMEOUT_NS ?
+                    implementation->round_timeout_ns :
+                    SPARK_TP_DEVICE_COLLECTIVE_ROUND_SPIN_TIMEOUT_NS)) != 0 )
             return SPARK_STATUS_IO_ERROR;
         goto combine;
     }
