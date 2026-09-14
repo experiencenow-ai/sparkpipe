@@ -5,10 +5,10 @@
 set -eu
 rank=$1
 checkpoint=/mnt/model-warm/qwen3.8-max-nvfp4-radixark-bf16-spine
-tree=/tmp/t1qmax_stage/tree
+tools=/tmp/t1qmax_stage/tools
 out=/tmp/t1qmax_rebuild/qwenmax.nvfp4.tp16.rank$rank.sp
 mkdir -p /tmp/t1qmax_rebuild
-cd "$tree"
+cd "$tools"
 sudo -n /usr/local/sbin/sparkcap python3 tools/qwen38_stagepack.py \
 	--checkpoint "$checkpoint" \
 	--output "$out" \
