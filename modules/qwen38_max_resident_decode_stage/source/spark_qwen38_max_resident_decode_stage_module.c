@@ -343,7 +343,7 @@ static SparkStatus SparkQwen38MaxModuleConfigure(SparkQwen38MaxModuleState *stat
 		if ( state->t1_stage_hidden == 0 || state->t1_stage_route_ids == 0 ||
 			state->t1_stage_route_weights == 0 || state->t1_stage_score == 0 )
 			SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
-		if ( cudaMalloc(&state->t1_score_device,sizeof(float)) != cudaSuccess )
+		if ( cudaMalloc((void **)&state->t1_score_device,sizeof(float)) != cudaSuccess )
 			SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
 	}
 	status = SparkStageModuleStageTimingEnable(&state->stage_timing,"q38stage",SPARK_QWEN38_MAX_MODULE_STAGE_NAMES,SPARK_QWEN38_MAX_MODULE_STAGE_COUNT);
