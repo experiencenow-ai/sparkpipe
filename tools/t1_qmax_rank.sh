@@ -33,6 +33,7 @@ sudo -n /usr/local/sbin/sparkcap env \
 	"SPARK_WEIGHTD_EXPERT_POOL_BYTES=$EXPERT_POOL_BYTES" \
 	"SPARK_WEIGHTD_SPINE_BUDGET_BYTES=$SPINE_BUDGET_BYTES" \
 	"SPARK_QWEN38_MAX_T1_DUMP=/tmp/t1qmax/dump" \
+	"T1_QMAX_TIMING=$TIMING" \
 	/tmp/t1qmax/t1_qmax_harness "$PROMPT_IDS" "$NEW_TOKENS" > /tmp/t1qmax/harness.log 2>&1 || rc=$?
 kill "$wpid" 2>/dev/null || true
 grep -q "t1_qmax_harness done" /tmp/t1qmax/harness.log || rc=1

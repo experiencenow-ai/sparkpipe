@@ -34,6 +34,7 @@ print(','.join(str(0 if a == b else base + a * tp + b) for a in range(tp) for b 
 	{
 		echo "PROMPT_IDS=$PROMPT_IDS"
 		echo "NEW_TOKENS=$NEW_TOKENS"
+		echo "TIMING=${TIMING:-0}"
 		echo "PORT_BASE=$PORT_BASE"
 		echo "TP_IDENTIFIER=$TP_IDENTIFIER"
 		echo "TP_HOSTS=\"$HOSTS\""

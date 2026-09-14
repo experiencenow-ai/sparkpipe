@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 
 #include "sparkpipe/spark_module_abi.h"
 #include "sparkpipe/spark_model_driver.h"
@@ -84,30 +85,60 @@ int main(int argc, char **argv)
 		return(1);
 	}
 	generated = 0u;
-	for ( step = 0u; step < prompt_count + new_tokens; step++ )
 	{
-		input_token = step < prompt_count ? prompt[step] : generated;
-		output_token = 0xdeadbeefu;
-		memset(&frame,0,sizeof(frame));
-		frame.active_slot_count = 1u;
-		frame.new_token_count = 1u;
-		frame.sequence_position = step;
-		buffers[0].address = &input_token;
-		buffers[0].bytes = sizeof(input_token);
-		buffers[1].address = &output_token;
-		buffers[1].bytes = sizeof(output_token);
-		frame.buffers = buffers;
-		frame.buffer_count = 2u;
-		status = SparkQwen38MaxResidentDecodeStageExecute(state,&frame);
-		if ( status != SPARK_STATUS_OK )
+		struct timespec total_begin;
+		double total_seconds;
+		uint32_t timing = getenv("T1_QMAX_TIMING") != 0 ? 1u : 0u;
+		clock_gettime(CLOCK_MONOTONIC,&total_begin);
+		for ( step = 0u; step < prompt_count + new_tokens; step++ )
 		{
-			fprintf(stderr,"t1_qmax_harness execute step=%u status=%d\n",step,(int)status);
-			SparkQwen38MaxResidentDecodeStageDestroy(state);
-			return(1);
+			struct timespec step_begin,step_end;
+			int have_step = 0;
+			input_token = step < prompt_count ? prompt[step] : generated;
+			output_token = 0xdeadbeefu;
+			memset(&frame,0,sizeof(frame));
+			frame.active_slot_count = 1u;
+			frame.new_token_count = 1u;
+			frame.sequence_position = step;
+			buffers[0].address = &input_token;
+			buffers[0].bytes = sizeof(input_token);
+			buffers[1].address = &output_token;
+			buffers[1].bytes = sizeof(output_token);
+			frame.buffers = buffers;
+			frame.buffer_count = 2u;
+			if ( timing != 0u )
+			{
+				clock_gettime(CLOCK_MONOTONIC,&step_begin);
+				have_step = 1;
+			}
+			status = SparkQwen38MaxResidentDecodeStageExecute(state,&frame);
+			if ( status != SPARK_STATUS_OK )
+			{
+				fprintf(stderr,"t1_qmax_harness execute step=%u status=%d\n",step,(int)status);
+				SparkQwen38MaxResidentDecodeStageDestroy(state);
+				return(1);
+			}
+			if ( have_step != 0 )
+			{
+				clock_gettime(CLOCK_MONOTONIC,&step_end);
+				fprintf(stderr,"STEP seconds=%.6f step=%u\n",
+					(double)(step_end.tv_sec - step_begin.tv_sec) +
+					(double)(step_end.tv_nsec - step_begin.tv_nsec) / 1e9,step);
+			}
+			generated = output_token;
+			printf("TOKEN step=%u input=%u output=%u\n",step,input_token,output_token);
+			fflush(stdout);
 		}
-		generated = output_token;
-		printf("TOKEN step=%u input=%u output=%u\n",step,input_token,output_token);
-		fflush(stdout);
+		if ( timing != 0u )
+		{
+			struct timespec total_end;
+			clock_gettime(CLOCK_MONOTONIC,&total_end);
+			total_seconds = (double)(total_end.tv_sec - total_begin.tv_sec) +
+				(double)(total_end.tv_nsec - total_begin.tv_nsec) / 1e9;
+			fprintf(stderr,"TOTAL steps=%u seconds=%.6f tok_per_s=%.6f\n",
+				prompt_count + new_tokens,total_seconds,
+				(double)(prompt_count + new_tokens) / total_seconds);
+		}
 	}
 	SparkQwen38MaxResidentDecodeStageDestroy(state);
 	fprintf(stderr,"t1_qmax_harness done steps=%u generated=%u\n",prompt_count + new_tokens,generated);
