@@ -15,7 +15,7 @@ PORT_BASE=21504
 TP_IDENTIFIER=2141723
 HOSTS="spark0 spark1 spark2 spark3 spark4 spark5 spark6 spark7 spark8 spark9 sparka sparkb sparkc sparkd sparke sparkf"
 EXPERT_POOL_BYTES=8589934592
-SPINE_BUDGET_BYTES=12884901888
+SPINE_BUDGET_BYTES=17179869184
 EXPORT_ROOT=/Users/mac/t1qmax/runs/t1qmax
 REVISION=d2dc35658bcf77e66643428cb52e774cc3b5bd29
 
