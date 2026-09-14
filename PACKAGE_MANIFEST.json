@@ -1,5 +1,5 @@
 {
-  "file_count": 2507,
+  "file_count": 2508,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -760,6 +760,11 @@
       "path": "docs/AGENT_LANE_BRIEFS/reports/staging-inventory-2026-08-28.md",
       "sha256": "9865c0f0bdebe2143178dcacea480e9fe82b3818520d31252aa81567cc8cef93",
       "size_bytes": 15496
+    },
+    {
+      "path": "docs/AGENT_LANE_BRIEFS/reports/t1-g53-2026-09-15.md",
+      "sha256": "a8ae3ae52492e647814c7442e26dd8ce973fdd40bdc633162cc52e946fdddeaa",
+      "size_bytes": 6381
     },
     {
       "path": "docs/AGENT_LANE_BRIEFS/reports/tokenizer-audit-2026-09-04.md",
@@ -12540,5 +12545,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 51994502
+  "total_bytes": 52000883
 }
