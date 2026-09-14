@@ -54,17 +54,15 @@ def fp8_block_to_bf16(payload_u8, scale_inv, out_dim, in_dim):
     return f32_to_bf16_u16(w * s)
 
 
-def nvfp4_to_bf16(payload_u8, scale_e4m3, out_dim, in_dim):
+def nvfp4_to_f32(payload_u8, scale_e4m3, out_dim, in_dim):
     if in_dim % 16 != 0:
         raise ValueError(f"nvfp4 input dim {in_dim} not a multiple of 16")
-    lo = (payload_u8 & 0xF).astype(np.int32)
-    hi = (payload_u8 >> 4).astype(np.int32)
-    nib = np.empty((out_dim, in_dim), dtype=np.int32)
-    nib[:, 0::2] = lo
-    nib[:, 1::2] = hi
-    w = _E2M1_LUT[nib].reshape(out_dim, in_dim // 16, 16).astype(np.float32)
-    s = _E4M3_LUT[scale_e4m3.reshape(out_dim, in_dim // 16)].astype(np.float32)
-    return f32_to_bf16_u16((w * s[:, :, None]).reshape(out_dim, in_dim))
+    groups = in_dim // 16
+    scales = _E4M3_LUT[scale_e4m3.reshape(out_dim, groups)].astype(np.float32)
+    w = np.empty((out_dim, groups, 16), dtype=np.float32)
+    w[:, :, 0::2] = _E2M1_LUT[(payload_u8 & 0xF).reshape(out_dim, groups, 8)]
+    w[:, :, 1::2] = _E2M1_LUT[(payload_u8 >> 4).reshape(out_dim, groups, 8)]
+    return (w * scales[:, :, None]).reshape(out_dim, in_dim)
 
 
 def mxfp4_to_bf16(payload_u8, scale_e8m0, out_dim, in_dim):

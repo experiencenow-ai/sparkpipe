@@ -2,7 +2,7 @@ import numpy as np
 
 from t1_reference_common import (Safetensors, bf16_round_f32, bf16_to_f32,
                                  define_float, define_uint, f32_to_bf16_u16,
-                                 fp8_block_to_bf16, nvfp4_to_bf16, rmsnorm,
+                                 fp8_block_to_bf16, nvfp4_to_f32, rmsnorm,
                                  sigmoid)
 
 PREFIX = "model.layers."
@@ -103,10 +103,10 @@ class Qwen38MaxEngine:
         freq = np.exp2(-(2.0 * pairs / self.rope_dim)
                        * np.log2(np.float32(self.rope_theta)))
         angle = np.float32(position) * freq
-        cos = np.cos(angle)[:, None]
-        sin = np.sin(angle)[:, None]
-        real = rows[:, 0:half]
-        imag = rows[:, half:self.rope_dim]
+        cos = np.cos(angle)
+        sin = np.sin(angle)
+        real = rows[:, 0:half].copy()
+        imag = rows[:, half:self.rope_dim].copy()
         rows[:, 0:half] = real * cos - imag * sin
         rows[:, half:self.rope_dim] = imag * cos + real * sin
         return rows
@@ -160,17 +160,17 @@ class Qwen38MaxEngine:
         return self.linear(gated, prefix + "linear_attn.out_proj"), layer_state
 
     def full_attention(self, prefix, x, cache, position):
-        qf = bf16_round_f32(self.tensor(prefix + "q_proj.weight") @ x)
+        qf = bf16_round_f32(self.tensor(prefix + "self_attn.q_proj.weight") @ x)
         qf = qf.reshape(self.heads, 2 * self.head_dim)
         value = qf[:, 0:self.head_dim].copy()
         gate = sigmoid(qf[:, self.head_dim:])
-        qn = bf16_to_f32(self.st.raw(prefix + "q_norm.weight").reshape(-1))
-        kn = bf16_to_f32(self.st.raw(prefix + "k_norm.weight").reshape(-1))
+        qn = bf16_to_f32(self.st.raw(prefix + "self_attn.q_norm.weight").reshape(-1))
+        kn = bf16_to_f32(self.st.raw(prefix + "self_attn.k_norm.weight").reshape(-1))
         value = value / np.sqrt((value * value).sum(axis=1, keepdims=True)
                                 / self.head_dim + self.eps) * qn[None, :]
         value = self.partial_rope(value, position)
-        k_raw = bf16_round_f32(self.tensor(prefix + "k_proj.weight") @ x)
-        v_raw = bf16_round_f32(self.tensor(prefix + "v_proj.weight") @ x)
+        k_raw = bf16_round_f32(self.tensor(prefix + "self_attn.k_proj.weight") @ x)
+        v_raw = bf16_round_f32(self.tensor(prefix + "self_attn.v_proj.weight") @ x)
         k = k_raw.reshape(self.kv_heads, self.head_dim)
         k = k / np.sqrt((k * k).sum(axis=1, keepdims=True) / self.head_dim
                         + self.eps) * kn[None, :]
@@ -190,7 +190,7 @@ class Qwen38MaxEngine:
             weights = weights / weights.sum()
             out[h] = weights @ values[:, kvh, :]
         gated = bf16_round_f32(out.reshape(-1) * gate.reshape(-1))
-        return self.linear(gated, prefix + "o_proj")
+        return self.linear(gated, prefix + "self_attn.o_proj")
 
     def dequant_expert(self, prefix, name):
         payload = self.st.raw(prefix + name + ".weight")
@@ -199,8 +199,8 @@ class Qwen38MaxEngine:
         rows = payload.shape[0]
         cols = payload.shape[1] * 2
         scalar = np.float32(scale_2.reshape(-1)[0])
-        w = nvfp4_to_bf16(payload, scale_e4m3.reshape(rows, -1), rows, cols)
-        return bf16_to_f32(w) * scalar
+        return nvfp4_to_f32(payload, scale_e4m3.reshape(rows, -1), rows,
+                            cols) * scalar
 
     def routed_expert(self, prefix, expert, x):
         gate_w = self.dequant_expert(prefix + f"experts.{expert}.", "gate_proj")
