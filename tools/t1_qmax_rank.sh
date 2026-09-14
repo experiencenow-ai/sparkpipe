@@ -3,7 +3,7 @@ set -eu
 rank=$1
 pack="$HOME/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank$rank.sp"
 sha=$(python3 -c "import json;print(json.load(open('$pack.receipt.json'))['output_sha256'])")
-. /tmp/t1qmax/rank.env
+. "/tmp/t1qmax/rank$rank.env"
 mkdir -p /tmp/t1qmax/dump
 /tmp/t1qmax/sparkpipe_weightd --socket /tmp/t1qmax/weightd.sock --device-bytes-max "$EXPERT_POOL_BYTES" > /tmp/t1qmax/weightd.log 2>&1 &
 wpid=$!
