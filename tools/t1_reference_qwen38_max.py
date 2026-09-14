@@ -45,11 +45,12 @@ def cross_check(defines, config):
         if abs(float(want) - float(got)) > 0:
             raise Qwen38MaxConfigError(
                 f"SPARK_LLM_{dname}={want} disagrees with config {cname}={got}")
+    return []
 
 
 class Qwen38MaxEngine:
     def __init__(self, checkpoint_dir, defines, config):
-        cross_check(defines, config)
+        self.mismatches = cross_check(defines, config)
         self.st = Safetensors(checkpoint_dir)
         self.hidden = int(config["hidden_size"])
         self.layers = int(config["num_hidden_layers"])
