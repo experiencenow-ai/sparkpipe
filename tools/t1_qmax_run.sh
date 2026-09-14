@@ -7,6 +7,7 @@ set -eu
 REPO=/Users/mac/t1qmax
 BUILD_NODE=spark7
 SCRATCH=/tmp/t1qmax
+STAGE_DIR=/tmp/t1qmax_stage
 RUNTIME_PACKS='$HOME/sparkdata/qwenmax.nvfp4.tp16/packs'
 PROMPT_IDS=760,6511,314,9338,369
 NEW_TOKENS=2
@@ -61,13 +62,14 @@ stage_build() {
 	say "bundling lane/t1-qmax for $BUILD_NODE"
 	rm -rf "$SCRATCH"
 	mkdir -p "$SCRATCH"
-	ssh "$BUILD_NODE" "mkdir -p $SCRATCH"
+	ssh "$BUILD_NODE" "rm -rf $STAGE_DIR && mkdir -p $STAGE_DIR $SCRATCH"
 	git -C "$REPO" bundle create "$SCRATCH/t1qmax.bundle" lane/t1-qmax
-	scp -q "$SCRATCH/t1qmax.bundle" "$BUILD_NODE:$SCRATCH/"
-	ssh "$BUILD_NODE" "rm -rf $SCRATCH/tree && git clone -q -b lane/t1-qmax $SCRATCH/t1qmax.bundle $SCRATCH/tree"
+	scp -q "$SCRATCH/t1qmax.bundle" "$BUILD_NODE:$STAGE_DIR/"
+	ssh "$BUILD_NODE" "rm -rf $STAGE_DIR/tree && git clone -q -b lane/t1-qmax $STAGE_DIR/t1qmax.bundle $STAGE_DIR/tree"
 	say "building on $BUILD_NODE"
-	scp -q "$REPO/tools/t1_qmax_build.sh" "$BUILD_NODE:$SCRATCH/"
-	ssh "$BUILD_NODE" "sh $SCRATCH/t1_qmax_build.sh"
+	sed 's|/tmp/t1qmax/tree|/tmp/t1qmax_stage/tree|g; s|/tmp/t1qmax/make_|/tmp/t1qmax_stage/make_|g' "$REPO/tools/t1_qmax_build.sh" > "$SCRATCH/t1_qmax_build.sh"
+	scp -q "$SCRATCH/t1_qmax_build.sh" "$BUILD_NODE:$STAGE_DIR/"
+	ssh "$BUILD_NODE" "sh $STAGE_DIR/t1_qmax_build.sh"
 	say "build green on $BUILD_NODE"
 }
 
@@ -76,8 +78,8 @@ stage_ship() {
 		host=$(rank_host "$rank")
 		ssh "$host" "rm -rf $SCRATCH && mkdir -p $SCRATCH"
 		write_rank_env "$rank"
-		scp -q "$BUILD_NODE:$SCRATCH/t1_qmax_harness" "$BUILD_NODE:$SCRATCH/libhidden_transport_spark_host_rdma_verbs.so" \
-			"$BUILD_NODE:$SCRATCH/sparkpipe_weightd" "$REPO/tools/t1_qmax_rank.sh" "$SCRATCH/rank$rank.env" "$host:$SCRATCH/"
+		scp -q "$BUILD_NODE:$STAGE_DIR/t1_qmax_harness" "$BUILD_NODE:$STAGE_DIR/libhidden_transport_spark_host_rdma_verbs.so" \
+			"$BUILD_NODE:$STAGE_DIR/sparkpipe_weightd" "$REPO/tools/t1_qmax_rank.sh" "$SCRATCH/rank$rank.env" "$host:$SCRATCH/"
 	done
 	say "staged artifacts on 16 hosts"
 }
