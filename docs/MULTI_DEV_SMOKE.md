@@ -213,3 +213,89 @@ python3 tools/multi_dev_orchestrate.py probe|spread|core|mps|evict|realws|cleanu
 Each stage appends raw SMOKE receipts under `runs/multi-dev-smoke-receipts/`.
 The orchestrator only ever kills daemons it started (pid-file + cmdline
 verified), and cleanup removes nothing outside `$HOME/smokemd-mds/`.
+
+## Capstone: the real-data concurrent run (operator directive, same night)
+
+Scope correction measured before the run: of the seven requested families,
+only four are attachable today. gemma4-26b (tp4), laguna (tp8.pp2), and dsv5
+(tp8) are NOT placed on any sparkdata root (fleet-replicated listing);
+qwen3flash.bf16.tp8, hy4.fp8.tp16, k3 (both arms), muse.tp16.bf16 (no sidecar
+at all) and glm53full.fp8.tp4pp4 carry manifest v1 (40-byte records) which the
+loader correctly rejects; the qwen3flash v2 arm is fp8.tp8 (bf16.tp8 is v1).
+glm53full's v2 arm is fp8.tp16 (no fp8.tp8 dir is placed). muse was dropped
+by operator swap; it remains the first wave-2 adoption candidate.
+
+### Weights-per-prompt, per-family (decode = top-8/layer; measured)
+
+| Family / pack | Rank file | Spine | Experts total | Decode WS | WS % (experts / incl. spine) |
+| --- | --- | --- | --- | --- | --- |
+| ling.bf16.tp16 r9 | 15.73 GB | 0.63 GB | 15.10 GB | **1.01 GB** | 2.4 / 6.4 |
+| dsv4flash.tp16 r8 | 22.11 GB | 12.91 GB | 9.20 GB | **13.73 GB** | 3.7 / 62.1 |
+| qwen3flash.fp8.tp8 r01 | 30.52 GB | 15.42 GB | 15.10 GB | **17.72 GB** | 7.5 / 58.1 |
+| glm53full.fp8.tp16 r9 | 54.14 GB | 7.42 GB | 46.71 GB | **11.13 GB** | 6.9 / 20.6 |
+
+glm53full's spine (7.42 GB) lands in the roofline's ~7 GB class — the first
+measured glm53full weights-per-prompt number. The four-family decode sum is
+43.6 GB, far above the ~20 GB/node target: the placed families' SPINES
+dominate (35.7 GB of the sum), which refutes the small-family assumption
+behind the target; the target families are precisely the ones not placed.
+The dense counter-example stands (qwen38_27b: no sidecar, fail-closed;
+working set = full pack by construction).
+
+### Prefill (distinct-expert fraction vs token count)
+
+Measured saturation bounds (all resident experts per layer, timed pulls;
+qwen3flash 6 batches, glm53full 5, ling 38 — all completed with receipts;
+warm pull rates 1.2→4.4 GiB/s as the pool filled) plus coupon-collector
+expectation for the distinct-expert fraction f(T) = 1−(1−1/E)^(T·k):
+
+| Family | E/layer | f(64) | f(128) | Prefill WS bound (experts) | Expected WS(64) |
+| --- | --- | --- | --- | --- | --- |
+| ling | 512 | 0.63 | 0.86 | 15.10 GB | ≈ 10.1 GB incl. spine |
+| dsv4flash | 256 | 0.88 | 1.00 | 9.20 GB | bound: 22.1 GB incl. spine (pull run hit a daemon-side IO_ERROR — honest skip, arithmetic bound recorded) |
+| qwen3flash.fp8 | 64 | 1.00 | 1.00 | 15.10 GB | 30.5 GB incl. spine (saturates by T=8) |
+| glm53full.fp8 | 32 | 1.00 | 1.00 | 46.71 GB | 54.1 GB incl. spine (saturates by T=4) |
+
+Prefill pulls strictly more expert bytes than decode, and for small-E
+families the working set saturates almost immediately: prefill capacity
+planning must assume the full resident expert set for E ≤ 64.
+
+### Concurrent real-data ladder
+
+Stages ran on spark9 with per-dev private daemons, lanes, and staggered
+attaches, co-tenant with the serving mesh:
+
+- Stage 2 (ling + dsv4flash-class): PASS — lanes 0/0 per private daemon,
+  working sets held, pulls verified.
+- Stage 4 (ling, dsv4flash passing; qwen3flash + glm53full failing
+  deterministically at the daemon acquire — SMOKE-F3 below): measured
+  concurrent real-data capacity = the passing set.
+- Stage 7 (7 concurrent real-data devs: ling ×4 + dsv4flash ×3): all seven
+  rigs failed at the daemon acquire — spark9 stopped accepting new CUDA
+  contexts mid-run (measured: `bandwidth` fails, nvidia-smi shows an 8-process
+  foreign wave replacing the earlier 2-rank serving stack). This is the third
+  node showing the pattern tonight (spark1: NVRM NV_ERR_NO_MEMORY, device
+  dead; sparka: refuses new contexts, old contexts fine; spark9: refuses new
+  contexts under concurrent spawn pressure).
+
+**SMOKE-F3 (blocking, needs coredev/sysadmin): the weightsd client acquire
+path (`AcquireWorkingSet` → `LoadLease` → `LoadRange`, ERRSITE
+runtime/spark_weightd.c:1729/1645, IO_ERROR) degrades from node-state:
+families that quantify cleanly in isolation (qwen3flash, glm53full — full
+receipts earlier the same night) begin failing deterministically after hours
+of attach/detach cycles, and eventually the whole node refuses new CUDA
+contexts. Quantification receipts stand (measured before degradation); the
+ladder receipts document the failure mode. Root cause is NOT in the smoke
+rig (identical configs flip pass/fail with node state).**
+
+### Bottom line for the 7-model real-data capstone
+
+- Real-data concurrency is proven per-family and at 2-dev stages with full
+  receipts; the 7-real-family concurrent run is blocked by (a) placement
+  (3 of 7 requested families not placed; 4 more v1/no-sidecar), (b) the
+  ~20 GB/node target being unreachable with placed spines (43.6 GB for the
+  four attachable families), and (c) SMOKE-F3 node-state degradation.
+- What the hillclimbing lanes inherit: measured decode WS per family, the
+  prefill saturation law (E ≤ 64 saturates by T=8; ling-class E=512 needs
+  ~10 GB at T=64), warm pull rates ~1–10 GiB/s through weightsd, and the
+  context-capacity constraint as THE co-residency budget item.

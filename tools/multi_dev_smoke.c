@@ -635,6 +635,18 @@ static int smoke_realws(const char *socket,const char *pack_path,const char *nam
 		SparkWeightdManifestDestroy(&manifest);
 		return -51;
 	}
+	{
+		uint32_t lane = 0xffffffffu;
+		if ( SparkWeightdClientLaneAcquire(client,&lane,SMOKE_TIMEOUT) != SPARK_STATUS_OK )
+		{
+			SparkWeightdManifestDestroy(&manifest);
+			SparkWeightdClientClose(client);
+			return -57;
+		}
+		snprintf(payload,sizeof(payload),"{\"op\":\"realws-lane\",\"dev\":\"%s\",\"lane\":%u}",
+			name,lane);
+		smoke_emit("REALWS",payload);
+	}
 	request.identity.abi_version = SPARK_WEIGHTD_IPC_ABI_VERSION;
 	request.identity.arena_bytes = (uint64_t)info.st_size;
 	snprintf(request.identity.model,sizeof(request.identity.model),"%s",name);
@@ -665,39 +677,56 @@ static int smoke_realws(const char *socket,const char *pack_path,const char *nam
 	keys = malloc(sizeof(*keys) * 512u);
 	if ( state == 0 && keys == 0 )
 		state = -54;
-	for ( layer_index = 0u; state == 0 && layer_index < sums.layers; layer_index++ )
 	{
-		uint32_t experts_this_layer = 0u;
-		for ( i = 0u; i < manifest.group_count; i++ )
+		uint64_t pull_started = smoke_now_ns();
+		uint64_t pull_ns = 0u;
+		uint32_t batch_ordinal = 0u;
+		for ( layer_index = 0u; state == 0 && layer_index < sums.layers; layer_index++ )
 		{
-			const SparkWeightdRangeGroup *group = &manifest.groups[i];
-			if ( group->layer != layer_index )
-				continue;
-			if ( experts_this_layer < topk && key_count < 512u )
+			uint32_t experts_this_layer = 0u;
+			for ( i = 0u; i < manifest.group_count; i++ )
 			{
-				keys[key_count].layer = group->layer;
-				keys[key_count].expert = group->expert;
-				key_count++;
-				experts_this_layer++;
-			}
-		}
-		if ( key_count == 512u || layer_index + 1u == sums.layers )
-		{
-			if ( key_count > 0u )
-			{
-				if ( SparkWeightdClientAcquire(client,attached.arena_generation,keys,key_count,
-					&working,SMOKE_TIMEOUT) != SPARK_STATUS_OK )
+				const SparkWeightdRangeGroup *group = &manifest.groups[i];
+				if ( group->layer != layer_index )
+					continue;
+				if ( experts_this_layer < topk && key_count < 512u )
 				{
-					state = -55;
-					break;
+					keys[key_count].layer = group->layer;
+					keys[key_count].expert = group->expert;
+					key_count++;
+					experts_this_layer++;
 				}
-				lease_bytes_total += working.resident_bytes;
-				if ( lease_batches < 64u )
-					lease_id[lease_batches] = working.lease_identifier;
-				lease_batches++;
-				key_count = 0u;
+			}
+			if ( key_count == 512u || layer_index + 1u == sums.layers )
+			{
+				if ( key_count > 0u )
+				{
+					uint64_t batch_started = smoke_now_ns();
+					if ( SparkWeightdClientAcquire(client,attached.arena_generation,keys,
+						key_count,&working,SMOKE_TIMEOUT) != SPARK_STATUS_OK )
+					{
+						state = -55;
+						break;
+					}
+					pull_ns = smoke_now_ns() - batch_started;
+					lease_bytes_total += working.resident_bytes;
+					if ( lease_batches < 64u )
+						lease_id[lease_batches] = working.lease_identifier;
+					lease_batches++;
+					snprintf(payload,sizeof(payload),
+						"{\"op\":\"realws-batch\",\"dev\":\"%s\",\"batch\":%u,\"keys\":%u,"
+						"\"resident_bytes\":%llu,\"pull_ms\":%.1f,\"gib_per_s\":%.2f}",
+						name,batch_ordinal,key_count,
+						(unsigned long long)working.resident_bytes,
+						(double)pull_ns / 1e6,(double)working.resident_bytes /
+						1073741824.0 / ((double)pull_ns / 1e9));
+					smoke_emit("REALWS",payload);
+					batch_ordinal++;
+					key_count = 0u;
+				}
 			}
 		}
+		(void)pull_started;
 	}
 	if ( state == 0 )
 	{

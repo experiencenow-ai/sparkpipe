@@ -1008,8 +1008,8 @@
     },
     {
       "path": "docs/MULTI_DEV_SMOKE.md",
-      "sha256": "73c55ca04cd9844334d8bf668075480df1722e8c793803e4026ab608d7624b7e",
-      "size_bytes": 12446
+      "sha256": "843fb9c9683a3ab535dc4b799074acde2e9f902c7866ecde1b2e6869ebeed239",
+      "size_bytes": 17540
     },
     {
       "path": "docs/NCCL_COLLECTIVE_PLANE.md",
@@ -10468,8 +10468,8 @@
     },
     {
       "path": "tools/multi_dev_smoke.c",
-      "sha256": "350e1b26256a43015072521477c4ede5f3970afdd87643574609bfbd7c01b7bc",
-      "size_bytes": 25694
+      "sha256": "26caa0d1d134033293f6b677abbd91113513e8b013000813364699398eca6bc3",
+      "size_bytes": 26743
     },
     {
       "path": "tools/muse_decode_roofline.py",
@@ -11120,5 +11120,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 35944165
+  "total_bytes": 35950308
 }
