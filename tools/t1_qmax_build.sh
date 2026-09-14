@@ -2,7 +2,8 @@
 set -eu
 cd /tmp/t1qmax/tree
 contract_sha=$(sha256sum model_contracts/qwen38_authoritative.json | cut -d' ' -f1)
-nvcc -std=c++17 -O2 \
+nvcc -std=c++17 -O3 --expt-relaxed-constexpr -lineinfo \
+	-gencode arch=compute_121,code=sm_121a \
 	-I. -Iinclude -Imodel-families/common/include -Imodel-families/qwen38_max/include \
 	-Imodules/qwen38_max_resident_decode_stage/include \
 	-Imodules/qwen38_max_resident_decode_stage/source \
