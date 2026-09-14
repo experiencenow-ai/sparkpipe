@@ -112,7 +112,7 @@ class Qwen38MaxEngine:
         return rows
 
     def gdn_attention(self, prefix, x, layer_state):
-        qkv = bf16_round_f32(self.tensor(prefix + "in_proj_qkv.weight") @ x)
+        qkv = bf16_round_f32(self.tensor(prefix + "linear_attn.in_proj_qkv.weight") @ x)
         channels = qkv.shape[0]
         if layer_state is None:
             layer_state = {"window": np.zeros((channels, self.conv),
@@ -122,16 +122,16 @@ class Qwen38MaxEngine:
         window = layer_state["window"]
         taps = np.concatenate([window[:, 1:], f32_to_bf16_u16(qkv).reshape(-1, 1)],
                               axis=1)
-        weights = self.tensor(prefix + "conv1d.weight").reshape(channels,
+        weights = self.tensor(prefix + "linear_attn.conv1d.weight").reshape(channels,
                                                                 self.conv)
         acc = (bf16_to_f32(taps) * weights).sum(axis=1)
         conv_out = bf16_round_f32(swish(acc))
         layer_state["window"] = taps
         qk = self.k_heads * self.kd
-        a_pre = bf16_round_f32(self.tensor(prefix + "in_proj_a.weight") @ x)
-        b_pre = bf16_round_f32(self.tensor(prefix + "in_proj_b.weight") @ x)
-        a_log = self.st.raw(prefix + "A_log").astype(np.float32)
-        dt_bias = self.st.raw(prefix + "dt_bias").astype(np.float32)
+        a_pre = bf16_round_f32(self.tensor(prefix + "linear_attn.in_proj_a.weight") @ x)
+        b_pre = bf16_round_f32(self.tensor(prefix + "linear_attn.in_proj_b.weight") @ x)
+        a_log = bf16_to_f32(self.st.raw(prefix + "linear_attn.A_log").reshape(-1))
+        dt_bias = bf16_to_f32(self.st.raw(prefix + "linear_attn.dt_bias").reshape(-1))
         log_decay = -np.exp(a_log) * softplus(a_pre + dt_bias)
         beta = sigmoid(b_pre)
         q = conv_out[0:qk].reshape(self.k_heads, self.kd)
@@ -151,13 +151,13 @@ class Qwen38MaxEngine:
             state[h] = decayed + k[key][:, None] * delta[None, :]
             out[h] = (state[h] * q[key][:, None]).sum(axis=0)
         core = bf16_round_f32(out.reshape(-1))
-        z = bf16_round_f32(self.tensor(prefix + "in_proj_z.weight") @ x)
-        norm_w = bf16_to_f32(self.st.raw(prefix + "norm.weight").reshape(-1))
+        z = bf16_round_f32(self.tensor(prefix + "linear_attn.in_proj_z.weight") @ x)
+        norm_w = bf16_to_f32(self.st.raw(prefix + "linear_attn.norm.weight").reshape(-1))
         zc = core.reshape(self.v_heads, self.kd)
         variance = (zc * zc).sum(axis=1) / self.kd
         normed = zc / np.sqrt(variance + self.eps)[:, None] * norm_w[None, :]
         gated = bf16_round_f32(normed.reshape(-1) * swish(z))
-        return self.linear(gated, prefix + "out_proj"), layer_state
+        return self.linear(gated, prefix + "linear_attn.out_proj"), layer_state
 
     def full_attention(self, prefix, x, cache, position):
         qf = bf16_round_f32(self.tensor(prefix + "q_proj.weight") @ x)
@@ -212,13 +212,13 @@ class Qwen38MaxEngine:
         return bf16_round_f32(down_w @ activated)
 
     def shared_expert(self, prefix, x):
-        gate = self.linear(x, prefix + "shared_expert.gate_proj")
-        up = self.linear(x, prefix + "shared_expert.up_proj")
+        gate = self.linear(x, prefix + "mlp.shared_expert.gate_proj")
+        up = self.linear(x, prefix + "mlp.shared_expert.up_proj")
         activated = bf16_round_f32(swish(gate) * up)
-        return self.linear(activated, prefix + "shared_expert.down_proj")
+        return self.linear(activated, prefix + "mlp.shared_expert.down_proj")
 
     def moe(self, prefix, x, sink):
-        scores = self.tensor(prefix + "gate.weight") @ x
+        scores = self.tensor(prefix + "mlp.gate.weight") @ x
         order = np.argsort(-scores, kind="stable")
         selected = np.sort(order[:self.topk])
         picked = scores[selected]
@@ -226,11 +226,11 @@ class Qwen38MaxEngine:
         weights = np.exp(shifted) / np.exp(shifted).sum()
         routed = np.zeros_like(x)
         for i in range(self.topk):
-            output = self.routed_expert(prefix, int(selected[i]), x)
+            output = self.routed_expert(prefix + "mlp.", int(selected[i]), x)
             routed = bf16_round_f32(routed + bf16_round_f32(output * weights[i]))
         shared = self.shared_expert(prefix, x)
         gate_logit = bf16_round_f32(
-            self.tensor(prefix + "shared_expert_gate.weight") @ x)
+            self.tensor(prefix + "mlp.shared_expert_gate.weight") @ x)
         coeff = sigmoid(gate_logit[0])
         sink.append(selected.astype(np.int32))
         sink.append(weights.astype(np.float32))

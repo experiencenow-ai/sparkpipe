@@ -196,7 +196,8 @@ class Glm5NextEngine:
     def kda_out(self, prefix, x, delta_out):
         o32 = delta_out.reshape(self.kheads, self.kd)
         rms = np.sqrt((o32 * o32).sum(axis=1) / self.kd + self.eps)
-        o_norm = self.st.raw(prefix + "self_attn.o_norm.weight").reshape(-1)
+        o_norm = bf16_to_f32(
+            self.st.raw(prefix + "self_attn.o_norm.weight").reshape(-1))
         gated_o = o32 / rms[:, None] * o_norm[None, :]
         gate = bf16_round_f32(bf16_round_f32(
             self.linear(x, prefix + "self_attn.g_a_proj"))
