@@ -88,6 +88,10 @@ class Safetensors:
             self.map = {}
         self.headers = {}
         self.fds = {}
+        self.cache = {}
+        self.cache_bytes = 0
+        self.cache_limit = int(os.environ.get("T1_REF_CACHE_BYTES",
+                                              80 * (1 << 30)))
 
     def _open(self, fname):
         if fname not in self.fds:
@@ -108,18 +112,22 @@ class Safetensors:
     @staticmethod
     def _np(dt):
         return {"BF16": np.uint16, "F32": np.float32, "F16": np.float16,
-                "U8": np.uint8, "F8_E4M3": np.uint8, "I64": np.int64}[dt]
+                "U8": np.uint8, "F8_E4M3": np.uint8}[dt]
 
     def entry(self, name):
         _, e, _ = self._entry(name)
         return e
 
     def raw(self, name):
+        if name in self.cache:
+            return self.cache[name]
         fname, e, base = self._entry(name)
         fh = self.fds[fname]
         fh.seek(base + e["data_offsets"][0])
         data = fh.read(e["data_offsets"][1] - e["data_offsets"][0])
-        return np.frombuffer(data, dtype=self._np(e["dtype"])).reshape(e["shape"])
+        array = np.frombuffer(data, dtype=self._np(e["dtype"])).reshape(e["shape"])
+        self.cache[name] = array
+        return array
 
     def raw_rows(self, name, first, count):
         fname, e, base = self._entry(name)
@@ -136,24 +144,6 @@ class Safetensors:
         if len(data) != count * stride:
             raise ValueError(f"truncated row range for {name}")
         return np.frombuffer(data, dtype=dtype).reshape(count, shape[1])
-
-    def raw_slab(self, name, first, count):
-        fname, e, base = self._entry(name)
-        shape = e["shape"]
-        if len(shape) < 2 or first < 0 or count <= 0 \
-                or first + count > shape[0]:
-            raise ValueError(f"slab range {first}+{count} outside {name} "
-                             f"{shape}")
-        dtype = np.dtype(self._np(e["dtype"]))
-        slab = int(np.prod(shape[1:], dtype=np.int64)) * dtype.itemsize
-        if e["data_offsets"][1] - e["data_offsets"][0] != shape[0] * slab:
-            raise ValueError(f"extent disagrees with shape for {name}")
-        fh = self.fds[fname]
-        fh.seek(base + e["data_offsets"][0] + first * slab)
-        data = fh.read(count * slab)
-        if len(data) != count * slab:
-            raise ValueError(f"truncated slab range for {name}")
-        return np.frombuffer(data, dtype=dtype).reshape([count] + shape[1:])
 
 
 DEFINE_RE = re.compile(r"^#define\s+SPARK_LLM_([A-Z0-9_]+)\s+(.+?)[ \t]*$", re.M)
@@ -175,22 +165,13 @@ def parse_llm_defines(path):
     return defines
 
 
-def _resolve_define(defines, name):
-    v = defines[name]
-    for _ in range(8):
-        if not v.startswith("SPARK_LLM_"):
-            return v
-        v = defines[v[len("SPARK_LLM_"):]]
-    raise ValueError(f"define {name} indirection deeper than 8")
-
-
 def define_uint(defines, name):
-    v = _resolve_define(defines, name)
+    v = defines[name]
     return int(v[:-1] if v.endswith("u") else v, 0)
 
 
 def define_float(defines, name):
-    v = _resolve_define(defines, name)
+    v = defines[name]
     if v.endswith("f"):
         v = v[:-1]
     return float(v)
