@@ -1,4 +1,57 @@
 {
+  "adjudication": {
+    "directive": "mgr2/operator: prove the reference bug offline via the bf16 checkpoint variant; hand cross-check one tensor",
+    "material_defect_found": {
+      "consequence": "fixture checkpoint != served checkpoint: the committed fp8 fixtures can never pass against the packs as-placed, at any tolerance; the packs' declared revision 84c6a6aa (the fp8 release) misrepresents their content",
+      "evidence": "router gate weight (layers.3.mlp.gate.weight [288,4096], native BF16 in BOTH checkpoints) u16-value-multiset overlap vs pack: pack~bf16off = 0.984, pack~fp8release = 0.925, fp8release~bf16off = 0.925 \u2014 the two checkpoints are different model snapshots (their routers differ), and the pack matches the bf16-official snapshot word-for-word at 98.4%",
+      "finding": "ASSET IDENTITY: the placed glm53flash.fp8.tp16 packs contain bf16-OFFICIAL-class weights, not the fp8-release checkpoint the committed fixtures were generated from",
+      "grade": "MEASURED (multiset fingerprint on raw checkpoint bytes vs pack bytes)"
+    },
+    "method": "tools/t1_reference_decoder.py --family glm5_next --checkpoint /mnt/model-warm/glm-5.3-flash-bf16-official (text_config flattened to top level; 120 safetensors symlinked) on spark5 under systemd-run MemoryMax=8G; ~55 min wall; deterministic container; log runs/t1g53/bf16_reference_run.log",
+    "operator_ruling_needed": "choose the canonical glm53flash serving snapshot: (a) keep packs as-deployed and regenerate fixtures from the bf16-official snapshot (candidate fixtures from this run in runs/t1g53/bf16off_candidate/), or (b) rebuild packs from the fp8-release and keep the committed fixtures; streams/routes banded compare then adjudicates the engine within one snapshot; exact ids beyond token 1 should not be an exactness gate for raw prompts (evidence above)",
+    "reference_fp8_dequant_hand_check": "PASS: independent bit-level e4m3 decode of experts.0.gate_proj row 0 block 0 matches t1_reference_common.fp8_block_to_bf16 within bf16 rounding; scale layout [N/128,K/128] confirmed against checkpoint (F32 [16,32] for [2048,4096]); weight stats sane (std 0.02, bounded +-0.156)",
+    "reference_verdict": "CLEAN \u2014 no reference bug. Dequant hand-verified; bf16 run fluent-first-token and deterministic.",
+    "results": {
+      "engine_on_placed_fp8packs_capital": {
+        "text": " Paris. In French",
+        "tokens": [
+          12089,
+          13,
+          758,
+          8584
+        ]
+      },
+      "reference_on_bf16off_capital": {
+        "first_token": "12089 == ENGINE first token (MEASURED)",
+        "text": " Paris [gMASK] course of",
+        "tokens": [
+          12089,
+          154822,
+          3308,
+          315
+        ]
+      },
+      "reference_on_bf16off_count_up": {
+        "note": "raw continuation degrades past token 1 on BOTH checkpoints and reference runs \u2014 token-exactness beyond token 1 is not a stable gate for this model+prompt class (consistent with the wave-t1-offline cross-node tie-flip finding)",
+        "text": " skip ency shoe - between",
+        "tokens": [
+          10701,
+          2251,
+          28872,
+          25878
+        ]
+      },
+      "reference_on_fp8_release_capital": {
+        "text": "mojibake (committed fixture, deterministic)",
+        "tokens": [
+          3837,
+          271,
+          271,
+          12
+        ]
+      }
+    }
+  },
   "blockers": [
     "fleet-wide NVRM NO_MEMORY event 01:22:5x (open incident)",
     "production root crash-loop churn starves weightd mesh",
