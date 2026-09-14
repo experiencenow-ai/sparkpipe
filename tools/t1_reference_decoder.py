@@ -85,6 +85,10 @@ def generate(arguments):
     document = {
         "family": arguments.family,
         "generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "host": os.uname().nodename,
+        "threading_env": {k: os.environ.get(k) for k in
+                          ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                           "MKL_NUM_THREADS")},
         "generator": "t1_reference_decoder.py",
         "numpy_version": np.__version__,
         "python_version": platform.python_version(),

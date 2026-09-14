@@ -171,15 +171,73 @@ All runs: `sudo -n systemd-run --scope -q -p MemoryMax=4096M
 per the byte-trace memory law; unbuffered logs.
 
 - glm5_next (spark5, warm `/mnt/model-warm/glm-5.3-flash`, 1.1 GB/s
-  class): run1 + run2 (determinism pair) on the FIXED engine.
-- qwen38_max (sparka, warm
-  `/mnt/model-warm/qwen3.8-max-nvfp4-radixark-bf16-spine`, 1.1 GB/s;
-  spark4 probed at 4.2 MB/s for this dataset and skipped per the ceph
-  playbook): nvfp4 CPU dequant dominates (~1.5 s per expert matrix
-  before the fused gather rewrite; 92 layers x 10 experts x 3 matrices
-  per position), so the committed qwen contract is ONE canonical prompt
-  ("The capital of France is") with `new_tokens: 2` — the full 2-prompt
-  set is a rerun of the same command with `prompts_qwen38max.json`.
+  class): run1 (both prompts) + run2 (determinism pair) on the FIXED
+  engine. Committed fixtures:
+  `qualification/t1_reference/glm5_next/{capital_of_france,count_up}.t1r`
+  + MANIFEST.json (config sha bb8f01c4..., index sha 3c3f4036...,
+  header sha 1a7f4b06...). Continuations, decoded with the checkpoint's
+  own tokenizer: "The capital of France is" -> [3837, 271, 271, 12]
+  ('，\n\n\n\n-'), "Counting upward: one, two," -> [323, 12, 29805, 11]
+  (' and-‐,'). These look odd because the canonical prompts are raw
+  token ids without a chat template — that is the point: the fixture
+  pins the model's RAW greedy behavior, not a pleasing completion.
+  Their faithfulness is anchored, not assumed: the committed oracle
+  agrees with the engine on position-0 top-1 for BOTH probes —
+  token 785 -> 154822 ([gMASK], logit 14.19 vs 13.00) and token 374 ->
+  264 (logit 15.25 vs 15.08) — the same continuation class the
+  full-prompt fixtures record.
+- Determinism receipts:
+  - glm5_next `capital_of_france.t1r`: spark5 run1 vs run2 (40 minutes
+    apart) BYTE-IDENTICAL (`cmp` clean).
+  - glm5_next `count_up.t1r`: spark0 run vs rerun (with OMP_NUM_THREADS=20
+    set on the rerun and unset on the first) BYTE-IDENTICAL.
+  - qwen38_max `capital_of_france.t1r`: spark0 run1 vs run2
+    BYTE-IDENTICAL.
+  - Cross-node honest finding: a spark0 rerun of count_up DIFFERS from
+    the spark5 reference (different routing from layer 3 onward — the
+    sigmoid router's top-8/9th score tie flips under cross-machine
+    gemm/BLAS reduction-order noise, and the greedy decode amplifies the
+    flip through the remaining 42 routed layers into different tokens).
+    Consequences recorded for the T1 gate design: (a) the committed
+    fixtures are NODE+LIBRARY-PINNED references (the generator now
+    records host and threading env in every manifest; the committed
+    runs are documented here), (b) same-node reruns are byte-identical,
+    so anti-tamper and regression checks are exact, (c) the driver-side
+    compare cannot hard-require route-id equality or multi-layer stream
+    bands against a differently-ordered implementation — the serving
+    gate needs a chaos-aware tolerance design (e.g. early-layer
+    teacher-forced sites plus final-token rank agreement). This wave
+    ships the instrument and the pinned references; the tolerance
+    ruling belongs to the gate owner.
+- Negative controls on the REAL committed fixtures (in addition to the
+  synthetic test), run with the fixed compare tool: a flipped byte in a
+  copy of `glm5_next/count_up.t1r` FAILs naming
+  `pos0006_layer0022_streams`; a flipped byte in a copy of
+  `qwen38_max/capital_of_france.t1r` FAILs naming
+  `pos0004_layer0045_route_weights`. `verify-manifest` PASSES on both
+  committed sets. A compare-tool defect found by the cross-node work was
+  fixed first: bf16-pattern arrays were compared as raw uint16 exact
+  instead of through their meta dtype band — the tool now consults the
+  container metadata (`BF16`/`F16` arrays get the tolerance band; integer
+  arrays stay exact).
+- qwen38_max (spark0 after sparka wedged on this dataset mid-run —
+  4.2 MB/s probe on spark4, folio_wait_bit stall on sparka; spark0
+  probed 1.0-1.5 GB/s): nvfp4 CPU dequant dominates (92 layers x
+  10 experts x 3 matrices per position), so the committed qwen contract
+  is ONE canonical prompt ("The capital of France is", ids
+  760,6511,314,9338,369) with `new_tokens: 2` — generated
+  [107300, 107300] ('资源篮' x2), head scores 4.95/5.04, finite.
+  Committed: `qualification/t1_reference/qwen38_max/capital_of_france.t1r`
+  + MANIFEST.json (config sha b2c724e3..., index sha 2b8d7065... —
+  note this equals the tp4pp4 receipt's source index sha ACC-1
+  recorded, identity leg across arms). No committed position-0 oracle
+  exists for this family (the module has no host oracle), so the qwen
+  fixtures ride on: ops ported only from driver-anchored sources, the
+  config cross-check, the synthetic proof, and — when serving opens —
+  the first driver compare through `tools/t1_reference_compare.py`,
+  which is the instrument this wave exists to hand the serving-gated
+  half. Full 2-prompt set is a rerun of the same command with
+  `prompts_qwen38max.json` (committed alongside the tiny set).
 
 ## Ratchet
 

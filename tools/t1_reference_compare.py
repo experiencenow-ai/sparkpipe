@@ -15,8 +15,8 @@ DEFAULT_REL = 0.02
 DEFAULT_ABS = 1e-3
 
 
-def compare_array(name, want, got, rel, absolute):
-    if want.dtype.kind in ("i", "u") and got.dtype.kind in ("i", "u"):
+def compare_array(name, want, got, rel, absolute, meta_dtype=None):
+    if want.dtype.kind in ("i", "u") and meta_dtype not in ("BF16", "F16"):
         if want.shape != got.shape or not np.array_equal(want, got):
             return {"name": name, "kind": "exact",
                     "detail": f"shape {want.shape} vs {got.shape}"}
@@ -43,6 +43,7 @@ def compare_array(name, want, got, rel, absolute):
 def compare_fixtures(reference_path, candidate_path, rel, absolute):
     ref_meta, ref = read_fixture(reference_path)
     cand_meta, cand = read_fixture(candidate_path)
+    kinds = {e["name"]: e["dtype"] for e in ref_meta["arrays"]}
     failures = []
     missing = sorted(set(ref) - set(cand))
     extra = sorted(set(cand) - set(ref))
@@ -50,8 +51,8 @@ def compare_fixtures(reference_path, candidate_path, rel, absolute):
         failures.append({"name": name, "kind": "missing",
                          "detail": "absent from candidate"})
     for name in sorted(set(ref) & set(cand)):
-        entry = next(e for e in ref_meta["arrays"] if e["name"] == name)
-        failure = compare_array(name, ref[name], cand[name], rel, absolute)
+        failure = compare_array(name, ref[name], cand[name], rel, absolute,
+                                kinds.get(name))
         if failure is not None:
             failures.append(failure)
     return failures, extra
