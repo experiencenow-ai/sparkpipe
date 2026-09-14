@@ -428,15 +428,16 @@ static SparkStatus SparkQwen38MaxModuleValidateEntry(SparkQwen38MaxModuleState *
 static SparkStatus SparkQwen38MaxModuleManifestCheck(const SparkWeightdManifest *manifest,void *opaque)
 {
 	const SparkQwen38MaxModuleState *state = (const SparkQwen38MaxModuleState *)opaque;
-	uint32_t layer;
+	uint32_t layer,expert,expert_base,expert_count;
 	if ( state == 0 )
 		return(SPARK_STATUS_INVALID_ARGUMENT);
 	if ( manifest->range_count > SPARK_WEIGHTD_RANGE_COUNT_MAX )
 		return(SPARK_STATUS_CAPACITY_EXCEEDED);
+	expert_count = SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT / state->tp_degree;
+	expert_base = state->tp_rank * expert_count;
 	for (layer = state->first_layer_index; layer < state->first_layer_index + state->layer_count; layer++)
 	{
-		uint32_t expert;
-		for (expert = 0u; expert < SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT; expert++)
+		for (expert = expert_base; expert < expert_base + expert_count; expert++)
 		{
 			const SparkWeightdRangeGroup *group = SparkWeightdManifestFind(manifest,layer,expert);
 			uint32_t index,kind_bits = 0u;
