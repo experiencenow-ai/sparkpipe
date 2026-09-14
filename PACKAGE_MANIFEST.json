@@ -763,8 +763,8 @@
     },
     {
       "path": "docs/AGENT_LANE_BRIEFS/reports/t1-g53-2026-09-15.md",
-      "sha256": "a8ae3ae52492e647814c7442e26dd8ce973fdd40bdc633162cc52e946fdddeaa",
-      "size_bytes": 6381
+      "sha256": "f85fa9843f504a6bfcbac39d0ab04a196e064910b6cf5d5463df2d65de147c83",
+      "size_bytes": 8548
     },
     {
       "path": "docs/AGENT_LANE_BRIEFS/reports/tokenizer-audit-2026-09-04.md",
@@ -12545,5 +12545,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 52000883
+  "total_bytes": 52003050
 }
