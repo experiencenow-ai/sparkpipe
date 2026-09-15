@@ -134,7 +134,7 @@ start_root() {
     fi
     cd "$rr" || return 1
     ln -sf "stage_$(printf %02d "$RANK").json" config/stage.json
-    mv residentd.log residentd.log.prev 2>/dev/null
+    [ -s residentd.log ] && mv residentd.log "residentd-$(date +%Y%m%d-%H%M%S).log" 2>/dev/null
     LD_LIBRARY_PATH="$rr/lib" nohup ./bin/sparkpipe_model_residentd \
         --deployment model_resident.json --rank-index "$RANK" \
         > residentd.log 2>&1 < /dev/null &
@@ -166,6 +166,9 @@ ensure_api() {
     LAST_API_START=$now
     echo "$(date +%T) api: starting"
     cd "$rr" || return 1
+    [ -s api.log ] && mv api.log "api-$(date +%Y%m%d-%H%M%S).log" 2>/dev/null
+    ${G5_MAX_PREFILL_ROWS:+SPARK_MODEL_API_MAX_PREFILL_ROWS="$G5_MAX_PREFILL_ROWS"} \
+    ${G5_INFLIGHT_BUDGET_NS:+SPARK_BATCH_INFLIGHT_BUDGET_NS="$G5_INFLIGHT_BUDGET_NS"} \
     LD_LIBRARY_PATH="$rr/lib" setsid nohup ./bin/sparkpipe_model_api \
         --deployment model_resident.json --runtime-root "$rr" --port "${G5_API_PORT:-8433}" \
         > api.log 2>&1 < /dev/null &
@@ -309,6 +312,7 @@ install_core() {
     mkdir -p "$wd"
     install -m 755 "$core/bin/sparkpipe_weightd" "$wd/sparkpipe_weightd.new"
     mv "$wd/sparkpipe_weightd.new" "$wd/sparkpipe_weightd"
+    [ -s "$HOME/weightd.log" ] && mv "$HOME/weightd.log" "$HOME/weightd-$(date +%Y%m%d-%H%M%S).log" 2>/dev/null
     setsid nohup "$wd/sparkpipe_weightd" --socket /tmp/spark_weightd.sock \
         --mesh-rank "$RANK" --mesh-interface "$MESH_INTERFACE" \
         --mesh-sgid-index "$MESH_SGID_INDEX" \
@@ -333,10 +337,17 @@ ensure_weightd() {
     [ -x "$home/sparkpipe_weightd" ] || return 0
     rm -f /tmp/weightd-mesh/mesh-*.rec /tmp/weightd-mesh/.ready 2>/dev/null
     echo "$(date +%T) weightd: starting"
+    [ -s "$HOME/weightd.log" ] && mv "$HOME/weightd.log" "$HOME/weightd-$(date +%Y%m%d-%H%M%S).log" 2>/dev/null
     setsid nohup "$home/sparkpipe_weightd" --socket /tmp/spark_weightd.sock \
         --mesh-rank "$RANK" --mesh-interface "$MESH_INTERFACE" \
         --mesh-sgid-index "$MESH_SGID_INDEX" \
         > "$HOME/weightd.log" 2>&1 < /dev/null &
+}
+
+prune_logs() {
+    ls -t "$1"/residentd-2*.log 2>/dev/null | tail -n +21 | xargs -r rm -f
+    ls -t "$1"/api-2*.log 2>/dev/null | tail -n +21 | xargs -r rm -f
+    ls -t "$HOME"/weightd-2*.log 2>/dev/null | tail -n +21 | xargs -r rm -f
 }
 
 echo "$$" > "$PID_FILE"
@@ -379,6 +390,7 @@ while true; do
     for r in "${RA[@]}"; do sync_root "$r"; done
     for r in "${RA[@]}"; do sync_rendezvous "$r"; done
     for r in "${RA[@]}"; do ensure_root "$r"; done
+    for r in "${RA[@]}"; do prune_logs "$HOME/sparkdata/$r"; done
     ensure_api
     report_if_changed
     sleep 1
