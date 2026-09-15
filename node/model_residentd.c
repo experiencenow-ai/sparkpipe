@@ -143,6 +143,7 @@ typedef struct SparkModelResidentdClient
 	uint64_t pending_client_reset;
 	uint64_t reset_done;
 	uint64_t last_message_id;
+	uint64_t last_activity_ns;
 	uint64_t last_submission_id;
 	SparkModelResidentdOutput *output;
 	uint8_t *output_storage;
@@ -2088,6 +2089,7 @@ static SparkStatus SparkModelResidentdReadClient(
 		if ( bytes_read < 0 )
 			return(errno == EAGAIN || errno == EWOULDBLOCK ? SPARK_STATUS_OK : SPARK_STATUS_IO_ERROR);
 		runtime->client.input_bytes += (uint32_t)bytes_read;
+		runtime->client.last_activity_ns = SparkModelResidentdMonotonicTimeNs();
 		if ( runtime->client.input_bytes == SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES && runtime->client.target_bytes == SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES )
 		{
 			header = (SparkModelResidentIpcHeader *)runtime->client.input;
@@ -2750,6 +2752,12 @@ static SparkStatus SparkModelResidentdRun(SparkModelResidentdRuntime *runtime)
 		if ( status != SPARK_STATUS_OK )
 			break;
 		poll_status = poll(fds,count,SparkModelResidentdPollTimeoutMs(runtime));
+		if ( runtime->client.fd >= 0 && runtime->client.last_activity_ns != 0u &&
+		     SparkModelResidentdMonotonicTimeNs() - runtime->client.last_activity_ns > UINT64_C(30000000000) )
+		{
+			fprintf(stderr,"model_residentd client idle timeout; closing fd=%d\n",runtime->client.fd);
+			SparkModelResidentdCloseClient(runtime);
+		}
 		if ( poll_status < 0 && errno != EINTR )
 			status = SPARK_STATUS_IO_ERROR;
 		if ( poll_status > 0 && (fds[0].revents & POLLIN) != 0 )
