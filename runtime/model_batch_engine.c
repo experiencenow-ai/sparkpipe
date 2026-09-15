@@ -681,14 +681,14 @@ static void SparkModelBatchHandleRejected(
 	{
 		SparkModelBatchRequestState *request;
 		request = &engine->requests[request_slots[lane]];
-		if ( status == SPARK_STATUS_BUSY && request->busy_restore_count < 10000u )
+		if ( (status == SPARK_STATUS_BUSY || status == SPARK_STATUS_IO_ERROR) && request->busy_restore_count < 10000u )
 		{
 			request->busy_restore_count++;
 			SparkModelBatchRestoreRejectedRequest(request,submission->work_kind);
 		}
 		else
 		{
-			if ( status == SPARK_STATUS_BUSY )
+			if ( status == SPARK_STATUS_BUSY || status == SPARK_STATUS_IO_ERROR )
 				fprintf(stderr,"batch_retry_cap request=%llu restores=%u; failing\n",
 					(unsigned long long)request->request_id,
 					(unsigned)request->busy_restore_count);
