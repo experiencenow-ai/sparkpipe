@@ -2997,7 +2997,6 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 }
 
 #define SPARK_GLM5_NEXT_GRAPH_CONTEXT_MARGIN 256u
-#define SPARK_GLM5_NEXT_GRAPH_PATH_ENABLED 1u
 
 static SparkStatus SparkGlm5NextGraphArm(
     SparkGlm5NextModuleState *state)
@@ -4109,7 +4108,10 @@ static SparkStatus SparkGlm5NextInitializeState(
 	if ( state == 0 )
 		SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
 	state->ledger.module_tag = SPARK_GLM5_NEXT_MODULE_TAG;
-	state->graph_path_enabled = SPARK_GLM5_NEXT_GRAPH_PATH_ENABLED;
+	{
+		const char *graph_env = getenv("SPARK_GLM5_NEXT_GRAPH_PATH");
+		state->graph_path_enabled = graph_env != 0 && graph_env[0] == '1' ? 1u : 0u;
+	}
 	for (lane=0u; lane<SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT; lane++)
 		atomic_init(&state->lazy_retained[lane],0);
 	status = SparkGlm5NextModuleConfigure(state,configuration,host_services,&pack_path);
