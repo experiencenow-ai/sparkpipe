@@ -1360,6 +1360,7 @@ static void SparkModelResidentdCloseClientLocked(
 		close(runtime->client.fd);
 	runtime->client.fd = -1;
 	runtime->client.hello_complete = 0u;
+	runtime->client.last_activity_ns = 0u;
 	runtime->client.close_after_output = 0u;
 	runtime->client.input_bytes = 0u;
 	runtime->client.target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
@@ -1558,6 +1559,7 @@ static void SparkModelResidentdAcceptClient(SparkModelResidentdRuntime *runtime)
 	pthread_mutex_lock(&runtime->mutex);
 	runtime->client.fd = fd;
 	runtime->client.target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
+	runtime->client.last_activity_ns = SparkModelResidentdMonotonicTimeNs();
 	if ( runtime->client.generation == 0u )
 		runtime->client.generation = 1u;
 	pthread_mutex_unlock(&runtime->mutex);
