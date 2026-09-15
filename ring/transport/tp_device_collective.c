@@ -64,6 +64,7 @@ typedef struct SparkTpDeviceCollectiveImplementation
     uint64_t round_wave_limit;
     uint64_t chain_key;
     uint64_t chain_epoch;
+    uint64_t chain_request_id;
     uint64_t round_index;
     uint64_t cancel_epoch;
     SparkTpDeviceCollectiveStagingSet
@@ -373,7 +374,6 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
     uint32_t band_index;
     volatile uint64_t *base_cell;
     uint64_t epoch;
-    SparkStatus status;
     if ( collective == 0 || collective->implementation == 0 ||
          request_id > SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK )
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
