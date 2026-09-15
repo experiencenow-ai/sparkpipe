@@ -1461,7 +1461,10 @@ SparkStatus SparkKvLaneTransactionsReset(SparkKvLaneTransactions *transactions)
 	cache = transactions->cache;
 	for (slot=0u; slot<cache->sequence_capacity; slot++)
 		if ( transactions->lanes[slot].phase >= SPARK_KV_LANE_TRANSACTION_EXECUTING )
-			SPARK_FAIL(SPARK_STATUS_BUSY);
+			fprintf(stderr,"KV-RECOVER aborting orphaned executing lane slot=%u sequence=%llu request=%llu (a full quiesce already proved its owner cannot complete)\n",
+				slot,
+				(unsigned long long)cache->sequences[slot].sequence_id,
+				(unsigned long long)transactions->lanes[slot].request.request_id);
 	for (slot=0u; slot<cache->sequence_capacity; slot++)
 	{
 		if ( transactions->lanes[slot].phase != SPARK_KV_LANE_TRANSACTION_EMPTY )

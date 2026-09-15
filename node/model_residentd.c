@@ -1719,8 +1719,17 @@ static SparkStatus SparkModelResidentdProcessHello(
 	}
 	if ( status == SPARK_STATUS_OK && queue_status == SPARK_STATUS_OK )
 	{
+		SparkStatus reset_status;
 		runtime->client.hello_complete = 1u;
 		runtime->client.last_submission_id = 0u;
+		reset_status = SPARK_STATUS_OK;
+		if ( runtime->adapter_library.adapter_interface.reset != 0 )
+			reset_status = runtime->adapter_library.adapter_interface.reset(
+				runtime->adapter_state,runtime->client.generation);
+		if ( reset_status != SPARK_STATUS_OK )
+			fprintf(stderr,"model_residentd client generation %llu reset deferred: status=%u (orphaned lanes remain until the engine quiesces)\n",
+				(unsigned long long)runtime->client.generation,
+				(unsigned)reset_status);
 	}
 	else
 		runtime->client.close_after_output = 1u;
@@ -2305,6 +2314,7 @@ static SparkStatus SparkModelResidentdFailContinuationLocked(
 	SparkModelResidentdRoute *route,
 	SparkStatus status)
 {
+	(void)runtime;
 	route->state = SPARK_MODEL_RESIDENTD_ROUTE_FENCED;
 	SPARK_RETURN(status);
 }
