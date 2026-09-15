@@ -1,5 +1,5 @@
 {
-  "file_count": 2576,
+  "file_count": 2578,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -480,6 +480,11 @@
       "path": "docs/AGENT_LANE_BRIEFS/dsv41_flash.md",
       "sha256": "dbdac34b6ca12c1380939ec287c04bb72b620e776bae64a7f9895f7cd8422b75",
       "size_bytes": 8507
+    },
+    {
+      "path": "docs/AGENT_LANE_BRIEFS/dsv5-t1-gate.md",
+      "sha256": "a4a72a5d4adb1d885cfe4ea091072dd62f2d264f52b847b93701473f04e0bad4",
+      "size_bytes": 7192
     },
     {
       "path": "docs/AGENT_LANE_BRIEFS/glm52.md",
@@ -3060,6 +3065,11 @@
       "path": "examples/release/dsv41_flash_tp8/receipt.json",
       "sha256": "359aaacd1c620bf9e9e096762febcf36dbcb2e55c1a043a818a7a4fd049d5b2d",
       "size_bytes": 5267
+    },
+    {
+      "path": "examples/release/dsv41_flash_tp8/t1_gate_receipt.json",
+      "sha256": "b3d2db3c68368360e3de3454eef950ec7929e29c0c4c5900d4a4bf2f4307fbfe",
+      "size_bytes": 5997
     },
     {
       "path": "examples/release/dsv4_tp16_b1_template/bin/sparkpipe_model_residentd",
@@ -12885,5 +12895,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 52487594
+  "total_bytes": 52500783
 }
