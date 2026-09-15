@@ -279,6 +279,21 @@ static SparkStatus SparkTpDeviceCollectiveRebase(
     {
         uint64_t high = implementation->round_seq;
         uint64_t base;
+        if ( (*base_cell >> SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS) >
+                SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK ||
+            (implementation->round_seq >>
+                SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS) >
+                SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK )
+        {
+            fprintf(stderr,
+                "CKEY-RESET rank=0 poisoned epoch cell=%llu round_seq=%llu\n",
+                (unsigned long long)*base_cell,
+                (unsigned long long)implementation->round_seq);
+            *base_cell = 0ull;
+            implementation->round_seq = 0ull;
+            implementation->base_seen = 0ull;
+            high = 0ull;
+        }
         if ( *base_cell > high )
             high = *base_cell;
         base = ((high / SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE) + 1ull) *
