@@ -1585,6 +1585,15 @@ static SparkStatus SparkQwen38MaxModuleRunMoe(SparkQwen38MaxModuleState *state, 
 			total = local_offsets[resident];
 			if ( total != 0u )
 				error = SparkWeightdRouteKeys(layer_ordinal_arg,local_offsets,resident,total,keys,SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT,&key_count) == SPARK_STATUS_OK ? cudaSuccess : cudaErrorInvalidValue;
+			for ( k = 0u; k < key_count; k++ )
+				keys[k].expert += first;
+			if ( key_count != 0u )
+			{
+				fprintf(stderr,"%s route_keys layer=%u rank=%u base=%u total=%u count=%u ids=",SPARK_QWEN38_MAX_MODULE_TAG,layer_ordinal_arg,state->tp_rank,first,total,key_count);
+				for ( k = 0u; k < key_count; k++ )
+					fprintf(stderr,"%u ",keys[k].expert);
+				fprintf(stderr,"\n");
+			}
 		}
 		if ( error == cudaSuccess && key_count != 0u )
 		{
