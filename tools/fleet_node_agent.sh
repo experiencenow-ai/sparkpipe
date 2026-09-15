@@ -122,6 +122,26 @@ unload_root() {
     return 1
 }
 
+declare -A BACKOFF NEXT_OK
+LAST_ANY_RESTART=0
+
+restart_ok() {
+    local cls="$1" now b n
+    now=$(date +%s)
+    b=${BACKOFF[$cls]:-1}
+    n=${NEXT_OK[$cls]:-0}
+    [ "$now" -lt "$n" ] && return 1
+    [ $(( now - LAST_ANY_RESTART )) -lt 5 ] && return 1
+    NEXT_OK[$cls]=$(( now + b ))
+    BACKOFF[$cls]=$(( b < 60 ? b * 2 : 60 ))
+    LAST_ANY_RESTART=$now
+    return 0
+}
+
+restart_healthy() {
+    BACKOFF[$1]=1
+}
+
 start_root() {
     local name="$1" rr="$HOME/sparkdata/$1" p
     for p in $(pgrep -f "bin/sparkpipe_model_(residentd|api)"); do
@@ -355,8 +375,9 @@ ensure_weightd() {
     fi
     local home="$HOME/sparkdata/weightd"
     [ -x "$home/sparkpipe_weightd" ] || return 0
+    restart_ok weightd || return 0
     rm -f /tmp/weightd-mesh/mesh-*.rec /tmp/weightd-mesh/.ready 2>/dev/null
-    echo "$(date +%T) weightd: starting"
+    echo "$(date +%T) weightd: starting (backoff ${BACKOFF[weightd]:-1}s)"
     [ -s "$HOME/weightd.log" ] && mv "$HOME/weightd.log" "$HOME/weightd-$(date +%Y%m%d-%H%M%S).log" 2>/dev/null
     setsid nohup "$home/sparkpipe_weightd" --socket /tmp/spark_weightd.sock \
         --mesh-rank "$RANK" --mesh-interface "$MESH_INTERFACE" \
@@ -390,14 +411,26 @@ ensure_root() {
             break
         done
     }
-    [ "$st" = "down" ] || return 0
+    [ "$st" = "down" ] || {
+        local age_p
+        for age_p in $(pgrep -f "bin/sparkpipe_model_residentd"); do
+            local rr_age="$HOME/sparkdata/$name"
+            [ "$(readlink /proc/$age_p/cwd 2>/dev/null)" = "$rr_age" ] || continue
+            local start_s up_s
+            start_s=$(awk '{print $22}' "/proc/$age_p/stat" 2>/dev/null)
+            up_s=$(awk '{printf "%d", $1}' /proc/uptime)
+            [ -n "$start_s" ] && [ $(( up_s - start_s / 100 )) -gt 120 ] && restart_healthy "engine-$name"
+        done
+        return 0
+    }
     local up
     up=$(awk '{printf "%d", $1}' /proc/uptime)
     [ "$up" -ge 900 ] || {
         [ -n "$AGENT_BLOCKED" ] || { echo "$(date +%T) $name: node up ${up}s (<15min); autospawn blocked"; AGENT_BLOCKED=1; }
         return 0
     }
-    echo "$(date +%T) $name: down; starting"
+    restart_ok "engine-$name" || return 0
+    echo "$(date +%T) $name: down; starting (backoff ${BACKOFF[engine-$name]:-1}s)"
     restart_root "$name"
 }
 
