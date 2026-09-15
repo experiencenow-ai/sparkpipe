@@ -1393,6 +1393,13 @@ static SparkStatus SparkGlm5NextAdmissionPredicate(
 	if ( pthread_mutex_lock(&state->kv_mutex) != 0 )
 		SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
 	status = request->control_generation < state->control_generation ? SPARK_STATUS_VALIDATION_FAILED : SparkKvLaneTransactionsAdmit(&state->kv_transactions,request);
+	if ( status != SPARK_STATUS_OK )
+		fprintf(stderr,"ADMIT9-MODULE request=%llu control_generation=%llu state_control=%llu reset_gen=%llu status=%u lanes=%u\n",
+			(unsigned long long)request->request_id,
+			(unsigned long long)request->control_generation,
+			(unsigned long long)state->control_generation,
+			(unsigned long long)state->reset_generation,
+			(unsigned)status,(unsigned)request->cache_lane_count);
 	if ( status == SPARK_STATUS_OK )
 		state->control_generation = request->control_generation;
 	if ( status == SPARK_STATUS_OK && (request->frame_flags & SPARK_MODEL_DRIVER_FRAME_FLAG_CACHE_RELEASE) != 0u )

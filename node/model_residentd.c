@@ -1768,6 +1768,10 @@ static SparkStatus SparkModelResidentdProcessSubmission(
 		status = SparkModelServingAdapterValidateRuntimeSubmissionPrevalidated(runtime->adapter_library.adapter_interface.descriptor,&runtime->runtime_limits,&submission);
 	if ( status == SPARK_STATUS_OK && submission.submission_id <= runtime->client.last_submission_id )
 		status = submission.submission_id == runtime->client.last_submission_id ? SPARK_STATUS_DUPLICATE : SPARK_STATUS_INVALID_ARGUMENT;
+	if ( status != SPARK_STATUS_OK )
+		fprintf(stderr,"ADMIT9-RESIDENTD submission=%llu status=%u last_submission=%llu decision_required=%u\n",
+			(unsigned long long)submission.submission_id,(unsigned)status,
+			(unsigned long long)runtime->client.last_submission_id,(unsigned)decision_required);
 	if ( status == SPARK_STATUS_OK )
 		status = SparkModelServingAdapterPrepareSubmission(&runtime->adapter_library.adapter_interface,runtime->adapter_state,&submission);
 	cache_prepared = status == SPARK_STATUS_OK ? 1u : 0u;
