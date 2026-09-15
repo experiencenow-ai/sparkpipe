@@ -1560,6 +1560,7 @@ static void SparkModelResidentdAcceptClient(SparkModelResidentdRuntime *runtime)
 	runtime->client.fd = fd;
 	runtime->client.target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
 	runtime->client.last_activity_ns = SparkModelResidentdMonotonicTimeNs();
+	runtime->client.generation += 1u;
 	if ( runtime->client.generation == 0u )
 		runtime->client.generation = 1u;
 	pthread_mutex_unlock(&runtime->mutex);
@@ -1731,15 +1732,10 @@ static SparkStatus SparkModelResidentdProcessHello(
 	{
 		runtime->client.hello_complete = 1u;
 		runtime->client.last_submission_id = 0u;
-		if ( runtime->client.reset_done == 0u )
-		{
-			runtime->client.pending_client_reset = runtime->client.generation;
-			fprintf(stderr,"model_residentd client reset armed generation=%llu\n",
-				(unsigned long long)runtime->client.generation);
-		}
-		else
-			fprintf(stderr,"model_residentd client resumed generation=%llu\n",
-				(unsigned long long)runtime->client.generation);
+		runtime->client.pending_client_reset = runtime->client.generation;
+		fprintf(stderr,"model_residentd client reset armed generation=%llu resumed=%u\n",
+			(unsigned long long)runtime->client.generation,
+			(unsigned)runtime->client.reset_done);
 	}
 	else
 		runtime->client.close_after_output = 1u;
