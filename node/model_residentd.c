@@ -1707,6 +1707,12 @@ static SparkStatus SparkModelResidentdProcessHello(
 	SparkStatus status,queue_status;
 	hello = (const SparkModelResidentIpcHello *)message;
 	status = SparkModelResidentIpcValidateHello(hello,message_bytes,runtime->rank_plan.rank_index,runtime->rank_plan.stage_index,runtime->adapter_library.adapter_interface.descriptor);
+	if ( status != SPARK_STATUS_OK )
+		fprintf(stderr,"model_residentd hello rejected status=%u msg_bytes=%u abi=%llu rank=%u stage=%u\n",
+			(unsigned)status,(unsigned)message_bytes,
+			(unsigned long long)(message != 0 && message_bytes >= 16u ? ((const SparkModelResidentIpcHello *)message)->header.abi_version : 0ull),
+			(unsigned)runtime->rank_plan.rank_index,
+			(unsigned)runtime->rank_plan.stage_index);
 	queue_status = SparkModelResidentIpcInitializeHelloAck(&ack,
 		hello->header.message_id,status,runtime->rank_plan.rank_index,
 		runtime->rank_plan.stage_index,runtime->client.generation,
