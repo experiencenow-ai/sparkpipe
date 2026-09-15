@@ -141,6 +141,7 @@ typedef struct SparkModelResidentdClient
 	uint32_t input_capacity;
 	uint64_t generation;
 	uint64_t pending_client_reset;
+	uint64_t reset_done;
 	uint64_t last_message_id;
 	uint64_t last_submission_id;
 	SparkModelResidentdOutput *output;
@@ -1556,7 +1557,6 @@ static void SparkModelResidentdAcceptClient(SparkModelResidentdRuntime *runtime)
 	pthread_mutex_lock(&runtime->mutex);
 	runtime->client.fd = fd;
 	runtime->client.target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
-	runtime->client.generation++;
 	if ( runtime->client.generation == 0u )
 		runtime->client.generation = 1u;
 	pthread_mutex_unlock(&runtime->mutex);
@@ -1722,9 +1722,15 @@ static SparkStatus SparkModelResidentdProcessHello(
 	{
 		runtime->client.hello_complete = 1u;
 		runtime->client.last_submission_id = 0u;
-		runtime->client.pending_client_reset = runtime->client.generation;
-		fprintf(stderr,"model_residentd client reset armed generation=%llu\n",
-			(unsigned long long)runtime->client.generation);
+		if ( runtime->client.reset_done == 0u )
+		{
+			runtime->client.pending_client_reset = runtime->client.generation;
+			fprintf(stderr,"model_residentd client reset armed generation=%llu\n",
+				(unsigned long long)runtime->client.generation);
+		}
+		else
+			fprintf(stderr,"model_residentd client resumed generation=%llu\n",
+				(unsigned long long)runtime->client.generation);
 	}
 	else
 		runtime->client.close_after_output = 1u;
@@ -2584,6 +2590,7 @@ static SparkStatus SparkModelResidentdProgress(SparkModelResidentdRuntime *runti
 			fprintf(stderr,"model_residentd client reset complete generation=%llu\n",
 				(unsigned long long)runtime->client.pending_client_reset);
 			runtime->client.pending_client_reset = 0u;
+			runtime->client.reset_done = 1u;
 		}
 		else if ( status != SPARK_STATUS_BUSY && status != SPARK_STATUS_PENDING )
 		{
