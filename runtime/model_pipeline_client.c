@@ -750,6 +750,51 @@ static SparkStatus SparkModelPipelineClientPreflight(
 	return(SPARK_STATUS_OK);
 }
 
+uint64_t SparkModelPipelineClientControlGeneration(
+	const SparkModelPipelineClient *pipeline)
+{
+	SparkModelResidentClientView view;
+	uint64_t generation;
+	uint32_t rank;
+	if ( pipeline == 0 )
+		return(1u);
+	generation = 1u;
+	for (rank=0u; rank<pipeline->rank_count; rank++)
+	{
+		if ( SparkModelResidentClientGetView(pipeline->clients[rank],&view) != SPARK_STATUS_OK )
+			continue;
+		if ( view.client_generation > generation )
+			generation = view.client_generation;
+	}
+	return(generation);
+}
+
+SparkStatus SparkModelPipelineClientRecover(
+	SparkModelPipelineClient *pipeline)
+{
+	SparkModelResidentClientView view;
+	uint32_t rank,degraded;
+	if ( pipeline == 0 )
+		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	degraded = pipeline->failed_status != SPARK_STATUS_OK ? 1u : 0u;
+	if ( degraded == 0u )
+		for (rank=0u; rank<pipeline->rank_count; rank++)
+		{
+			if ( SparkModelResidentClientGetView(pipeline->clients[rank],&view) != SPARK_STATUS_OK || view.connected == 0u )
+			{
+				degraded = 1u;
+				break;
+			}
+		}
+	if ( degraded == 0u )
+		return(SPARK_STATUS_OK);
+	pipeline->failed_status = SPARK_STATUS_OK;
+	pipeline->failed_stage_index = SPARK_MODEL_PIPELINE_CLIENT_INVALID_STAGE_INDEX;
+	for (rank=0u; rank<pipeline->rank_count; rank++)
+		(void)SparkModelResidentClientProgress(pipeline->clients[rank],1u);
+	return(SPARK_STATUS_OK);
+}
+
 SparkStatus SparkModelPipelineClientSubmit(
 	SparkModelPipelineClient *pipeline,
 	const SparkModelServingSubmission *submission)

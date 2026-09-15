@@ -1666,7 +1666,7 @@ static void SparkModelBatchInitializeSubmission(
 	submission->submission_id = engine->next_submission_id;
 	submission->request_id = engine->next_submission_id;
 	submission->sequence_id = engine->next_submission_id;
-	submission->control_generation = 1u;
+	submission->control_generation = SparkModelPipelineClientControlGeneration(engine->pipeline);
 	submission->transaction_id = engine->next_submission_id;
 	submission->dispatch_generation = engine->next_submission_id;
 	submission->request_generation = 1u;
@@ -2077,6 +2077,8 @@ SparkStatus SparkModelBatchEngineReopenAdmission(
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	engine->admission_open = 1u;
 	engine->failed_status = SPARK_STATUS_OK;
+	if ( engine->pipeline != 0 )
+		(void)SparkModelPipelineClientRecover(engine->pipeline);
 	return(SPARK_STATUS_OK);
 }
 
