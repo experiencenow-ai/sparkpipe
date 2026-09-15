@@ -64,6 +64,7 @@ typedef struct SparkTpDeviceCollectiveImplementation
     uint64_t round_wave_limit;
     uint64_t chain_key;
     uint64_t chain_epoch;
+    uint64_t consumed_cell;
     uint64_t round_index;
     uint64_t cancel_epoch;
     SparkTpDeviceCollectiveStagingSet
@@ -435,6 +436,7 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
         implementation->cancel_seen = *cancel_cell;
         while ( cell_epoch == 0ull ||
                 cell_epoch > SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK ||
+                cell == implementation->consumed_cell ||
                 (cell & SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK) !=
                     request_id )
         {
@@ -462,6 +464,7 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
             cell_epoch = cell >> SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_BITS;
         }
         epoch = cell_epoch;
+        implementation->consumed_cell = cell;
         if ( epoch != implementation->chain_epoch ||
              implementation->round_rebased == 0u )
         {
