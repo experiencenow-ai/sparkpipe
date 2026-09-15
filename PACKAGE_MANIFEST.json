@@ -1,5 +1,5 @@
 {
-  "file_count": 2568,
+  "file_count": 2571,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -63,8 +63,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "51cfdf6d9451004b3eeabc1c146f5760584338bc8d12fc6e8f7482023145115a",
-      "size_bytes": 112522
+      "sha256": "e5e53c72b94cf02a785d38b05425e02936d62e7814735084d200e8c4f5d7e0c9",
+      "size_bytes": 112786
     },
     {
       "path": "NCCL_16WIDE_RECEIPTS.md",
@@ -1195,6 +1195,11 @@
       "path": "docs/MODULE_MAP.md",
       "sha256": "a0a48ff5776d56b8a13da2113e953c5ec6002c0cae5cd2595b83d026f43d279e",
       "size_bytes": 3045
+    },
+    {
+      "path": "docs/MULTI_DEV_SMOKE.md",
+      "sha256": "843fb9c9683a3ab535dc4b799074acde2e9f902c7866ecde1b2e6869ebeed239",
+      "size_bytes": 17540
     },
     {
       "path": "docs/NCCL_COLLECTIVE_PLANE.md",
@@ -10737,6 +10742,16 @@
       "size_bytes": 788
     },
     {
+      "path": "tools/multi_dev_orchestrate.py",
+      "sha256": "cf814967ca3c071c42ba08629a8f068785e407f99fb6fed3a69731713af75ea0",
+      "size_bytes": 21854
+    },
+    {
+      "path": "tools/multi_dev_smoke.c",
+      "sha256": "26caa0d1d134033293f6b677abbd91113513e8b013000813364699398eca6bc3",
+      "size_bytes": 26743
+    },
+    {
       "path": "tools/muse_decode_roofline.py",
       "sha256": "d9bf7649d7ee5e1f24733de330c22fefd6cf496abc2c85b6e062ee5eeea9543f",
       "size_bytes": 5350
@@ -12845,5 +12860,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 52385575
+  "total_bytes": 52451976
 }
