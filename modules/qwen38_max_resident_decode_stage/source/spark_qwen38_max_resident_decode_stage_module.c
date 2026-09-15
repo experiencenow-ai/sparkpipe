@@ -407,13 +407,22 @@ static SparkStatus SparkQwen38MaxModuleValidateEntry(SparkQwen38MaxModuleState *
 	SparkQwen38MaxStagePackTensorShape shape;
 	uint32_t global = entry->layer_index == SPARK_QWEN38_MAX_STAGEPACK_GLOBAL_LAYER ? 1u : 0u;
 	uint32_t routed_expert = entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W1 || entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W3 || entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_DOWN ? 1u : 0u;
+	uint32_t shared_rows = entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_GATE || entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_UP ? 1u : 0u;
+	uint32_t shared_cols = entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_DOWN ? 1u : 0u;
 	uint32_t expected_rows;
+	uint32_t expected_columns;
 	if ( SparkQwen38MaxStagePackResolvedShape(entry->tensor_kind,global != 0u ? 0u : entry->layer_index,global,&shape) != 0 )
 		SPARK_FAIL(SPARK_STATUS_VALIDATION_FAILED);
 	expected_rows = shape.rows;
-	if ( routed_expert != 0u && state->tp_degree > 1u )
-		expected_rows = shape.rows / state->tp_degree;
-	if ( entry->rows != expected_rows || entry->columns != shape.columns )
+	expected_columns = shape.columns;
+	if ( state->tp_degree > 1u )
+	{
+		if ( routed_expert != 0u || shared_rows != 0u )
+			expected_rows = shape.rows / state->tp_degree;
+		if ( shared_cols != 0u )
+			expected_columns = shape.columns / state->tp_degree;
+	}
+	if ( entry->rows != expected_rows || entry->columns != expected_columns )
 		SPARK_FAIL(SPARK_STATUS_VALIDATION_FAILED);
 	if ( entry->weight_format != shape.natural_format )
 	{
@@ -1638,9 +1647,15 @@ static SparkStatus SparkQwen38MaxModuleRunMoe(SparkQwen38MaxModuleState *state, 
 		if ( error == cudaSuccess )
 			error = SparkQwen38MaxLaunchLinear(stream,&weights->shared_up,slot->normalized_bf16,slot->shared_up_bf16,rows);
 		if ( error == cudaSuccess )
-			error = SparkQwen38MaxLaunchSwiGlu(stream,slot->shared_gate_bf16,slot->shared_up_bf16,rows,SPARK_QWEN38_MAX_MODEL_EXPERT_INTERMEDIATE_DIMENSION);
+			error = SparkQwen38MaxLaunchSwiGlu(stream,slot->shared_gate_bf16,slot->shared_up_bf16,rows,weights->shared_gate.output_dimension);
 		if ( error == cudaSuccess )
 			error = SparkQwen38MaxLaunchLinear(stream,&weights->shared_down,slot->shared_up_bf16,slot->shared_down_bf16,rows);
+		if ( error == cudaSuccess && state->tp_degree > 1u )
+		{
+			status = SparkQwen38MaxModuleTpAllReduceHidden(state,slot,slot->shared_down_bf16,rows);
+			if ( status != SPARK_STATUS_OK )
+				SPARK_RETURN(status);
+		}
 		if ( error == cudaSuccess )
 			error = SparkQwen38MaxLaunchSharedGate(stream,slot->shared_down_bf16,weights->shared_gate_weight_bf16,slot->normalized_bf16,rows,SPARK_QWEN38_MAX_MODEL_HIDDEN_DIMENSION);
 		if ( error == cudaSuccess )
