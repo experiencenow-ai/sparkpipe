@@ -3,11 +3,7 @@ set -eu
 rank=$1
 pack="$HOME/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank$rank.sp"
 sha=$(python3 -c "import json;print(json.load(open('$pack.receipt.json'))['output_sha256'])")
-. "/tmp/t1qmax/rank$rank.env"
-mkdir -p /tmp/t1qmax/dump
-/tmp/t1qmax/sparkpipe_weightd --socket /tmp/t1qmax/weightd.sock --device-bytes-max "$EXPERT_POOL_BYTES" > /tmp/t1qmax/weightd.log 2>&1 &
-wpid=$!
-sleep 1
+. "/tmp/t1qmax_stage/tools/rank$rank.env"
 rc=0
 sudo -n /usr/local/sbin/sparkcap env \
 	SPARK_QWEN38_MAX_ALLOW_UNQUALIFIED_EXECUTION=1 \
@@ -28,13 +24,12 @@ sudo -n /usr/local/sbin/sparkcap env \
 	"SPARK_QWEN38_MAX_STAGE_TP_SESSION_PORTS=$SESSION_PORTS" \
 	"SPARK_QWEN38_MAX_STAGE_TP_LOCAL_HOST=$LOCAL_HOST" \
 	SPARK_QWEN38_MAX_STAGE_TP_TIMEOUT_MS=180000 \
-	"SPARK_WEIGHTD_SOCKET=/tmp/t1qmax/weightd.sock" \
+	"SPARK_WEIGHTD_SOCKET=$WEIGHTD_SOCKET" \
 	"SPARK_WEIGHTD_PACK_SHA256=$sha" \
 	"SPARK_WEIGHTD_EXPERT_POOL_BYTES=$EXPERT_POOL_BYTES" \
 	"SPARK_WEIGHTD_SPINE_BUDGET_BYTES=$SPINE_BUDGET_BYTES" \
 	"SPARK_QWEN38_MAX_T1_DUMP=/tmp/t1qmax/dump" \
 	"T1_QMAX_TIMING=$TIMING" \
 	/tmp/t1qmax/t1_qmax_harness "$PROMPT_IDS" "$NEW_TOKENS" > /tmp/t1qmax/harness.log 2>&1 || rc=$?
-kill "$wpid" 2>/dev/null || true
 grep -q "t1_qmax_harness done" /tmp/t1qmax/harness.log || rc=1
 exit "$rc"

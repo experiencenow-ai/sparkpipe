@@ -42,6 +42,7 @@ print(','.join(str(0 if a == b else base + a * tp + b) for a in range(tp) for b 
 		echo "LOCAL_HOST=$(rank_host "$1")"
 		echo "EXPERT_POOL_BYTES=$EXPERT_POOL_BYTES"
 		echo "SPINE_BUDGET_BYTES=$SPINE_BUDGET_BYTES"
+		echo "WEIGHTD_SOCKET=$WEIGHTD_SOCKET"
 		echo "SESSION_PORTS=\"$ports\""
 	} > "$SCRATCH/rank$1.env"
 }
