@@ -1656,8 +1656,8 @@ extern "C" cudaError_t SparkQwen38MaxLaunchGroupedExpertLinear(
 		payload_stride = rows_per_expert * view->input_dimension;
 		scale_stride = (rows_per_expert / 128u) * ((uint64_t)view->input_dimension / 128u) * 4u;
 	}
-	payload = (const uint8_t *)view->weight_payload + ((uint64_t)tp_rank * experts_per_rank * payload_stride);
-	scale = (const uint8_t *)view->weight_scale_e8m0 + ((uint64_t)tp_rank * experts_per_rank * scale_stride);
+	payload = (const uint8_t *)view->weight_payload;
+	scale = (const uint8_t *)view->weight_scale_e8m0;
 	offsets = group_row_offset + ((uint64_t)tp_rank * experts_per_rank);
 	prefix = group_tile_prefix + ((uint64_t)tp_rank * experts_per_rank);
 	return(SparkLmHostLaunchGroupedScalarLinear<32u>(stream,
