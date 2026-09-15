@@ -975,11 +975,17 @@ SparkStatus SparkModelResidentClientGetPollDescriptor(
 	const SparkModelResidentClient *client,
 	SparkModelResidentClientPollDescriptor *descriptor)
 {
-	if ( client == 0 || descriptor == 0 || client->connected == 0u )
+	if ( client == 0 || descriptor == 0 )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	memset(descriptor,0,sizeof(*descriptor));
 	descriptor->abi_version = SPARK_MODEL_RESIDENT_CLIENT_ABI_VERSION;
 	descriptor->descriptor_bytes = SPARK_MODEL_RESIDENT_CLIENT_POLL_DESCRIPTOR_BYTES;
+	if ( client->connected == 0u )
+	{
+		descriptor->fd = -1;
+		descriptor->events = 0u;
+		return(SPARK_STATUS_OK);
+	}
 	descriptor->fd = client->fd;
 	descriptor->events = SPARK_MODEL_RESIDENT_CLIENT_POLL_READ;
 	if ( client->output_count != 0u )

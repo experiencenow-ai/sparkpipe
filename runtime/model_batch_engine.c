@@ -2105,6 +2105,8 @@ SparkStatus SparkModelBatchEngineProgress(
 		}
 		if ( status != SPARK_STATUS_OK )
 		{
+			if ( status == SPARK_STATUS_IO_ERROR )
+				break;
 			SparkModelBatchSetFailed(engine,status);
 			SparkModelBatchFailIdleRequests(engine,status);
 			SPARK_RETURN(status);
