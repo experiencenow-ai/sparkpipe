@@ -376,7 +376,18 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
     epoch = *base_cell >> SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS;
     if ( epoch == 0ull ||
          epoch > SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK )
+    {
+        fprintf(stderr,
+            "CKEY-BAD-CELL rank=%u cell=%llu rebased=%u band=%u base_seen=%llu round_seq=%llu limit=%llu\n",
+            implementation->tp_rank,
+            (unsigned long long)*base_cell,
+            implementation->round_rebased,
+            band_index,
+            (unsigned long long)implementation->base_seen,
+            (unsigned long long)implementation->round_seq,
+            (unsigned long long)implementation->round_wave_limit);
         SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
+    }
     if ( epoch != implementation->chain_epoch )
     {
         fprintf(stderr,
