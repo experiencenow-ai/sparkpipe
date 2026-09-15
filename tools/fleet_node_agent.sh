@@ -143,6 +143,7 @@ start_root() {
 
 ensure_api() {
     [ "$RANK" = 0 ] || return 0
+    [ -n "$G5_API_DISABLED" ] && return 0
     local rr="$HOME/sparkdata/glm53flash.fp8.tp16"
     [ -x "$rr/bin/sparkpipe_model_api" ] || return 0
     local ready_count now
