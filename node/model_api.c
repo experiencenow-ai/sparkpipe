@@ -1052,6 +1052,15 @@ int main(int argc, char **argv)
 	cfg.request_capacity = 64;
 	cfg.max_context_tokens = API_MAX_PROMPT_TOKENS + API_MAX_OUTPUT_TOKENS;
 	cfg.max_prefill_rows_per_submission = dep.runtime_limits.max_input_row_count;
+	{
+		const char *rows_env = getenv("SPARK_MODEL_API_MAX_PREFILL_ROWS");
+		if ( rows_env != 0 && rows_env[0] != '\0' )
+		{
+			uint32_t clamp = (uint32_t)strtoul(rows_env,0,10);
+			if ( clamp != 0u && clamp < cfg.max_prefill_rows_per_submission )
+				cfg.max_prefill_rows_per_submission = clamp;
+		}
+	}
 	cfg.connect_timeout_ms = 30000;
 	cfg.maximum_messages_per_rank_per_progress = 8;
 	cfg.event_function = api_event;
