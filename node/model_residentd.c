@@ -2754,7 +2754,7 @@ static SparkStatus SparkModelResidentdRun(SparkModelResidentdRuntime *runtime)
 		if ( status != SPARK_STATUS_OK )
 			break;
 		poll_status = poll(fds,count,SparkModelResidentdPollTimeoutMs(runtime));
-		if ( runtime->client.fd >= 0 && runtime->client.last_activity_ns != 0u &&
+		if ( runtime->client.fd >= 0 && runtime->client.hello_complete == 0u && runtime->client.last_activity_ns != 0u &&
 		     SparkModelResidentdMonotonicTimeNs() - runtime->client.last_activity_ns > UINT64_C(30000000000) )
 		{
 			uint32_t inflight_index,inflight_count = 0u;
