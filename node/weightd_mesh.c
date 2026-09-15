@@ -57,6 +57,9 @@ typedef struct SparkWeightdMesh
     int memfd;
     uint64_t boot_ns;
     uint64_t record_check_ns;
+    uint64_t artifact_check_ns;
+    uint16_t lid;
+    uint8_t gid[16];
     uint64_t wired_boot_ns[SPARK_WEIGHTD_MESH_PEERS];
     uint64_t send_ok;
     uint64_t send_err;
@@ -479,6 +482,7 @@ SparkStatus SparkWeightdMeshInit(void)
     own_record.rkey = weightd_mesh.recv_mr->rkey;
     own_record.recv_addr = (uint64_t)(uintptr_t)weightd_mesh.recv_buffer;
     own_record.lid = (uint16_t)port_attr.lid;
+    weightd_mesh.lid = (uint16_t)port_attr.lid;
     {
         union ibv_gid gid;
         if (ibv_query_gid(weightd_mesh.context,1,3,&gid) != 0)
@@ -487,6 +491,7 @@ SparkStatus SparkWeightdMeshInit(void)
             return SPARK_STATUS_DRIVER_LOAD_ERROR;
         }
         memcpy(own_record.gid,gid.raw,16);
+        memcpy(weightd_mesh.gid,gid.raw,16);
     }
     for (peer = 0u; peer < SPARK_WEIGHTD_MESH_PEERS; peer++)
     {
@@ -562,6 +567,40 @@ void SparkWeightdMeshPoll(void)
     }
     if (weightd_mesh.mesh_ready == 0u)
         return;
+    if (SparkWeightdMeshRealtimeNs() - weightd_mesh.artifact_check_ns >=
+        1000000000ull)
+    {
+        struct stat artifact_st;
+        char artifact_path[256];
+        SparkWeightdMeshRecord own_record;
+        uint32_t peer;
+        weightd_mesh.artifact_check_ns = SparkWeightdMeshRealtimeNs();
+        if (stat(SPARK_WEIGHTD_MESH_DIR "/.ready",&artifact_st) != 0)
+        {
+            FILE *marker = fopen(SPARK_WEIGHTD_MESH_DIR "/.ready","w");
+            if (marker != 0)
+                (void)fclose(marker);
+        }
+        (void)snprintf(artifact_path,sizeof(artifact_path),"%s/mesh-%x.rec",
+            SPARK_WEIGHTD_MESH_DIR,weightd_mesh.local_rank);
+        if (stat(artifact_path,&artifact_st) != 0)
+        {
+            memset(&own_record,0,sizeof(own_record));
+            own_record.magic = SPARK_WEIGHTD_MESH_MAGIC;
+            own_record.rank = weightd_mesh.local_rank;
+            own_record.boot_ns = weightd_mesh.boot_ns;
+            own_record.rkey = weightd_mesh.recv_mr != 0 ? weightd_mesh.recv_mr->rkey : 0u;
+            own_record.recv_addr = (uint64_t)(uintptr_t)weightd_mesh.recv_buffer;
+            own_record.lid = weightd_mesh.lid;
+            memcpy(own_record.gid,weightd_mesh.gid,16);
+            for (peer = 0u; peer < SPARK_WEIGHTD_MESH_PEERS; peer++)
+            {
+                own_record.send_qpn[peer] = weightd_mesh.send_qps[peer] != 0 ? weightd_mesh.send_qps[peer]->qp_num : 0u;
+                own_record.recv_qpn[peer] = weightd_mesh.recv_qps[peer] != 0 ? weightd_mesh.recv_qps[peer]->qp_num : 0u;
+            }
+            (void)SparkWeightdMeshWriteRecord(&own_record);
+        }
+    }
     SparkWeightdMeshDrainCq();
     if (weightd_mesh.send_ok - weightd_mesh.send_logged >= 2048ull)
     {
