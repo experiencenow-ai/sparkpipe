@@ -390,6 +390,9 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
     {
         uint64_t cell_epoch = *base_cell >>
             SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_BITS;
+        implementation->cancel_seen = *(volatile uint64_t *)
+            (implementation->mesh_buffer +
+            SparkTpDeviceCollectiveCancelCellOffset(band_index));
         if ( cell_epoch > SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK )
             cell_epoch = 0ull;
         if ( implementation->chain_epoch > cell_epoch )
