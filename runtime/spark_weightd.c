@@ -1290,11 +1290,13 @@ static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
             result->status = status;
             return;
         }
-        if (arena->lazy == 0u || arena->expert_pool_bytes != request->expert_pool_bytes)
+        if (arena->lazy == 0u)
         {
             result->status = (uint32_t)SPARK_STATUS_INVALID_ARGUMENT;
             return;
         }
+        if (request->expert_pool_bytes > arena->expert_pool_bytes)
+            arena->expert_pool_bytes = request->expert_pool_bytes;
         slot = (uint32_t)(arena - server->arenas);
         status = SparkWeightdServerAttachRegister(server, connection, slot);
         result->status = (uint32_t)status;
