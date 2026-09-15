@@ -2755,8 +2755,18 @@ static SparkStatus SparkModelResidentdRun(SparkModelResidentdRuntime *runtime)
 		if ( runtime->client.fd >= 0 && runtime->client.last_activity_ns != 0u &&
 		     SparkModelResidentdMonotonicTimeNs() - runtime->client.last_activity_ns > UINT64_C(30000000000) )
 		{
-			fprintf(stderr,"model_residentd client idle timeout; closing fd=%d\n",runtime->client.fd);
-			SparkModelResidentdCloseClient(runtime);
+			uint32_t inflight_index,inflight_count = 0u;
+			if ( runtime->routes != 0 )
+				for (inflight_index=0u; inflight_index<runtime->route_capacity; inflight_index++)
+					if ( runtime->routes[inflight_index].active != 0u )
+						inflight_count++;
+			if ( inflight_count == 0u )
+			{
+				fprintf(stderr,"model_residentd client idle timeout; closing fd=%d\n",runtime->client.fd);
+				SparkModelResidentdCloseClient(runtime);
+			}
+			else
+				runtime->client.last_activity_ns = SparkModelResidentdMonotonicTimeNs();
 		}
 		if ( poll_status < 0 && errno != EINTR )
 			status = SPARK_STATUS_IO_ERROR;
