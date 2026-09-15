@@ -407,7 +407,13 @@ static SparkStatus SparkQwen38MaxModuleValidateEntry(SparkQwen38MaxModuleState *
 	SparkQwen38MaxStagePackTensorShape shape;
 	uint32_t global = entry->layer_index == SPARK_QWEN38_MAX_STAGEPACK_GLOBAL_LAYER ? 1u : 0u;
 	uint32_t routed_expert = entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W1 || entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W3 || entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_DOWN ? 1u : 0u;
-	if ( SparkQwen38MaxStagePackResolvedShape(entry->tensor_kind,global != 0u ? 0u : entry->layer_index,global,&shape) != 0 || entry->rows != shape.rows || entry->columns != shape.columns )
+	uint32_t expected_rows;
+	if ( SparkQwen38MaxStagePackResolvedShape(entry->tensor_kind,global != 0u ? 0u : entry->layer_index,global,&shape) != 0 )
+		SPARK_FAIL(SPARK_STATUS_VALIDATION_FAILED);
+	expected_rows = shape.rows;
+	if ( routed_expert != 0u && state->tp_degree > 1u )
+		expected_rows = shape.rows / state->tp_degree;
+	if ( entry->rows != expected_rows || entry->columns != shape.columns )
 		SPARK_FAIL(SPARK_STATUS_VALIDATION_FAILED);
 	if ( entry->weight_format != shape.natural_format )
 	{
