@@ -254,7 +254,10 @@ static SparkStatus SparkModelResidentClientFinishConnect(
 	error = 0;
 	error_bytes = sizeof(error);
 	if ( getsockopt(fd,SOL_SOCKET,SO_ERROR,&error,&error_bytes) != 0 || error != 0 )
+	{
+		fprintf(stderr,"client_connect_fail errno=%d\n",error);
 		SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+	}
 	return(SPARK_STATUS_OK);
 }
 
@@ -444,7 +447,11 @@ static SparkStatus SparkModelResidentClientEnsureConnected(
 	status = SparkModelResidentClientOpenEndpoint(client,&client->endpoint,
 		client->connect_timeout_ms);
 	if ( status != SPARK_STATUS_OK )
+	{
+		fprintf(stderr,"client_reconnect_fail rank=%u status=%u\n",
+			(unsigned)client->rank_index,(unsigned)status);
 		SPARK_RETURN(status);
+	}
 	memset(&configuration,0,sizeof(configuration));
 	configuration.endpoint = client->endpoint;
 	configuration.connect_timeout_ms = client->connect_timeout_ms;
