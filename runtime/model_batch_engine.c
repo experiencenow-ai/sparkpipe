@@ -123,6 +123,8 @@ struct SparkModelBatchEngine
 	uint32_t live_request_count;
 	uint32_t inflight_submission_count;
 	uint32_t failed_status;
+	uint32_t consecutive_pipeline_failures;
+	uint64_t circuit_open_until_ns;
 	uint32_t next_work_kind;
 	uint32_t work_kind_bypass_counts[4];
 	uint32_t cache_block_token_count;
@@ -1899,6 +1901,14 @@ static void SparkModelBatchRecordSubmission(
 	engine->inflight_kv_page_count = engine->selected_kv_page_count;
 }
 
+static uint64_t SparkModelBatchNowNs(void)
+{
+	struct timespec timestamp = {0,0};
+	if ( clock_gettime(CLOCK_MONOTONIC,&timestamp) != 0 )
+		return(0ull);
+	return((uint64_t)timestamp.tv_sec * UINT64_C(1000000000) + (uint64_t)timestamp.tv_nsec);
+}
+
 static SparkStatus SparkModelBatchDispatchKind(
 	SparkModelBatchEngine *engine,
 	uint32_t work_kind,
@@ -1908,7 +1918,11 @@ static SparkStatus SparkModelBatchDispatchKind(
 	SparkModelServingSubmission submission;
 	SparkStatus status;
 	uint32_t lane_count;
+	uint64_t now_ns;
 	*dispatched_out = 0u;
+	now_ns = SparkModelBatchNowNs();
+	if ( engine->circuit_open_until_ns != 0u && now_ns < engine->circuit_open_until_ns )
+		SPARK_FAIL(SPARK_STATUS_BUSY);
 	state = SparkModelBatchReserveSubmission(engine,work_kind);
 	if ( state == 0 )
 		SPARK_FAIL(SPARK_STATUS_BUSY);
@@ -1928,8 +1942,19 @@ static SparkStatus SparkModelBatchDispatchKind(
 	if ( status != SPARK_STATUS_OK )
 	{
 		state->active = 0u;
+		engine->consecutive_pipeline_failures++;
+		if ( engine->consecutive_pipeline_failures >= 8u )
+		{
+			fprintf(stderr,"batch circuit open: %u consecutive pipeline failures; dispatch suspended 15s\n",
+				(unsigned)engine->consecutive_pipeline_failures);
+			engine->circuit_open_until_ns = SparkModelBatchNowNs() + UINT64_C(15000000000);
+			engine->consecutive_pipeline_failures = 0u;
+		}
 		SPARK_RETURN(status);
 	}
+	if ( engine->circuit_open_until_ns != 0u )
+		engine->circuit_open_until_ns = 0u;
+	engine->consecutive_pipeline_failures = 0u;
 	SparkModelBatchRecordSubmission(engine,state,lane_count);
 	*dispatched_out = 1u;
 	return(SPARK_STATUS_OK);
