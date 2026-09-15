@@ -1967,6 +1967,19 @@ static uint32_t SparkModelBatchChooseWorkKind(
 	return(SparkModelBatchSchedulerChooseWorkKind(available_by_kind,minimum_by_kind,engine->admission_open,engine->inflight_submission_count,engine->submission_capacity,&engine->next_work_kind,engine->work_kind_bypass_counts));
 }
 
+static uint64_t SparkModelBatchInflightBudgetNs(void)
+{
+	const char *env = getenv("SPARK_BATCH_INFLIGHT_BUDGET_NS");
+	uint64_t value;
+	if ( env != 0 && env[0] != '\0' )
+	{
+		value = strtoull(env,0,10);
+		if ( value >= UINT64_C(1000000000) )
+			return(value);
+	}
+	return(UINT64_C(240) * UINT64_C(1000000000));
+}
+
 static void SparkModelBatchExpireStalledRequests(
 	SparkModelBatchEngine *engine)
 {
@@ -1987,7 +2000,7 @@ static void SparkModelBatchExpireStalledRequests(
 		if ( engine->requests[index].inflight_since_ns == 0ull )
 			engine->requests[index].inflight_since_ns = now;
 		else if ( now - engine->requests[index].inflight_since_ns >
-		          UINT64_C(240) * UINT64_C(1000000000) )
+		          SparkModelBatchInflightBudgetNs() )
 		{
 			fprintf(stderr,
 			    "batch request expired id=%llu state=%u\n",
