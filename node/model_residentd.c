@@ -1723,6 +1723,8 @@ static SparkStatus SparkModelResidentdProcessHello(
 		runtime->client.hello_complete = 1u;
 		runtime->client.last_submission_id = 0u;
 		runtime->client.pending_client_reset = runtime->client.generation;
+		fprintf(stderr,"model_residentd client reset armed generation=%llu\n",
+			(unsigned long long)runtime->client.generation);
 	}
 	else
 		runtime->client.close_after_output = 1u;
@@ -2569,10 +2571,16 @@ static SparkStatus SparkModelResidentdProgress(SparkModelResidentdRuntime *runti
 	if ( runtime->client.pending_client_reset != 0u &&
 		runtime->adapter_library.adapter_interface.reset != 0 )
 	{
+		fprintf(stderr,"model_residentd client reset attempt generation=%llu\n",
+			(unsigned long long)runtime->client.pending_client_reset);
 		status = runtime->adapter_library.adapter_interface.reset(
 			runtime->adapter_state,runtime->client.pending_client_reset);
 		if ( status == SPARK_STATUS_OK )
+		{
+			fprintf(stderr,"model_residentd client reset complete generation=%llu\n",
+				(unsigned long long)runtime->client.pending_client_reset);
 			runtime->client.pending_client_reset = 0u;
+		}
 		else if ( status != SPARK_STATUS_BUSY && status != SPARK_STATUS_PENDING )
 		{
 			fprintf(stderr,"model_residentd client generation %llu reset failed loudly: status=%u\n",
