@@ -2033,6 +2033,7 @@ SparkStatus SparkModelBatchEngineProgress(
 	uint32_t dispatched,kind,misses,step;
 	if ( engine == 0 || maximum_new_submission_count == 0u )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	(void)SparkModelPipelineClientRecover(engine->pipeline);
 	status = SparkModelPipelineClientProgress(engine->pipeline,engine->maximum_messages_per_rank);
 	if ( status != SPARK_STATUS_OK )
 	{
