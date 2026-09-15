@@ -406,11 +406,12 @@ static SparkStatus SparkQwen38MaxModuleValidateEntry(SparkQwen38MaxModuleState *
 {
 	SparkQwen38MaxStagePackTensorShape shape;
 	uint32_t global = entry->layer_index == SPARK_QWEN38_MAX_STAGEPACK_GLOBAL_LAYER ? 1u : 0u;
+	uint32_t routed_expert = entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W1 || entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W3 || entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_DOWN ? 1u : 0u;
 	if ( SparkQwen38MaxStagePackResolvedShape(entry->tensor_kind,global != 0u ? 0u : entry->layer_index,global,&shape) != 0 || entry->rows != shape.rows || entry->columns != shape.columns )
 		SPARK_FAIL(SPARK_STATUS_VALIDATION_FAILED);
 	if ( entry->weight_format != shape.natural_format )
 	{
-		if ( (shape.natural_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_MXFP4_E2M1 && shape.natural_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_FP8_E4M3_F32B128) || entry->weight_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_BF16 )
+		if ( (shape.natural_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_MXFP4_E2M1 && shape.natural_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_FP8_E4M3_F32B128) || (entry->weight_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_BF16 && !(routed_expert != 0u && entry->weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_NVFP4_PACKED)) )
 			SPARK_FAIL(SPARK_STATUS_VALIDATION_FAILED);
 	}
 	if ( entry->weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_MXFP4_E2M1 ? entry->scale_group_size != SPARK_QWEN38_MAX_MODEL_MXFP4_GROUP_SIZE : (entry->weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_FP8_E4M3_F32B128 ? entry->scale_group_size != 128u : (entry->weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_NVFP4_PACKED ? entry->scale_group_size != 16u : entry->scale_group_size != 0u)) )
