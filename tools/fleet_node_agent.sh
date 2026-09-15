@@ -334,6 +334,14 @@ self_update() {
 
 ensure_weightd() {
     if pgrep -f "sparkpipe_weightd" >/dev/null; then
+        local youngest=0 p start_s
+        for p in $(pgrep -f "sparkpipe_weightd"); do
+            start_s=$(awk '{print $22}' "/proc/$p/stat" 2>/dev/null || echo 0)
+            [ "$start_s" -gt "$youngest" ] && youngest=$start_s
+        done
+        if [ $(( $(awk '{printf "%d", $1}' /proc/uptime) - $(( youngest / 100 ) ) )) -lt 30 ]; then
+            return 0
+        fi
         if [ -S /tmp/spark_weightd.sock ] && python3 -c "import socket,sys; s=socket.socket(socket.AF_UNIX); s.settimeout(2); s.connect(\"/tmp/spark_weightd.sock\"); s.close()" 2>/dev/null; then
             return 0
         fi
