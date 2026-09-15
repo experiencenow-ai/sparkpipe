@@ -2183,6 +2183,22 @@ static void SparkModelBatchCountStates(
 	}
 }
 
+void SparkModelBatchEngineSeedSubmissionId(
+	SparkModelBatchEngine *engine,
+	uint64_t next_submission_id)
+{
+	if ( engine == 0 || next_submission_id == 0u )
+		return;
+	if ( next_submission_id > engine->next_submission_id )
+		engine->next_submission_id = next_submission_id;
+}
+
+uint64_t SparkModelBatchEnginePeekSubmissionId(
+	const SparkModelBatchEngine *engine)
+{
+	return(engine == 0 ? 0u : engine->next_submission_id);
+}
+
 SparkStatus SparkModelBatchEngineGetView(
 	const SparkModelBatchEngine *engine,
 	SparkModelBatchEngineView *view)
