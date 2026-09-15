@@ -402,13 +402,23 @@ static SparkStatus SparkQwen38MaxModuleConfigure(SparkQwen38MaxModuleState *stat
 
 #include "sparkpipe/spark_pack_load_common.h"
 
+#define SPARK_QWEN38_MAX_MODULE_ROW_SHARDED_KIND_MASK \
+	((1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W1) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W3) | \
+	 (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_DOWN) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_GATE) | \
+	 (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_UP) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTN_QUERY) | \
+	 (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTN_KEY) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTN_VALUE) | \
+	 (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_GDN_QKV) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_GDN_GATE) | \
+	 (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_GDN_BETA) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_GDN_DECAY))
+#define SPARK_QWEN38_MAX_MODULE_COL_SHARDED_KIND_MASK \
+	((1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_DOWN) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_GDN_OUTPUT) | \
+	 (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTN_OUTPUT))
+
 static SparkStatus SparkQwen38MaxModuleValidateEntry(SparkQwen38MaxModuleState *state, const SparkQwen38MaxStagePackEntry *entry, uint64_t file_bytes, uint32_t *is_global)
 {
 	SparkQwen38MaxStagePackTensorShape shape;
 	uint32_t global = entry->layer_index == SPARK_QWEN38_MAX_STAGEPACK_GLOBAL_LAYER ? 1u : 0u;
 	uint32_t routed_expert = entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W1 || entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W3 || entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_DOWN ? 1u : 0u;
-	uint32_t shared_rows = entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_GATE || entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_UP ? 1u : 0u;
-	uint32_t shared_cols = entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_DOWN ? 1u : 0u;
+	uint32_t kind_bit = entry->tensor_kind < 32u ? (1u << entry->tensor_kind) : 0u;
 	uint32_t expected_rows;
 	uint32_t expected_columns;
 	if ( SparkQwen38MaxStagePackResolvedShape(entry->tensor_kind,global != 0u ? 0u : entry->layer_index,global,&shape) != 0 )
@@ -417,9 +427,9 @@ static SparkStatus SparkQwen38MaxModuleValidateEntry(SparkQwen38MaxModuleState *
 	expected_columns = shape.columns;
 	if ( state->tp_degree > 1u )
 	{
-		if ( routed_expert != 0u || shared_rows != 0u )
+		if ( (kind_bit & SPARK_QWEN38_MAX_MODULE_ROW_SHARDED_KIND_MASK) != 0u )
 			expected_rows = shape.rows / state->tp_degree;
-		if ( shared_cols != 0u )
+		if ( (kind_bit & SPARK_QWEN38_MAX_MODULE_COL_SHARDED_KIND_MASK) != 0u )
 			expected_columns = shape.columns / state->tp_degree;
 	}
 	if ( entry->rows != expected_rows || entry->columns != expected_columns )
