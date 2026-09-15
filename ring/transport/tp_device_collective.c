@@ -653,21 +653,11 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
             sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_HOST,
             submission->cuda_stream) != 0 )
         goto publish_fail;
-    for ( peer = 0u; peer < implementation->tp_degree - 1u; peer++ )
     {
-        uint32_t peer_rank =
-            peer < implementation->tp_rank ? peer : peer + 1u;
-        volatile uint64_t *end_word = (volatile uint64_t *)
-            (implementation->mesh_buffer + implementation->band_base +
-            ((uint64_t)peer_rank *
-                SPARK_WEIGHTD_MESH_SLOTS_PER_RANK +
-                (round_seq &
-                    (uint64_t)(SPARK_WEIGHTD_MESH_SLOTS_PER_RANK - 1u))) *
-                slot_bytes +
-            bytes);
+        uint32_t peers_remaining = implementation->tp_degree - 1u;
         uint32_t exact = implementation->chain_key != 0ull;
-        while ( exact != 0u ? *end_word != round_seq :
-            *end_word < round_seq )
+        uint32_t peer_passed[SPARK_TP_DEVICE_COLLECTIVE_MAX_DEGREE] = {0u};
+        while ( peers_remaining != 0u )
         {
             struct timespec pause = {0,1000};
             volatile uint64_t *cancel_cell = (volatile uint64_t *)
@@ -677,12 +667,9 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
             {
                 implementation->cancel_seen = *cancel_cell;
                 fprintf(stderr,
-                    "MESH-CANCEL-ABORT rank=%u peer=%u want=%llu got=%llu at8=%llu mi=%llu pub seq=%llu bytes=%llu slot=%llu\n",
-                    implementation->tp_rank,peer_rank,
+                    "MESH-CANCEL-ABORT rank=%u want=%llu mi=%llu pub seq=%llu bytes=%llu slot=%llu\n",
+                    implementation->tp_rank,
                     (unsigned long long)round_seq,
-                    (unsigned long long)*end_word,
-                    (unsigned long long)*(volatile uint64_t *)
-                        ((uint8_t *)end_word - bytes),
                     (unsigned long long)implementation->round_index,
                     (unsigned long long)staging->seq,
                     (unsigned long long)staging->bytes,
@@ -692,16 +679,36 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
             if ( SparkTpDeviceCollectiveTimeNs() >= deadline )
             {
                 fprintf(stderr,
-                    "MESH-SPIN-TIMEOUT rank=%u peer=%u want=%llu got=%llu bytes=%llu mi=%llu pub seq=%llu bytes=%llu slot=%llu\n",
-                    implementation->tp_rank,peer_rank,
+                    "MESH-SPIN-TIMEOUT rank=%u want=%llu remaining=%u bytes=%llu mi=%llu pub seq=%llu bytes=%llu slot=%llu\n",
+                    implementation->tp_rank,
                     (unsigned long long)round_seq,
-                    (unsigned long long)*end_word,
+                    (unsigned)peers_remaining,
                     (unsigned long long)bytes,
                     (unsigned long long)implementation->round_index,
                     (unsigned long long)staging->seq,
                     (unsigned long long)staging->bytes,
                     (unsigned long long)staging->slot);
                 return SPARK_STATUS_BUSY;
+            }
+            for ( peer = 0u; peer < implementation->tp_degree - 1u; peer++ )
+            {
+                uint32_t peer_rank =
+                    peer < implementation->tp_rank ? peer : peer + 1u;
+                volatile uint64_t *end_word = (volatile uint64_t *)
+                    (implementation->mesh_buffer + implementation->band_base +
+                    ((uint64_t)peer_rank *
+                        SPARK_WEIGHTD_MESH_SLOTS_PER_RANK +
+                        (round_seq &
+                            (uint64_t)(SPARK_WEIGHTD_MESH_SLOTS_PER_RANK - 1u))) *
+                        slot_bytes +
+                    bytes);
+                if ( peer_passed[peer] == 0u &&
+                     ( exact != 0u ? *end_word == round_seq :
+                       *end_word >= round_seq ) )
+                {
+                    peer_passed[peer] = 1u;
+                    peers_remaining--;
+                }
             }
             nanosleep(&pause,0);
         }
