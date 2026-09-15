@@ -34,6 +34,7 @@ typedef struct SparkModelBatchRequestState
 	uint32_t output_token_budget;
 	uint32_t cancel_pending;
 	uint32_t resident_bound;
+	uint32_t busy_restore_count;
 	uint32_t resident_sequence_slot;
 	uint32_t terminal_event_kind;
 	uint32_t terminal_status;
@@ -678,10 +679,19 @@ static void SparkModelBatchHandleRejected(
 	{
 		SparkModelBatchRequestState *request;
 		request = &engine->requests[request_slots[lane]];
-		if ( status == SPARK_STATUS_BUSY )
+		if ( status == SPARK_STATUS_BUSY && request->busy_restore_count < 10000u )
+		{
+			request->busy_restore_count++;
 			SparkModelBatchRestoreRejectedRequest(request,submission->work_kind);
+		}
 		else
+		{
+			if ( status == SPARK_STATUS_BUSY )
+				fprintf(stderr,"batch_retry_cap request=%llu restores=%u; failing\n",
+					(unsigned long long)request->request_id,
+					(unsigned)request->busy_restore_count);
 			SparkModelBatchFailRequest(engine,request,status);
+		}
 	}
 }
 
@@ -1883,6 +1893,7 @@ static void SparkModelBatchRecordSubmission(
 		request_slots[lane] = engine->scratch_request_slots[lane];
 		prefill_counts[lane] = state->work_kind == SPARK_MODEL_SERVING_WORK_KIND_PREFILL ? engine->scratch_prefill_counts[lane] : 0u;
 		engine->requests[request_slots[lane]].state = inflight_state;
+		engine->requests[request_slots[lane]].busy_restore_count = 0u;
 	}
 	engine->inflight_submission_count++;
 	engine->inflight_kv_page_count = engine->selected_kv_page_count;
