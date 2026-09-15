@@ -334,12 +334,15 @@ self_update() {
 
 ensure_weightd() {
     if pgrep -f "sparkpipe_weightd" >/dev/null; then
-        [ -S /tmp/spark_weightd.sock ] && return 0
-        echo "$(date +%T) weightd: process exists but socket missing; clearing stale instances"
+        if [ -S /tmp/spark_weightd.sock ] && python3 -c "import socket,sys; s=socket.socket(socket.AF_UNIX); s.settimeout(2); s.connect(\"/tmp/spark_weightd.sock\"); s.close()" 2>/dev/null; then
+            return 0
+        fi
+        echo "$(date +%T) weightd: stale or unresponsive instance(s); clearing"
         for p in $(ls -l /proc/[0-9]*/exe 2>/dev/null | grep sparkpipe_weightd | sed "s|.*/proc/\([0-9]*\)/exe.*|\1|"); do
             kill -9 "$p" 2>/dev/null
         done
         sleep 2
+        rm -f /tmp/spark_weightd.sock
     fi
     local home="$HOME/sparkdata/weightd"
     [ -x "$home/sparkpipe_weightd" ] || return 0
