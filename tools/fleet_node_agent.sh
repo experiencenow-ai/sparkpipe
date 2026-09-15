@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
+ulimit -c unlimited
 ROOTS="${1:?comma-separated runtime root names}"
 HUB="${2:-sparkf}"
 HOST=$(hostname)
