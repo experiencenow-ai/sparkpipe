@@ -1977,7 +1977,7 @@ static uint64_t SparkModelBatchInflightBudgetNs(void)
 		if ( value >= UINT64_C(1000000000) )
 			return(value);
 	}
-	return(UINT64_C(240) * UINT64_C(1000000000));
+	return(UINT64_C(900) * UINT64_C(1000000000));
 }
 
 static void SparkModelBatchExpireStalledRequests(
