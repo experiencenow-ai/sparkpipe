@@ -208,7 +208,7 @@ HUBSSH="ssh -o BatchMode=yes -o ConnectTimeout=5 -o ControlMaster=auto -o Contro
 if ! ssh -o BatchMode=yes -o ConnectTimeout=4 "$HUB" true 2>/dev/null; then
     ssh-keyscan -H "$HUB" >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
 fi
-RELEASE_HTTP="${FLEET_HTTP_RELEASE:-http://10.10.100.25:8802}"
+RELEASE_HTTP="${FLEET_HTTP_RELEASE:-http://10.10.250.2:8802}"
 
 sync_rendezvous() {
     local name="$1" host rd
