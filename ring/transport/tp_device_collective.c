@@ -283,6 +283,11 @@ static SparkStatus SparkTpDeviceCollectiveRebase(
             high = *base_cell;
         base = ((high / SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE) + 1ull) *
             SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE;
+        fprintf(stderr,"CKEY-REBASE rank=%u band=%u base=%llu high=%llu round_seq=%llu cell_before=%llu\n",
+            implementation->tp_rank,band_index,
+            (unsigned long long)base,(unsigned long long)high,
+            (unsigned long long)implementation->round_seq,
+            (unsigned long long)*base_cell);
         *base_cell = base;
         if ( use_broadcast != 0u )
         {
@@ -378,14 +383,16 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
          epoch > SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK )
     {
         fprintf(stderr,
-            "CKEY-BAD-CELL rank=%u cell=%llu rebased=%u band=%u base_seen=%llu round_seq=%llu limit=%llu\n",
+            "CKEY-BAD-CELL rank=%u cell=%llu rebased=%u band=%u base_seen=%llu round_seq=%llu limit=%llu chain_key=%llu req=%llu\n",
             implementation->tp_rank,
             (unsigned long long)*base_cell,
             implementation->round_rebased,
             band_index,
             (unsigned long long)implementation->base_seen,
             (unsigned long long)implementation->round_seq,
-            (unsigned long long)implementation->round_wave_limit);
+            (unsigned long long)implementation->round_wave_limit,
+            (unsigned long long)implementation->chain_key,
+            (unsigned long long)request_id);
         SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
     }
     if ( epoch != implementation->chain_epoch )
