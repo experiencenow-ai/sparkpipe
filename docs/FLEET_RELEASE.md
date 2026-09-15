@@ -7,9 +7,11 @@ a node that reboots or drops off the network catches up unattended.
 
 ## Topology
 
-- **Hub** = the rtx5090 workstation (10.10.250.2). `~/release/<root>/` holds
-  each release root; `fleet-release.service` serves `~/release` over HTTP on
-  :8802 (`http://10.10.250.2:8802/<root>/...`). All non-inference serving
+- **Hub** = the rtx5090 workstation. `~/release/<root>/` holds each release
+  root; `fleet-release.service` serves `~/release` over HTTP on :8802.
+  Sparks cannot route to the workstation's fleet address (the lab router
+  drops fleet→workstation traffic), so agents reach the hub over tailscale:
+  `http://100.123.97.61:8802/<root>/...`. All non-inference serving
   infrastructure lives on the workstation. Builds for aarch64/sm_121a run on
   sparkf (`~/g5n-rd-build`); publishing is an `install` into sparkf's staging
   `~/release` plus an `rsync -a --delete` of the roots to the workstation.
