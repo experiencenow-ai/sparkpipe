@@ -2081,6 +2081,7 @@ static SparkStatus SparkModelResidentdReadClient(
 		bytes_read = read(runtime->client.fd,runtime->client.input + runtime->client.input_bytes,runtime->client.target_bytes - runtime->client.input_bytes);
 		if ( bytes_read == 0 )
 		{
+			fprintf(stderr,"model_residentd client closed: peer eof fd=%d\n",runtime->client.fd);
 			SparkModelResidentdCloseClient(runtime);
 			return(SPARK_STATUS_OK);
 		}
