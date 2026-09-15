@@ -241,7 +241,6 @@ static void SparkTpDeviceCollectiveInvokeCompletion(
 #define SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS 10u
 #define SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE \
     (1ull << SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS)
-#define SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ROUND_WATERMARK 512ull
 #define SPARK_TP_DEVICE_COLLECTIVE_ROUND_SPIN_TIMEOUT_NS (60ull * 1000000000ull)
 
 static uint64_t SparkTpDeviceCollectiveBaseCellOffset(uint32_t band_index)
@@ -389,29 +388,19 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
         SparkTpDeviceCollectiveBaseCellOffset(band_index));
     if ( implementation->tp_rank == 0u )
     {
-        if ( implementation->round_rebased == 0u || *base_cell == 0ull ||
-             (*base_cell >> SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_BITS) >
-                SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK ||
-             implementation->round_index +
-                SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ROUND_WATERMARK >=
-                (1ull << SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ROUND_BITS) )
-        {
-            uint64_t cell_epoch = *base_cell >>
-                SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_BITS;
-            if ( cell_epoch > SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK )
-                cell_epoch = 0ull;
-            if ( implementation->chain_epoch > cell_epoch )
-                cell_epoch = implementation->chain_epoch;
-            epoch = cell_epoch + 1ull;
-            implementation->base_seen = epoch <<
-                SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS;
-            implementation->round_seq = implementation->base_seen - 1ull;
-            implementation->round_wave_limit = implementation->base_seen +
-                SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE;
-            implementation->round_rebased = 1u;
-        }
-        else
-            epoch = implementation->chain_epoch;
+        uint64_t cell_epoch = *base_cell >>
+            SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_BITS;
+        if ( cell_epoch > SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK )
+            cell_epoch = 0ull;
+        if ( implementation->chain_epoch > cell_epoch )
+            cell_epoch = implementation->chain_epoch;
+        epoch = cell_epoch + 1ull;
+        implementation->base_seen = epoch <<
+            SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS;
+        implementation->round_seq = implementation->base_seen - 1ull;
+        implementation->round_wave_limit = implementation->base_seen +
+            SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE;
+        implementation->round_rebased = 1u;
         *base_cell = (epoch << SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_BITS) |
             request_id;
         fprintf(stderr,
