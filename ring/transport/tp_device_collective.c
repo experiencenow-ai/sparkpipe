@@ -241,7 +241,7 @@ static void SparkTpDeviceCollectiveInvokeCompletion(
 #define SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS 10u
 #define SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE \
     (1ull << SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS)
-#define SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ROUND_WATERMARK 128ull
+#define SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ROUND_WATERMARK 512ull
 #define SPARK_TP_DEVICE_COLLECTIVE_ROUND_SPIN_TIMEOUT_NS (5ull * 1000000000ull)
 
 static uint64_t SparkTpDeviceCollectiveBaseCellOffset(uint32_t band_index)
@@ -390,57 +390,51 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
     if ( implementation->tp_rank == 0u )
     {
         if ( implementation->round_rebased == 0u || *base_cell == 0ull ||
-             implementation->round_seq + 1ull +
+             (*base_cell >> SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_BITS) >
+                SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK ||
+             implementation->round_index +
                 SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ROUND_WATERMARK >=
-                implementation->round_wave_limit )
+                (1ull << SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ROUND_BITS) )
         {
-            uint64_t high = *base_cell;
-            uint64_t base;
-            uint64_t cell_epoch;
-            if ( (high >> SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS) >
-                 SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK )
-            {
-                fprintf(stderr,
-                    "CKEY-RESET rank=0 cell=%llu stride_bits=%u mask=%llu\n",
-                    (unsigned long long)high,
-                    (unsigned)SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS,
-                    (unsigned long long)SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK);
-                high = 0ull;
-            }
-            cell_epoch = high >> SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS;
+            uint64_t cell_epoch = *base_cell >>
+                SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_BITS;
+            if ( cell_epoch > SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK )
+                cell_epoch = 0ull;
             if ( implementation->chain_epoch > cell_epoch )
                 cell_epoch = implementation->chain_epoch;
-            base = (cell_epoch + 1ull) <<
+            epoch = cell_epoch + 1ull;
+            implementation->base_seen = epoch <<
                 SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS;
-            *base_cell = base;
-            fprintf(stderr,
-                "CKEY-WRITE rank=0 base=%llu cell=%llu req=%llu\n",
-                (unsigned long long)base,
-                (unsigned long long)*base_cell,
-                (unsigned long long)request_id);
-            __sync_synchronize();
-            (void)SparkWeightdClientMeshBroadcast(
-                implementation->client,
-                ((1u << SPARK_WEIGHTD_MESH_RANKS_PER_BAND) - 1u) &
-                    ~(1u << implementation->tp_rank),
-                SparkTpDeviceCollectiveBaseCellOffset(band_index),
-                SparkTpDeviceCollectiveBaseCellOffset(band_index),8u,0ull,0ull,
-                implementation->round_timeout_ns);
-            implementation->base_seen = base;
-            implementation->round_seq = base - 1ull;
-            implementation->round_wave_limit = base +
+            implementation->round_seq = implementation->base_seen - 1ull;
+            implementation->round_wave_limit = implementation->base_seen +
                 SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE;
             implementation->round_rebased = 1u;
         }
-        epoch = *base_cell >> SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS;
+        else
+            epoch = implementation->chain_epoch;
+        *base_cell = (epoch << SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_BITS) |
+            request_id;
+        fprintf(stderr,
+            "CKEY-WRITE rank=0 epoch=%llu cell=%llu req=%llu\n",
+            (unsigned long long)epoch,
+            (unsigned long long)*base_cell,
+            (unsigned long long)request_id);
+        __sync_synchronize();
+        (void)SparkWeightdClientMeshBroadcast(
+            implementation->client,
+            ((1u << SPARK_WEIGHTD_MESH_RANKS_PER_BAND) - 1u) &
+                ~(1u << implementation->tp_rank),
+            SparkTpDeviceCollectiveBaseCellOffset(band_index),
+            SparkTpDeviceCollectiveBaseCellOffset(band_index),8u,0ull,0ull,
+            implementation->round_timeout_ns);
     }
     else
     {
         volatile uint64_t *cancel_cell = (volatile uint64_t *)
             (implementation->mesh_buffer +
             SparkTpDeviceCollectiveCancelCellOffset(band_index));
-        uint64_t cell_epoch = *base_cell >>
-            SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS;
+        uint64_t cell = *base_cell;
+        uint64_t cell_epoch = cell >> SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_BITS;
         uint64_t deadline = SparkTpDeviceCollectiveTimeNs() +
             (implementation->round_timeout_ns <
                 SPARK_TP_DEVICE_COLLECTIVE_ROUND_SPIN_TIMEOUT_NS ?
@@ -449,32 +443,31 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
         implementation->cancel_seen = *cancel_cell;
         while ( cell_epoch == 0ull ||
                 cell_epoch > SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK ||
-                cell_epoch < implementation->chain_epoch ||
-                ( cell_epoch == implementation->chain_epoch &&
-                  implementation->round_rebased == 0u ) )
+                (cell & SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK) !=
+                    request_id )
         {
             struct timespec pause = {0,1000};
             if ( *cancel_cell != implementation->cancel_seen )
             {
                 fprintf(stderr,
-                    "CKEY-CANCEL rank=%u cell=%llu had=%llu\n",
+                    "CKEY-CANCEL rank=%u cell=%llu req=%llu\n",
                     implementation->tp_rank,
                     (unsigned long long)*base_cell,
-                    (unsigned long long)implementation->chain_epoch);
+                    (unsigned long long)request_id);
                 return SPARK_STATUS_BUSY;
             }
             if ( SparkTpDeviceCollectiveTimeNs() >= deadline )
             {
                 fprintf(stderr,
-                    "CKEY-CELL-TIMEOUT rank=%u cell=%llu had=%llu\n",
+                    "CKEY-CELL-TIMEOUT rank=%u cell=%llu req=%llu\n",
                     implementation->tp_rank,
                     (unsigned long long)*base_cell,
-                    (unsigned long long)implementation->chain_epoch);
+                    (unsigned long long)request_id);
                 return SPARK_STATUS_BUSY;
             }
             nanosleep(&pause,0);
-            cell_epoch = *base_cell >>
-                SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS;
+            cell = *base_cell;
+            cell_epoch = cell >> SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_BITS;
         }
         epoch = cell_epoch;
         if ( epoch != implementation->chain_epoch ||
