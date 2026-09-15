@@ -1059,34 +1059,17 @@ SparkStatus SparkTpDeviceCollectivePrepareReceiveBf16(
         uint64_t lane_bytes = 2ull *
             SPARK_WEIGHTD_MESH_SLOTS_PER_BAND *
             SPARK_WEIGHTD_MESH_SLOT_BYTES;
-        if ( SparkTpDeviceCollectiveRegisteredRegion != 0 ||
+        if ( SparkTpDeviceCollectiveRegisteredRegion == 0 &&
              cudaHostRegister(receive_device +
                     implementation->band_base -
                     (implementation->band_base % lane_bytes),
                 lane_bytes,0u) != 0 )
         {
-            int first = cudaGetLastError();
-            int retry = cudaHostRegister(receive_device +
-                    implementation->band_base -
-                    (implementation->band_base % lane_bytes),
-                lane_bytes,0u);
-            if ( SparkTpDeviceCollectiveRegisteredRegion != 0 || retry != 0 )
-            {
-                FILE *maps = fopen("/proc/self/maps","r");
-                char line[256];
-                fprintf(stderr,"MESH-REGISTER-FAIL ptr=%p band=%llu first=%d retry=%d(%s)\n",
-                    receive_device,
-                    (unsigned long long)implementation->band_base,first,retry,
-                    cudaGetErrorString(retry != 0 ? retry : first));
-                if ( maps != 0 )
-                {
-                    while ( fgets(line,sizeof(line),maps) != 0 )
-                        if ( strstr(line,"spark-mesh") != 0 )
-                            fputs(line,stderr);
-                    fclose(maps);
-                }
-                SPARK_FAIL(SPARK_STATUS_IO_ERROR);
-            }
+            fprintf(stderr,"MESH-REGISTER-FALLBACK ptr=%p band=%llu lane_bytes=%llu (%s); continuing with pageable mesh memory\n",
+                receive_device,
+                (unsigned long long)implementation->band_base,
+                (unsigned long long)lane_bytes,
+                cudaGetErrorString(cudaGetLastError()));
         }
         SparkTpDeviceCollectiveRegisteredRegion = receive_device;
     }
