@@ -2073,13 +2073,17 @@ SparkStatus SparkModelBatchEngineProgress(
 	status = SparkModelPipelineClientProgress(engine->pipeline,engine->maximum_messages_per_rank);
 	if ( status != SPARK_STATUS_OK )
 	{
-		SparkModelBatchSetFailed(engine,status);
-		SparkModelBatchFailIdleRequests(engine,status);
+		if ( status != SPARK_STATUS_IO_ERROR )
+		{
+			SparkModelBatchSetFailed(engine,status);
+			SparkModelBatchFailIdleRequests(engine,status);
+		}
 		SPARK_RETURN(status);
 	}
 	if ( engine->failed_status != SPARK_STATUS_OK )
 	{
-		SparkModelBatchFailIdleRequests(engine,(SparkStatus)engine->failed_status);
+		if ( engine->failed_status != SPARK_STATUS_IO_ERROR )
+			SparkModelBatchFailIdleRequests(engine,(SparkStatus)engine->failed_status);
 		return((SparkStatus)engine->failed_status);
 	}
 	SparkModelBatchExpireStalledRequests(engine);
