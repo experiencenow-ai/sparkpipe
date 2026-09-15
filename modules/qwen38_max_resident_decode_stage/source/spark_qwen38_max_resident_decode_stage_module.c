@@ -1549,6 +1549,7 @@ static SparkStatus SparkQwen38MaxModuleRunMoe(SparkQwen38MaxModuleState *state, 
 	cudaStream_t stream = (cudaStream_t)slot->cuda_stream;
 	cudaError_t error;
 	SparkStatus status;
+	uint32_t run_experts = 1u;
 	SparkQwen38MaxLinearView w1 = weights->experts_w1,w3 = weights->experts_w3,w2 = weights->experts_w2;
 	SparkStageModuleStageTimingBegin(&state->stage_timing,stream,SPARK_QWEN38_MAX_MODULE_STAGE_MOE_NORM_ROUTE);
 	error = SparkQwen38MaxLaunchFusedResidualRmsNorm(stream,slot->hidden_bf16,slot->delta_bf16,mlp_norm_bf16,slot->normalized_bf16,rows,SPARK_QWEN38_MAX_MODEL_HIDDEN_DIMENSION,SPARK_QWEN38_MAX_MODEL_RMS_NORM_EPSILON);
@@ -1558,11 +1559,14 @@ static SparkStatus SparkQwen38MaxModuleRunMoe(SparkQwen38MaxModuleState *state, 
 		error = SparkQwen38MaxLaunchGateSelect(stream,slot->moe_scores_f32,0,rows,SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT,SPARK_QWEN38_MAX_MODEL_EXPERTS_PER_TOKEN,1.0f,slot->moe_indices_u32,slot->moe_weights_f32);
 	if ( error == cudaSuccess )
 		error = SparkQwen38MaxLaunchMoeRoute(stream,slot->moe_indices_u32,rows,SPARK_QWEN38_MAX_MODEL_EXPERT_INTERMEDIATE_DIMENSION,slot->moe_group_offset_u32,slot->moe_inverse_u32,slot->moe_grouped_rows_u32,slot->moe_tile_prefix_w1_u32,slot->moe_tile_prefix_w2_u32);
+	if ( error == cudaSuccess )
+		error = cudaMemsetAsync(slot->moe_slot_out_bf16,0,(size_t)rows * SPARK_QWEN38_MAX_MODEL_EXPERTS_PER_TOKEN * SPARK_QWEN38_MAX_MODEL_HIDDEN_DIMENSION * sizeof(uint16_t),stream) == cudaSuccess ? cudaSuccess : cudaErrorInvalidValue;
 	SparkStageModuleStageTimingEnd(&state->stage_timing,stream);
 	if ( error == cudaSuccess && state->lazy_pack != 0 )
 	{
 		SparkStageModuleStageTimingBegin(&state->stage_timing,stream,SPARK_QWEN38_MAX_MODULE_STAGE_MOE_LEASE);
 		uint32_t host_offsets[SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT + 1u];
+		uint32_t local_offsets[SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT + 1u];
 		SparkWeightdExpertKey keys[SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT];
 		uint32_t key_count = 0u;
 		SparkWeightdMap *map = state->lazy_pack->map;
@@ -1570,15 +1574,26 @@ static SparkStatus SparkQwen38MaxModuleRunMoe(SparkQwen38MaxModuleState *state, 
 		if ( cudaMemcpy(host_offsets,slot->moe_group_offset_u32,(SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT + 1u) * sizeof(uint32_t),cudaMemcpyDeviceToHost) != cudaSuccess )
 			error = cudaErrorInvalidValue;
 		if ( error == cudaSuccess )
-			error = SparkWeightdRouteKeys(layer_ordinal_arg,host_offsets,SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT,rows * SPARK_QWEN38_MAX_MODEL_EXPERTS_PER_TOKEN,keys,SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT,&key_count) == SPARK_STATUS_OK ? cudaSuccess : cudaErrorInvalidValue;
-		if ( error == cudaSuccess )
+		{
+			uint32_t resident = SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT / state->tp_degree;
+			uint32_t first = state->tp_rank * resident;
+			uint32_t window = host_offsets[first];
+			uint32_t k;
+			uint32_t total;
+			for ( k = 0u; k <= resident; k++ )
+				local_offsets[k] = host_offsets[first + k] - window;
+			total = local_offsets[resident];
+			if ( total != 0u )
+				error = SparkWeightdRouteKeys(layer_ordinal_arg,local_offsets,resident,total,keys,SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT,&key_count) == SPARK_STATUS_OK ? cudaSuccess : cudaErrorInvalidValue;
+		}
+		if ( error == cudaSuccess && key_count != 0u )
 		{
 			error = SparkWeightdMapAcquire(map,keys,key_count,&state->lazy_lease_identifier,SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS) == SPARK_STATUS_OK ? cudaSuccess : cudaErrorInvalidValue;
 			state->lazy_lease_active = state->lazy_lease_identifier != 0u ? 1u : 0u;
 		}
-		if ( error == cudaSuccess )
+		if ( error == cudaSuccess && key_count != 0u )
 			error = SparkWeightdMapBeginUse(map,state->lazy_lease_identifier,&address) == SPARK_STATUS_OK ? cudaSuccess : cudaErrorInvalidValue;
-		if ( error == cudaSuccess )
+		if ( error == cudaSuccess && key_count != 0u )
 		{
 			w1.weight_payload = (uint8_t *)address + weights->experts_w1_payload_offset;
 			w3.weight_payload = (uint8_t *)address + weights->experts_w3_payload_offset;
@@ -1599,8 +1614,9 @@ static SparkStatus SparkQwen38MaxModuleRunMoe(SparkQwen38MaxModuleState *state, 
 			state->lazy_lease_active = 0u;
 		}
 		SparkStageModuleStageTimingEnd(&state->stage_timing,stream);
+		run_experts = key_count != 0u ? 1u : 0u;
 	}
-	if ( error == cudaSuccess )
+	if ( error == cudaSuccess && run_experts != 0u )
 	{
 		SparkStageModuleStageTimingBegin(&state->stage_timing,stream,SPARK_QWEN38_MAX_MODULE_STAGE_MOE_EXPERTS);
 		if ( rows >= SPARK_QWEN38_MAX_MODULE_MOE_TILE_ROWS )
