@@ -1429,12 +1429,16 @@ static SparkStatus SparkWeightdArenaChunkEnsure(SparkWeightdServer *server,Spark
             if (cuMemCreate(&handle, (size_t)arena->chunk_bytes, &prop,
                     0ull) != CUDA_SUCCESS)
             {
+                fprintf(stderr,"WD-CHUNK-FAIL create idx=%u bytes=%llu\n",
+                    (unsigned)index,(unsigned long long)arena->chunk_bytes);
                 SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
             }
             if (cuMemMap(base + (CUdeviceptr)index * arena->chunk_bytes,
                     (size_t)arena->chunk_bytes, 0u, handle, 0ull) != CUDA_SUCCESS)
             {
                 (void)cuMemRelease(handle);
+                fprintf(stderr,"WD-CHUNK-FAIL map idx=%u bytes=%llu\n",
+                    (unsigned)index,(unsigned long long)arena->chunk_bytes);
                 SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
             }
             arena->chunk_handles[index] = (void *)handle;
