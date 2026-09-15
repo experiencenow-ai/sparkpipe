@@ -1590,10 +1590,20 @@ static SparkStatus SparkWeightdLoadRange(SparkWeightdArena *arena,int32_t fd,con
 		if ( moved < 0 && errno == EINTR )
 			continue;
 		if ( moved <= 0 )
+		{
+			fprintf(stderr,"WD-LOADRANGE-FAIL pread fd=%d off=%llu req=%llu moved=%ld errno=%d\n",
+				fd,(unsigned long long)(range->offset + offset),
+				(unsigned long long)bytes,(long)moved,errno);
 			return(SPARK_STATUS_IO_ERROR);
+		}
 		SparkCk128Update(&context,arena->staging,(size_t)moved);
 		if ( cudaMemcpy((uint8_t *)arena->device_base + range->offset + offset,arena->staging,(size_t)moved,cudaMemcpyHostToDevice) != cudaSuccess )
+		{
+			fprintf(stderr,"WD-LOADRANGE-FAIL memcpy dst_off=%llu bytes=%llu cuda=%s\n",
+				(unsigned long long)(range->offset + offset),
+				(unsigned long long)moved,cudaGetErrorString(cudaGetLastError()));
 			return(SPARK_STATUS_IO_ERROR);
+		}
 		offset += (uint64_t)moved;
 	}
 	SparkCk128Finalize(&context,digest);
