@@ -1,5 +1,5 @@
 {
-  "file_count": 2525,
+  "file_count": 2532,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -115,6 +115,31 @@
       "path": "cache/cache.h",
       "sha256": "d9923684f16b1103831914a0a254e366a5cb6851726884a41dbc8e1afccc3a1b",
       "size_bytes": 14044
+    },
+    {
+      "path": "cache/dsv41_warm/DeepSeek_V41_Tech_Report.pdf",
+      "sha256": "ba68e2e40408125ae6d2f63a9a241b61c73910691c74ec1a2a7023c851eac08d",
+      "size_bytes": 1809802
+    },
+    {
+      "path": "cache/dsv41_warm/model.safetensors.index.json",
+      "sha256": "74b0686a3d2891980d5e303251b075a3bccae2c2ff650747db2620a649b98fa8",
+      "size_bytes": 7470294
+    },
+    {
+      "path": "cache/dsv41_warm/ref/engram.py",
+      "sha256": "11f35ecbead8150c35aa002b3d180ef290b05a25afe883a11884f94d476d3897",
+      "size_bytes": 8138
+    },
+    {
+      "path": "cache/dsv41_warm/ref/kernel.py",
+      "sha256": "1236c3507019ed176f5dba5e04bcea58867cf654818c6cf138ed4845398c2455",
+      "size_bytes": 23790
+    },
+    {
+      "path": "cache/dsv41_warm/ref/model.py",
+      "sha256": "4e9ae23620edc8028ccc5d5fef552ab7fdc7dcd6f79608754fe9f67644056f65",
+      "size_bytes": 61549
     },
     {
       "path": "cache/kv_cache.c",
@@ -310,6 +335,11 @@
       "path": "docs/AGENT_LANE_BRIEFS/dsv41_flash.md",
       "sha256": "dbdac34b6ca12c1380939ec287c04bb72b620e776bae64a7f9895f7cd8422b75",
       "size_bytes": 8507
+    },
+    {
+      "path": "docs/AGENT_LANE_BRIEFS/dsv5-t1-gate.md",
+      "sha256": "a4a72a5d4adb1d885cfe4ea091072dd62f2d264f52b847b93701473f04e0bad4",
+      "size_bytes": 7192
     },
     {
       "path": "docs/AGENT_LANE_BRIEFS/glm52.md",
@@ -2870,6 +2900,11 @@
       "path": "examples/release/dsv41_flash_tp8/receipt.json",
       "sha256": "359aaacd1c620bf9e9e096762febcf36dbcb2e55c1a043a818a7a4fd049d5b2d",
       "size_bytes": 5267
+    },
+    {
+      "path": "examples/release/dsv41_flash_tp8/t1_gate_receipt.json",
+      "sha256": "b3d2db3c68368360e3de3454eef950ec7929e29c0c4c5900d4a4bf2f4307fbfe",
+      "size_bytes": 5997
     },
     {
       "path": "examples/release/dsv4_tp16_b1_template/bin/sparkpipe_model_residentd",
@@ -12630,5 +12665,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 52190782
+  "total_bytes": 61577544
 }
