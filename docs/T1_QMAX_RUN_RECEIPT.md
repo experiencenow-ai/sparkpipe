@@ -102,3 +102,108 @@ to drain before further waves.
   analytic ceiling 22.0 tok/s with NO measured companion (gated on T1).
 - The fixture, its manifest sha, and the checkpoint identity chain are
   untouched from the prior wave's audit.
+
+---
+
+# T1-QMAX run receipt — 2026-09-15/16 night wave 2 (parity fix + first all-16 collective)
+
+Lane lane/t1-qmax-wave4 @ dc4a16c (9 engine commits total), worktree
+/Users/mac/t1qmaxw. Mesh lease ACTIVE T1-QMAX from 19:06:43Z.
+Fixture untouched: capital_of_france.t1r sha256 74fc4bed5354b734... matches
+the committed manifest.
+
+## 1. ManifestFind PARITY TEST — verdict: MODULE side (key-derivation bug)
+
+Tool committed this wave: tools/qwen38max_parity_probe.c (compiles on the
+build node, runs offline against the placed experts sidecar; no daemon,
+no lease, no CEPH). It derives module-style keys through
+SparkWeightdRouteKeys on a synthetic full local window and diffs them
+against the daemon-side id space (base-shifted) with
+SparkWeightdManifestFind.
+
+- rank5 manifest (window 160..191), layers 0/45/91:
+  module-local keys 0/32 HIT, base-shifted keys 32/32 HIT,
+  verdict basis=global every time
+- rank0 manifest (window 0..31): both spaces coincide 32/32 HIT -
+  the control that explains why rank0 alone never hit the acquire path
+
+Root cause chain, both halves read in source:
+- daemon map id space: tools/qwen38max_experts_manifest.c writes groups
+  as (layer = entry->layer_index, expert = base + expert), base =
+  tp_rank * per_rank; the lease table resolves keys with
+  SparkWeightdManifestFind against that manifest (spark_weightd_lease.c
+  prepare_groups)
+- module derivation: RunMoe rebased the routing prefix on the rank
+  window (correct for the window test and the RouteKeys schema check)
+  but SparkWeightdRouteKeys emits the array index as the expert id -
+  local 0..31, global on no rank except 0
+- the probe path always worked because it copies (layer, expert)
+  straight from manifest groups
+
+Layer semantics were verified equal on both sides (module iterates
+first_layer_index..first+count-1, the same space the pack entries and
+manifest carry).
+
+## 2. The fix (committed, minimal)
+
+- module (spark_qwen38_max_resident_decode_stage_module.c): after
+  RouteKeys, shift every derived key into the daemon's global id space
+  (keys[k].expert += first); plus a standing route_keys print (layer,
+  rank, base, total, count, exact ids) on every MoE lease
+- daemon-side standing parity print (runtime/spark_weightd_lease.c):
+  on any ManifestFind miss the daemon dumps the requested (layer,
+  expert) and the group id range it actually holds for that layer
+  (weightd_parity lease_miss)
+- commits: 3edb3e1 (fix + prints), dc4a16c (parity probe + build
+  wiring + runner retarget to /Users/mac/t1qmaxw and lane/t1-qmax-wave4)
+
+## 3. Instrumented decode wave — two launches, one clean
+
+Wave 1 (19:07:44Z): raced an external redeploy of the SHARED fleet
+weightd daemons at 19:07:56Z (all 16 nodes, same second, new binary in
+~/sparkdata/weightd, not this lane's build; no MESH_LEASE entry claims
+it). Harness clients attached through the churn; every acquire then
+died on a stale socket: map.c:393 status=4 (IO_ERROR), 8 ranks.
+
+Mesh state before wave 2: all 16 daemons stable 7.5-9.5 min, then
+weightd_execute_probe (rebuilt on the build node, run on spark5 against
+the rank5 pack and the REDEPLOYED daemon) EXECUTE-PROBE waves=2 keys=8
+waves_ns=813113913 - client and redeployed daemon are compatible and
+acquire leases fine.
+
+Wave 2 (19:21:41Z, clean):
+- ALL routed-expert ranks derived correct GLOBAL keys, zero NOT_FOUND,
+  zero weightd_parity lease_miss; step-0 routing (B1, top-8) touched
+  exactly 8 windows: rank1 e51, rank5 e177, rank8 e256/269/287,
+  rank9 e304, rank10 e329, rank11 e382, rank14 e469, rank15 e496 -
+  every id inside its own window; the other 8 ranks skipped the lease
+- the block has MOVED: all 16 ranks then failed at the FIRST TP hidden
+  allreduce (16384 bytes = hidden dim bf16, round 0) with
+  MESH-SPIN-TIMEOUT - every rank's own publication staged (pub
+  seq=1024) but ZERO peer publications ever became visible (got=0)
+  - evidence: runs/t1qmax/wave3-night/harness-rank{0..15}.log
+- fabric counter-evidence: rocep1s0f1 PORT_ACTIVE on probed nodes, and
+  the weightd mesh wired 15/15 peers over the same NIC class minutes
+  before - the link is up; the tp transport's pairwise publication
+  path is what does not deliver
+- prior-session context: no wave of this lane ever reached a collective
+  with all 16 ranks alive before the lease fix; the one independent
+  other lane that got there (T1-G53, glm5_next, PR #1016) reports the
+  same class of failure at its first TP collective
+
+## VERDICT: T1 FAIL - honestly
+
+The routed-expert lease NOT_FOUND blocker this lane was carrying is
+FIXED and proven fleet-wide (parity basis=global, live route_keys
+global ids, clean acquires, EXECUTE-PROBE green). The decode now runs
+to the first TP hidden allreduce on all 16 ranks and the transport
+delivers no peer publication; no tokens can be produced, the compare
+stage was never reached, no tolerance touched, no rerun-until-pass.
+Measured B1 tok/s correctly not attempted - gated on T1.
+
+The standing blocker for the lane is now the TP16 transport publication
+wire-up (ring/transport tp_device_collective + hidden_transport
+rdma_verbs backend), a shared-fleet component: two independent lanes,
+two model families, both stop at their first TP collective. It needs
+its own evidence-driven repair pass (transport-level, not a backend
+swap - required behavior cannot be waived by compatibility paths).
