@@ -333,7 +333,14 @@ self_update() {
 }
 
 ensure_weightd() {
-    pgrep -f "sparkpipe_weightd" >/dev/null && return 0
+    if pgrep -f "sparkpipe_weightd" >/dev/null; then
+        [ -S /tmp/spark_weightd.sock ] && return 0
+        echo "$(date +%T) weightd: process exists but socket missing; clearing stale instances"
+        for p in $(ls -l /proc/[0-9]*/exe 2>/dev/null | grep sparkpipe_weightd | sed "s|.*/proc/\([0-9]*\)/exe.*|\1|"); do
+            kill -9 "$p" 2>/dev/null
+        done
+        sleep 2
+    fi
     local home="$HOME/sparkdata/weightd"
     [ -x "$home/sparkpipe_weightd" ] || return 0
     rm -f /tmp/weightd-mesh/mesh-*.rec /tmp/weightd-mesh/.ready 2>/dev/null
