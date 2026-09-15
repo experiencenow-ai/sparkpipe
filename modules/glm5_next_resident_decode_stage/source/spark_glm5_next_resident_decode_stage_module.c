@@ -2301,6 +2301,9 @@ static void SparkGlm5NextTpChainFail(SparkGlm5NextTpChain *chain,SparkStatus sta
 {
 	SparkGlm5NextModuleState *state;
 	SparkGlm5NextAsyncCompletion *async;
+	if ( chain->active == 0u )
+		return;
+	chain->active = 0u;
 	state = chain->state;
 	fprintf(stderr,"G5N-DBG chainfail: stage %u next_layer %u rows %u status %d\n",
 		(unsigned)chain->stage,(unsigned)chain->next_layer,(unsigned)chain->wave_rows,(int)status);
@@ -2319,7 +2322,6 @@ static void SparkGlm5NextTpChainFail(SparkGlm5NextTpChain *chain,SparkStatus sta
 	}
 	async = &state->completions[chain->slot_index];
 	async->completion.status = status;
-	chain->active = 0u;
 	SparkGlm5NextCompleteAsync(async);
 	free(chain);
 }
@@ -2378,7 +2380,10 @@ static void SparkGlm5NextLazyRetryRetained(void *context)
 	uint32_t slot;
 	for (slot=0u; slot<state->pipeline_slot_count; slot++)
 		if ( SparkGlm5NextLazyRecoverLease(state,slot,&chain) == SPARK_STATUS_OK )
+		{
+			chain->active = 1u;
 			SparkGlm5NextTpChainFail(chain,chain->retained_status);
+		}
 }
 
 static void SparkGlm5NextTpChainReduceMlp(SparkGlm5NextTpChain *chain)
