@@ -1571,8 +1571,8 @@ static SparkStatus SparkQwen38MaxModuleRunMoe(SparkQwen38MaxModuleState *state, 
 		uint32_t key_count = 0u;
 		SparkWeightdMap *map = state->lazy_pack->map;
 		void *address = 0;
-		if ( cudaMemcpy(host_offsets,slot->moe_group_offset_u32,(SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT + 1u) * sizeof(uint32_t),cudaMemcpyDeviceToHost) != cudaSuccess )
-			error = cudaErrorInvalidValue;
+		if ( error == cudaSuccess )
+			error = (cudaMemcpyAsync(host_offsets,slot->moe_group_offset_u32,(SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT + 1u) * sizeof(uint32_t),cudaMemcpyDeviceToHost,stream) == cudaSuccess && cudaStreamSynchronize(stream) == cudaSuccess) ? cudaSuccess : cudaErrorInvalidValue;
 		if ( error == cudaSuccess )
 		{
 			uint32_t resident = SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT / state->tp_degree;
