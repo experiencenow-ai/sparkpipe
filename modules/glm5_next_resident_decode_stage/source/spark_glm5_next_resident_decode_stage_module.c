@@ -2453,7 +2453,9 @@ static void SparkGlm5NextLazyWork(void *context)
 {
 	SparkGlm5NextTpChain *chain = (SparkGlm5NextTpChain *)context;
 	SparkStatus status,cleanup;
+	fprintf(stderr,"LAZYWORK-ENTER slot=%u layer=%u\n",(unsigned)chain->slot_index,(unsigned)chain->next_layer);
 	status = SparkGlm5NextLazyExperts(chain);
+	fprintf(stderr,"LAZYWORK-EXPERTS slot=%u layer=%u status=%d\n",(unsigned)chain->slot_index,(unsigned)chain->next_layer,(int)status);
 	if ( status == SPARK_STATUS_OK && chain->state->decode_cover_host != 0 )
 	{
 		SparkGlm5NextModuleState *st = chain->state;
