@@ -2490,6 +2490,7 @@ static void SparkGlm5NextLazyWork(void *context)
 		chain->union_fed = appended;
 	}
 	cleanup = SparkGlm5NextLazyRelease(chain);
+	fprintf(stderr,"LAZYWORK-RELEASE slot=%u layer=%u cleanup=%d\n",(unsigned)chain->slot_index,(unsigned)chain->next_layer,(int)cleanup);
 	if ( cleanup == SPARK_STATUS_IO_ERROR || cleanup == SPARK_STATUS_BUSY )
 		cleanup = SparkGlm5NextLazyRelease(chain);
 	if ( cleanup != SPARK_STATUS_OK )
