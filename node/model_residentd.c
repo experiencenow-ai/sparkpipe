@@ -140,6 +140,7 @@ typedef struct SparkModelResidentdClient
 	uint32_t output_message_capacity;
 	uint32_t input_capacity;
 	uint64_t generation;
+	uint64_t pending_client_reset;
 	uint64_t last_message_id;
 	uint64_t last_submission_id;
 	SparkModelResidentdOutput *output;
@@ -1719,17 +1720,9 @@ static SparkStatus SparkModelResidentdProcessHello(
 	}
 	if ( status == SPARK_STATUS_OK && queue_status == SPARK_STATUS_OK )
 	{
-		SparkStatus reset_status;
 		runtime->client.hello_complete = 1u;
 		runtime->client.last_submission_id = 0u;
-		reset_status = SPARK_STATUS_OK;
-		if ( runtime->adapter_library.adapter_interface.reset != 0 )
-			reset_status = runtime->adapter_library.adapter_interface.reset(
-				runtime->adapter_state,runtime->client.generation);
-		if ( reset_status != SPARK_STATUS_OK )
-			fprintf(stderr,"model_residentd client generation %llu reset deferred: status=%u (orphaned lanes remain until the engine quiesces)\n",
-				(unsigned long long)runtime->client.generation,
-				(unsigned)reset_status);
+		runtime->client.pending_client_reset = runtime->client.generation;
 	}
 	else
 		runtime->client.close_after_output = 1u;
@@ -2573,6 +2566,21 @@ static SparkStatus SparkModelResidentdProgressRoutes(
 static SparkStatus SparkModelResidentdProgress(SparkModelResidentdRuntime *runtime)
 {
 	SparkStatus status;
+	if ( runtime->client.pending_client_reset != 0u &&
+		runtime->adapter_library.adapter_interface.reset != 0 )
+	{
+		status = runtime->adapter_library.adapter_interface.reset(
+			runtime->adapter_state,runtime->client.pending_client_reset);
+		if ( status == SPARK_STATUS_OK )
+			runtime->client.pending_client_reset = 0u;
+		else if ( status != SPARK_STATUS_BUSY && status != SPARK_STATUS_PENDING )
+		{
+			fprintf(stderr,"model_residentd client generation %llu reset failed loudly: status=%u\n",
+				(unsigned long long)runtime->client.pending_client_reset,
+				(unsigned)status);
+			runtime->client.pending_client_reset = 0u;
+		}
+	}
 	status = SparkModelResidentdProgressRoutes(runtime,0u);
 	if ( status != SPARK_STATUS_OK )
 		fprintf(stderr,"model_residentd progress stage=routes-pre status=%s rank=%u\n",SparkStatusToString(status),runtime->rank_plan.rank_index);

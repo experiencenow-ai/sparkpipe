@@ -3825,9 +3825,9 @@ static SparkStatus SparkGlm5NextResetClaimed(SparkGlm5NextModuleState *state,uin
 	if ( pthread_mutex_lock(&state->kv_mutex) != 0 )
 		SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
 	status = SPARK_STATUS_VALIDATION_FAILED;
-	if ( generation >= state->control_generation && generation > state->reset_generation )
+	if ( generation > state->reset_generation )
 	{
-		state->control_generation = generation;
+		state->control_generation = 1u;
 		status = SparkKvLaneTransactionsReset(&state->kv_transactions);
 		if ( status == SPARK_STATUS_OK )
 			status = SparkGlm5NextResetExecutionState(state);
