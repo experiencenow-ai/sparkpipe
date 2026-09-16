@@ -239,18 +239,6 @@ static SparkStatus map_drop_slot(SparkWeightdMap *map,uint32_t slot)
 			map->owners[i] &= ~bit;
 			continue;
 		}
-		if ( map->mapped[i] != 0u )
-		{
-			if ( cuMemUnmap(map->base + (i * map->chunk_bytes),(size_t)map->chunk_bytes) != CUDA_SUCCESS )
-				SPARK_FAIL(SPARK_STATUS_IO_ERROR);
-			map->mapped[i] = 0u;
-		}
-		if ( map->handles[i] != 0 )
-		{
-			if ( cuMemRelease(map->handles[i]) != CUDA_SUCCESS )
-				SPARK_FAIL(SPARK_STATUS_IO_ERROR);
-			map->handles[i] = 0;
-		}
 		map->owners[i] = 0u;
 	}
 	return(SPARK_STATUS_OK);
