@@ -1699,6 +1699,9 @@ static void SparkWeightdMarkGroupChunks(SparkWeightdArena *arena,uint32_t group_
 
 static SparkStatus SparkWeightdFreeChunk(SparkWeightdServer *server,SparkWeightdArena *arena,uint32_t index)
 {
+	if ( arena->pool_export_handle != 0 &&
+	     arena->chunk_handles[index] == arena->pool_export_handle )
+		return(SPARK_STATUS_OK);
 	CUdeviceptr base = (CUdeviceptr)(uintptr_t)arena->device_base;
 	if ( arena->chunk_handles[index] == 0 )
 		return(SPARK_STATUS_OK);
