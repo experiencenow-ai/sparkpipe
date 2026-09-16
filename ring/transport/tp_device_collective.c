@@ -247,7 +247,7 @@ static void SparkTpDeviceCollectiveInvokeCompletion(
 #define SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS 10u
 #define SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE \
     (1ull << SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE_BITS)
-#define SPARK_TP_DEVICE_COLLECTIVE_ROUND_SPIN_TIMEOUT_NS (2ull * 1000000000ull)
+#define SPARK_TP_DEVICE_COLLECTIVE_ROUND_SPIN_TIMEOUT_NS (30ull * 1000000000ull)
 
 static uint64_t SparkTpDeviceCollectiveBaseCellOffset(uint32_t band_index)
 {
