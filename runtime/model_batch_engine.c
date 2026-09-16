@@ -837,7 +837,11 @@ static void SparkModelBatchSubmitResult(
 	submission = engine != 0 ? SparkModelBatchFindSubmission(engine,submission_id) : 0;
 	if ( submission == 0 || submission->result_received != 0u )
 	{
-		if ( engine != 0 )
+		if ( engine != 0 && submission == 0 )
+			fprintf(stderr,
+			    "batch result for unknown submission %llu (session reset?) — ignoring\n",
+			    (unsigned long long)submission_id);
+		else if ( engine != 0 )
 			SparkModelBatchSetFailed(engine,SPARK_STATUS_SCHEMA_ERROR);
 		return;
 	}
@@ -880,7 +884,15 @@ static void SparkModelBatchCompletion(
 	SparkStatus status;
 	engine = (SparkModelBatchEngine *)completion_context;
 	submission = engine != 0 && completion != 0 ? SparkModelBatchFindSubmission(engine,completion->submission_id) : 0;
-	if ( submission == 0 || submission->result_received == 0u )
+	if ( submission == 0 )
+	{
+		if ( engine != 0 )
+			fprintf(stderr,
+			    "batch completion for unknown submission %llu (session reset?) — ignoring\n",
+			    completion != 0 ? (unsigned long long)completion->submission_id : 0ull);
+		return;
+	}
+	if ( submission->result_received == 0u )
 	{
 		if ( engine != 0 )
 			SparkModelBatchSetFailed(engine,SPARK_STATUS_SCHEMA_ERROR);
