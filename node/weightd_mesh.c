@@ -63,6 +63,9 @@ typedef struct SparkWeightdMesh
     uint64_t wired_boot_ns[SPARK_WEIGHTD_MESH_PEERS];
     uint64_t send_ok;
     uint64_t send_err;
+    uint64_t send_err_window;
+    uint64_t quiesce_until_ns;
+    uint32_t degraded_logged;
     uint64_t send_logged;
     uint64_t seq_storage;
     struct ibv_mr *seq_mr;
@@ -322,6 +325,9 @@ static void SparkWeightdMeshTryWireLocked(void)
             (void)fclose(marker);
     }
     weightd_mesh.mesh_ready = 1u;
+    weightd_mesh.send_err_window = 0ull;
+    weightd_mesh.degraded_logged = 0u;
+    weightd_mesh.quiesce_until_ns = 0ull;
     printf("weightd-mesh: ready rank=%u peers=%u rkey=%u\n",
         weightd_mesh.local_rank,SPARK_WEIGHTD_MESH_PEERS,
         weightd_mesh.recv_mr->rkey);
@@ -529,23 +535,37 @@ static void SparkWeightdMeshDrainCq(void)
         for (index = 0; index < completed; index++)
         {
             if (completions[index].status == IBV_WC_SUCCESS)
-                weightd_mesh.send_ok++;
-            else if (completions[index].status == IBV_WC_WR_FLUSH_ERR)
             {
-                weightd_mesh.send_err++;
-                repair_needed = 1u;
+                weightd_mesh.send_ok++;
+                weightd_mesh.send_err_window = 0ull;
             }
             else
             {
                 weightd_mesh.send_err++;
-                fprintf(stderr,
-                    "WD-MESH-CQERR wr=%llu opcode=%u status=%u vendor=%u\n",
-                    (unsigned long long)completions[index].wr_id,
-                    (unsigned)completions[index].opcode,
-                    (unsigned)completions[index].status,
-                    (unsigned)completions[index].vendor_err);
+                weightd_mesh.send_err_window++;
+                if (completions[index].status != IBV_WC_WR_FLUSH_ERR)
+                    fprintf(stderr,
+                        "WD-MESH-CQERR wr=%llu opcode=%u status=%u vendor=%u\n",
+                        (unsigned long long)completions[index].wr_id,
+                        (unsigned)completions[index].opcode,
+                        (unsigned)completions[index].status,
+                        (unsigned)completions[index].vendor_err);
+                repair_needed = 1u;
             }
         }
+    }
+    if (weightd_mesh.send_err_window > 256ull)
+    {
+        if (weightd_mesh.degraded_logged == 0u)
+        {
+            fprintf(stderr,
+                "WD-MESH-DEGRADED window=%llu total=%llu — quiescing ships 100ms per pass until a successful re-wire\n",
+                (unsigned long long)weightd_mesh.send_err_window,
+                (unsigned long long)weightd_mesh.send_err);
+            weightd_mesh.degraded_logged = 1u;
+        }
+        weightd_mesh.quiesce_until_ns =
+            SparkWeightdMeshRealtimeNs() + 100000000ull;
     }
     if (repair_needed != 0u)
         SparkWeightdMeshTryWire();
@@ -643,6 +663,8 @@ void SparkWeightdMeshDoorbellLoop(void)
     for (;;)
     {
         SparkWeightdMeshDrainCq();
+        if (SparkWeightdMeshRealtimeNs() < weightd_mesh.quiesce_until_ns)
+            continue;
         pthread_mutex_lock(&SparkWeightdMeshWireLock);
         memcpy(qp_snapshot,weightd_mesh.qp_info,sizeof(qp_snapshot));
         pthread_mutex_unlock(&SparkWeightdMeshWireLock);
