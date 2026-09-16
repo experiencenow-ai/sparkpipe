@@ -213,6 +213,7 @@ struct SparkGlm5NextModuleState
 	uint32_t tp_device_collective_initialized;
 	uint32_t tp_chain_active;
 	uint32_t tp_lane;
+	SparkWeightdClient *lane_client;
 	SparkTpDeviceCollectiveCreditBinding tp_credit_bindings[SPARK_TP_DEVICE_COLLECTIVE_MAX_BINDING_COUNT];
 	uint32_t tp_credit_binding_count;
 	void *tp_credit_send_bf16;
@@ -1902,18 +1903,22 @@ static SparkStatus SparkGlm5NextModuleInitializeTpCollective(
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	if ( state->tp_degree == 1u || state->tp_collective_disabled != 0u )
 		return(SPARK_STATUS_OK);
+	if ( state->lane_client == 0 )
 	{
-		SparkWeightdClient *lane_client;
 		const char *socket = getenv("SPARK_WEIGHTD_SOCKET");
 		if ( socket == 0 || socket[0] == '\0' )
 			SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
-		if ( SparkWeightdClientConnect(socket,&lane_client,0) != SPARK_STATUS_OK )
+		if ( SparkWeightdClientConnect(socket,&state->lane_client,0) != SPARK_STATUS_OK )
+		{
+			state->lane_client = 0;
 			SPARK_FAIL(SPARK_STATUS_IO_ERROR);
-		status = SparkWeightdClientLaneAcquire(lane_client,&state->tp_lane,
+		}
+		status = SparkWeightdClientLaneAcquire(state->lane_client,&state->tp_lane,
 			(uint64_t)context->tp_connect_timeout_milli * 1000000ull);
-		(void)SparkWeightdClientClose(lane_client);
 		if ( status != SPARK_STATUS_OK )
 		{
+			(void)SparkWeightdClientClose(state->lane_client);
+			state->lane_client = 0;
 			fprintf(stderr,"GLM mesh lane acquire failed: no free lane (status=%d)\n",(int32_t)status);
 			SPARK_RETURN(status);
 		}
@@ -3156,6 +3161,122 @@ static void SparkGlm5NextGraphEnsure(SparkGlm5NextTpChain *chain,
 	*status_out = status;
 }
 
+static int SparkGlm5NextT1Enabled(void)
+{
+	static int t1_enabled = -1;
+	if ( t1_enabled < 0 )
+		t1_enabled = getenv("SPARK_GLM5_NEXT_T1") != 0 ? 1 : 0;
+	return(t1_enabled);
+}
+static void SparkGlm5NextT1Wave(const SparkGlm5NextCudaWave *wave)
+{
+	uint32_t i;
+	if ( SparkGlm5NextT1Enabled() == 0 || wave == 0 || wave->tp_rank != 0u ||
+	    wave->host_resident_slots == 0 || wave->host_token_ids == 0 ||
+	    wave->host_positions == 0 )
+		return;
+	fprintf(stderr,"G5N-T1 wave seq%u rows=%u",wave->host_resident_slots[0],wave->row_count);
+	for ( i = 0u; i < wave->row_count; i++ )
+		fprintf(stderr," pos%u=%u",wave->host_positions[i],wave->host_token_ids[i]);
+	fputc('\n',stderr);
+}
+static void SparkGlm5NextT1Streams(SparkGlm5NextTpChain *chain,uint32_t layer)
+{
+	static uint16_t *rows_host = 0;
+	static uint32_t rows_host_capacity = 0;
+	uint32_t row;
+	uint32_t i;
+	uint32_t flat;
+	uint64_t bytes;
+	if ( SparkGlm5NextT1Enabled() == 0 || chain->wave.tp_rank != 0u )
+		return;
+	if ( cudaStreamSynchronize((cudaStream_t)chain->slot->stream) != cudaSuccess )
+		return;
+	flat = SPARK_GLM5_NEXT_MODEL_HC_MULT * SPARK_GLM5_NEXT_MODEL_HIDDEN_DIMENSION;
+	bytes = (uint64_t)chain->wave_rows * flat * sizeof(uint16_t);
+	if ( rows_host_capacity < chain->wave_rows )
+	{
+		free(rows_host);
+		rows_host = (uint16_t *)malloc(bytes);
+		rows_host_capacity = rows_host != 0 ? chain->wave_rows : 0u;
+	}
+	if ( rows_host == 0 ||
+	    cudaMemcpy(rows_host,chain->slot->hidden_bf16,bytes,cudaMemcpyDeviceToHost) != cudaSuccess )
+		return;
+	for ( row = 0u; row < chain->wave_rows; row++ )
+	{
+		uint16_t *values = rows_host + (uint64_t)row * flat;
+		fprintf(stderr,"G5N-T1 stream L%u pos%u",layer,chain->wave.host_positions[row]);
+		for ( i = 0u; i < flat; i++ )
+			fprintf(stderr," %04x",values[i]);
+		fputc('\n',stderr);
+	}
+}
+static void SparkGlm5NextT1Route(SparkGlm5NextTpChain *chain,uint32_t layer)
+{
+	static uint32_t *ids_host = 0;
+	static float *weights_host = 0;
+	static uint32_t route_capacity = 0;
+	uint32_t row;
+	uint32_t k;
+	uint64_t bytes;
+	if ( SparkGlm5NextT1Enabled() == 0 || chain->wave.tp_rank != 0u ||
+	    layer < SPARK_GLM5_NEXT_MODEL_FIRST_ROUTED_LAYER )
+		return;
+	bytes = (uint64_t)chain->wave_rows * SPARK_GLM5_NEXT_MODEL_MOE_TOP_K * sizeof(uint32_t);
+	if ( route_capacity < chain->wave_rows )
+	{
+		free(ids_host);
+		free(weights_host);
+		ids_host = (uint32_t *)malloc(bytes);
+		weights_host = (float *)malloc(bytes);
+		route_capacity = ids_host != 0 && weights_host != 0 ? chain->wave_rows : 0u;
+	}
+	if ( ids_host == 0 || weights_host == 0 ||
+	    cudaMemcpy(ids_host,chain->slot->route_expert,bytes,cudaMemcpyDeviceToHost) != cudaSuccess ||
+	    cudaMemcpy(weights_host,chain->slot->route_weight,bytes,cudaMemcpyDeviceToHost) != cudaSuccess )
+		return;
+	for ( row = 0u; row < chain->wave_rows; row++ )
+	{
+		fprintf(stderr,"G5N-T1 route L%u pos%u ids",layer,chain->wave.host_positions[row]);
+		for ( k = 0u; k < SPARK_GLM5_NEXT_MODEL_MOE_TOP_K; k++ )
+			fprintf(stderr," %u",ids_host[row * SPARK_GLM5_NEXT_MODEL_MOE_TOP_K + k]);
+		fprintf(stderr," weights");
+		for ( k = 0u; k < SPARK_GLM5_NEXT_MODEL_MOE_TOP_K; k++ )
+			fprintf(stderr," %08x",
+			    ((const uint32_t *)weights_host)[row * SPARK_GLM5_NEXT_MODEL_MOE_TOP_K + k]);
+		fputc('\n',stderr);
+	}
+}
+static void SparkGlm5NextT1Head(SparkGlm5NextTpChain *chain)
+{
+	static uint32_t *tokens_host = 0;
+	static float *scores_host = 0;
+	static uint32_t head_capacity = 0;
+	uint32_t i;
+	if ( SparkGlm5NextT1Enabled() == 0 || chain->wave.tp_rank != 0u ||
+	    chain->state->owns_final_head == 0u )
+		return;
+	if ( cudaStreamSynchronize((cudaStream_t)chain->slot->stream) != cudaSuccess )
+		return;
+	if ( head_capacity < chain->wave_rows )
+	{
+		free(tokens_host);
+		free(scores_host);
+		tokens_host = (uint32_t *)malloc((uint64_t)chain->wave_rows * sizeof(uint32_t));
+		scores_host = (float *)malloc((uint64_t)chain->wave_rows * sizeof(float));
+		head_capacity = tokens_host != 0 && scores_host != 0 ? chain->wave_rows : 0u;
+	}
+	if ( tokens_host == 0 || scores_host == 0 ||
+	    cudaMemcpy(tokens_host,chain->slot->output_token,(uint64_t)chain->wave_rows * sizeof(uint32_t),cudaMemcpyDeviceToHost) != cudaSuccess ||
+	    cudaMemcpy(scores_host,chain->slot->output_score,(uint64_t)chain->wave_rows * sizeof(float),cudaMemcpyDeviceToHost) != cudaSuccess )
+		return;
+	for ( i = 0u; i < chain->wave_rows; i++ )
+		fprintf(stderr,"G5N-T1 head pos%u token %u score_bits %08x\n",
+		    chain->wave.host_positions[i],tokens_host[i],
+		    ((const uint32_t *)scores_host)[i]);
+}
+
 static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 {
 	SparkGlm5NextTpChain *chain;
@@ -3222,6 +3343,7 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 		if ( chain->sweep_submitted == 0u )
 		{
 			SparkGlm5NextBuildWave(chain);
+			SparkGlm5NextT1Wave(&chain->wave);
 			if ( state->lazy_pack != 0 && state->tp_degree > 1u &&
 			     chain->slot->route_recorded != 0u )
 			{
@@ -3337,6 +3459,8 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 			SparkGlm5NextTpChainFail(chain,SPARK_STATUS_INTERNAL_ERROR);
 			return;
 		}
+		SparkGlm5NextT1Streams(chain,chain->wave.first_layer_index + chain->next_layer);
+		SparkGlm5NextT1Route(chain,chain->wave.first_layer_index + chain->next_layer);
 		chain->next_layer++;
 		chain->sweep_retries = 0u;
 		if ( chain->next_layer < chain->wave.layer_count )
@@ -3378,6 +3502,7 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 			SparkGlm5NextTpChainFail(chain,launch_status);
 			return;
 		}
+		SparkGlm5NextT1Head(chain);
 		if ( chain->spec_verify != 0u )
 		{
 			error = cudaLaunchHostFunc((cudaStream_t)chain->slot->stream,SparkGlm5NextMtpResolveHost,chain);
@@ -4136,6 +4261,11 @@ void SparkGlm5NextResidentDecodeStageDestroy(void *module_state)
 	state->tp_hc_host_credit_receive_bf16 = 0;
 	if ( state->tp_device_collective_initialized != 0u )
 		SparkTpDeviceCollectiveDestroy(&state->tp_device_collective);
+	if ( state->lane_client != 0 )
+	{
+		(void)SparkWeightdClientClose(state->lane_client);
+		state->lane_client = 0;
+	}
 	SparkGlm5NextReleaseCaches(state);
 	SparkGlm5NextReleaseSlotHost(state);
 	SparkStageModuleLedgerRelease(&state->ledger);
@@ -4216,6 +4346,11 @@ static SparkStatus SparkGlm5NextInitializeState(
 		{
 			fprintf(stderr,"GLM lazy initialization cleanup failed; retaining CUDA resources until process exit\n");
 			SPARK_RETURN(status);
+		}
+		if ( state->lane_client != 0 )
+		{
+			(void)SparkWeightdClientClose(state->lane_client);
+			state->lane_client = 0;
 		}
 		SparkGlm5NextReleaseCaches(state);
 		SparkGlm5NextReleaseSlotHost(state);
