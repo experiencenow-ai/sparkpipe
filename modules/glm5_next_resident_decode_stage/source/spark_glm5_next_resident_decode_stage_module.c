@@ -2299,6 +2299,15 @@ static void CUDART_CB SparkGlm5NextMtpResolveHost(void *context)
 	free(chain);
 }
 
+static void SparkGlm5NextLazyRetryRetained(void *context);
+
+static void SparkGlm5NextScheduleRetainedRetry(SparkGlm5NextModuleState *state)
+{
+	if ( state->lazy_pack == 0 || state->lazy_pack->worker == 0 )
+		return;
+	(void)SparkWeightdWorkerSubmit(state->lazy_pack->worker,SparkGlm5NextLazyRetryRetained,state);
+}
+
 static void SparkGlm5NextTpChainFail(SparkGlm5NextTpChain *chain,SparkStatus status)
 {
 	SparkGlm5NextModuleState *state;
@@ -2320,6 +2329,7 @@ static void SparkGlm5NextTpChainFail(SparkGlm5NextTpChain *chain,SparkStatus sta
 		fprintf(stderr,"GLM chain drain failed; retaining slot %u and CUDA resources for teardown retry\n",chain->slot_index);
 		state->tp_chain_active = 0u;
 		atomic_store_explicit(&state->lazy_retained[chain->slot_index],chain,memory_order_release);
+		SparkGlm5NextScheduleRetainedRetry(state);
 		return;
 	}
 	async = &state->completions[chain->slot_index];
@@ -2525,6 +2535,7 @@ static void SparkGlm5NextLazyWork(void *context)
 		fprintf(stderr,"GLM expert cleanup failed: slot=%u lease=%llu status=%d; retaining slot and lease for teardown retry\n",chain->slot_index,(unsigned long long)chain->expert_lease,(int32_t)cleanup);
 		chain->state->tp_chain_active = 0u;
 		atomic_store_explicit(&chain->state->lazy_retained[chain->slot_index],chain,memory_order_release);
+		SparkGlm5NextScheduleRetainedRetry(chain->state);
 		return;
 	}
 	if ( status != SPARK_STATUS_OK )
@@ -3725,8 +3736,15 @@ static SparkStatus SparkGlm5NextStartClaimedBatch(SparkGlm5NextModuleState *stat
 	SparkGlm5NextTpChain *chain;
 	SparkStatus status;
 	cudaError_t error;
+	uint32_t retained_index;
 	if ( state->tp_chain_active != 0u )
 		SPARK_FAIL(SPARK_STATUS_BUSY);
+	for ( retained_index = 0u; retained_index < state->pipeline_slot_count; retained_index++ )
+		if ( atomic_load_explicit(&state->lazy_retained[retained_index],memory_order_acquire) != 0 )
+		{
+			SparkGlm5NextScheduleRetainedRetry(state);
+			break;
+		}
 	chain = (SparkGlm5NextTpChain *)calloc(1u,sizeof(*chain));
 	if ( chain == 0 )
 		SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
