@@ -1315,11 +1315,13 @@ static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
             result->status = status;
             return;
         }
-        if (arena->lazy == 0u || arena->expert_pool_bytes != request->expert_pool_bytes)
+        if (arena->lazy == 0u)
         {
             result->status = (uint32_t)SPARK_STATUS_INVALID_ARGUMENT;
             return;
         }
+        if (request->expert_pool_bytes > arena->expert_pool_bytes)
+            arena->expert_pool_bytes = request->expert_pool_bytes;
         slot = (uint32_t)(arena - server->arenas);
         status = SparkWeightdServerAttachRegister(server, connection, slot);
         result->status = (uint32_t)status;
@@ -1454,12 +1456,16 @@ static SparkStatus SparkWeightdArenaChunkEnsure(SparkWeightdServer *server,Spark
             if (cuMemCreate(&handle, (size_t)arena->chunk_bytes, &prop,
                     0ull) != CUDA_SUCCESS)
             {
+                fprintf(stderr,"WD-CHUNK-FAIL create idx=%u bytes=%llu\n",
+                    (unsigned)index,(unsigned long long)arena->chunk_bytes);
                 SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
             }
             if (cuMemMap(base + (CUdeviceptr)index * arena->chunk_bytes,
                     (size_t)arena->chunk_bytes, 0u, handle, 0ull) != CUDA_SUCCESS)
             {
                 (void)cuMemRelease(handle);
+                fprintf(stderr,"WD-CHUNK-FAIL map idx=%u bytes=%llu\n",
+                    (unsigned)index,(unsigned long long)arena->chunk_bytes);
                 SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
             }
             arena->chunk_handles[index] = (void *)handle;
@@ -1615,10 +1621,20 @@ static SparkStatus SparkWeightdLoadRange(SparkWeightdArena *arena,int32_t fd,con
 		if ( moved < 0 && errno == EINTR )
 			continue;
 		if ( moved <= 0 )
+		{
+			fprintf(stderr,"WD-LOADRANGE-FAIL pread fd=%d off=%llu req=%llu moved=%ld errno=%d\n",
+				fd,(unsigned long long)(range->offset + offset),
+				(unsigned long long)bytes,(long)moved,errno);
 			return(SPARK_STATUS_IO_ERROR);
+		}
 		SparkCk128Update(&context,arena->staging,(size_t)moved);
 		if ( cudaMemcpy((uint8_t *)arena->device_base + range->offset + offset,arena->staging,(size_t)moved,cudaMemcpyHostToDevice) != cudaSuccess )
+		{
+			fprintf(stderr,"WD-LOADRANGE-FAIL memcpy dst_off=%llu bytes=%llu cuda=%s\n",
+				(unsigned long long)(range->offset + offset),
+				(unsigned long long)moved,cudaGetErrorString(cudaGetLastError()));
 			return(SPARK_STATUS_IO_ERROR);
+		}
 		offset += (uint64_t)moved;
 	}
 	SparkCk128Finalize(&context,digest);
@@ -1971,13 +1987,33 @@ static uint32_t SparkWeightdServerDispatch(SparkWeightdServer *server,
         {
             if ( request_header->kind == SPARK_WEIGHTD_IPC_KIND_RELEASE )
             {
+                uint32_t occ_i,occ_n = 0u;
+                for (occ_i = 0u; occ_i < SPARK_WEIGHTD_LEASE_COUNT_MAX; occ_i++)
+                    if ( arena->leases->leases[occ_i].count != 0u )
+                        occ_n++;
                 result->lease_identifier = release->lease_identifier;
                 result->status = SparkWeightdLeaseRelease(arena->leases,connection->owner,release->lease_identifier);
+                fprintf(stderr,"WD-LEASE-TRACE kind=release owner=%llu id=%llu status=%d occupied=%u\n",
+                    (unsigned long long)connection->owner,
+                    (unsigned long long)release->lease_identifier,
+                    (int)result->status,occ_n);
             }
             else if ( acquire->reserved0 != 0u )
                 result->status = SPARK_STATUS_INVALID_ARGUMENT;
             else
+            {
+                uint32_t occ_i,occ_n = 0u;
+                for (occ_i = 0u; occ_i < SPARK_WEIGHTD_LEASE_COUNT_MAX; occ_i++)
+                    if ( arena->leases->leases[occ_i].count != 0u )
+                        occ_n++;
                 result->status = SparkWeightdAcquireWorkingSet(server,connection,arena,acquire->keys,acquire->count,&result->lease_identifier);
+                fprintf(stderr,"WD-LEASE-TRACE kind=%s owner=%llu keys=%u status=%d occupied=%u id=%llu\n",
+                    request_header->kind == SPARK_WEIGHTD_IPC_KIND_ACQUIRE ? "acquire" : "release",
+                    (unsigned long long)connection->owner,
+                    request_header->kind == SPARK_WEIGHTD_IPC_KIND_ACQUIRE ? (unsigned)acquire->count : 0u,
+                    (int)result->status,occ_n,
+                    (unsigned long long)result->lease_identifier);
+            }
         }
         result->resident_bytes = server->resident_bytes;
         return(sizeof(*result));
@@ -2191,6 +2227,13 @@ static void SparkWeightdServerCloseConnection(SparkWeightdServer *server,
     uint32_t connection_index)
 {
     SparkWeightdConnection *connection = &server->connections[connection_index];
+    if (connection->owner != 0u)
+    {
+        uint32_t arena_index;
+        for (arena_index = 0u; arena_index < server->arena_count; arena_index++)
+            if (server->arenas[arena_index].leases != 0)
+                (void)SparkWeightdLeaseReleaseOwner(server->arenas[arena_index].leases,connection->owner);
+    }
     while (connection->attach_count != 0u)
     {
         /* consumer death drops a refcount — every one of them */

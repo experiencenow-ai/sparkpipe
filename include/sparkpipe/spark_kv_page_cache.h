@@ -171,6 +171,7 @@ typedef struct SparkKvLaneTransaction
 	SparkModelDriverAdmissionRequest request;
 	SparkModelDriverCacheLane lane;
 	uint64_t validation_epoch;
+	uint64_t executing_since_ns;
 	uint32_t phase;
 	uint32_t page_count;
 	uint32_t mutation_flags;

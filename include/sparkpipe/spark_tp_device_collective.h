@@ -339,6 +339,12 @@ SparkStatus SparkTpDeviceCollectiveWaitAllRoutes(
     SparkTpDeviceCollective *collective,
     uint32_t timeout_milli);
 
+void SparkTpDeviceCollectiveRoundStats(
+    SparkTpDeviceCollective *collective,
+    uint64_t *count_out,
+    uint64_t *total_ns_out,
+    uint32_t reset);
+
 SparkStatus SparkTpDeviceCollectiveArmCapture(
     SparkTpDeviceCollective *collective);
 
