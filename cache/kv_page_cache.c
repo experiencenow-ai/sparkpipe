@@ -1,6 +1,7 @@
 #include "sparkpipe/spark_kv_page_cache.h"
 
 #include <string.h>
+#include <time.h>
 
 #include "sparkpipe/spark_error_site.h"
 #include "sparkpipe/spark_model_driver_support.h"
@@ -1236,9 +1237,14 @@ static SparkStatus SparkKvLaneTransactionsPrepare(SparkKvLaneTransactions *trans
 	SparkStatus status,rollback;
 	for (index=0u; index<request->cache_lane_count; index++)
 	{
+		struct timespec now_ts;
+		uint64_t now_ns = clock_gettime(CLOCK_MONOTONIC,&now_ts) == 0 ?
+		    (uint64_t)now_ts.tv_sec * UINT64_C(1000000000) + (uint64_t)now_ts.tv_nsec : 0u;
 		owner = &transactions->lanes[request->cache_lanes[index].resident_sequence_slot];
 		if ( (owner->phase == SPARK_KV_LANE_TRANSACTION_PREPARED ||
-		       owner->phase == SPARK_KV_LANE_TRANSACTION_COMMITTED) &&
+		       owner->phase == SPARK_KV_LANE_TRANSACTION_COMMITTED ||
+		       (owner->phase == SPARK_KV_LANE_TRANSACTION_EXECUTING &&
+		        owner->executing_since_ns != 0u && now_ns - owner->executing_since_ns > UINT64_C(60000000000))) &&
 		     request->request_id != owner->request.request_id )
 		{
 			SparkStatus takeover;
@@ -1374,7 +1380,13 @@ SparkStatus SparkKvLaneTransactionsClaim(SparkKvLaneTransactions *transactions,c
 	if ( status != SPARK_STATUS_OK )
 		SPARK_RETURN(status);
 	for (index=0u; index<frame->cache_lane_count; index++)
+	{
+		struct timespec executing_since;
 		transactions->lanes[frame->cache_lanes[index].resident_sequence_slot].phase = SPARK_KV_LANE_TRANSACTION_EXECUTING;
+		transactions->lanes[frame->cache_lanes[index].resident_sequence_slot].executing_since_ns =
+		    clock_gettime(CLOCK_MONOTONIC,&executing_since) == 0 ?
+		    (uint64_t)executing_since.tv_sec * UINT64_C(1000000000) + (uint64_t)executing_since.tv_nsec : 0u;
+	}
 	return(SPARK_STATUS_OK);
 }
 
