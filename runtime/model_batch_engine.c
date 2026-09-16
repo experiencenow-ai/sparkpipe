@@ -2115,7 +2115,7 @@ SparkStatus SparkModelBatchEngineProgress(
 			(unsigned long long)session_fingerprint);
 		engine->observed_control_generation = session_fingerprint;
 		SparkModelBatchInvalidateEngineSession(engine);
-		(void)SparkModelPipelineClientRecover(engine->pipeline);
+		SparkModelPipelineClientClearTransactions(engine->pipeline);
 	}
 	status = SparkModelPipelineClientProgress(engine->pipeline,engine->maximum_messages_per_rank);
 	if ( status != SPARK_STATUS_OK )
