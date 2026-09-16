@@ -84,6 +84,7 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 				atomicExch((unsigned long long *)error_word,sequence);
 				return;
 			}
+			__nanosleep(200u);
 		}
 	}
 }
