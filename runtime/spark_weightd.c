@@ -673,11 +673,8 @@ static SparkStatus SparkWeightdVmmAllocate(uint64_t arena_bytes,
         arena->chunk_bytes = chunk_bytes;
         arena->chunk_count = chunk_count;
         arena->staging = (uint8_t *)malloc(SPARK_WEIGHTD_ARENA_STAGING_BYTES);
-        if (arena->staging == 0)
-        {
-            break;
-        }
-        return SPARK_STATUS_OK;
+        if (arena->staging != 0)
+            return SPARK_STATUS_OK;
     }
     /* unwind: unmap what was mapped, release what was created, free the VA */
     if (mapped != 0u)
@@ -1293,6 +1290,10 @@ static void SparkWeightdServerStageMeshFd(SparkWeightdConnection *connection)
     connection->response_fds[connection->response_fd_count++] = fd;
 }
 
+static SparkStatus SparkWeightdPreloadSpine(SparkWeightdServer *server,
+    SparkWeightdArena *arena,int32_t fd);
+static SparkStatus SparkWeightdArenaChunkEnsure(SparkWeightdServer *server,
+    SparkWeightdArena *arena,uint32_t first_chunk,uint32_t last_chunk);
 static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
     SparkWeightdConnection *connection,
     const SparkWeightdIpcAttachLazy *request,
