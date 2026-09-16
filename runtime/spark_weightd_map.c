@@ -28,6 +28,7 @@ struct SparkWeightdMap
 	CUcontext context;
 	CUdeviceptr base;
 	uint64_t generation,span_bytes,chunk_bytes;
+	uint64_t validated_epoch;
 	void *epoch_device;
 	void *epoch_handle;
 	uint32_t chunk_count;
@@ -414,6 +415,23 @@ SparkStatus SparkWeightdMapBeginUse(SparkWeightdMap *map,uint64_t identifier,voi
 		SPARK_FAIL(SPARK_STATUS_NOT_FOUND);
 	if ( slot->state != MAP_ACQUIRED )
 		SPARK_FAIL(SPARK_STATUS_BUSY);
+	if ( map->epoch_device != 0 )
+	{
+		uint64_t current_epoch =
+		    *(volatile uint64_t *)map->epoch_device;
+		if ( current_epoch != map->validated_epoch )
+		{
+			uint32_t i;
+			map->validated_epoch = current_epoch;
+			for ( i = 0u; i < map->chunk_count; i++ )
+				map->mapped[i] = 0u;
+			fprintf(stderr,
+			    "WEIGHTD-MAP-EPOCH-MOVE epoch=%llu — all chunk mappings invalidated, next access re-imports\n",
+			    (unsigned long long)current_epoch);
+			slot->state = MAP_ACQUIRED;
+			SPARK_FAIL(SPARK_STATUS_BUSY);
+		}
+	}
 	slot->state = MAP_INFLIGHT;
 	*address = (void *)(uintptr_t)map->base;
 	return(SPARK_STATUS_OK);
