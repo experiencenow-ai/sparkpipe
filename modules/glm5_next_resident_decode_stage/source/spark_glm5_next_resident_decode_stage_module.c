@@ -2242,6 +2242,8 @@ static SparkStatus SparkGlm5NextMtpStashHidden(
 	return(SPARK_STATUS_OK);
 }
 
+static void SparkGlm5NextLazyReleaseQuiet(SparkGlm5NextTpChain *chain);
+
 static void CUDART_CB SparkGlm5NextMtpResolveHost(void *context)
 {
 	SparkGlm5NextTpChain *chain;
@@ -2293,6 +2295,7 @@ static void CUDART_CB SparkGlm5NextMtpResolveHost(void *context)
 	}
 	chain->stage = SPARK_GLM5_NEXT_CHAIN_STAGE_FINISH;
 	chain->active = 0u;
+	SparkGlm5NextLazyReleaseQuiet(chain);
 	free(chain);
 }
 
@@ -2322,6 +2325,7 @@ static void SparkGlm5NextTpChainFail(SparkGlm5NextTpChain *chain,SparkStatus sta
 	async = &state->completions[chain->slot_index];
 	async->completion.status = status;
 	SparkGlm5NextCompleteAsync(async);
+	SparkGlm5NextLazyReleaseQuiet(chain);
 	free(chain);
 }
 
@@ -2353,6 +2357,18 @@ static SparkStatus SparkGlm5NextLazyRelease(SparkGlm5NextTpChain *chain)
 		chain->wave.expert_lease_base = 0;
 	}
 	SPARK_RETURN(status);
+}
+
+static void SparkGlm5NextLazyReleaseQuiet(SparkGlm5NextTpChain *chain)
+{
+	SparkStatus release_status;
+	if ( chain == 0 || chain->expert_lease == 0u )
+		return;
+	release_status = SparkGlm5NextLazyRelease(chain);
+	if ( release_status != SPARK_STATUS_OK )
+		fprintf(stderr,"LAZYWORK-RELEASE-FAIL slot=%u status=%d lease=%llu\n",
+			(unsigned)chain->slot_index,(int)release_status,
+			(unsigned long long)chain->expert_lease);
 }
 
 static SparkStatus SparkGlm5NextLazyRecoverLease(SparkGlm5NextModuleState *state,uint32_t slot,SparkGlm5NextTpChain **out)
@@ -2407,6 +2423,8 @@ static SparkStatus SparkGlm5NextLazyExperts(SparkGlm5NextTpChain *chain)
 		    (chain->wave.first_layer_index + chain->next_layer) *
 		        (SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT + 1u),
 		SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT,chain->wave.row_count * SPARK_GLM5_NEXT_MODEL_MOE_TOP_K,keys,SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT,&count);
+	if ( status == SPARK_STATUS_OK && chain->expert_lease != 0u )
+		status = SparkGlm5NextLazyRelease(chain);
 	if ( status == SPARK_STATUS_OK )
 		status = SparkWeightdMapAcquire(map,keys,count,&chain->expert_lease,SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
 	if ( status != SPARK_STATUS_OK )
@@ -3175,6 +3193,7 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 				}
 				chain->stage = SPARK_GLM5_NEXT_CHAIN_STAGE_FINISH;
 				chain->active = 0u;
+				SparkGlm5NextLazyReleaseQuiet(chain);
 				free(chain);
 				return;
 			}
@@ -3383,6 +3402,7 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 		}
 		chain->stage = SPARK_GLM5_NEXT_CHAIN_STAGE_FINISH;
 		chain->active = 0u;
+		SparkGlm5NextLazyReleaseQuiet(chain);
 		free(chain);
 		return;
 	default:
