@@ -193,6 +193,29 @@ struct SparkWeightdClient
     uint64_t next_request_id;
 };
 
+uint32_t SparkWeightdClientAlive(const SparkWeightdClient *client)
+{
+    struct pollfd pfd;
+    char probe;
+    ssize_t got;
+    if ( client == 0 || client->fd < 0 )
+        return(0u);
+    memset(&pfd,0,sizeof(pfd));
+    pfd.fd = client->fd;
+    pfd.events = POLLIN | POLLHUP | POLLERR | POLLRDHUP;
+    if ( poll(&pfd,1,0) < 0 )
+        return(0u);
+    if ( (pfd.revents & (POLLHUP | POLLERR | POLLRDHUP)) != 0 )
+        return(0u);
+    if ( (pfd.revents & POLLIN) != 0 )
+    {
+        got = recv(client->fd,&probe,1u,MSG_PEEK | MSG_DONTWAIT);
+        if ( got == 0 )
+            return(0u);
+    }
+    return(1u);
+}
+
 static uint64_t SparkWeightdMonotonicTimeNs(void)
 {
     struct timespec now;

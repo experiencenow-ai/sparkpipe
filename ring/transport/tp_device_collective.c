@@ -682,6 +682,13 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
                     (unsigned long long)staging->slot);
                 return SPARK_STATUS_BUSY;
             }
+            if ( SparkWeightdClientAlive(implementation->client) == 0u )
+            {
+                fprintf(stderr,
+                    "WEIGHTD-DEAD rank=%u mid-wait — failing fast\n",
+                    implementation->tp_rank);
+                return SPARK_STATUS_IO_ERROR;
+            }
             if ( SparkTpDeviceCollectiveTimeNs() >= deadline )
             {
                 fprintf(stderr,

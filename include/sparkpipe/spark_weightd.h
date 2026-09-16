@@ -555,6 +555,7 @@ SparkStatus SparkWeightdClientConnect(const char *socket_path,
     SparkWeightdHelloResult *hello_out);
 
 void SparkWeightdClientClose(SparkWeightdClient *client);
+uint32_t SparkWeightdClientAlive(const SparkWeightdClient *client);
 
 SparkStatus SparkWeightdClientMeshWrite(SparkWeightdClient *client,
     uint32_t peer_rank,
