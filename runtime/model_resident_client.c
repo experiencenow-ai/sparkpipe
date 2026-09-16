@@ -56,6 +56,8 @@ struct SparkModelResidentClient
 	uint32_t connected;
 	uint32_t rank_index;
 	uint32_t stage_index;
+	uint64_t reconnect_not_before_ns;
+	uint32_t reconnect_backoff_ms;
 	uint32_t queue_capacity;
 	uint32_t output_head;
 	uint32_t output_count;
@@ -440,16 +442,30 @@ static SparkStatus SparkModelResidentClientEnsureConnected(
 {
 	SparkModelResidentClientConfiguration configuration;
 	SparkStatus status;
+	struct timespec now_ts;
+	uint64_t now_ns;
 	if ( client == 0 )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	if ( client->connected != 0u )
 		return(SPARK_STATUS_OK);
+	now_ns = clock_gettime(CLOCK_MONOTONIC,&now_ts) == 0 ?
+		(uint64_t)now_ts.tv_sec * UINT64_C(1000000000) + (uint64_t)now_ts.tv_nsec : 0u;
+	if ( now_ns != 0u && client->reconnect_not_before_ns != 0u && now_ns < client->reconnect_not_before_ns )
+		return(SPARK_STATUS_IO_ERROR);
 	status = SparkModelResidentClientOpenEndpoint(client,&client->endpoint,
 		client->connect_timeout_ms);
 	if ( status != SPARK_STATUS_OK )
 	{
 		fprintf(stderr,"client_reconnect_fail rank=%u status=%u\n",
 			(unsigned)client->rank_index,(unsigned)status);
+		if ( now_ns != 0u )
+		{
+			if ( client->reconnect_backoff_ms == 0u )
+				client->reconnect_backoff_ms = 100u;
+			else if ( client->reconnect_backoff_ms < 5000u )
+				client->reconnect_backoff_ms *= 2u;
+			client->reconnect_not_before_ns = now_ns + (uint64_t)client->reconnect_backoff_ms * UINT64_C(1000000);
+		}
 		SPARK_RETURN(status);
 	}
 	memset(&configuration,0,sizeof(configuration));
@@ -467,9 +483,19 @@ static SparkStatus SparkModelResidentClientEnsureConnected(
 			close(client->fd);
 			client->fd = -1;
 		}
+		if ( now_ns != 0u )
+		{
+			if ( client->reconnect_backoff_ms == 0u )
+				client->reconnect_backoff_ms = 100u;
+			else if ( client->reconnect_backoff_ms < 5000u )
+				client->reconnect_backoff_ms *= 2u;
+			client->reconnect_not_before_ns = now_ns + (uint64_t)client->reconnect_backoff_ms * UINT64_C(1000000);
+		}
 		SPARK_RETURN(status);
 	}
 	client->connected = 1u;
+	client->reconnect_not_before_ns = 0u;
+	client->reconnect_backoff_ms = 0u;
 	client->next_message_id = 2u;
 	client->input_target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
 	return(SPARK_STATUS_OK);
