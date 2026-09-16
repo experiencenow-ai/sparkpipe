@@ -32,7 +32,7 @@ extern int SparkGlm5NextLaunchMeshGuard(void *stream,
 extern int SparkGlm5NextLaunchMeshWait(void *stream,
     volatile void *band_base,uint64_t slot_bytes,const void *round_seq,
     uint64_t slots_per_rank,uint64_t ring,uint32_t rank,uint32_t degree,
-    void *error_word,unsigned long long deadline_ns);
+    void *error_word,unsigned long long deadline_ns,void *diag_word);
 
 #define SPARK_TP_DEVICE_COLLECTIVE_STAGING_SETS \
     (SPARK_WEIGHTD_MESH_SLOTS_PER_RANK * 16u)
