@@ -3420,9 +3420,6 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 	{
 	case SPARK_GLM5_NEXT_CHAIN_STAGE_BEGIN:
 		if ( chain->wave_rows == 1u && chain->first_row == 0u &&
-		     (chain->context->flags &
-		         SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_FRAME_FLAG_PREFILL)
-		         == 0u &&
 		     state->tp_device_collective_initialized != 0u &&
 		     state->lazy_pack != 0 && state->tp_degree > 1u &&
 		     state->graph_path_enabled != 0u )
