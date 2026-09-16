@@ -1959,13 +1959,33 @@ static uint32_t SparkWeightdServerDispatch(SparkWeightdServer *server,
         {
             if ( request_header->kind == SPARK_WEIGHTD_IPC_KIND_RELEASE )
             {
+                uint32_t occ_i,occ_n = 0u;
+                for (occ_i = 0u; occ_i < SPARK_WEIGHTD_LEASE_COUNT_MAX; occ_i++)
+                    if ( arena->leases->leases[occ_i].count != 0u )
+                        occ_n++;
                 result->lease_identifier = release->lease_identifier;
                 result->status = SparkWeightdLeaseRelease(arena->leases,connection->owner,release->lease_identifier);
+                fprintf(stderr,"WD-LEASE-TRACE kind=release owner=%llu id=%llu status=%d occupied=%u\n",
+                    (unsigned long long)connection->owner,
+                    (unsigned long long)release->lease_identifier,
+                    (int)result->status,occ_n);
             }
             else if ( acquire->reserved0 != 0u )
                 result->status = SPARK_STATUS_INVALID_ARGUMENT;
             else
+            {
+                uint32_t occ_i,occ_n = 0u;
+                for (occ_i = 0u; occ_i < SPARK_WEIGHTD_LEASE_COUNT_MAX; occ_i++)
+                    if ( arena->leases->leases[occ_i].count != 0u )
+                        occ_n++;
                 result->status = SparkWeightdAcquireWorkingSet(server,connection,arena,acquire->keys,acquire->count,&result->lease_identifier);
+                fprintf(stderr,"WD-LEASE-TRACE kind=%s owner=%llu keys=%u status=%d occupied=%u id=%llu\n",
+                    request_header->kind == SPARK_WEIGHTD_IPC_KIND_ACQUIRE ? "acquire" : "release",
+                    (unsigned long long)connection->owner,
+                    request_header->kind == SPARK_WEIGHTD_IPC_KIND_ACQUIRE ? (unsigned)acquire->count : 0u,
+                    (int)result->status,occ_n,
+                    (unsigned long long)result->lease_identifier);
+            }
         }
         result->resident_bytes = server->resident_bytes;
         return(sizeof(*result));
