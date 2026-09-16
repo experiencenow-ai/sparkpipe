@@ -72,6 +72,7 @@ typedef struct SparkTpDeviceCollectiveImplementation
     void *seq_cell;
     void *round_seq_device;
     void *error_word;
+    void *diag_word;
     uint32_t capture_armed;
     uint32_t round_rebased;
     uint64_t cancel_seen;
@@ -604,7 +605,8 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
                 (unsigned long long)(implementation->round_timeout_ns <
                     SPARK_TP_DEVICE_COLLECTIVE_ROUND_SPIN_TIMEOUT_NS ?
                     implementation->round_timeout_ns :
-                    SPARK_TP_DEVICE_COLLECTIVE_ROUND_SPIN_TIMEOUT_NS)) != 0 )
+                    SPARK_TP_DEVICE_COLLECTIVE_ROUND_SPIN_TIMEOUT_NS),
+                implementation->diag_word) != 0 )
             return SPARK_STATUS_IO_ERROR;
         goto combine;
     }
@@ -1119,11 +1121,13 @@ SparkStatus SparkTpDeviceCollectiveArmCapture(
     {
         if ( cudaMalloc(&implementation->seq_cell,8u) != 0 ||
              cudaMalloc(&implementation->round_seq_device,8u) != 0 ||
-             cudaMalloc(&implementation->error_word,8u) != 0 )
+             cudaMalloc(&implementation->error_word,8u) != 0 ||
+             cudaMalloc(&implementation->diag_word,8u) != 0 )
         {
             implementation->seq_cell = 0;
             implementation->round_seq_device = 0;
             implementation->error_word = 0;
+            implementation->diag_word = 0;
             SPARK_FAIL(SPARK_STATUS_IO_ERROR);
         }
     }
@@ -1132,6 +1136,8 @@ SparkStatus SparkTpDeviceCollectiveArmCapture(
          cudaMemcpy(implementation->round_seq_device,&zero,
             sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
          cudaMemcpy(implementation->error_word,&zero,
+            sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
+         cudaMemcpy(implementation->diag_word,&zero,
             sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 )
         SPARK_FAIL(SPARK_STATUS_IO_ERROR);
     implementation->capture_armed = 1u;
@@ -1194,6 +1200,22 @@ void SparkTpDeviceCollectiveBroadcastCancel(
             cancel_offset,cancel_offset,
             8u,0ull,0ull,implementation->round_timeout_ns);
     }
+}
+
+uint64_t SparkTpDeviceCollectiveGraphDiag(
+    SparkTpDeviceCollective *collective)
+{
+    SparkTpDeviceCollectiveImplementation *implementation;
+    uint64_t diag = 0u;
+    if ( collective == 0 || collective->implementation == 0 )
+        return(0ull);
+    implementation = collective->implementation;
+    if ( implementation->diag_word == 0 )
+        return(0ull);
+    if ( cudaMemcpy(&diag,implementation->diag_word,sizeof(uint64_t),
+            SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST) != 0 )
+        return(0ull);
+    return(diag);
 }
 
 uint64_t SparkTpDeviceCollectiveGraphError(

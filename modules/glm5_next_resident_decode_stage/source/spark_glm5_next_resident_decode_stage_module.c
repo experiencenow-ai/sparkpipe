@@ -3051,14 +3051,22 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 			if ( poll == cudaErrorNotReady )
 			{
 				uint64_t stuck_error;
+				uint64_t stuck_diag;
 				stuck_error = SparkTpDeviceCollectiveGraphError(
+					&state->tp_device_collective);
+				stuck_diag = SparkTpDeviceCollectiveGraphDiag(
 					&state->tp_device_collective);
 				state->graph_path_enabled = 0u;
 				state->degrade_graph_stuck++;
 				fprintf(stderr,
-					"DEGRADE graph-stuck slot=%u alt=%u err=%llu\n",
+					"DEGRADE graph-stuck slot=%u alt=%u err=%llu diag_peer=%llu ring=%llu slotidx=%llu want=%llu got=%llu\n",
 					chain->slot_index,chain->slot->graph_alt,
-					(unsigned long long)stuck_error);
+					(unsigned long long)stuck_error,
+					(unsigned long long)(stuck_diag >> 56),
+					(unsigned long long)((stuck_diag >> 48) & 0xff),
+					(unsigned long long)((stuck_diag >> 32) & 0xffff),
+					(unsigned long long)((stuck_diag >> 16) & 0xffff),
+					(unsigned long long)(stuck_diag & 0xffff));
 				status = SPARK_STATUS_INTERNAL_ERROR;
 			}
 			else if ( poll != cudaSuccess )
