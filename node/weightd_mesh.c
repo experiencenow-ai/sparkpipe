@@ -846,6 +846,7 @@ void SparkWeightdMeshDoorbellLoop(void)
                 }
             }
         }
+        __asm__ volatile ("yield");
     }
     }
 }
