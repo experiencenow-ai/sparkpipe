@@ -134,7 +134,7 @@ static SparkStatus spine_stream(int32_t fd,const SparkWeightdManifest *manifest,
 		uint32_t copy_index = 0u;
 		for (index = 0u; index < manifest->spine_count; index++)
 		{
-			const SparkWeightdManifestRange *span = &manifest->spine[index];
+			const SparkWeightdSpan *span = &manifest->spine[index];
 			uint64_t span_offset = span->offset;
 			while ( span_offset < span->offset + span->bytes )
 			{
