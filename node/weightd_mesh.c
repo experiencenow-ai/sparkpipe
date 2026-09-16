@@ -642,7 +642,6 @@ void SparkWeightdMeshDoorbellLoop(void)
         SparkWeightdMeshQpInfo qp_snapshot[SPARK_WEIGHTD_MESH_PEERS];
     for (;;)
     {
-        struct timespec pause = {0,2000};
         SparkWeightdMeshDrainCq();
         pthread_mutex_lock(&SparkWeightdMeshWireLock);
         memcpy(qp_snapshot,weightd_mesh.qp_info,sizeof(qp_snapshot));
@@ -847,7 +846,6 @@ void SparkWeightdMeshDoorbellLoop(void)
                 }
             }
         }
-        nanosleep(&pause,0);
     }
     }
 }

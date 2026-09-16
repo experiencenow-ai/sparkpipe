@@ -3046,7 +3046,6 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 					UINT64_C(1000000000) +
 					(uint64_t)watch_now.tv_nsec >= watch_stop )
 					break;
-				usleep(500u);
 			}
 			if ( poll == cudaErrorNotReady )
 			{
