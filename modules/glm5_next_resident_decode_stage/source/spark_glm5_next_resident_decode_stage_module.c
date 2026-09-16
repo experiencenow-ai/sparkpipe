@@ -3780,12 +3780,17 @@ static SparkStatus SparkGlm5NextFinishCacheLanes(SparkGlm5NextAsyncCompletion *a
 	result = async->completion.status;
 	for (lane=0u; lane<async->lane_count && result==SPARK_STATUS_OK; lane++)
 		result = SparkGlm5NextCaptureRecurrent(state,async->lane_indices[lane]);
-	if ( result == SPARK_STATUS_BUSY )
+	if ( result == SPARK_STATUS_OK )
+		result = SparkKvLaneTransactionsFinish(&state->kv_transactions,async->lane_indices,async->lane_count,result,(uint32_t)async->mtp_cache_extra);
+	else
 	{
-		(void)pthread_mutex_unlock(&state->kv_mutex);
-		return(result);
+		SparkStatus finish_status;
+		finish_status = SparkKvLaneTransactionsFinish(&state->kv_transactions,async->lane_indices,async->lane_count,SPARK_STATUS_IO_ERROR,(uint32_t)async->mtp_cache_extra);
+		if ( finish_status != SPARK_STATUS_OK )
+			fprintf(stderr,"KV-LANE-CLEANUP-FAIL lane_count=%u status=%u — lanes may be stuck in EXECUTING\n",
+				(unsigned)async->lane_count,(unsigned)finish_status);
+		result = result != SPARK_STATUS_OK ? result : finish_status;
 	}
-	result = SparkKvLaneTransactionsFinish(&state->kv_transactions,async->lane_indices,async->lane_count,result,(uint32_t)async->mtp_cache_extra);
 	for (lane=0u; lane<async->lane_count; lane++)
 	{
 		resident = async->lane_indices[lane];
