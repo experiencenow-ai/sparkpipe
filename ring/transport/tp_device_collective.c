@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <sched.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -325,12 +324,10 @@ static SparkStatus SparkTpDeviceCollectiveRebase(
         uint64_t marker = implementation->base_seen;
         while ( *base_cell == marker )
         {
-            sched_yield();
             if ( *cancel_cell != implementation->cancel_seen )
                 return SPARK_STATUS_BUSY;
             if ( SparkTpDeviceCollectiveTimeNs() >= deadline )
                 return SPARK_STATUS_BUSY;
-            ;
         }
         implementation->base_seen = *base_cell;
     }
@@ -443,7 +440,6 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
                 (cell & SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK) !=
                     request_id )
         {
-            sched_yield();
             if ( *cancel_cell != implementation->cancel_seen )
             {
                 fprintf(stderr,
@@ -662,7 +658,6 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
         uint32_t peer_passed[SPARK_TP_DEVICE_COLLECTIVE_MAX_DEGREE] = {0u};
         while ( peers_remaining != 0u )
         {
-            sched_yield();
             volatile uint64_t *cancel_cell = (volatile uint64_t *)
                 (implementation->mesh_buffer +
                 SparkTpDeviceCollectiveCancelCellOffset(band_index));
