@@ -1537,7 +1537,12 @@ static void SparkModelResidentdAcceptClient(SparkModelResidentdRuntime *runtime)
 {
 	int32_t fd;
 	if ( runtime->client.fd >= 0 )
-		return;
+	{
+		fprintf(stderr,
+		    "model_residentd takeover: closing old client fd=%d for new connection\n",
+		    runtime->client.fd);
+		SparkModelResidentdCloseClient(runtime);
+	}
 	fd = accept(runtime->listen_fd,0,0);
 	if ( fd < 0 )
 		return;
