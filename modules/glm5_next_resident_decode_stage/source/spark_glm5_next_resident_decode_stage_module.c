@@ -3424,8 +3424,18 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 				free(chain);
 				return;
 			}
-			fprintf(stderr,"GRAPH-FALLBACK-TO-CHAIN status=%d\n",
-				(int32_t)graph_status);
+			if ( graph_status == SPARK_STATUS_BUSY )
+			{
+				fprintf(stderr,"GRAPH-FALLBACK-TO-CHAIN status=%d\n",
+					(int32_t)graph_status);
+			}
+			else
+			{
+				fprintf(stderr,"GRAPH-PATH-FAILED status=%d\n",
+					(int32_t)graph_status);
+				SparkGlm5NextTpChainFail(chain,graph_status);
+				return;
+			}
 		}
 		if ( chain->sweep_submitted == 0u )
 		{
