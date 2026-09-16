@@ -1127,7 +1127,7 @@ SparkStatus SparkTpDeviceCollectiveArmCapture(
             SPARK_FAIL(SPARK_STATUS_IO_ERROR);
         }
     }
-    if ( cudaMemcpy(implementation->seq_cell,&implementation->round_seq,
+    if ( cudaMemcpy(implementation->seq_cell,&zero,
             sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
          cudaMemcpy(implementation->round_seq_device,&zero,
             sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
