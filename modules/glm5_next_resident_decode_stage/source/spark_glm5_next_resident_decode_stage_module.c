@@ -2828,7 +2828,11 @@ static SparkStatus SparkGlm5NextGraphRouteSweep(
 		state->decode_cover_words = words;
 	}
 	if ( chain->slot->route_recorded == 0u )
+	{
+		fprintf(stderr,"SWEEP-BUSY slot=%u reason=route_not_recorded\n",
+			chain->slot_index);
 		return(SPARK_STATUS_BUSY);
+	}
 	{
 		uint32_t recorded = state->decode_miss_host[1];
 		uint32_t miss_index;
@@ -2938,6 +2942,11 @@ static SparkStatus SparkGlm5NextGraphRouteSweep(
 				&state->decode_route_leases[
 				    state->decode_route_lease_count],
 				SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
+			if ( status != SPARK_STATUS_OK )
+				fprintf(stderr,"SWEEP-BUSY slot=%u reason=acquire status=%d chunk=%u union=%u leases=%u\n",
+					chain->slot_index,(int)status,chunk,
+					state->decode_union_count,
+					state->decode_route_lease_count);
 			if ( status != SPARK_STATUS_OK )
 			{
 				SparkGlm5NextGraphLeasesDrop(state);
