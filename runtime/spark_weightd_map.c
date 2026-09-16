@@ -135,7 +135,7 @@ static SparkStatus map_initialize_cuda(SparkWeightdMap *map)
 	    CUDA_SUCCESS ? SPARK_STATUS_OK : SPARK_STATUS_CAPACITY_EXCEEDED);
 }
 
-SparkStatus SparkWeightdMapCreate(SparkWeightdClient *client,const SparkWeightdLazyAttachResult *attached,int epoch_fd,SparkWeightdMap **out)
+SparkStatus SparkWeightdMapCreate(SparkWeightdClient *client,const SparkWeightdLazyAttachResult *attached,int epoch_fd,int pool_fd,SparkWeightdMap **out)
 {
 	SparkWeightdMap *map;
 	SparkStatus status;
@@ -192,6 +192,45 @@ SparkStatus SparkWeightdMapCreate(SparkWeightdClient *client,const SparkWeightdL
 	{
 		(void)map_free_initial(map);
 		SPARK_RETURN(status);
+	}
+	if ( status == SPARK_STATUS_OK && pool_fd >= 0 )
+	{
+		CUmemGenericAllocationHandle pool_handle = 0;
+		CUmemAccessDesc access;
+		if ( cuMemImportFromShareableHandle(&pool_handle,
+		         (void *)(intptr_t)pool_fd,
+			         CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) !=
+			     CUDA_SUCCESS ||
+		     cuMemMap(map->base,(size_t)map->span_bytes,0u,pool_handle,0ull) !=
+		             CUDA_SUCCESS )
+		{
+			fprintf(stderr,"WD-MAP-POOL-IMPORT-FAIL chunk_count=%u span=%llu\n",
+			    map->chunk_count,(unsigned long long)map->span_bytes);
+			status = SPARK_STATUS_IO_ERROR;
+		}
+		else
+		{
+			uint32_t i;
+			memset(&access,0,sizeof(access));
+			access.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+			access.location.id = map->device;
+			access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+			if ( cuMemSetAccess(map->base,(size_t)map->span_bytes,
+			        &access,1u) != CUDA_SUCCESS )
+				status = SPARK_STATUS_IO_ERROR;
+			else
+			{
+				for ( i = 0u; i < map->chunk_count; i++ )
+				{
+					map->handles[i] = pool_handle;
+					map->mapped[i] = 1u;
+				}
+				fprintf(stderr,
+				    "WD-MAP-POOL-BULK chunks=%u span=%llu — all chunks mapped in ONE import\n",
+				    map->chunk_count,(unsigned long long)map->span_bytes);
+			}
+		}
+		(void)close(pool_fd);
 	}
 	*out = map;
 	return(SPARK_STATUS_OK);
