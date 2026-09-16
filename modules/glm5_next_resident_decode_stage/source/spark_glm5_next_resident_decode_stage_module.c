@@ -3542,7 +3542,7 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 	}
 	if ( async->completion.status == SPARK_STATUS_OK )
 	{
-		if ( state->epoch_device != 0 )
+		if ( state->epoch_device != 0 && state->decode_miss_host != 0 )
 		{
 			uint64_t seen =
 			    ((volatile uint64_t *)state->decode_miss_host)[
