@@ -236,6 +236,9 @@ struct SparkGlm5NextModuleState
 	uint64_t degrade_covered_abandon;
 	uint64_t degrade_graph_disabled;
 	uint64_t degrade_graph_stuck;
+	uint32_t graph_record_limit;
+	uint32_t graph_record_ops;
+	uint32_t graph_record_stop;
 	uint64_t chain_stage_ns[8u];
 	uint64_t chain_profile_last_ns;
 	uint32_t chain_profile_stage;
@@ -2599,6 +2602,9 @@ static SparkStatus SparkGlm5NextGraphReduce(SparkGlm5NextTpChain *chain,
 		chain->tp_hc_op_index += 1u;
 	else
 		chain->tp_op_index += 1u;
+	if ( state->graph_record_limit != 0u &&
+	     ++state->graph_record_ops >= state->graph_record_limit )
+		state->graph_record_stop = 1u;
 	return(SparkTpDeviceCollectiveEnqueue(
 		hc_wide != 0u ? &state->tp_device_collective_hc :
 			&state->tp_device_collective,
@@ -2648,6 +2654,8 @@ static void SparkGlm5NextGraphRecord(SparkGlm5NextTpChain *chain,
 	wave = &chain->wave;
 	stream = (cudaStream_t)wave->slot->stream;
 	*exec_out = 0;
+	state->graph_record_ops = 0u;
+	state->graph_record_stop = 0u;
 	if ( cudaStreamBeginCapture(stream,0u) != cudaSuccess )
 		return;
 	if ( state->epoch_device != 0 &&
@@ -2662,7 +2670,10 @@ static void SparkGlm5NextGraphRecord(SparkGlm5NextTpChain *chain,
 	     SparkGlm5NextModuleReduceHidden(chain,
 	         chain->slot->hidden_bf16) != SPARK_STATUS_OK )
 		failed = 1u;
-	for ( layer = 0u; layer < wave->layer_count && failed == 0u; layer++ )
+	for ( layer = 0u;
+	      layer < wave->layer_count && failed == 0u &&
+	          state->graph_record_stop == 0u;
+	      layer++ )
 	{
 		if ( SparkGlm5NextLaunchCudaLayerAttention(wave,layer) != 0 ||
 		     SparkGlm5NextGraphReduce(chain,wave->slot->attention_out_bf16,
@@ -4426,7 +4437,11 @@ static SparkStatus SparkGlm5NextInitializeState(
 	state->ledger.module_tag = SPARK_GLM5_NEXT_MODULE_TAG;
 	{
 		const char *graph_env = getenv("SPARK_GLM5_NEXT_GRAPH_PATH");
+		const char *record_limit_env =
+		    getenv("SPARK_GLM5_NEXT_GRAPH_RECORD_OPS");
 		state->graph_path_enabled = graph_env != 0 && graph_env[0] == '1' ? 1u : 0u;
+		state->graph_record_limit = record_limit_env != 0 ?
+		    (uint32_t)strtoul(record_limit_env,0,10) : 0u;
 	}
 	for (lane=0u; lane<SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT; lane++)
 		atomic_init(&state->lazy_retained[lane],0);
