@@ -1371,12 +1371,14 @@ static void SparkModelResidentdCloseClientLocked(
 	runtime->client.output_count = 0u;
 	if ( runtime->routes != 0 )
 		for (index=0u; index<runtime->route_capacity; index++)
+		{
 			if ( runtime->routes[index].active != 0u )
-			runtime->client.had_active_routes = 1u;
-		if ( runtime->routes[index].active != 0u && runtime->routes[index].client_generation == runtime->client.generation )
+				runtime->client.had_active_routes = 1u;
+			if ( runtime->routes[index].active != 0u && runtime->routes[index].client_generation == runtime->client.generation )
 				if ( runtime->routes[index].state !=
 					SPARK_MODEL_RESIDENTD_ROUTE_RESERVED )
 					runtime->routes[index].abandoned = 1u;
+		}
 }
 
 static void SparkModelResidentdCloseClient(SparkModelResidentdRuntime *runtime)
