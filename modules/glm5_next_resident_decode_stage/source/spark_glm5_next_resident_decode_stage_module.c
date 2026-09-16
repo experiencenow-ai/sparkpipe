@@ -237,6 +237,7 @@ struct SparkGlm5NextModuleState
 	uint64_t degrade_graph_disabled;
 	uint64_t degrade_graph_stuck;
 	uint32_t graph_record_limit;
+	uint32_t graph_gate_printed;
 	uint32_t graph_record_ops;
 	uint32_t graph_record_stop;
 	uint64_t chain_stage_ns[8u];
@@ -3419,6 +3420,18 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 	switch ( chain->stage )
 	{
 	case SPARK_GLM5_NEXT_CHAIN_STAGE_BEGIN:
+		if ( state->graph_gate_printed < 3u )
+		{
+			state->graph_gate_printed++;
+			fprintf(stderr,
+			    "GRAPH-GATE rows=%u first=%u coll=%u lazy=%u deg=%u enabled=%u flags=%u\n",
+			    (unsigned)chain->wave_rows,(unsigned)chain->first_row,
+			    (unsigned)state->tp_device_collective_initialized,
+			    (unsigned)(state->lazy_pack != 0),
+			    (unsigned)state->tp_degree,
+			    (unsigned)state->graph_path_enabled,
+			    (unsigned)chain->context->flags);
+		}
 		if ( chain->wave_rows == 1u && chain->first_row == 0u &&
 		     state->tp_device_collective_initialized != 0u &&
 		     state->lazy_pack != 0 && state->tp_degree > 1u &&
