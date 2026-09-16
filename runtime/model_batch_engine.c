@@ -125,6 +125,7 @@ struct SparkModelBatchEngine
 	uint32_t failed_status;
 	uint32_t consecutive_pipeline_failures;
 	uint64_t circuit_open_until_ns;
+	uint64_t observed_control_generation;
 	uint32_t next_work_kind;
 	uint32_t work_kind_bypass_counts[4];
 	uint32_t cache_block_token_count;
@@ -2061,15 +2062,48 @@ static void SparkModelBatchFailIdleRequests(
 	}
 }
 
+static void SparkModelBatchInvalidateEngineSession(SparkModelBatchEngine *engine)
+{
+	uint32_t index;
+	for (index=0u; index<engine->request_capacity; index++)
+	{
+		SparkModelBatchRequestState *request = &engine->requests[index];
+		if ( request->state == SPARK_MODEL_BATCH_REQUEST_FREE )
+			continue;
+		SparkModelBatchReleaseResidentSlot(engine,request);
+		request->resident_bound = 0u;
+		request->computed_prompt_token_count = 0u;
+		request->generated_token_count = 0u;
+		request->cache_prefix_token_count = 0u;
+		request->cache_published_token_count = 0u;
+		request->busy_restore_count = 0u;
+		request->inflight_since_ns = 0ull;
+		request->state = SPARK_MODEL_BATCH_REQUEST_QUEUED_PREFILL;
+	}
+	(void)SparkPrefixCacheReset(&engine->prefix_cache);
+}
+
 SparkStatus SparkModelBatchEngineProgress(
 	SparkModelBatchEngine *engine,
 	uint32_t maximum_new_submission_count)
 {
 	SparkStatus status;
 	uint32_t dispatched,kind,misses,step;
+	uint64_t session_fingerprint;
 	if ( engine == 0 || maximum_new_submission_count == 0u )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	(void)SparkModelPipelineClientRecover(engine->pipeline);
+	session_fingerprint = SparkModelPipelineClientSessionFingerprint(engine->pipeline);
+	if ( engine->observed_control_generation == 0u )
+		engine->observed_control_generation = session_fingerprint;
+	if ( session_fingerprint != engine->observed_control_generation )
+	{
+		fprintf(stderr,"batch engine session changed %llu -> %llu; prefix cache and resident bindings invalidated\n",
+			(unsigned long long)engine->observed_control_generation,
+			(unsigned long long)session_fingerprint);
+		engine->observed_control_generation = session_fingerprint;
+		SparkModelBatchInvalidateEngineSession(engine);
+	}
 	status = SparkModelPipelineClientProgress(engine->pipeline,engine->maximum_messages_per_rank);
 	if ( status != SPARK_STATUS_OK )
 	{

@@ -96,6 +96,8 @@ SparkStatus SparkModelPipelineClientSubmit(
 	const SparkModelServingSubmission *submission);
 uint64_t SparkModelPipelineClientControlGeneration(
 	const SparkModelPipelineClient *pipeline);
+uint64_t SparkModelPipelineClientSessionFingerprint(
+	const SparkModelPipelineClient *pipeline);
 SparkStatus SparkModelPipelineClientRecover(
 	SparkModelPipelineClient *pipeline);
 SparkStatus SparkModelPipelineClientProgress(
