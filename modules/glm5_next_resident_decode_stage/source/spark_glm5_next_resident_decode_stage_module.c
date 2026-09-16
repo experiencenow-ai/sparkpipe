@@ -3043,9 +3043,7 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 	SparkStatus status;
 	void *exec;
 	state = chain->state;
-	status = SparkGlm5NextGraphRouteSweep(chain);
-	if ( status == SPARK_STATUS_BUSY && chain->slot->graph_ready != 0u )
-		status = SPARK_STATUS_OK;
+	status = SPARK_STATUS_OK;
 	if ( status == SPARK_STATUS_OK )
 	{
 		exec = chain->slot->graph_exec_a;
