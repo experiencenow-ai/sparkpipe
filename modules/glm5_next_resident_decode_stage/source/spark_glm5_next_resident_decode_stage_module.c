@@ -3050,6 +3050,8 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 		}
 		else
 		{
+			struct timespec replay_t0,replay_t1;
+			clock_gettime(CLOCK_MONOTONIC,&replay_t0);
 			cudaError_t poll;
 			uint64_t watch_stop;
 			struct timespec watch_now;
@@ -3065,6 +3067,20 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 					UINT64_C(1000000000) +
 					(uint64_t)watch_now.tv_nsec >= watch_stop )
 					break;
+			}
+			clock_gettime(CLOCK_MONOTONIC,&replay_t1);
+			{
+				uint64_t replay_ns = (uint64_t)(replay_t1.tv_sec - replay_t0.tv_sec) *
+				    UINT64_C(1000000000) +
+				    (uint64_t)(replay_t1.tv_nsec - replay_t0.tv_nsec);
+				fprintf(stderr,
+				    "GRAPH-REPLAY-TIME slot=%u alt=%u ns=%llu rounds=%u ns_per_round=%llu\n",
+				    chain->slot_index,chain->slot->graph_alt,
+				    (unsigned long long)replay_ns,
+				    (unsigned)state->tp_device_collective_initialized ?
+				        91u : 0u,
+				    state->tp_device_collective_initialized ?
+				        (unsigned long long)(replay_ns / 91u) : 0ull);
 			}
 			if ( poll == cudaErrorNotReady )
 			{
