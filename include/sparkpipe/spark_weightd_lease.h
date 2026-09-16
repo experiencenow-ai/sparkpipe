@@ -1,7 +1,7 @@
 #pragma once
 #include "sparkpipe/spark_weightd_manifest.h"
 
-#define SPARK_WEIGHTD_LEASE_COUNT_MAX 64u
+#define SPARK_WEIGHTD_LEASE_COUNT_MAX 256u
 #define SPARK_WEIGHTD_LEASE_GROUPS_MAX 512u
 
 typedef struct SparkWeightdExpertKey
