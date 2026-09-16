@@ -2423,8 +2423,6 @@ static SparkStatus SparkGlm5NextLazyExperts(SparkGlm5NextTpChain *chain)
 		    (chain->wave.first_layer_index + chain->next_layer) *
 		        (SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT + 1u),
 		SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT,chain->wave.row_count * SPARK_GLM5_NEXT_MODEL_MOE_TOP_K,keys,SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT,&count);
-	if ( status == SPARK_STATUS_OK && chain->expert_lease != 0u )
-		status = SparkGlm5NextLazyRelease(chain);
 	if ( status == SPARK_STATUS_OK )
 		status = SparkWeightdMapAcquire(map,keys,count,&chain->expert_lease,SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
 	if ( status != SPARK_STATUS_OK )
