@@ -132,88 +132,13 @@ static __global__ void SparkGlm5NextHeadMaxlocUnpackKernel(
 }
 
 
-static __global__ void SparkGlm5NextSeedF32Kernel(
-    float *destination_f32,
-    const void *source_a_bf16,
-    const void *source_b_bf16,
-    uint32_t pair_count)
-{
-	uint32_t pair;
-	float2 a,b;
-	for (pair=threadIdx.x; pair<pair_count; pair+=blockDim.x)
-	{
-		a = SparkGlm5NextLoadBf16Pair(source_a_bf16,pair);
-		b = SparkGlm5NextLoadBf16Pair(source_b_bf16,pair);
-		destination_f32[2u * pair] = a.x + b.x;
-		destination_f32[2u * pair + 1u] = a.y + b.y;
-	}
-}
+static 
+static 
+static 
 
-static __global__ void SparkGlm5NextAddF32Kernel(
-    float *destination_f32,
-    const void *source_bf16,
-    uint32_t pair_count)
-{
-	uint32_t pair;
-	float2 b;
-	for (pair=threadIdx.x; pair<pair_count; pair+=blockDim.x)
-	{
-		b = SparkGlm5NextLoadBf16Pair(source_bf16,pair);
-		destination_f32[2u * pair] += b.x;
-		destination_f32[2u * pair + 1u] += b.y;
-	}
-}
 
-static __global__ void SparkGlm5NextRoundF32Kernel(
-    void *destination_bf16,
-    const float *source_f32,
-    uint32_t pair_count)
-{
-	uint32_t pair;
-	float2 v;
-	for (pair=threadIdx.x; pair<pair_count; pair+=blockDim.x)
-	{
-		v.x = source_f32[2u * pair];
-		v.y = source_f32[2u * pair + 1u];
-		SparkGlm5NextStoreBf16Pair(destination_bf16,pair,v.x,v.y);
-	}
-}
 
-extern "C" cudaError_t SparkGlm5NextLaunchSeedF32(cudaStream_t stream,
-    float *destination,const void *a,const void *b,uint32_t element_count)
-{
-	SparkGlm5NextSeedF32Kernel<<<1,SPARK_GLM5_NEXT_CUDA_THREADS,0u,stream>>>(
-	    destination,a,b,(element_count + 1u) / 2u);
-	return cudaPeekAtLastError();
-}
-
-extern "C" cudaError_t SparkGlm5NextLaunchAddF32(cudaStream_t stream,
-    float *destination,const void *b,uint32_t element_count)
-{
-	SparkGlm5NextAddF32Kernel<<<1,SPARK_GLM5_NEXT_CUDA_THREADS,0u,stream>>>(
-	    destination,b,(element_count + 1u) / 2u);
-	return cudaPeekAtLastError();
-}
-
-extern "C" cudaError_t SparkGlm5NextLaunchRoundF32(cudaStream_t stream,
-    void *destination,const float *source,uint32_t element_count)
-{
-	SparkGlm5NextRoundF32Kernel<<<1,SPARK_GLM5_NEXT_CUDA_THREADS,0u,stream>>>(
-	    destination,source,(element_count + 1u) / 2u);
-	return cudaPeekAtLastError();
-}
-
-static __global__ void SparkGlm5NextAccumU64MaxKernel(
-	uint64_t *destination,
-	const uint64_t *source,
-	uint32_t element_count)
-{
-	uint32_t element;
-	element = blockIdx.x * blockDim.x + threadIdx.x;
-	if ( element < element_count && source[element] > destination[element] )
-		destination[element] = source[element];
-}
-
+static 
 extern "C" cudaError_t SparkGlm5NextLaunchHeadMaxlocPack(cudaStream_t stream,const float *scores,const uint32_t *token_ids,uint64_t *maxloc,uint32_t row_count,uint32_t rank_offset)
 {
 	if ( scores == 0 || token_ids == 0 || maxloc == 0 || row_count == 0u )
@@ -248,13 +173,6 @@ static uint32_t SparkGlm5NextProbeReduction(cudaStream_t stream,const uint16_t *
 }
 
 
-extern "C" cudaError_t SparkGlm5NextLaunchAccumAdd(cudaStream_t stream,void *destination_bf16,const void *source_bf16,uint32_t row_count,uint32_t width)
-{
-	if ( destination_bf16 == 0 || source_bf16 == 0 || row_count == 0u || width == 0u || (width & 1u) != 0u )
-		return(cudaErrorInvalidValue);
-	SparkGlm5NextAccumAddKernel<<<row_count,256u,0u,stream>>>(destination_bf16,source_bf16,row_count,width);
-	return(cudaPeekAtLastError());
-}
 
 __global__ static void SparkGlm5NextEpochSampleKernel(
     const unsigned long long *epoch,
@@ -277,13 +195,6 @@ extern "C" cudaError_t SparkGlm5NextLaunchEpochSample(cudaStream_t stream,
 }
 
 
-extern "C" cudaError_t SparkGlm5NextLaunchAccumU64Max(cudaStream_t stream,uint64_t *destination,const uint64_t *source,uint32_t element_count)
-{
-	if ( destination == 0 || source == 0 || element_count == 0u )
-		return(cudaErrorInvalidValue);
-	SparkGlm5NextAccumU64MaxKernel<<<(element_count + 255u) / 256u,256u,0u,stream>>>(destination,source,element_count);
-	return(cudaPeekAtLastError());
-}
 
 __global__ static void SparkGlm5NextKdaResetKernel(
 	uint8_t *state_pools, uint64_t state_layer_stride, uint64_t state_slot_bytes,
