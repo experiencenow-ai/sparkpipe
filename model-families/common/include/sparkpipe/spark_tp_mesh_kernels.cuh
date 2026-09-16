@@ -5,6 +5,12 @@
 #if defined(__CUDACC__)
 #include <cuda_runtime.h>
 #include <stdio.h>
+#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V3-PARITY-TAIL-ABORT-DIAG"
+#if defined(__CUDACC__)
+__constant__ char SparkTpMeshKernelsBuildMarker[] =
+    SPARK_TP_MESH_KERNELS_MARKER;
+#endif
+
 #define SPARK_TP_MESH_THREADS 256u
 
 static __device__ __forceinline__ unsigned long long SparkGlm5NextGlobalTimerNs(void)
