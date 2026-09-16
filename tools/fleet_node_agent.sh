@@ -157,7 +157,7 @@ start_root() {
     cd "$rr" || return 1
     ln -sf "stage_$(printf %02d "$RANK").json" config/stage.json
     [ -s residentd.log ] && mv residentd.log "residentd-$(date +%Y%m%d-%H%M%S).log" 2>/dev/null
-    SPARK_WEIGHTD_EXPERT_POOL_BYTES="${G5_EXPERT_POOL_BYTES:-17179869184}" \
+    SPARK_WEIGHTD_EXPERT_POOL_BYTES="${G5_EXPERT_POOL_BYTES:-34359738368}" \
     LD_LIBRARY_PATH="$rr/lib" nohup ./bin/sparkpipe_model_residentd \
         --deployment model_resident.json --rank-index "$RANK" \
         > residentd.log 2>&1 < /dev/null &
