@@ -2342,6 +2342,8 @@ static void SparkGlm5NextTpChainFail(SparkGlm5NextTpChain *chain,SparkStatus sta
 		return;
 	chain->active = 0u;
 	state = chain->state;
+	chain->slot->route_recorded = 0u;
+	chain->sweep_submitted = 0u;
 	fprintf(stderr,"G5N-DBG chainfail: stage %u next_layer %u rows %u status %d\n",
 		(unsigned)chain->stage,(unsigned)chain->next_layer,(unsigned)chain->wave_rows,(int)status);
 	if ( state->tp_device_collective_initialized != 0u )
