@@ -575,14 +575,14 @@ void SparkWeightdMeshPoll(void)
         SparkWeightdMeshRecord own_record;
         uint32_t peer;
         weightd_mesh.artifact_check_ns = SparkWeightdMeshRealtimeNs();
-        if (stat(SPARK_WEIGHTD_MESH_DIR "/.ready",&artifact_st) != 0)
+        if (stat(SparkWeightdMeshReadyMarker,&artifact_st) != 0)
         {
-            FILE *marker = fopen(SPARK_WEIGHTD_MESH_DIR "/.ready","w");
+            FILE *marker = fopen(SparkWeightdMeshReadyMarker,"w");
             if (marker != 0)
                 (void)fclose(marker);
         }
         (void)snprintf(artifact_path,sizeof(artifact_path),"%s/mesh-%x.rec",
-            SPARK_WEIGHTD_MESH_DIR,weightd_mesh.local_rank);
+            SparkWeightdMeshDir(),weightd_mesh.local_rank);
         if (stat(artifact_path,&artifact_st) != 0)
         {
             memset(&own_record,0,sizeof(own_record));
