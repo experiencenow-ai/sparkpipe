@@ -328,9 +328,23 @@ static SparkStatus SparkTpDeviceCollectiveRebase(
         while ( *base_cell == marker )
         {
             if ( *cancel_cell != implementation->cancel_seen )
+            {
+                fprintf(stderr,
+                    "REBASE-CANCEL-QUIET rank=%u cell=%llu marker=%llu\n",
+                    implementation->tp_rank,
+                    (unsigned long long)*base_cell,
+                    (unsigned long long)marker);
                 return SPARK_STATUS_BUSY;
+            }
             if ( SparkTpDeviceCollectiveTimeNs() >= deadline )
+            {
+                fprintf(stderr,
+                    "REBASE-TIMEOUT-QUIET rank=%u cell=%llu marker=%llu\n",
+                    implementation->tp_rank,
+                    (unsigned long long)*base_cell,
+                    (unsigned long long)marker);
                 return SPARK_STATUS_BUSY;
+            }
         }
         implementation->base_seen = *base_cell;
     }
