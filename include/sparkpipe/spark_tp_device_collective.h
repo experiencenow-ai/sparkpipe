@@ -351,6 +351,8 @@ SparkStatus SparkTpDeviceCollectiveArmCapture(
 SparkStatus SparkTpDeviceCollectiveDisarmCapture(
     SparkTpDeviceCollective *collective);
 
+const void *SparkTpDeviceCollectiveMeshBuffer(
+    SparkTpDeviceCollective *collective);
 uint64_t SparkTpDeviceCollectiveGraphDiag(
     SparkTpDeviceCollective *collective);
 uint64_t SparkTpDeviceCollectiveGraphError(

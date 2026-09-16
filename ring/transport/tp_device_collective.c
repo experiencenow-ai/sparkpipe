@@ -1202,6 +1202,14 @@ void SparkTpDeviceCollectiveBroadcastCancel(
     }
 }
 
+const void *SparkTpDeviceCollectiveMeshBuffer(
+    SparkTpDeviceCollective *collective)
+{
+    if ( collective == 0 || collective->implementation == 0 )
+        return(0);
+    return(collective->implementation->mesh_buffer);
+}
+
 uint64_t SparkTpDeviceCollectiveGraphDiag(
     SparkTpDeviceCollective *collective)
 {
