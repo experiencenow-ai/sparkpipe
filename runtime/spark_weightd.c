@@ -1290,6 +1290,9 @@ static void SparkWeightdServerStageMeshFd(SparkWeightdConnection *connection)
     connection->response_fds[connection->response_fd_count++] = fd;
 }
 
+static SparkStatus SparkWeightdArenaChunkEnsure(
+    SparkWeightdServer *server,SparkWeightdArena *arena,
+    uint32_t first_chunk,uint32_t last_chunk);
 static SparkStatus SparkWeightdPremapPool(SparkWeightdServer *server,
     SparkWeightdArena *arena)
 {
