@@ -3028,7 +3028,12 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 		exec = (chain->slot->graph_alt == 0u) ?
 			chain->slot->graph_exec_a : chain->slot->graph_exec_b;
 		if ( cudaGraphLaunch(exec,chain->slot->stream) != cudaSuccess )
+		{
+			fprintf(stderr,"GRAPH-LAUNCH-ERR slot=%u alt=%u cuda=%s\n",
+				chain->slot_index,chain->slot->graph_alt,
+				cudaGetErrorString(cudaGetLastError()));
 			status = SPARK_STATUS_IO_ERROR;
+		}
 		else
 		{
 			cudaError_t poll;
@@ -3069,7 +3074,13 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 				status = SPARK_STATUS_INTERNAL_ERROR;
 			}
 			else if ( poll != cudaSuccess )
+			{
+				fprintf(stderr,"GRAPH-STREAM-ERR slot=%u alt=%u cuda=%s\n",
+					chain->slot_index,chain->slot->graph_alt,
+					cudaGetErrorString(poll));
+				(void)cudaGetLastError();
 				status = SPARK_STATUS_IO_ERROR;
+			}
 		}
 	}
 	if ( status == SPARK_STATUS_OK )
