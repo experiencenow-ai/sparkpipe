@@ -92,6 +92,8 @@ typedef struct SparkTpDeviceCollectiveImplementation
     uint32_t tp_rank;
     uint32_t tp_degree;
     uint32_t local_hidden_dimension;
+    uint64_t round_ns_total;
+    uint64_t round_count;
 } SparkTpDeviceCollectiveImplementation;
 
 static uint64_t SparkTpDeviceCollectiveTimeNs(void)
@@ -963,8 +965,13 @@ static SparkStatus SparkTpDeviceCollectiveSubmitInternal(
          submission->completion_function == 0 )
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
     round = *submission;
-    status = SparkTpDeviceCollectiveRunRound(implementation,&round,
-        operation_kind);
+    {
+        uint64_t round_start_ns = SparkTpDeviceCollectiveTimeNs();
+        status = SparkTpDeviceCollectiveRunRound(implementation,&round,
+            operation_kind);
+        implementation->round_ns_total += SparkTpDeviceCollectiveTimeNs() - round_start_ns;
+        implementation->round_count++;
+    }
     if ( status != SPARK_STATUS_OK )
         SparkTpDeviceCollectiveQueueCompletion(implementation,&round,
             round.ordinal,status);
@@ -1229,4 +1236,25 @@ void SparkTpDeviceCollectiveDestroy(SparkTpDeviceCollective *collective)
     SparkWeightdClientClose(implementation->client);
     free(implementation);
     collective->implementation = 0;
+}
+
+void SparkTpDeviceCollectiveRoundStats(
+    SparkTpDeviceCollective *collective,
+    uint64_t *count_out,
+    uint64_t *total_ns_out,
+    uint32_t reset)
+{
+    SparkTpDeviceCollectiveImplementation *implementation;
+    if ( collective == 0 || collective->implementation == 0 )
+        return;
+    implementation = collective->implementation;
+    if ( count_out != 0 )
+        *count_out = implementation->round_count;
+    if ( total_ns_out != 0 )
+        *total_ns_out = implementation->round_ns_total;
+    if ( reset != 0u )
+    {
+        implementation->round_count = 0u;
+        implementation->round_ns_total = 0u;
+    }
 }

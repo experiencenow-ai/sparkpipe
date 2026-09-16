@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <cuda_runtime.h>
 #include "sparkpipe/spark_tp_chain_ordinal.h"
@@ -74,6 +75,14 @@ typedef struct SparkGlm5NextPackRange
 
 typedef struct SparkGlm5NextModuleState SparkGlm5NextModuleState;
 
+static uint64_t SparkGlm5NextNowNs(void)
+{
+	struct timespec now;
+	if ( clock_gettime(CLOCK_MONOTONIC,&now) != 0 )
+		return(0u);
+	return((uint64_t)now.tv_sec * UINT64_C(1000000000) + (uint64_t)now.tv_nsec);
+}
+
 typedef struct SparkGlm5NextAsyncCompletion
 {
 	SparkGlm5NextModuleState *state;
@@ -90,6 +99,7 @@ typedef struct SparkGlm5NextAsyncCompletion
 	uint32_t finish_retries;
 	uint32_t burst_token_count;
 	uint64_t mtp_cache_extra;
+	uint64_t chain_start_ns;
 	uint32_t mtp_draft_tokens[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MTP_DRAFT_DEPTH];
 	SparkModelDriverCompletion completion;
 } SparkGlm5NextAsyncCompletion;
@@ -3572,6 +3582,14 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 		async->completion.status = SPARK_STATUS_INTERNAL_ERROR;
 	}
 	async->completion.status = SparkGlm5NextFinishCacheLanes(async);
+	{
+		uint64_t round_count = 0u,round_ns = 0u,chain_ns = SparkGlm5NextNowNs();
+		SparkTpDeviceCollectiveRoundStats(&state->tp_device_collective,&round_count,&round_ns,1u);
+		fprintf(stderr,"CHAIN-TIME slot=%u status=%d total_ms=%.2f allreduce_ms=%.2f rounds=%llu\n",
+			(unsigned)async->slot_index,(int)async->completion.status,
+			async->chain_start_ns != 0u ? (double)(chain_ns - async->chain_start_ns) / 1000000.0 : 0.0,
+			(double)round_ns / 1000000.0,(unsigned long long)round_count);
+	}
 	if ( async->completion.status == SPARK_STATUS_BUSY &&
 	     ++async->finish_retries >= 2u )
 	{
@@ -3760,6 +3778,7 @@ static SparkStatus SparkGlm5NextStartClaimedBatch(SparkGlm5NextModuleState *stat
 	chain->frame = frame;
 	chain->context = context;
 	chain->batch = context->batch;
+	state->completions[slot_index].chain_start_ns = SparkGlm5NextNowNs();
 	chain->wave_rows = SparkGlm5NextRoundMajorWaveRows(state,context->batch,0u);
 	chain->next_wave_row = chain->wave_rows;
 	chain->stage = SPARK_GLM5_NEXT_CHAIN_STAGE_BEGIN;
