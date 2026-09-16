@@ -2409,6 +2409,17 @@ static SparkStatus SparkGlm5NextLazyExperts(SparkGlm5NextTpChain *chain)
 		SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT,chain->wave.row_count * SPARK_GLM5_NEXT_MODEL_MOE_TOP_K,keys,SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT,&count);
 	if ( status == SPARK_STATUS_OK )
 		status = SparkWeightdMapAcquire(map,keys,count,&chain->expert_lease,SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
+	if ( status != SPARK_STATUS_OK )
+	{
+		uint32_t diag_index;
+		fprintf(stderr,"LAZYWORK-KEYS slot=%u layer=%u count=%u status=%d",
+			(unsigned)chain->slot_index,(unsigned)chain->next_layer,
+			(unsigned)count,(int)status);
+		for (diag_index=0u; diag_index<count && diag_index<8u; diag_index++)
+			fprintf(stderr," %u:%u",(unsigned)keys[diag_index].layer,(unsigned)keys[diag_index].expert);
+		fprintf(stderr,"\n");
+		SPARK_RETURN(status);
+	}
 	if ( status == SPARK_STATUS_OK )
 		status = SparkWeightdMapBeginUse(map,chain->expert_lease,&address);
 	if ( status != SPARK_STATUS_OK )
