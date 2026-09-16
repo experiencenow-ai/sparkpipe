@@ -1227,8 +1227,11 @@ static SparkStatus SparkKvLaneTransactionsPrepare(SparkKvLaneTransactions *trans
 	for (index=0u; index<request->cache_lane_count; index++)
 	{
 		owner = &transactions->lanes[request->cache_lanes[index].resident_sequence_slot];
-		if ( owner->phase == SPARK_KV_LANE_TRANSACTION_PREPARED &&
-		     request->request_id != owner->request.request_id )
+		if ( (owner->phase == SPARK_KV_LANE_TRANSACTION_PREPARED ||
+		       owner->phase == SPARK_KV_LANE_TRANSACTION_COMMITTED) &&
+		     request->request_id != owner->request.request_id &&
+		     (owner->phase == SPARK_KV_LANE_TRANSACTION_PREPARED ||
+		      request->cache_lanes[index].sequence_id != owner->lane.sequence_id) )
 		{
 			SparkStatus takeover;
 			fprintf(stderr,
