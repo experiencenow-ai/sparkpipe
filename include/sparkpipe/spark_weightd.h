@@ -254,6 +254,7 @@ typedef struct SparkWeightdIpcAttachLazyResult
     uint32_t chunk_count;
     uint32_t loaded_from_pack;
     uint32_t mesh_ready;
+    uint32_t pool_fd_staged;
     uint64_t mesh_send_buffer_addr;
     uint64_t mesh_send_buffer_bytes;
     uint8_t manifest_sha256[32];
