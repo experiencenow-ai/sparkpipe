@@ -1555,6 +1555,16 @@ static void SparkModelResidentdAcceptClient(SparkModelResidentdRuntime *runtime)
 			close(fd);
 			return;
 		}
+		enabled = 1;
+		if ( setsockopt(fd,SOL_SOCKET,SO_KEEPALIVE,&enabled,sizeof(enabled)) == 0 )
+		{
+			int32_t keepidle = 10;
+			int32_t keepintvl = 5;
+			int32_t keepcnt = 3;
+			(void)setsockopt(fd,IPPROTO_TCP,TCP_KEEPIDLE,&keepidle,sizeof(keepidle));
+			(void)setsockopt(fd,IPPROTO_TCP,TCP_KEEPINTVL,&keepintvl,sizeof(keepintvl));
+			(void)setsockopt(fd,IPPROTO_TCP,TCP_KEEPCNT,&keepcnt,sizeof(keepcnt));
+		}
 	}
 	pthread_mutex_lock(&runtime->mutex);
 	runtime->client.fd = fd;
