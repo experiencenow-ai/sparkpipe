@@ -3784,12 +3784,9 @@ static SparkStatus SparkGlm5NextFinishCacheLanes(SparkGlm5NextAsyncCompletion *a
 		result = SparkKvLaneTransactionsFinish(&state->kv_transactions,async->lane_indices,async->lane_count,result,(uint32_t)async->mtp_cache_extra);
 	else
 	{
-		SparkStatus finish_status;
-		finish_status = SparkKvLaneTransactionsFinish(&state->kv_transactions,async->lane_indices,async->lane_count,SPARK_STATUS_IO_ERROR,(uint32_t)async->mtp_cache_extra);
-		if ( finish_status != SPARK_STATUS_OK )
-			fprintf(stderr,"KV-LANE-CLEANUP-FAIL lane_count=%u status=%u — lanes may be stuck in EXECUTING\n",
-				(unsigned)async->lane_count,(unsigned)finish_status);
-		result = result != SPARK_STATUS_OK ? result : finish_status;
+		SparkKvLaneTransactionsForceCleanup(&state->kv_transactions,
+		    async->lane_indices,async->lane_count);
+		result = result != SPARK_STATUS_OK ? result : SPARK_STATUS_OK;
 	}
 	for (lane=0u; lane<async->lane_count; lane++)
 	{

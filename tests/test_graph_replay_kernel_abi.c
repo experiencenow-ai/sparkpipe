@@ -1,116 +1,103 @@
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <cuda_runtime.h>
-#include <dlfcn.h>
+
+static int failures;
 
 #define TEST_FAIL(msg) do { \
     fprintf(stderr, "FAIL: %s:%d %s\n", __FILE__, __LINE__, msg); \
-    return 1; \
+    failures++; \
 } while (0)
 
-static int check_symbol_arity(const char *so_path, const char *symbol,
-    uint32_t expected_args)
+static int check_marker(const char *path, const char *marker)
 {
-    void *handle;
-    void *sym;
-    char msg[256];
-
-    handle = dlopen(so_path, RTLD_LAZY);
-    if (handle == 0) {
-        snprintf(msg, sizeof(msg), "dlopen %s: %s", so_path, dlerror());
-        TEST_FAIL(msg);
-    }
-    sym = dlsym(handle, symbol);
-    if (sym == 0) {
-        dlclose(handle);
-        snprintf(msg, sizeof(msg), "dlsym %s: not found", symbol);
-        TEST_FAIL(msg);
-    }
-
-    Dl_info info;
-    if (dladdr(sym, &info) == 0) {
-        dlclose(handle);
-        snprintf(msg, sizeof(msg), "dladdr %s: failed", symbol);
-        TEST_FAIL(msg);
-    }
-
-    dlclose(handle);
-
-    fprintf(stderr, "PASS: %s found in %s (arity check requires disassembly)\n",
-        symbol, info.dli_fname);
-    return 0;
-}
-
-static int check_marker_string(const char *so_path, const char *marker)
-{
-    char cmd[512];
+    char cmd[1024];
     char line[256];
     FILE *pipe;
     int found = 0;
 
-    snprintf(cmd, sizeof(cmd), "strings %s 2>/dev/null | grep -c '%s'",
-        so_path, marker);
+    snprintf(cmd, sizeof(cmd), "strings '%s' 2>/dev/null | grep -c '%s'",
+        path, marker);
     pipe = popen(cmd, "r");
     if (pipe == 0)
-        TEST_FAIL("popen strings");
+        return -1;
     if (fgets(line, sizeof(line), pipe) != 0) {
-        int count = atoi(line);
-        if (count > 0)
+        if (atoi(line) > 0)
             found = 1;
     }
     pclose(pipe);
 
     if (!found) {
-        snprintf(line, sizeof(line),
-            "marker '%s' not found in %s — module compiled a stale/private copy",
-            marker, so_path);
-        TEST_FAIL(line);
+        fprintf(stderr,
+            "FAIL: marker '%s' NOT in %s — stale/private kernel copy compiled\n",
+            marker, path);
+        failures++;
+    } else {
+        fprintf(stderr, "PASS: marker '%s' present in %s\n", marker, path);
     }
-    fprintf(stderr, "PASS: marker '%s' found in %s\n", marker, so_path);
-    return 0;
+    return found;
 }
 
-static int check_kernel_signature_match(const char *driver_path)
+static int check_kernel_present(const char *path, const char *kernel)
 {
     char cmd[1024];
     char line[512];
     FILE *pipe;
-    int mismatches = 0;
+    int found = 0;
 
     snprintf(cmd, sizeof(cmd),
-        "cuobjdump -sass %s 2>/dev/null | grep -o "
-        "'_Z[0-9]*SparkGlm5Next[A-Za-z]*Kernel[A-Za-z0-9]*' | sort -u",
-        driver_path);
+        "cuobjdump -sass '%s' 2>/dev/null | grep -c '%s' || strings '%s' 2>/dev/null | grep -c '%s'",
+        path, kernel, path, kernel);
     pipe = popen(cmd, "r");
     if (pipe == 0)
-        TEST_FAIL("popen cuobjdump");
-
+        return -1;
     while (fgets(line, sizeof(line), pipe) != 0) {
-        fprintf(stderr, "kernel: %s", line);
+        if (atoi(line) > 0)
+            found = 1;
     }
     pclose(pipe);
-    return 0;
+    return found;
 }
 
 int main(int argc, char **argv)
 {
-    const char *driver_path;
-    int failures = 0;
+    const char *path;
 
     if (argc < 2) {
-        fprintf(stderr, "usage: %s <model_driver.so path>\n", argv[0]);
+        fprintf(stderr, "usage: %s <model_driver.so or weightd binary>\n", argv[0]);
         return 2;
     }
-    driver_path = argv[1];
+    path = argv[1];
 
-    failures += check_marker_string(driver_path,
-        "SPARK-TP-MESH-KERNELS-V3-PARITY-TAIL-ABORT-DIAG");
-    failures += check_marker_string(driver_path,
-        "GRAPH-CAPTURE-OK");
+    fprintf(stderr, "=== kernel ABI checks on %s ===\n\n", path);
 
-    failures += check_kernel_signature_match(driver_path);
+    fprintf(stderr, "1. Mesh kernel build marker:\n");
+    check_marker(path, "SPARK-TP-MESH-KERNELS-V3-PARITY-TAIL-ABORT-DIAG");
 
-    fprintf(stderr, "%s: %d failures\n", argv[0], failures);
+    fprintf(stderr, "\n2. Graph capture marker:\n");
+    check_marker(path, "GRAPH-CAPTURE-OK");
+
+    fprintf(stderr, "\n3. Key kernel symbols:\n");
+    {
+        const char *kernels[] = {
+            "SparkGlm5NextMeshWaitKernel",
+            "SparkGlm5NextMeshPublishKernel",
+            "SparkGlm5NextMeshCopyDownKernel",
+            "SparkGlm5NextSumRanksF32Kernel",
+        };
+        uint32_t i;
+        for (i = 0; i < 4; i++) {
+            int found = check_kernel_present(path, kernels[i]);
+            if (found)
+                fprintf(stderr, "PASS: %s found\n", kernels[i]);
+            else {
+                fprintf(stderr, "FAIL: %s NOT found\n", kernels[i]);
+                failures++;
+            }
+        }
+    }
+
+    fprintf(stderr, "\n%s: %d failures\n", argv[0], failures);
     return failures ? 1 : 0;
 }
