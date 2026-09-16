@@ -65,7 +65,6 @@ typedef struct SparkGlm5NextExecutionSlot
 	void *graph_exec_a;
 	void *graph_exec_b;
 	uint32_t graph_ready;
-	void *graph_mesh_buffer;
 	uint32_t graph_alt;
 	uint32_t graph_bound;
 	uint32_t graph_disabled;

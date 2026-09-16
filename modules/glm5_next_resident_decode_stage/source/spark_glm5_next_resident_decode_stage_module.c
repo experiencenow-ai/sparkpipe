@@ -3190,23 +3190,6 @@ static void SparkGlm5NextGraphEnsure(SparkGlm5NextTpChain *chain,
 	if ( bound > chain->wave.max_sequence_positions )
 		bound = chain->wave.max_sequence_positions;
 	if ( slot->graph_ready != 0u &&
-	     slot->graph_mesh_buffer !=
-	         (void *)(uintptr_t)SparkTpDeviceCollectiveMeshBuffer(
-	             &state->tp_device_collective) )
-	{
-		if ( slot->graph_exec_a != 0 )
-			(void)cudaGraphExecDestroy(
-				(cudaGraphExec_t)slot->graph_exec_a);
-		if ( slot->graph_exec_b != 0 )
-			(void)cudaGraphExecDestroy(
-				(cudaGraphExec_t)slot->graph_exec_b);
-		slot->graph_exec_a = 0;
-		slot->graph_exec_b = 0;
-		slot->graph_ready = 0u;
-		fprintf(stderr,"GRAPH-REMESH slot=%u (collective mapping changed)\n",
-			chain->slot_index);
-	}
-	if ( slot->graph_ready != 0u &&
 	     chain->wave.maximum_context > slot->graph_bound )
 	{
 		if ( slot->graph_exec_a != 0 )
@@ -3258,8 +3241,6 @@ static void SparkGlm5NextGraphEnsure(SparkGlm5NextTpChain *chain,
 		slot->graph_exec_b = exec_b;
 		slot->graph_bound = bound;
 		slot->graph_ready = 1u;
-		slot->graph_mesh_buffer = (void *)(uintptr_t)
-		    SparkTpDeviceCollectiveMeshBuffer(&state->tp_device_collective);
 		fprintf(stderr,"GRAPH-CAPTURE-OK bound=%u\n",bound);
 	}
 	SparkGlm5NextGraphStep(chain,&status);

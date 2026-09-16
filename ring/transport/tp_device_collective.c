@@ -592,7 +592,10 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
                 SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(band_index,
                     implementation->tp_rank),
                 implementation->seq_cell,implementation->round_seq_device,
-                bytes,slot_index) != 0 )
+                bytes,slot_index,
+                implementation->mesh_buffer +
+                implementation->band_base + slot_index * slot_bytes +
+                slot_bytes - 8u) != 0 )
             return SPARK_STATUS_IO_ERROR;
         if ( SparkGlm5NextLaunchMeshWait(submission->cuda_stream,
                 implementation->mesh_buffer + implementation->band_base,
@@ -1200,14 +1203,6 @@ void SparkTpDeviceCollectiveBroadcastCancel(
             cancel_offset,cancel_offset,
             8u,0ull,0ull,implementation->round_timeout_ns);
     }
-}
-
-const void *SparkTpDeviceCollectiveMeshBuffer(
-    SparkTpDeviceCollective *collective)
-{
-    if ( collective == 0 || collective->implementation == 0 )
-        return(0);
-    return(collective->implementation->mesh_buffer);
 }
 
 uint64_t SparkTpDeviceCollectiveGraphDiag(
