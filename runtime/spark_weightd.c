@@ -2125,6 +2125,13 @@ static void SparkWeightdServerCloseConnection(SparkWeightdServer *server,
     uint32_t connection_index)
 {
     SparkWeightdConnection *connection = &server->connections[connection_index];
+    if (connection->owner != 0u)
+    {
+        uint32_t arena_index;
+        for (arena_index = 0u; arena_index < server->arena_count; arena_index++)
+            if (server->arenas[arena_index].leases != 0)
+                (void)SparkWeightdLeaseReleaseOwner(server->arenas[arena_index].leases,connection->owner);
+    }
     while (connection->attach_count != 0u)
     {
         /* consumer death drops a refcount — every one of them */

@@ -39,6 +39,10 @@ const SparkWeightdLease *SparkWeightdLeaseFind(const SparkWeightdLeaseTable *tab
 // Release only after consumer GPU completion and unmapping are established.
 // Connection loss alone is not permission to release an in-flight lease.
 SparkStatus SparkWeightdLeaseRelease(SparkWeightdLeaseTable *table,uint64_t owner,uint64_t identifier);
+// Dead-consumer recovery: a closed connection can never signal completion,
+// and its mesh endpoints die with the consumer process, so nothing can still
+// reference the pooled bytes. Called from connection teardown only.
+SparkStatus SparkWeightdLeaseReleaseOwner(SparkWeightdLeaseTable *table,uint64_t owner);
 
 // Completed host routing offsets, length expert_count + 1. Validate the full
 // prefix before emitting keys. No allocation; failures leave count zero.
