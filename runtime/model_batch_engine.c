@@ -2110,11 +2110,12 @@ SparkStatus SparkModelBatchEngineProgress(
 		engine->observed_control_generation = session_fingerprint;
 	if ( session_fingerprint != engine->observed_control_generation )
 	{
-		fprintf(stderr,"batch engine session changed %llu -> %llu; prefix cache and resident bindings invalidated\n",
+		fprintf(stderr,"batch engine session changed %llu -> %llu; prefix cache, resident bindings, and pipeline transactions invalidated\n",
 			(unsigned long long)engine->observed_control_generation,
 			(unsigned long long)session_fingerprint);
 		engine->observed_control_generation = session_fingerprint;
 		SparkModelBatchInvalidateEngineSession(engine);
+		(void)SparkModelPipelineClientRecover(engine->pipeline);
 	}
 	status = SparkModelPipelineClientProgress(engine->pipeline,engine->maximum_messages_per_rank);
 	if ( status != SPARK_STATUS_OK )
