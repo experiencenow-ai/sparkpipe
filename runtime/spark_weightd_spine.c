@@ -105,7 +105,8 @@ static SparkStatus spine_stream(int32_t fd,const SparkWeightdManifest *manifest,
 {
 	SparkSha256Context hash;
 	SparkCk128Context quick;
-	uint8_t buffer[65536],digest[32];
+	static _Thread_local uint8_t buffer[1048576];
+	uint8_t digest[32];
 	char hex[SPARK_SHA256_HEX_BYTES];
 	char receipt_path[192];
 	SpineReceipt receipt;
