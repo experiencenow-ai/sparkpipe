@@ -554,18 +554,17 @@ static void SparkWeightdMeshDrainCq(void)
             }
         }
     }
-    if (weightd_mesh.send_err_window > 256ull)
+    if (weightd_mesh.send_err_window > 256ull &&
+        weightd_mesh.degraded_logged == 0u)
     {
-        if (weightd_mesh.degraded_logged == 0u)
-        {
-            fprintf(stderr,
-                "WD-MESH-DEGRADED window=%llu total=%llu — quiescing ships 100ms per pass until a successful re-wire\n",
-                (unsigned long long)weightd_mesh.send_err_window,
-                (unsigned long long)weightd_mesh.send_err);
-            weightd_mesh.degraded_logged = 1u;
-        }
+        fprintf(stderr,
+            "WD-MESH-DEGRADED window=%llu total=%llu — one 100ms quiesce pass\n",
+            (unsigned long long)weightd_mesh.send_err_window,
+            (unsigned long long)weightd_mesh.send_err);
+        weightd_mesh.degraded_logged = 1u;
         weightd_mesh.quiesce_until_ns =
             SparkWeightdMeshRealtimeNs() + 100000000ull;
+        weightd_mesh.send_err_window = 0ull;
     }
     if (repair_needed != 0u)
         SparkWeightdMeshTryWire();
