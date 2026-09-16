@@ -24,6 +24,8 @@ extern int cudaHostRegister(void *address,size_t bytes,unsigned int flags);
 extern int cudaMemcpy(void *destination,const void *source,
     size_t bytes,int kind);
 extern int cudaMalloc(void **address,size_t bytes);
+extern int SparkGlm5NextLaunchMeshCopyDown(void *stream,
+    volatile void *destination,const void *source,uint64_t bytes);
 extern int SparkGlm5NextLaunchMeshPublish(void *stream,
     volatile void *entry,void *seq_cell,void *round_seq,uint64_t bytes,
     uint64_t slot_index,volatile void *slot_tail);
@@ -581,11 +583,10 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
         slot_index = (uint64_t)implementation->tp_rank *
             SPARK_WEIGHTD_MESH_SLOTS_PER_RANK +
             (round_seq & (uint64_t)(SPARK_WEIGHTD_MESH_SLOTS_PER_RANK - 1u));
-        if ( cudaMemcpyAsync(implementation->mesh_buffer +
+        if ( SparkGlm5NextLaunchMeshCopyDown(submission->cuda_stream,
+                implementation->mesh_buffer +
                 implementation->band_base + slot_index * slot_bytes,
-                submission->local_device,(size_t)bytes,
-                SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST,
-                submission->cuda_stream) != 0 )
+                submission->local_device,bytes) != 0 )
             return SPARK_STATUS_IO_ERROR;
         if ( SparkGlm5NextLaunchMeshPublish(submission->cuda_stream,
                 implementation->mesh_buffer +

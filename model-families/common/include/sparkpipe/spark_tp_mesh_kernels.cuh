@@ -298,6 +298,29 @@ extern "C" cudaError_t SparkGlm5NextLaunchMeshGuard(cudaStream_t stream,
 	return cudaPeekAtLastError();
 }
 
+__global__ void SparkGlm5NextMeshCopyDownKernel(
+    volatile uint64_t *destination,
+    const uint64_t *source,
+    uint32_t quad_count)
+{
+	uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	if ( i < quad_count )
+		destination[i] = source[i];
+}
+
+extern "C" cudaError_t SparkGlm5NextLaunchMeshCopyDown(
+	cudaStream_t stream,void *destination,const void *source,
+	uint64_t bytes)
+{
+	uint32_t quads = (uint32_t)((bytes + 7u) / 8u);
+	if ( destination == 0 || source == 0 || quads == 0u )
+		return(cudaErrorInvalidValue);
+	SparkGlm5NextMeshCopyDownKernel<<<(quads + 255u) / 256u,256u,0u,stream>>>(
+		(volatile uint64_t *)destination,
+		(const uint64_t *)source,quads);
+	return(cudaPeekAtLastError());
+}
+
 extern "C" cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
 	volatile void *entry,void *seq_cell,void *round_seq,uint64_t bytes,
 	uint64_t slot_index)
