@@ -1297,60 +1297,10 @@ static SparkStatus SparkWeightdArenaChunkEnsure(
 static SparkStatus SparkWeightdPremapPool(SparkWeightdServer *server,
     SparkWeightdArena *arena)
 {
-    CUmemAllocationProp prop;
-    CUmemAccessDesc access;
-    CUdeviceptr base = (CUdeviceptr)(uintptr_t)arena->device_base;
-    CUmemGenericAllocationHandle pool_handle = 0;
-    uint32_t index;
-    uint64_t pool_bytes;
-    int device = 0;
-
-    if ( arena->lazy == 0u || arena->staging == 0 )
-        return(SPARK_STATUS_INVALID_ARGUMENT);
-    if ( cudaGetDevice(&device) != cudaSuccess )
-        SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
-
-    pool_bytes = arena->virtual_bytes;
-    memset(&prop,0,sizeof(prop));
-    prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-    prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    prop.location.id = device;
-    prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-
-    if ( cuMemCreate(&pool_handle,(size_t)pool_bytes,&prop,0ull) != CUDA_SUCCESS )
-    {
-        fprintf(stderr,"WD-POOL-CREATE-FAIL bytes=%llu\n",
-            (unsigned long long)pool_bytes);
-        SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
-    }
-    if ( cuMemMap(base,(size_t)pool_bytes,0u,pool_handle,0ull) != CUDA_SUCCESS )
-    {
-        (void)cuMemRelease(pool_handle);
-        fprintf(stderr,"WD-POOL-MAP-FAIL bytes=%llu\n",
-            (unsigned long long)pool_bytes);
-        SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
-    }
-    for ( index = 0u; index < arena->chunk_count; index++ )
-    {
-        arena->chunk_handles[index] = (void *)(uintptr_t)pool_handle;
-        arena->pool_committed_bytes += arena->chunk_bytes;
-        server->resident_bytes += arena->chunk_bytes;
-    }
-    memset(&access,0,sizeof(access));
-    access.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    access.location.id = device;
-    access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    if ( cuMemSetAccess(base,(size_t)pool_bytes,&access,1u) != CUDA_SUCCESS )
-    {
-        (void)cuMemRelease(pool_handle);
-        SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
-    }
-    arena->pool_export_handle = (void *)(uintptr_t)pool_handle;
-    printf("weightd pool single-alloc chunks=%u bytes=%llu handle=%llu\n",
-        arena->chunk_count,(unsigned long long)pool_bytes,
-        (unsigned long long)pool_handle);
-    fflush(stdout);
-    return(SPARK_STATUS_OK);
+	(void)server;
+	(void)arena;
+	fprintf(stderr,"WD-POOL-PREMAP-SKIP (pool pre-map disabled: overwrites spine mapping — needs separate VA ranges)\n");
+	return(SPARK_STATUS_OK);
 }
 
 static SparkStatus SparkWeightdPreloadSpine(SparkWeightdServer *server,
