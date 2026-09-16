@@ -3,6 +3,7 @@ set -uo pipefail
 ulimit -c unlimited
 ROOTS="${1:?comma-separated runtime root names}"
 HUB="${2:-sparkf}"
+[ "$HUB" = "sparkf" ] && HUB="spec@100.123.97.61"
 HOST=$(hostname)
 FLEET_HOSTS="spark0 spark1 spark2 spark3 spark4 spark5 spark6 spark7 spark8 spark9 sparka sparkb sparkc sparkd sparke sparkf"
 MESH_INTERFACE="rocep1s0f1"
@@ -75,7 +76,7 @@ report() {
         printf '}\n'
     } > "$VIEW/$HOST.json"
     LAST_REPORT="$states"
-    scp -q -o BatchMode=yes -o ConnectTimeout=4 "$VIEW/$HOST.json" \
+    scp -q -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=4 "$VIEW/$HOST.json" \
         "$HUB:current/" 2>/dev/null || true
 }
 
@@ -205,9 +206,9 @@ restart_root() {
 }
 
 FLEET_SIZE=16
-HUBSSH="ssh -o BatchMode=yes -o ConnectTimeout=5 -o ControlMaster=auto -o ControlPath=$HOME/.ssh/cm-agent-%r@%h:%p -o ControlPersist=600"
-if ! ssh -o BatchMode=yes -o ConnectTimeout=4 "$HUB" true 2>/dev/null; then
-    ssh-keyscan -H "$HUB" >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+HUBSSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o ControlMaster=auto -o ControlPath=$HOME/.ssh/cm-agent-%r@%h:%p -o ControlPersist=600"
+if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=4 "$HUB" true 2>/dev/null; then
+    ssh-keyscan -H "${HUB#*@}" >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
 fi
 RELEASE_HTTP="${FLEET_HTTP_RELEASE:-http://100.123.97.61:8802}"
 
@@ -220,7 +221,7 @@ sync_rendezvous() {
             [ -f "$rd/.upload_lock" ] && [ $(( $(date +%s) - $(stat -c %Y "$rd/.upload_lock") )) -lt 3 ] && return 0
             touch "$rd/.upload_lock"
             $HUBSSH "$HUB" "mkdir -p release/qpn/$host/$name" 2>/dev/null
-            scp -q -o BatchMode=yes -o ConnectTimeout=4 "$rd"/*.rec \
+            scp -q -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=4 "$rd"/*.rec \
                 "$HUB:release/qpn/$host/$name/" 2>/dev/null
             $HUBSSH "$HUB" "cd release/qpn/$host/$name && sha256sum *.rec > index.txt.\$\$ 2>/dev/null && mv index.txt.\$\$ index.txt" 2>/dev/null
             touch "$rd/.shipped"
@@ -237,7 +238,7 @@ sync_rendezvous() {
             if [ ! -f "$mesh_dir/.shipped_sha" ] || \
                [ "$(cat "$mesh_dir/.shipped_sha" 2>/dev/null)" != "$sum" ]; then
                 $HUBSSH "$HUB" "mkdir -p release/qpn/$host/mesh" 2>/dev/null
-                scp -q -o BatchMode=yes -o ConnectTimeout=4 "$own_rec" \
+                scp -q -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=4 "$own_rec" \
                     "$HUB:release/qpn/$host/mesh/" 2>/dev/null && \
                     echo "$sum" > "$mesh_dir/.shipped_sha"
             fi
