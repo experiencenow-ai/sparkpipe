@@ -1323,16 +1323,16 @@ static SparkStatus SparkWeightdPremapPool(SparkWeightdServer *server,
             (unsigned long long)pool_bytes);
         SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
     }
+    if ( cuMemMap(base,(size_t)pool_bytes,0u,pool_handle,0ull) != CUDA_SUCCESS )
+    {
+        (void)cuMemRelease(pool_handle);
+        fprintf(stderr,"WD-POOL-MAP-FAIL bytes=%llu\n",
+            (unsigned long long)pool_bytes);
+        SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
+    }
     for ( index = 0u; index < arena->chunk_count; index++ )
     {
-        if ( cuMemMap(base + (CUdeviceptr)index * arena->chunk_bytes,
-                (size_t)arena->chunk_bytes,0u,pool_handle,0ull) != CUDA_SUCCESS )
-        {
-            (void)cuMemRelease(pool_handle);
-            fprintf(stderr,"WD-POOL-MAP-FAIL idx=%u\n",index);
-            SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
-        }
-        arena->chunk_handles[index] = (void *)pool_handle;
+        arena->chunk_handles[index] = (void *)(uintptr_t)pool_handle;
         arena->pool_committed_bytes += arena->chunk_bytes;
         server->resident_bytes += arena->chunk_bytes;
     }
