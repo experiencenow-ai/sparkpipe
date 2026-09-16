@@ -1229,9 +1229,7 @@ static SparkStatus SparkKvLaneTransactionsPrepare(SparkKvLaneTransactions *trans
 		owner = &transactions->lanes[request->cache_lanes[index].resident_sequence_slot];
 		if ( (owner->phase == SPARK_KV_LANE_TRANSACTION_PREPARED ||
 		       owner->phase == SPARK_KV_LANE_TRANSACTION_COMMITTED) &&
-		     request->request_id != owner->request.request_id &&
-		     (owner->phase == SPARK_KV_LANE_TRANSACTION_PREPARED ||
-		      request->cache_lanes[index].sequence_id != owner->lane.sequence_id) )
+		     request->request_id != owner->request.request_id )
 		{
 			SparkStatus takeover;
 			fprintf(stderr,
