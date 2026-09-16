@@ -68,9 +68,25 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 		while ( *end_word < sequence )
 		{
 			if ( *error_word != 0ull )
+			{
+				printf("MESH-WAIT-ABORT peer=%u ring=%llu off=%llu want=%llu got=%llu\\n",
+					peer_rank,
+					(unsigned long long)ring,
+					(unsigned long long)(((uint8_t *)end_word -
+						(uint8_t *)band_base)),
+					(unsigned long long)sequence,
+					(unsigned long long)*end_word);
 				return;
+			}
 			if ( SparkGlm5NextGlobalTimerNs() >= stop_at )
 			{
+				printf("MESH-WAIT-DIE peer=%u ring=%llu off=%llu want=%llu got=%llu\\n",
+					peer_rank,
+					(unsigned long long)ring,
+					(unsigned long long)(((uint8_t *)end_word -
+						(uint8_t *)band_base)),
+					(unsigned long long)sequence,
+					(unsigned long long)*end_word);
 				atomicExch((unsigned long long *)error_word,sequence);
 				return;
 			}

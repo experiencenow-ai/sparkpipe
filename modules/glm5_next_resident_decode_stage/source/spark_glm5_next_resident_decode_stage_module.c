@@ -236,6 +236,9 @@ struct SparkGlm5NextModuleState
 	uint64_t degrade_covered_abandon;
 	uint64_t degrade_graph_disabled;
 	uint64_t degrade_graph_stuck;
+	uint64_t chain_stage_ns[8u];
+	uint64_t chain_profile_last_ns;
+	uint32_t chain_profile_stage;
 	uint32_t rs_taken;
 	uint32_t rs_hit;
 	uint32_t hbound_probes;
@@ -3361,6 +3364,15 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 		return;
 	}
 	{
+		uint64_t now_ns = SparkGlm5NextNowNs();
+		if ( state->chain_profile_last_ns != 0ull &&
+		     state->chain_profile_stage < 8u )
+			state->chain_stage_ns[state->chain_profile_stage] +=
+				now_ns - state->chain_profile_last_ns;
+		state->chain_profile_last_ns = now_ns;
+		state->chain_profile_stage = (uint32_t)chain->stage;
+	}
+	{
 		static uint32_t chain_trace_count;
 		if ( chain_trace_count < 1000000000u )
 		{
@@ -3778,10 +3790,20 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 	{
 		uint64_t round_count = 0u,round_ns = 0u,chain_ns = SparkGlm5NextNowNs();
 		SparkTpDeviceCollectiveRoundStats(&state->tp_device_collective,&round_count,&round_ns,1u);
-		fprintf(stderr,"CHAIN-TIME slot=%u status=%d total_ms=%.2f allreduce_ms=%.2f rounds=%llu\n",
+		fprintf(stderr,"CHAIN-TIME slot=%u status=%d total_ms=%.2f allreduce_ms=%.2f rounds=%llu stage_ms=%.1f/%.1f/%.1f/%.1f/%.1f/%.1f/%.1f/%.1f\n",
 			(unsigned)async->slot_index,(int)async->completion.status,
 			async->chain_start_ns != 0u ? (double)(chain_ns - async->chain_start_ns) / 1000000.0 : 0.0,
-			(double)round_ns / 1000000.0,(unsigned long long)round_count);
+			(double)round_ns / 1000000.0,(unsigned long long)round_count,
+			(double)state->chain_stage_ns[0] / 1000000.0,
+			(double)state->chain_stage_ns[1] / 1000000.0,
+			(double)state->chain_stage_ns[2] / 1000000.0,
+			(double)state->chain_stage_ns[3] / 1000000.0,
+			(double)state->chain_stage_ns[4] / 1000000.0,
+			(double)state->chain_stage_ns[5] / 1000000.0,
+			(double)state->chain_stage_ns[6] / 1000000.0,
+			(double)state->chain_stage_ns[7] / 1000000.0);
+		memset(state->chain_stage_ns,0,sizeof(state->chain_stage_ns));
+		state->chain_profile_last_ns = 0ull;
 	}
 	if ( async->completion.status == SPARK_STATUS_BUSY &&
 	     ++async->finish_retries >= 2u )
