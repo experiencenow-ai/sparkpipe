@@ -1900,12 +1900,28 @@ static SparkStatus SparkModelResidentdValidateContinuationLease(
 		lane = &submission->lanes[lane_index];
 		slot = &runtime->sequence_slots[lane->resident_sequence_slot];
 		if ( SparkModelResidentdSequenceSlotMatches(slot,lane) == 0u )
+		{
+			fprintf(stderr,"model_residentd slot_mismatch slot=%u bound=%u slot_req=%llu slot_gen=%llu slot_seq=%llu lane_req=%llu lane_gen=%llu lane_seq=%llu pos=%llu\n",
+				(unsigned)lane->resident_sequence_slot,(unsigned)slot->bound,
+				(unsigned long long)slot->request_id,(unsigned long long)slot->request_generation,
+				(unsigned long long)slot->sequence_id,
+				(unsigned long long)lane->request_id,(unsigned long long)lane->request_generation,
+				(unsigned long long)lane->sequence_id,(unsigned long long)lane->sequence_position);
 			SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
+		}
 		status = SparkModelContinuationLeaseValidate(&slot->lease,
 			wire->client_generation,submission->control_generation,
 			lane->sequence_position,lane->step_generation);
 		if ( status != SPARK_STATUS_OK )
+		{
+			fprintf(stderr,"model_residentd lease_reject slot=%u status=%u client_gen=%llu control_gen=%llu pos=%llu step_gen=%llu\n",
+				(unsigned)lane->resident_sequence_slot,(unsigned)status,
+				(unsigned long long)wire->client_generation,
+				(unsigned long long)submission->control_generation,
+				(unsigned long long)lane->sequence_position,
+				(unsigned long long)lane->step_generation);
 			SPARK_RETURN(status);
+		}
 	}
 	return(SPARK_STATUS_OK);
 }
