@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <sched.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -324,12 +325,12 @@ static SparkStatus SparkTpDeviceCollectiveRebase(
         uint64_t marker = implementation->base_seen;
         while ( *base_cell == marker )
         {
-            struct timespec pause = {0,1000};
+            sched_yield();
             if ( *cancel_cell != implementation->cancel_seen )
                 return SPARK_STATUS_BUSY;
             if ( SparkTpDeviceCollectiveTimeNs() >= deadline )
                 return SPARK_STATUS_BUSY;
-            nanosleep(&pause,0);
+            ;
         }
         implementation->base_seen = *base_cell;
     }
@@ -442,7 +443,7 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
                 (cell & SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK) !=
                     request_id )
         {
-            struct timespec pause = {0,1000};
+            sched_yield();
             if ( *cancel_cell != implementation->cancel_seen )
             {
                 fprintf(stderr,
@@ -461,7 +462,7 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
                     (unsigned long long)request_id);
                 return SPARK_STATUS_BUSY;
             }
-            nanosleep(&pause,0);
+            ;
             cell = *base_cell;
             cell_epoch = cell >> SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_BITS;
         }
@@ -661,7 +662,7 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
         uint32_t peer_passed[SPARK_TP_DEVICE_COLLECTIVE_MAX_DEGREE] = {0u};
         while ( peers_remaining != 0u )
         {
-            struct timespec pause = {0,1000};
+            sched_yield();
             volatile uint64_t *cancel_cell = (volatile uint64_t *)
                 (implementation->mesh_buffer +
                 SparkTpDeviceCollectiveCancelCellOffset(band_index));
@@ -712,7 +713,7 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
                     peers_remaining--;
                 }
             }
-            nanosleep(&pause,0);
+            ;
         }
     }
 combine:
