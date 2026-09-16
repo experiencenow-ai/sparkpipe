@@ -1345,7 +1345,7 @@ static SparkStatus SparkWeightdPremapPool(SparkWeightdServer *server,
         (void)cuMemRelease(pool_handle);
         SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
     }
-    arena->pool_export_handle = pool_handle;
+    arena->pool_export_handle = (void *)(uintptr_t)pool_handle;
     printf("weightd pool single-alloc chunks=%u bytes=%llu handle=%llu\n",
         arena->chunk_count,(unsigned long long)pool_bytes,
         (unsigned long long)pool_handle);
@@ -1548,7 +1548,7 @@ static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
     {
         int pool_fd = -1;
         if ( cuMemExportToShareableHandle(&pool_fd,
-                 (CUmemGenericAllocationHandle)arena->pool_export_handle,
+                 (CUmemGenericAllocationHandle)(uintptr_t)arena->pool_export_handle,
                  CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,0ull) == CUDA_SUCCESS &&
              pool_fd >= 0 )
         {
