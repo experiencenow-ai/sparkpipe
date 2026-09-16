@@ -220,11 +220,9 @@ SparkStatus SparkModelResidentIpcValidateHelloAck(
 		SPARK_RETURN(status);
 	if ( rank_index >= descriptor->stage_count || stage_index >= descriptor->stage_count )
 	{
-		fprintf(stderr,"IPC-ACK-FAIL rank=%u stage=%u stage_count=%u gen=%llu msgid=%llu\n",
+		fprintf(stderr,"IPC-ACK-FAIL-VALIDATE rank=%u stage=%u stage_count=%u\n",
 			(unsigned)rank_index,(unsigned)stage_index,
-			(unsigned)descriptor->stage_count,
-			(unsigned long long)client_generation,
-			(unsigned long long)message_id);
+			(unsigned)descriptor->stage_count);
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	}
 	if ( ack->status > SPARK_STATUS_UNSUPPORTED || ack->client_generation == 0u || ack->header.message_id != message_id || ack->rank_index != rank_index || ack->stage_index != stage_index || ack->adapter_capability_flags != descriptor->capability_flags || ack->max_inflight_submission_count != runtime_limits->max_inflight_submission_count || ack->max_active_sequence_count != runtime_limits->max_active_sequence_count || ack->max_input_row_count != runtime_limits->max_input_row_count || ack->resident_sequence_capacity != runtime_limits->resident_sequence_capacity || ack->kv_logical_page_capacity != runtime_limits->kv_logical_page_capacity || ack->kv_physical_page_capacity != runtime_limits->kv_physical_page_capacity || ack->boundary_format != descriptor->boundary_format || ack->boundary_element_count != descriptor->boundary_element_count || ack->boundary_element_bytes != descriptor->boundary_element_bytes || ack->linear_weight_codec != descriptor->linear_weight_codec || ack->expert_weight_codec != descriptor->expert_weight_codec || ack->kv_cache_codec != descriptor->kv_cache_codec )
