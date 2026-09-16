@@ -1448,6 +1448,36 @@ static SparkStatus SparkKvLaneTransactionsDiscardCompleted(SparkKvLaneTransactio
 	return(failure);
 }
 
+void SparkKvLaneTransactionsForceCleanup(
+    SparkKvLaneTransactions *transactions,
+    const uint32_t *resident_slots,
+    uint32_t lane_count)
+{
+    uint32_t index;
+    if ( transactions == 0 || resident_slots == 0 || lane_count == 0u )
+        return;
+    for (index=0u; index<lane_count; index++)
+    {
+        uint32_t slot = resident_slots[index];
+        SparkKvLaneTransaction *owner;
+        if ( slot >= transactions->cache->sequence_capacity )
+            continue;
+        owner = &transactions->lanes[slot];
+        if ( owner->phase == SPARK_KV_LANE_TRANSACTION_EMPTY )
+            continue;
+        if ( owner->phase == SPARK_KV_LANE_TRANSACTION_EXECUTING )
+        {
+            (void)SparkKvLaneTransactionAbort(transactions,owner);
+        }
+        else if ( owner->phase == SPARK_KV_LANE_TRANSACTION_PREPARED ||
+                  owner->phase == SPARK_KV_LANE_TRANSACTION_COMMITTED )
+        {
+            owner->phase = SPARK_KV_LANE_TRANSACTION_EMPTY;
+            owner->page_count = 0u;
+        }
+    }
+}
+
 SparkStatus SparkKvLaneTransactionsFinish(SparkKvLaneTransactions *transactions,const uint32_t *resident_slots,uint32_t lane_count,SparkStatus execution_status,uint32_t extra_tokens)
 {
 	uint32_t index,slot;

@@ -2773,6 +2773,21 @@ static SparkStatus SparkModelResidentdRun(SparkModelResidentdRuntime *runtime)
 		status = SparkModelResidentdBuildPollFds(runtime,fds,sizeof(fds) / sizeof(fds[0]),&count);
 		if ( status != SPARK_STATUS_OK )
 			break;
+		{
+			SparkStatus progress_status = SPARK_STATUS_OK;
+			if ( status == SPARK_STATUS_OK )
+				progress_status = SparkModelResidentdProgress(runtime);
+			if ( progress_status == SPARK_STATUS_IO_ERROR ||
+			     progress_status == SPARK_STATUS_BUSY )
+			{
+				fprintf(stderr,
+				    "model_residentd recoverable=%s — continuing (route-level error, not engine-fatal)\n",
+				    SparkStatusToString(progress_status));
+				status = SPARK_STATUS_OK;
+				continue;
+			}
+			status = progress_status;
+		}
 		poll_status = poll(fds,count,SparkModelResidentdPollTimeoutMs(runtime));
 		if ( runtime->client.fd >= 0 && runtime->client.hello_complete == 0u && runtime->client.last_activity_ns != 0u &&
 		     SparkModelResidentdMonotonicTimeNs() - runtime->client.last_activity_ns > UINT64_C(30000000000) )
@@ -2817,8 +2832,6 @@ static SparkStatus SparkModelResidentdRun(SparkModelResidentdRuntime *runtime)
 			SparkModelResidentdCloseClient(runtime);
 		if ( poll_status > 0 && (fds[2].revents & POLLIN) != 0 )
 			SparkModelResidentdDrainWake(runtime);
-		if ( status == SPARK_STATUS_OK )
-			status = SparkModelResidentdProgress(runtime);
 	}
 	failed_status = atomic_load(&runtime->failed_status);
 	return(failed_status != SPARK_STATUS_OK && status == SPARK_STATUS_OK ? (SparkStatus)failed_status : status);
