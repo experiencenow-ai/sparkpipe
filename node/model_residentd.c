@@ -139,6 +139,7 @@ typedef struct SparkModelResidentdClient
 	uint32_t output_capacity;
 	uint32_t output_message_capacity;
 	uint32_t input_capacity;
+	uint64_t had_active_routes;
 	uint64_t generation;
 	uint64_t pending_client_reset;
 	uint64_t reset_done;
@@ -1370,7 +1371,9 @@ static void SparkModelResidentdCloseClientLocked(
 	runtime->client.output_count = 0u;
 	if ( runtime->routes != 0 )
 		for (index=0u; index<runtime->route_capacity; index++)
-			if ( runtime->routes[index].active != 0u && runtime->routes[index].client_generation == runtime->client.generation )
+			if ( runtime->routes[index].active != 0u )
+			runtime->client.had_active_routes = 1u;
+		if ( runtime->routes[index].active != 0u && runtime->routes[index].client_generation == runtime->client.generation )
 				if ( runtime->routes[index].state !=
 					SPARK_MODEL_RESIDENTD_ROUTE_RESERVED )
 					runtime->routes[index].abandoned = 1u;
@@ -1575,9 +1578,13 @@ static void SparkModelResidentdAcceptClient(SparkModelResidentdRuntime *runtime)
 	runtime->client.fd = fd;
 	runtime->client.target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
 	runtime->client.last_activity_ns = SparkModelResidentdMonotonicTimeNs();
-	runtime->client.generation += 1u;
-	if ( runtime->client.generation == 0u )
-		runtime->client.generation = 1u;
+	if ( runtime->client.had_active_routes != 0u )
+	{
+		runtime->client.generation += 1u;
+		if ( runtime->client.generation == 0u )
+			runtime->client.generation = 1u;
+		runtime->client.had_active_routes = 0u;
+	}
 	pthread_mutex_unlock(&runtime->mutex);
 }
 
