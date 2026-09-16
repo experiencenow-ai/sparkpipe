@@ -3039,8 +3039,7 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 		status = SPARK_STATUS_OK;
 	if ( status == SPARK_STATUS_OK )
 	{
-		exec = (chain->slot->graph_alt == 0u) ?
-			chain->slot->graph_exec_a : chain->slot->graph_exec_b;
+		exec = chain->slot->graph_exec_a;
 		if ( cudaGraphLaunch(exec,chain->slot->stream) != cudaSuccess )
 		{
 			fprintf(stderr,"GRAPH-LAUNCH-ERR slot=%u alt=%u cuda=%s\n",
