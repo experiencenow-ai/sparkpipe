@@ -11,6 +11,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 import t1_reference_hy4 as engine_module  # noqa: E402
+from t1_reference_common import f32_to_bf16_u16  # noqa: E402
 from t1_reference_common import parse_llm_defines  # noqa: E402
 
 HIDDEN = 32
@@ -105,8 +106,9 @@ def synthetic_checkpoint(root):
     put("model.embed_tokens.weight", "BF16",
         np.frombuffer(embed.astype(np.float16).view(np.uint8), dtype=np.uint8)
         .view(np.uint16).reshape(VOCAB, HIDDEN))
-    put("lm_head.weight", "F32",
-        rng.standard_normal((VOCAB, HIDDEN)).astype(np.float32))
+    put("lm_head.weight", "BF16",
+        f32_to_bf16_u16(
+            rng.standard_normal((VOCAB, HIDDEN)).astype(np.float32)))
     put("model.norm.weight", "BF16",
         (rng.random(HIDDEN).astype(np.float16)).view(np.uint8)
         .view(np.uint16).reshape(HIDDEN))

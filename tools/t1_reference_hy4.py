@@ -402,7 +402,7 @@ class Hy4Engine:
                          self.eps)
         lm = self._weight("lm_head.weight")
         if lm.dtype != np.float32:
-            raise ValueError("reference lm_head must be F32")
+            lm = bf16_to_f32(lm)
         best = -np.inf
         best_token = -1
         for start in range(0, lm.shape[0], chunk):
