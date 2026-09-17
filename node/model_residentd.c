@@ -1580,14 +1580,9 @@ static void SparkModelResidentdAcceptClient(SparkModelResidentdRuntime *runtime)
 	runtime->client.fd = fd;
 	runtime->client.target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
 	runtime->client.last_activity_ns = SparkModelResidentdMonotonicTimeNs();
-	if ( runtime->client.generation == 0u ||
-	     runtime->client.had_active_routes != 0u )
-	{
-		runtime->client.generation += 1u;
-		if ( runtime->client.generation == 0u )
-			runtime->client.generation = 1u;
-		runtime->client.had_active_routes = 0u;
-	}
+	runtime->client.generation += 1u;
+	if ( runtime->client.generation == 0u )
+		runtime->client.generation = 1u;
 	pthread_mutex_unlock(&runtime->mutex);
 }
 
