@@ -81,9 +81,16 @@ static SparkStatus lazy_pack_initialize(SparkWeightdLazyPack *pack,int32_t fd,co
 	if ( status != SPARK_STATUS_OK )
 		SPARK_RETURN(status);
 	if ( check != 0 )
+	{
 		status = check(&pack->manifest,context);
-	if ( status != SPARK_STATUS_OK )
-		SPARK_RETURN(status);
+		if ( status != SPARK_STATUS_OK )
+			SPARK_RETURN(status);
+		SparkWeightdManifestDestroy(&pack->manifest);
+		memset(&pack->manifest,0,sizeof(pack->manifest));
+		status = SparkWeightdManifestLoad(path,request->identity.arena_bytes,&pack->manifest);
+		if ( status != SPARK_STATUS_OK )
+			SPARK_RETURN(status);
+	}
 	status = lazy_spine_load(pack,fd,request,budget);
 	if ( status != SPARK_STATUS_OK )
 		SPARK_RETURN(status);

@@ -1,5 +1,5 @@
 {
-  "file_count": 2965,
+  "file_count": 2967,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "f490a83e4ea8924d72e82ec474fb2a2d990bec60cdc30146520429b5e852a382",
-      "size_bytes": 113000
+      "sha256": "4eb773119c36c4e1968ec2210c829ebfb94df69ed520300683630ca636463858",
+      "size_bytes": 113272
     },
     {
       "path": "NCCL_16WIDE_RECEIPTS.md",
@@ -7113,8 +7113,8 @@
     },
     {
       "path": "runtime/spark_weightd.c",
-      "sha256": "1ca150d6a6cb88e4358fb869fc4144507b6deac907fc339465f2ab0e6f6de7a9",
-      "size_bytes": 145527
+      "sha256": "1a6d08811b8bbdf7da55b613f0f73ad3cb9ad6113da26bd9e48bf638defad211",
+      "size_bytes": 145987
     },
     {
       "path": "runtime/spark_weightd_attach.c",
@@ -7123,8 +7123,8 @@
     },
     {
       "path": "runtime/spark_weightd_lazy_pack.c",
-      "sha256": "5e1b8f33f5315bce5fb6b2af933c11a40265b22dbbadef687f8bab88114bb6d4",
-      "size_bytes": 6867
+      "sha256": "c3873b98b7f62018ae10678811b0c03226b5baeb9c16e9c606b7ff6fc9616734",
+      "size_bytes": 7124
     },
     {
       "path": "runtime/spark_weightd_lease.c",
@@ -9218,8 +9218,8 @@
     },
     {
       "path": "tests/test_weightd_working_set.c",
-      "sha256": "b7e5d26a117eb9a7751c0a8c772aee49cf53b284ec600857119c105870a0bab9",
-      "size_bytes": 24330
+      "sha256": "7ac957a709a30824c1149aadd460329ac038a84db143474aa1042d255a7573b5",
+      "size_bytes": 24292
     },
     {
       "path": "tests/test_work_transaction.c",
@@ -11607,6 +11607,11 @@
       "size_bytes": 8172
     },
     {
+      "path": "tools/weightd_route_probe.c",
+      "sha256": "f850f9da846faeed827b003b2da1ca70ca30dd13ee361f6f9808b6bd320e5a0c",
+      "size_bytes": 10332
+    },
+    {
       "path": "tools/weightd_smoke.c",
       "sha256": "ec0a48ebfc5fb2807ad80a54a5ac63c71e5877f21f8236ad97a2052574c5feb0",
       "size_bytes": 5674
@@ -12960,6 +12965,11 @@
       "path": "tools_local/publish_local.sh",
       "sha256": "191c99349866291a59b5d8aff33c605b2f43fad5c63b0c461838a4f82f17dcac",
       "size_bytes": 1490
+    },
+    {
+      "path": "tools_local/qmax_rank_window_gen.c",
+      "sha256": "774d0e9db7583e09b02465a1bdbb74e0553b07a1066bb2c76f8067ef53a06443",
+      "size_bytes": 2366
     },
     {
       "path": "tools_local/qwen36_dflash2_bisect.py",
@@ -14830,5 +14840,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 56613968
+  "total_bytes": 56627617
 }
