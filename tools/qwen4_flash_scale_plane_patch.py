@@ -72,7 +72,7 @@ def derive_planes(source, tp_degree, tp_rank):
 				shard, meta, data_offset = source.resolve(name)
 				if meta["dtype"] != "BF16" or meta["shape"] != [s_rows, s_cols]:
 					raise SystemExit(f"{name}: {meta['dtype']} {meta['shape']} unexpected")
-				planes.setdefault((layer, kind), bytearray())
+				planes.setdefault((layer, kind), [])
 				request = (shard, data_offset, s_rows * s_cols * 2)
 				planes[(layer, kind)].append(request)
 	return planes
