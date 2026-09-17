@@ -66,8 +66,8 @@ for host in $hosts; do
 		"$binary_host:q3ft1_rt_stage/qwen4_flash_pack_verify.py" \
 		"$binary_host:q3ft1_rt_stage/spark_pack_common.py" \
 		"$binary_host:q3ft1_rt_stage/qwen4_flash_stagepack.py" \
-		"$host:$remote_tools/"
-	scp -q "$tools_dir/t1_q3f_patch_pack.sh" "$host:$remote_tools/"
+		"$host:q3ft1_rt_patch/"
+	scp -q "$tools_dir/t1_q3f_patch_pack.sh" "$host:q3ft1_rt_patch/"
 	if ssh -o BatchMode=yes "$host" "sh $remote_tools/t1_q3f_patch_pack.sh '$pack' $tp_degree $tp_rank $remote_tools" \
 		> "$runs_dir/$host.log" 2>&1; then
 		echo "[$(date -u +%H:%M:%S)] $host OK"

@@ -30,7 +30,7 @@ if [ "$rc" != 0 ]; then
 	echo "PATCH FAILED rc=$rc - $pack left UNLOCKED, evidence: $pack.patch.json" >&2
 	exit "$rc"
 fi
-"$HOME/q3ft1_rt/build-qwen4flash-experts-manifest" "$pack" "$tp_degree" "$tp_rank"
+"$tools/build-qwen4flash-experts-manifest" "$pack" "$tp_degree" "$tp_rank"
 python3 - "$pack" "$old_sha" <<'PYEOF'
 import hashlib
 import json
