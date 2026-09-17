@@ -348,6 +348,9 @@ void SparkTpDeviceCollectiveRoundStats(
 SparkStatus SparkTpDeviceCollectiveArmCapture(
     SparkTpDeviceCollective *collective);
 
+SparkStatus SparkTpDeviceCollectiveGraphCancelSeed(
+    SparkTpDeviceCollective *collective,void *stream);
+
 SparkStatus SparkTpDeviceCollectiveDisarmCapture(
     SparkTpDeviceCollective *collective);
 

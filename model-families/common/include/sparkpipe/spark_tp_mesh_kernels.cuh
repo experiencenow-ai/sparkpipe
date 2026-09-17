@@ -5,7 +5,7 @@
 #if defined(__CUDACC__)
 #include <cuda_runtime.h>
 #include <stdio.h>
-#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V4-TAILWRITE-SEQPARITY"
+#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V5-CANCELPOLL-ORDPARITY"
 #if defined(__CUDACC__)
 __constant__ char SparkTpMeshKernelsBuildMarker[] =
     SPARK_TP_MESH_KERNELS_MARKER;
@@ -66,7 +66,9 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 	uint32_t degree,
     unsigned long long *error_word,
     unsigned long long deadline_ns,
-    unsigned long long *diag_word)
+    unsigned long long *diag_word,
+    volatile uint64_t *cancel_cell,
+    const unsigned long long *cancel_expected)
 {
 	uint32_t peer;
 	volatile uint64_t *end_word;
@@ -76,6 +78,9 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 		return;
 	sequence = round_seq[0];
 	stop_at = SparkGlm5NextGlobalTimerNs() + deadline_ns;
+	if ( cancel_cell != 0 && cancel_expected != 0 &&
+	     *cancel_cell != *cancel_expected )
+		return;
 	{
 		unsigned long long spins = 0ull;
 		unsigned long long spin_cap = deadline_ns / 200ull;
@@ -92,6 +97,9 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 			while ( *end_word < sequence )
 			{
 				if ( *error_word != 0ull )
+					return;
+				if ( cancel_cell != 0 && cancel_expected != 0 &&
+				     *cancel_cell != *cancel_expected )
 					return;
 				spins++;
 				if ( (spins & 4095ull) == 0ull &&
@@ -347,13 +355,16 @@ extern "C" cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
 extern "C" cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
 	volatile void *band_base,uint64_t slot_bytes,const void *round_seq,
 	uint64_t slots_per_rank,uint64_t ring,uint32_t rank,uint32_t degree,
-	void *error_word,unsigned long long deadline_ns,void *diag_word)
+	void *error_word,unsigned long long deadline_ns,void *diag_word,
+	volatile void *cancel_cell,const void *cancel_expected)
 {
 	SparkGlm5NextMeshWaitKernel<<<1,32,0u,stream>>>(
 		(volatile uint64_t *)band_base,slot_bytes,
 		(const unsigned long long *)round_seq,slots_per_rank,ring,rank,
 		degree,(unsigned long long *)error_word,deadline_ns,
-		(unsigned long long *)diag_word);
+		(unsigned long long *)diag_word,
+		(volatile uint64_t *)cancel_cell,
+		(const unsigned long long *)cancel_expected);
 	return(cudaPeekAtLastError());
 }
 

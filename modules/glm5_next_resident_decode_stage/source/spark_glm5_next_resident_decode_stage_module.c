@@ -2742,6 +2742,17 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 	void *exec;
 	state = chain->state;
 	status = SPARK_STATUS_OK;
+	if ( state->tp_device_collective_initialized != 0u &&
+	     SparkTpDeviceCollectiveGraphCancelSeed(
+	         &state->tp_device_collective,chain->slot->stream) !=
+	         SPARK_STATUS_OK )
+		status = SPARK_STATUS_IO_ERROR;
+	if ( status == SPARK_STATUS_OK &&
+	     state->tp_device_collective_hc_initialized != 0u &&
+	     SparkTpDeviceCollectiveGraphCancelSeed(
+	         &state->tp_device_collective_hc,chain->slot->stream) !=
+	         SPARK_STATUS_OK )
+		status = SPARK_STATUS_IO_ERROR;
 	if ( status == SPARK_STATUS_OK )
 	{
 		exec = chain->slot->graph_exec_a;
