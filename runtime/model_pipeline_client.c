@@ -894,7 +894,9 @@ SparkStatus SparkModelPipelineClientSubmit(
 		if ( status != SPARK_STATUS_OK )
 		{
 			SparkModelPipelineClientRecordFailure(transaction,status);
-			SparkModelPipelineClientSetFailure(pipeline,status,rank);
+			if ( status != SPARK_STATUS_IO_ERROR )
+				SparkModelPipelineClientSetFailure(pipeline,
+				    status,rank);
 			break;
 		}
 	}
