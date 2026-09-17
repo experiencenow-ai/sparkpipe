@@ -14,7 +14,7 @@ case $arm in
 		prefix='qwenflash.tp8.fp8.rank'
 		;;
 	tp4pp4)
-		hosts="sparkc sparkd sparke sparkf"
+		hosts=${HOSTS:-"sparkc sparkd sparke sparkf"}
 		tp_degree=4
 		pack_dir='sparkdata/qwen3flash.fp8.tp4pp4/packs'
 		prefix='qwenflash.tp4_pp4_fp8.rank'
@@ -31,6 +31,7 @@ scp -q "$tools_dir/qwen4_flash_scale_plane_patch.py" \
 	"$tools_dir/qwen4_flash_stagepack.py" \
 	"$binary_host:q3ft1_rt_stage/"
 rc_total=0
+deferred=""
 for host in $hosts; do
 	case $host in
 		sparka) digit=10 ;;
@@ -58,6 +59,15 @@ for host in $hosts; do
 		rc_total=1
 		break
 	fi
+	if ! ssh -o BatchMode=yes "$host" "timeout 45 dd if=/mnt/model-warm/qwen3.8-flash-next-fp8/model-00001-of-00131.safetensors of=/dev/null bs=1M count=32 2>&1 | tail -1" | grep -q copied; then
+		if [ "${DEFERRED_RETRY:-0}" = 1 ]; then
+			echo "[$(date -u +%H:%M:%S)] $host warm client UNHEALTHY on retry - FAILING"
+			exit 1
+		fi
+		echo "[$(date -u +%H:%M:%S)] $host warm client UNHEALTHY - deferring"
+		deferred="$deferred $host"
+		continue
+	fi
 	echo "[$(date -u +%H:%M:%S)] $host patching rank=$rank tp_rank=$tp_rank"
 	ssh -o BatchMode=yes "$host" "rm -rf $remote_tools && mkdir -p $remote_tools"
 	scp -q "$binary_host:q3ft1_rt_stage/build-qwen4flash-experts-manifest" \
@@ -79,5 +89,9 @@ for host in $hosts; do
 		rc_total=1
 		break
 	fi
+done
+for host in $deferred; do
+	echo "[$(date -u +%H:%M:%S)] retrying deferred $host"
+	HOSTS="$host" DEFERRED_RETRY=1 "$0" "$arm" || rc_total=1
 done
 exit "$rc_total"
