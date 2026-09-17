@@ -55,8 +55,12 @@ if _TOOLS_DIR not in sys.path:
 from spark_pack_common import (  # noqa: E402
     PackFailure,
     SafetensorsSource as _BaseSafetensorsSource,
+    TpPlan,
     align_up,
+    packed_tp_shape,
+    pump,
     sha256_file,
+    tp_window,
     write_receipt,
 )
 
@@ -77,6 +81,30 @@ PAYLOAD_ALIGNMENT = 256
 WEIGHT_BF16 = 0
 WEIGHT_F32 = 1
 WEIGHT_FP8_F32B128 = 4
+WEIGHT_NVFP4_PACKED = 8
+NVFP4_SEGMENT_TAIL_BYTES = 8
+
+
+def ref_weight_format(ref):
+    """Effective on-wire format: under EXPERT_CODEC=nvfp4 the routed-expert
+    slabs carry codec-6 bytes (U8-packed e2m1 + per-16 e4m3 + the f32 tail)
+    and must be stamped NVFP4_PACKED (8) - the fp8 code they share in the
+    kind table means a different byte layout. The MTP fused pseudo-layer
+    streams plain BF16 and stays stamped BF16."""
+    if EXPERT_CODEC != "nvfp4" or ref.weight_format != WEIGHT_FP8_F32B128:
+        return ref.weight_format
+    if ref.kind in (KIND_MOE_W1, KIND_MOE_W3, KIND_MOE_DOWN):
+        return WEIGHT_BF16 if ref.layer == MTP_LAYER else WEIGHT_NVFP4_PACKED
+    return ref.weight_format
+
+
+def entry_group_size(ref) -> int:
+    fmt = ref_weight_format(ref)
+    if fmt == WEIGHT_FP8_F32B128:
+        return 128
+    if fmt == WEIGHT_NVFP4_PACKED:
+        return 16
+    return 0
 
 HIDDEN = 8192
 LAYER_COUNT = 92
@@ -96,6 +124,7 @@ EXPERTS_PER_TOKEN = 10
 EXPERT_INTERMEDIATE = 2048
 VOCAB = 248320
 MTP_LAYERS = 1
+STRIP_MTP = False
 MXFP4_GROUP = 32
 
 GDN_QK_DIM = GDN_KEY_HEADS * GDN_HEAD_KEY_DIM            # 2048
@@ -302,7 +331,10 @@ def expected_tensor_count(first_layer: int, layer_count: int) -> int:
     if first_layer == 0:
         tensors += 1
     if first_layer + layer_count == LAYER_COUNT:
-        tensors += 2 + 4 + 16 + (1 if first_layer != 0 else 0)
+        if STRIP_MTP:
+            tensors += 2 + (1 if first_layer != 0 else 0)
+        else:
+            tensors += 2 + 4 + 16 + (1 if first_layer != 0 else 0)
     return tensors
 
 
@@ -319,11 +351,15 @@ def build_inventory(first_layer: int, layer_count: int) -> list[TensorRef]:
     if first_layer + layer_count == LAYER_COUNT:
         if first_layer != 0:
             refs.append(TensorRef(KIND_EMBEDDING, GLOBAL_LAYER, GLOBAL_TENSORS[KIND_EMBEDDING]))
-        for kind in (KIND_FINAL_NORM, KIND_LM_HEAD, KIND_MTP_FC,
-                     KIND_MTP_EMBED_NORM, KIND_MTP_HIDDEN_NORM, KIND_MTP_FINAL_NORM):
-            refs.append(TensorRef(kind, GLOBAL_LAYER, GLOBAL_TENSORS[kind]))
-        for kind in EVERY_LAYER_KINDS + ATTN_LAYER_KINDS:
-            refs.append(TensorRef(kind, MTP_LAYER, layer_tensor_name(kind, MTP_LAYER)))
+        if STRIP_MTP:
+            refs.append(TensorRef(KIND_FINAL_NORM, GLOBAL_LAYER, GLOBAL_TENSORS[KIND_FINAL_NORM]))
+            refs.append(TensorRef(KIND_LM_HEAD, GLOBAL_LAYER, GLOBAL_TENSORS[KIND_LM_HEAD]))
+        else:
+            for kind in (KIND_FINAL_NORM, KIND_LM_HEAD, KIND_MTP_FC,
+                         KIND_MTP_EMBED_NORM, KIND_MTP_HIDDEN_NORM, KIND_MTP_FINAL_NORM):
+                refs.append(TensorRef(kind, GLOBAL_LAYER, GLOBAL_TENSORS[kind]))
+            for kind in EVERY_LAYER_KINDS + ATTN_LAYER_KINDS:
+                refs.append(TensorRef(kind, MTP_LAYER, layer_tensor_name(kind, MTP_LAYER)))
     expected = expected_tensor_count(first_layer, layer_count)
     if len(refs) != expected:
         raise PackFailure(f"inventory {len(refs)} tensors, format expects {expected}")
@@ -655,9 +691,10 @@ class _HashingWriter:
 
 
 def copy_nvfp4_experts(source: SafetensorsSource, ref: TensorRef, out) -> None:
-    """Stream per-expert NVFP4 payload [R, C/2] U8 expert-major, then the
-    F8_E4M3 scale plane [E*R, C/16] byte-per-scale (the codec-6 layout;
-    global + input F32 scales ride the manifest entry)."""
+    """Stream per-expert NVFP4 payload [R, C/2] U8 expert-major, then each
+    expert's scale segment: the F8_E4M3 per-16 plane [R, C/16] followed by
+    the [input_scale][weight_scale_2] f32 tail the grouped scalar kernel
+    documents (global = segment end - 4)."""
     experts = EXPERT_COUNT
     rows_per_expert = ref.rows // experts
     scale_cols = ref.columns // 16
@@ -674,14 +711,7 @@ def copy_nvfp4_experts(source: SafetensorsSource, ref: TensorRef, out) -> None:
                     raise PackFailure("short read on nvfp4 payload")
                 remaining -= step
                 out.write(raw)
-        s_shard, s_meta, s_off = source.resolve(
-            ref.name.replace("{e}", str(e))[:-len(".weight")] + ".weight_scale")
-        with (source.root / s_shard).open("rb") as f:
-            f.seek(s_off)
-            sraw = f.read(rows_per_expert * scale_cols)
-        if len(sraw) != rows_per_expert * scale_cols:
-            raise PackFailure("short read on nvfp4 scale plane")
-        scales.write(sraw)
+        scales.write(scale_segment_bytes(source, ref, e, rows_per_expert, scale_cols))
     scales.seek(0)
     while True:
         chunk = scales.read(CHUNK_BYTES)
@@ -709,10 +739,13 @@ def convert(checkpoint: Path, output: Path, first_layer: int, layer_count: int,
             scale_bytes = 0
         elif ref.weight_format == WEIGHT_FP8_F32B128 and EXPERT_CODEC == "nvfp4":
             # codec-6 sizing: U8-packed payload (2 values/byte) + one F8_E4M3
-            # scale byte per 16 values; F32 global/input scales ride the
-            # manifest entry, not the payload stream.
+            # scale byte per 16 values; per-expert segment tail carries the
+            # checkpoint's F32 input_scale then weight_scale_2 (the layout
+            # SparkLmGroupedScalarLinearKernel documents: global is the LAST
+            # 4 bytes, the input scale the 4 before it).
+            resident = pr // (ref.rows // EXPERT_COUNT)
             payload_bytes = pr * (pc // 2)
-            scale_bytes = pr * (pc // 16)
+            scale_bytes = pr * (pc // 16) + resident * NVFP4_SEGMENT_TAIL_BYTES
         elif ref.weight_format == WEIGHT_FP8_F32B128:
             payload_bytes = pr * pc
             scale_bytes = (pr // 128) * (pc // 128) * F32_BYTES
@@ -721,11 +754,12 @@ def convert(checkpoint: Path, output: Path, first_layer: int, layer_count: int,
             payload_bytes = pr * pc * element_bytes
             scale_bytes = 0
         payload_offset = align_up(cursor, PAYLOAD_ALIGNMENT)
-        plans.append((ref, offset, payload_offset, payload_bytes, scale_bytes, plan))
+        plans.append((ref, offset, payload_offset, payload_bytes, scale_bytes, plan, pr, pc))
         cursor = payload_offset + payload_bytes + scale_bytes
     payload_base = align_up(HEADER_BYTES + len(plans) * ENTRY_BYTES, PAYLOAD_ALIGNMENT)
     file_bytes = payload_base + cursor
 
+    mtp_layer_count = 0 if STRIP_MTP else MTP_LAYERS
     if tp_degree > 1:
         header = HEADER2_STRUCT.pack(
             MAGIC, FORMAT2_VERSION, HEADER2_BYTES, ENTRY_BYTES, len(plans),
@@ -734,7 +768,7 @@ def convert(checkpoint: Path, output: Path, first_layer: int, layer_count: int,
             GDN_KEY_HEADS, GDN_VALUE_HEADS, GDN_HEAD_KEY_DIM, GDN_HEAD_VALUE_DIM,
             GDN_CONV_KERNEL, ATTN_QUERY_HEADS, ATTN_KV_HEADS, ATTN_HEAD_DIM,
             ATTN_ROPE_DIM, EXPERT_COUNT, EXPERTS_PER_TOKEN, EXPERT_INTERMEDIATE,
-            VOCAB, MXFP4_GROUP, MTP_LAYERS,
+            VOCAB, MXFP4_GROUP, mtp_layer_count,
             tp_degree, tp_rank, HEADER2_BYTES, file_bytes)
         payload_base = align_up(HEADER2_BYTES + len(plans) * ENTRY_BYTES, PAYLOAD_ALIGNMENT)
         file_bytes = payload_base + cursor
@@ -746,16 +780,16 @@ def convert(checkpoint: Path, output: Path, first_layer: int, layer_count: int,
             GDN_KEY_HEADS, GDN_VALUE_HEADS, GDN_HEAD_KEY_DIM, GDN_HEAD_VALUE_DIM,
             GDN_CONV_KERNEL, ATTN_QUERY_HEADS, ATTN_KV_HEADS, ATTN_HEAD_DIM,
             ATTN_ROPE_DIM, EXPERT_COUNT, EXPERTS_PER_TOKEN, EXPERT_INTERMEDIATE,
-            VOCAB, MXFP4_GROUP, MTP_LAYERS,
+            VOCAB, MXFP4_GROUP, mtp_layer_count,
             HEADER_BYTES, file_bytes)
     entries = b"".join(
         ENTRY_STRUCT.pack(
-            ref.kind, ref.layer, ref.weight_format, pr, pc,
-            128 if ref.weight_format == WEIGHT_FP8_F32B128 else 0,
+            ref.kind, ref.layer, ref_weight_format(ref), pr, pc,
+            entry_group_size(ref),
             payload_base + payload_offset, payload_bytes,
             payload_base + payload_offset + payload_bytes if scale_bytes else 0,
             scale_bytes)
-        for ref, _, payload_offset, payload_bytes, scale_bytes, plan in plans)
+        for ref, _, payload_offset, payload_bytes, scale_bytes, plan, pr, pc in plans)
     receipt.update({
         "first_layer_index": first_layer,
         "layer_count": layer_count,
@@ -785,7 +819,7 @@ def convert(checkpoint: Path, output: Path, first_layer: int, layer_count: int,
             "tp_degree": tp_degree,
             "tp_rank": tp_rank,
         })
-        for ref, source_offset, payload_offset, payload_bytes, scale_bytes, plan in plans:
+        for ref, source_offset, payload_offset, payload_bytes, scale_bytes, plan, pr, pc in plans:
             before = hashing.tell()
             if plan is not None:
                 copy_tp_plan(source, ref, plan, hashing)
@@ -865,17 +899,6 @@ HEADER2_BYTES = 128
 HEADER2_STRUCT = struct.Struct("<28I2Q")
 assert HEADER2_STRUCT.size == HEADER2_BYTES
 
-def tp_window(total: int, degree: int, rank: int) -> tuple[int, int]:
-    assert total % degree == 0, f"tp_window: {total} not divisible by {degree}"
-    per = total // degree
-    return rank * per, per
-
-class TpPlan:
-    """RowWindow / ColWindow / ExpertRange / QkvSegments / None(replicated)."""
-    def __init__(self, kind: str, **kw):
-        self.kind = kind
-        self.__dict__.update(kw)
-
 def build_tp_plan(ref, degree: int, rank: int):
     if degree <= 1:
         return None
@@ -906,37 +929,6 @@ def build_tp_plan(ref, degree: int, rank: int):
                                 (2 * qk + v_off, v_count)))
     return None  # norms, router, shared-gate-weight, conv, a_log/dt_bias, embed
 
-def packed_tp_shape(ref, plan):
-    if plan is None:
-        return ref.rows, ref.columns
-    if plan.kind == "rows":
-        return plan.row_count, ref.columns
-    if plan.kind == "cols":
-        return ref.rows, plan.col_count
-    if plan.kind == "experts":
-        return plan.row_count, ref.columns
-    if plan.kind == "qkv":
-        return sum(c for _, c in plan.segments), ref.columns
-    raise PackFailure(f"unknown tp plan {plan.kind}")
-
-def pump(fd, offset: int, length: int, out) -> None:
-    """Stream fd[offset:offset+length) to out in small chunks, evicting
-    each chunk from the page cache (DONTNEED) so warm reads never pile up
-    resident memory on the 119G nodes."""
-    remaining = length
-    while remaining > 0:
-        step = min(remaining, CHUNK_BYTES)
-        raw = os.pread(fd, step, offset)
-        if len(raw) != step:
-            raise PackFailure(f"short read at {offset}")
-        out.write(raw)
-        try:
-            os.posix_fadvise(fd, offset, step, os.POSIX_FADV_DONTNEED)
-        except (AttributeError, OSError):
-            pass
-        offset += step
-        remaining -= step
-
 def copy_row_window(source: SafetensorsSource, ref, plan, out) -> None:
     """Contiguous row-axis slice of a whole-row-packed tensor."""
     shard, meta, off = source.resolve(ref.name)
@@ -964,6 +956,52 @@ def copy_col_window_bf16(source: SafetensorsSource, ref, plan, out) -> None:
         for r in range(ref.rows):
             pump(fd, off + r * row_bytes + plan.col_off * BF16_BYTES, span, out)
 
+def copy_expert_scale_segment(source: SafetensorsSource, ref, expert: int,
+                              scale_cols: int, out) -> None:
+    """One expert's nvfp4 scale segment: the per-16 e4m3 plane then the
+    [input_scale][weight_scale_2] f32 tail the grouped scalar kernel
+    documents (global = segment end - 4)."""
+    base = ref.name.replace("{e}", str(expert))[:-len(".weight")]
+    s_shard, _, s_off = source.resolve(base + ".weight_scale")
+    sf = (source.root / s_shard).open("rb")
+    try:
+        pump(sf.fileno(), s_off, expert_rows(ref) * scale_cols, out)
+    finally:
+        sf.close()
+    for tail in (".input_scale", ".weight_scale_2"):
+        t_shard, _, t_off = source.resolve(base + tail)
+        tf = (source.root / t_shard).open("rb")
+        try:
+            pump(tf.fileno(), t_off, F32_BYTES, out)
+        finally:
+            tf.close()
+
+
+def scale_segment_bytes(source: SafetensorsSource, ref, expert: int,
+                        rows_per_expert: int, scale_cols: int) -> bytes:
+    """copy_nvfp4_experts variant of the segment (in-RAM, TP1 path)."""
+    base = ref.name.replace("{e}", str(expert))[:-len(".weight")]
+    s_shard, _, s_off = source.resolve(base + ".weight_scale")
+    with (source.root / s_shard).open("rb") as f:
+        f.seek(s_off)
+        sraw = f.read(rows_per_expert * scale_cols)
+    if len(sraw) != rows_per_expert * scale_cols:
+        raise PackFailure("short read on nvfp4 scale plane")
+    for tail in (".input_scale", ".weight_scale_2"):
+        t_shard, _, t_off = source.resolve(base + tail)
+        with (source.root / t_shard).open("rb") as f:
+            f.seek(t_off)
+            traw = f.read(F32_BYTES)
+        if len(traw) != F32_BYTES:
+            raise PackFailure(f"short read on nvfp4 {tail}")
+        sraw += traw
+    return sraw
+
+
+def expert_rows(ref) -> int:
+    return ref.rows // EXPERT_COUNT
+
+
 def copy_experts_bounded(source: SafetensorsSource, ref, plan, out) -> None:
     """The per-expert nvfp4/fp8 streams, bounded to this rank's experts.
     Two-pass (all payloads, then all scales) so no scale accumulation
@@ -989,6 +1027,9 @@ def copy_experts_bounded(source: SafetensorsSource, ref, plan, out) -> None:
     shandles = []
     try:
         for e in range(first, last):
+            if nvfp4:
+                copy_expert_scale_segment(source, ref, e, scale_cols, out)
+                continue
             s_shard, _, s_off = source.resolve(
                 ref.name.replace("{e}", str(e))[:-len(".weight")] + ".weight_scale")
             sf = (source.root / s_shard).open("rb")
@@ -1019,7 +1060,7 @@ def copy_tp_plan(source: SafetensorsSource, ref, plan, out) -> None:
         raise PackFailure(f"unknown tp plan {plan.kind}")
 
 def main() -> int:
-    global EXPERT_CODEC
+    global EXPERT_CODEC, STRIP_MTP
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--checkpoint", type=Path, help="safetensors checkpoint directory")
     parser.add_argument("--output", type=Path, help="pack output path")
@@ -1028,6 +1069,10 @@ def main() -> int:
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
     parser.add_argument("--receipt", type=Path, help="receipt output (default: <output>.receipt.json)")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--strip-mtp", action="store_true",
+        help="exclude the MTP entries (4 global kinds + the MTP-layer "
+             "pseudo-layer) from the tail stage; the pack header carries "
+             "mtp_layer_count 0 and the MTP=0 module form accepts it")
     parser.add_argument("--expert-codec", choices=("fp8", "nvfp4"), default="fp8",
         help="expert weight codec: fp8 (F8_E4M3 + BF16 scale_inv b128, the "
              "2.3T source) or nvfp4 (U8-packed 4-bit + F8_E4M3 g16 scales + "
@@ -1041,6 +1086,7 @@ def main() -> int:
                         help="this rank's shard (0 .. tp-degree-1)")
     args = parser.parse_args()
     EXPERT_CODEC = args.expert_codec
+    STRIP_MTP = args.strip_mtp
     if args.tp_degree < 1 or args.tp_rank < 0 or args.tp_rank >= args.tp_degree:
         parser.error("--tp-rank must satisfy 0 <= tp-rank < tp-degree")
 
@@ -1064,9 +1110,12 @@ def main() -> int:
         "checkpoint": str(args.checkpoint),
         "contract": {"path": str(args.contract),
                      "sha256": sha256_file(args.contract) if args.contract.is_file() else None},
-        "weight_formats": {"routed_experts": "fp8_e4m3_f32b128_scale_inv",
-                           "non_expert": "bf16",
-                           "gdn_a_log_dt_bias": "f32"},
+        "weight_formats": {
+            "routed_experts": ("nvfp4_e2m1_e4m3b16_f32tail" if args.expert_codec == "nvfp4"
+                               else "fp8_e4m3_f32b128_scale_inv"),
+            "non_expert": "bf16",
+            "gdn_a_log_dt_bias": "f32"},
+        "expert_codec": args.expert_codec,
     }
     result = convert(args.checkpoint, args.output or Path("/dev/null"),
                      args.first_layer, args.layer_count, receipt, args.dry_run,

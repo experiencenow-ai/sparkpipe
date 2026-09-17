@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <string.h>
 
 #include "sparkpipe/spark_qwen38_max_resident_decode_stage_firmware.h"
 #include "sparkpipe/spark_stagepack_format.h"
@@ -56,7 +57,7 @@ typedef enum SparkQwen38MaxStagePackTensorKind
 #define SPARK_QWEN38_MAX_STAGEPACK_CLASS_GDN_LAYER SPARK_STAGEPACK_FORMAT_LAYER_CLASS_GDN_LAYER
 #define SPARK_QWEN38_MAX_STAGEPACK_CLASS_ATTN_LAYER SPARK_STAGEPACK_FORMAT_LAYER_CLASS_ATTN_LAYER
 
-typedef struct SparkQwen38MaxStagePackHeader
+typedef struct SparkQwen38MaxStagePackHeaderCanonical
 {
 	uint32_t magic;
 	uint32_t format_version;
@@ -86,7 +87,7 @@ typedef struct SparkQwen38MaxStagePackHeader
 	uint32_t mtp_layer_count;
 	uint64_t directory_offset;
 	uint64_t file_bytes;
-} SparkQwen38MaxStagePackHeader;
+} SparkQwen38MaxStagePackHeaderCanonical;
 
 typedef struct SparkQwen38MaxStagePackEntry
 {
@@ -104,8 +105,45 @@ typedef struct SparkQwen38MaxStagePackEntry
 
 #define SPARK_QWEN38_MAX_STAGEPACK_HEADER_BYTES 120u
 #define SPARK_QWEN38_MAX_STAGEPACK_ENTRY_BYTES 56u
-_Static_assert(sizeof(SparkQwen38MaxStagePackHeader) == SPARK_QWEN38_MAX_STAGEPACK_HEADER_BYTES,"qwen38 stage pack header must be 120 wire bytes");
+#define SPARK_QWEN38_MAX_STAGEPACK_FORMAT_VERSION_V2 2u
+#define SPARK_QWEN38_MAX_STAGEPACK_HEADER_BYTES_V2 (SPARK_QWEN38_MAX_STAGEPACK_HEADER_BYTES + 8u)
+typedef struct SparkQwen38MaxStagePackHeader
+{
+	uint32_t magic;
+	uint32_t format_version;
+	uint32_t header_bytes;
+	uint32_t directory_entry_bytes;
+	uint32_t tensor_count;
+	uint32_t hidden_dimension;
+	uint32_t layer_count;
+	uint32_t first_layer_index;
+	uint32_t total_layer_count;
+	uint32_t attention_period;
+	uint32_t full_attention_phase;
+	uint32_t gdn_key_head_count;
+	uint32_t gdn_value_head_count;
+	uint32_t gdn_head_key_dimension;
+	uint32_t gdn_head_value_dimension;
+	uint32_t gdn_conv_kernel;
+	uint32_t attn_query_head_count;
+	uint32_t attn_kv_head_count;
+	uint32_t attn_head_dimension;
+	uint32_t attn_rope_dimension;
+	uint32_t routed_expert_count;
+	uint32_t experts_per_token;
+	uint32_t expert_intermediate_dimension;
+	uint32_t output_vocab_count;
+	uint32_t mxfp4_group_size;
+	uint32_t mtp_layer_count;
+	uint32_t tail_a;
+	uint32_t tail_b;
+	uint64_t tail_c;
+	uint64_t directory_offset;
+	uint64_t file_bytes;
+} SparkQwen38MaxStagePackHeader;
+_Static_assert(sizeof(SparkQwen38MaxStagePackHeaderCanonical) == SPARK_QWEN38_MAX_STAGEPACK_HEADER_BYTES,"qwen38 stage pack header must be 120 wire bytes");
 _Static_assert(sizeof(SparkQwen38MaxStagePackEntry) == SPARK_QWEN38_MAX_STAGEPACK_ENTRY_BYTES,"qwen38 stage pack directory entry must be 56 wire bytes");
+_Static_assert(sizeof(SparkQwen38MaxStagePackHeader) >= SPARK_QWEN38_MAX_STAGEPACK_HEADER_BYTES_V2,"qwen38 v2 header view must cover the 128 wire bytes");
 
 _Static_assert(SPARK_QWEN38_MAX_MODEL_GDN_LAYER_COUNT + SPARK_QWEN38_MAX_MODEL_FULL_ATTENTION_LAYER_COUNT == SPARK_QWEN38_MAX_MODEL_LAYER_COUNT,"qwen38 layer split must cover the stack");
 _Static_assert((SPARK_QWEN38_MAX_MODEL_LAYER_COUNT % SPARK_QWEN38_MAX_MODEL_ATTENTION_PERIOD) == 0u,"qwen38 layer count must be whole periods");
@@ -135,11 +173,17 @@ static inline uint32_t SparkQwen38MaxStagePackExpectedTensorCount(uint32_t first
 	if ( first_layer_index == 0u )
 		tensors += 1u;
 	if ( first_layer_index + layer_count == SPARK_QWEN38_MAX_MODEL_LAYER_COUNT )
+	{
+#if SPARK_QWEN38_MAX_MODEL_MTP_LAYER_COUNT == 0
+		tensors += 2u + (first_layer_index != 0u ? 1u : 0u);
+#else
 		tensors += 2u + 4u + 16u + (first_layer_index != 0u ? 1u : 0u);
+#endif
+	}
 	return(tensors);
 }
 
-static inline void SparkQwen38MaxStagePackExpectedGeometry(SparkQwen38MaxStagePackHeader *header, uint32_t first_layer_index, uint32_t layer_count)
+static inline void SparkQwen38MaxStagePackExpectedGeometry(SparkQwen38MaxStagePackHeaderCanonical *header, uint32_t first_layer_index, uint32_t layer_count)
 {
 	header->magic = SPARK_QWEN38_MAX_STAGEPACK_MAGIC;
 	header->format_version = SPARK_QWEN38_MAX_STAGEPACK_FORMAT_VERSION;
@@ -171,12 +215,53 @@ static inline void SparkQwen38MaxStagePackExpectedGeometry(SparkQwen38MaxStagePa
 	header->file_bytes = 0u;
 }
 
-SPARK_STAGEPACK_HEADER_LAYOUT_PROOF(SparkQwen38MaxStagePackHeader);
+SPARK_STAGEPACK_HEADER_LAYOUT_PROOF(SparkQwen38MaxStagePackHeaderCanonical);
+static inline int32_t SparkQwen38MaxStagePackHeaderIdentityAccepts(const SparkQwen38MaxStagePackHeader *file_header)
+{
+	if ( file_header->magic != SPARK_QWEN38_MAX_STAGEPACK_MAGIC )
+		return(-1);
+	if ( file_header->format_version == SPARK_QWEN38_MAX_STAGEPACK_FORMAT_VERSION && file_header->header_bytes == SPARK_QWEN38_MAX_STAGEPACK_HEADER_BYTES )
+		return(0);
+	if ( file_header->format_version == SPARK_QWEN38_MAX_STAGEPACK_FORMAT_VERSION_V2 && file_header->header_bytes == SPARK_QWEN38_MAX_STAGEPACK_HEADER_BYTES_V2 )
+		return(0);
+	return(-1);
+}
+static inline void SparkQwen38MaxStagePackHeaderNormalize(SparkQwen38MaxStagePackHeader *header)
+{
+	uint64_t swapped;
+	if ( SparkQwen38MaxStagePackHeaderIdentityAccepts(header) != 0 )
+		return;
+	if ( header->format_version != SPARK_QWEN38_MAX_STAGEPACK_FORMAT_VERSION_V2 )
+	{
+		swapped = header->tail_c;
+		header->directory_offset = (uint64_t)header->tail_a | ((uint64_t)header->tail_b << 32);
+		header->file_bytes = swapped;
+		return;
+	}
+	swapped = header->directory_offset;
+	header->directory_offset = header->tail_c;
+	header->file_bytes = swapped;
+}
 static inline int32_t SparkQwen38MaxStagePackHeaderMatches(const SparkQwen38MaxStagePackHeader *file_header, const SparkQwen38MaxStagePackHeader *expected)
 {
+	SparkQwen38MaxStagePackHeaderCanonical file;
+	if ( SparkQwen38MaxStagePackHeaderIdentityAccepts(file_header) != 0 )
+		return(-1);
+	memcpy(&file, file_header, sizeof(file));
+	file.format_version = expected->format_version;
+	file.header_bytes = expected->header_bytes;
 	return(SparkStagePackHeaderMatches(
-		(const SparkStagePackHeaderCommon *)file_header,
+		(const SparkStagePackHeaderCommon *)&file,
 		(const SparkStagePackHeaderCommon *)expected));
+}
+static inline void SparkQwen38MaxStagePackExpectedGeometryWire(SparkQwen38MaxStagePackHeader *header, uint32_t first_layer_index, uint32_t layer_count)
+{
+	SparkQwen38MaxStagePackHeaderCanonical canonical;
+	SparkQwen38MaxStagePackExpectedGeometry(&canonical,first_layer_index,layer_count);
+	memset(header,0,sizeof(*header));
+	memcpy(header,&canonical,sizeof(canonical));
+	header->format_version = SPARK_QWEN38_MAX_STAGEPACK_FORMAT_VERSION_V2;
+	header->header_bytes = SPARK_QWEN38_MAX_STAGEPACK_HEADER_BYTES_V2;
 }
 
 typedef SparkStagePackTensorShape SparkQwen38MaxStagePackTensorShape;
@@ -184,6 +269,7 @@ typedef SparkStagePackTensorShape SparkQwen38MaxStagePackTensorShape;
 _Static_assert(SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_BF16 == SPARK_STAGEPACK_FORMAT_WEIGHT_BF16,"qwen38 bf16 weight code must match the shared format");
 _Static_assert(SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_F32 == SPARK_STAGEPACK_FORMAT_WEIGHT_F32,"qwen38 f32 weight code must match the shared format");
 _Static_assert(SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_FP8_E4M3_F32B128 == SPARK_STAGEPACK_FORMAT_WEIGHT_FP8_E4M3_F32B128,"qwen38 fp8 weight code must match the shared format");
+_Static_assert(SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_NVFP4_PACKED == SPARK_STAGEPACK_FORMAT_WEIGHT_NVFP4_PACKED,"qwen38 nvfp4 weight code must match the shared format");
 
 static const SparkStagePackGeometryTable SparkQwen38MaxStagePackGeometry =
 {
@@ -296,6 +382,8 @@ static inline uint64_t SparkQwen38MaxStagePackPayloadBytes(uint32_t weight_forma
 	uint64_t elements = (uint64_t)rows * (uint64_t)columns;
 	if ( weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_MXFP4_E2M1 )
 		return(elements / 2u);
+	if ( weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_NVFP4_PACKED )
+		return(elements / 2u);
 	if ( weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_FP8_E4M3_F32B128 )
 		return(elements);
 	if ( weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_F32 || weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_U32 )
@@ -310,4 +398,16 @@ static inline uint64_t SparkQwen38MaxStagePackScaleBytes(uint32_t weight_format,
 	if ( weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_FP8_E4M3_F32B128 )
 		return(((uint64_t)rows / 128u) * ((uint64_t)columns / 128u) * 4u);
 	return(0u);
+}
+
+static inline uint64_t SparkQwen38MaxStagePackScaleBytesFor(uint32_t tensor_kind, uint32_t weight_format, uint32_t rows, uint32_t columns)
+{
+	uint64_t expert_rows,resident;
+	if ( weight_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_NVFP4_PACKED )
+		return(SparkQwen38MaxStagePackScaleBytes(weight_format,rows,columns));
+	expert_rows = tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_DOWN ? SPARK_QWEN38_MAX_MODEL_HIDDEN_DIMENSION : SPARK_QWEN38_MAX_MODEL_EXPERT_INTERMEDIATE_DIMENSION;
+	if ( expert_rows == 0u || (rows % expert_rows) != 0u || (columns % 16u) != 0u )
+		return(0u);
+	resident = rows / expert_rows;
+	return(((uint64_t)rows * (uint64_t)columns) / 16u + resident * 8u);
 }

@@ -395,6 +395,7 @@ cudaError_t cudaHostRegister(
     return cudaSuccess;
 }
 
+
 cudaError_t cudaLaunchHostFunc(
     cudaStream_t stream,
     cudaHostFn_t function,
@@ -452,6 +453,15 @@ cudaError_t cudaGraphInstantiate(
     }
     *graph_exec = malloc(1u);
     return *graph_exec != 0 ? cudaSuccess : cudaErrorMemoryAllocation;
+}
+
+cudaError_t cudaGraphUpload(
+    cudaGraphExec_t graph_exec,
+    cudaStream_t stream)
+{
+    (void)graph_exec;
+    (void)stream;
+    return cudaSuccess;
 }
 
 cudaError_t cudaGraphLaunch(
@@ -1085,4 +1095,22 @@ CUresult cuMemAddressFree(CUdeviceptr pointer, size_t bytes)
         return CUDA_ERROR_INVALID_VALUE;
     }
     return cuda_stub_free(reservation);
+}
+
+cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
+    volatile void *entry,void *seq_cell,void *round_seq,uint64_t bytes,
+    uint64_t slot_index)
+{
+    (void)stream;(void)entry;
+    (void)seq_cell;(void)round_seq;(void)bytes;(void)slot_index;
+    return cudaSuccess;
+}
+
+cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
+    volatile void *band_base,uint64_t slot_bytes,const void *round_seq,
+    uint64_t parity,uint32_t rank,uint32_t degree)
+{
+    (void)stream;(void)band_base;
+    (void)slot_bytes;(void)round_seq;(void)parity;(void)rank;(void)degree;
+    return cudaSuccess;
 }

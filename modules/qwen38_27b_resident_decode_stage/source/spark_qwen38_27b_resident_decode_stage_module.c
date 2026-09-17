@@ -23,6 +23,7 @@
 #include "spark_qwen38_27b_tp.h"
 
 
+#define SPARK_QWEN38_27B_MODULE_PROFILE_LOG_PERIOD 64u
 #define SPARK_QWEN38_27B_MODULE_TAG "qwen38_27b_stage"
 #define SPARK_QWEN38_27B_MODULE_FUSED_QUERY_COMPONENT_COUNT 2u
 
@@ -286,7 +287,7 @@ static void SparkQwen38_27bProfilePrint(SparkQwen38_27bModuleState *state, uint6
 			(double)state->profile_stage_nanos / 1000000.0,
 			(double)state->profile_walk_nanos / 1000000.0,
 			(double)state->profile_tail_nanos / 1000000.0);
-	if ( (state->profile_frame_count & 63u) == 0u )
+	if ( (state->profile_frame_count & (SPARK_QWEN38_27B_MODULE_PROFILE_LOG_PERIOD - 1u)) == 0u )
 		fprintf(stderr, "%s graph_profile replayed=%u captured=%u plain=%u broken=%u evframes=%u evgdn_ms=%.0f evattn_ms=%.0f evffn_ms=%.0f\n",
 			SPARK_QWEN38_27B_MODULE_TAG, state->graph_frames_replayed,
 			state->graph_frames_captured, state->graph_frames_plain,
@@ -1091,9 +1092,6 @@ static SparkStatus SparkQwen38_27bModuleRunGdnLayer(SparkQwen38_27bModuleState *
 		else if ( prefill != 0 && slot->verify_frame != 0u && state->snapshot_state_f32 != 0 && state->dflash2_state_select != 0u && state->gdn_snapshot_slot_count >= SPARK_QWEN38_27B_RESIDENT_DECODE_STAGE_VERIFY_CHECKPOINT_SLOT_BASE + 8u )
 			error = SparkQwen38_27bModuleRunGdnCoreReplaySnap(state,slot,weights,prefill->lane_index,rows,ordinal);
 		else
-			/* a single-token prefill IS a decode step: routing it through the
-			 * chunk pipeline changes the rounding and breaks decode-vs-prefill
-			 * token equality (the GdnChunk formulation differs from GdnStep) */
 		error = (prefill != 0 && rows > 1u) ? SparkQwen38_27bModuleRunGdnCorePrefill(state,slot,weights,prefill->lane_index,rows,ordinal) : SparkQwen38_27bModuleRunGdnCoreDecode(state,slot,weights,rows,ordinal);
 	}
 	if ( error != cudaSuccess && rows >= 32u )
@@ -1945,15 +1943,6 @@ static SparkStatus SparkQwen38_27bModuleFinish(SparkQwen38_27bModuleState *state
 	SPARK_RETURN(status);
 }
 
-static uint64_t SparkQwen38_27bModuleFingerprint(const void *bytes, uint64_t count, uint64_t basis)
-{
-	const uint8_t *data = (const uint8_t *)bytes;
-	uint64_t hash = basis,index;
-	for (index = 0; index < count; index++)
-		hash = (hash ^ data[index]) * 1099511628211ull;
-	return(hash);
-}
-
 static SparkStatus SparkQwen38_27bModuleOpenKvTier(SparkQwen38_27bModuleState *state)
 {
 	SparkQwen38_27bStagePackHeader geometry;
@@ -1977,11 +1966,11 @@ static SparkStatus SparkQwen38_27bModuleOpenKvTier(SparkQwen38_27bModuleState *s
 	SparkQwen38_27bStagePackExpectedGeometry(&geometry,state->first_layer_index,state->layer_count);
 	geometry.tp_degree = state->tp_degree;
 	geometry.tp_rank = state->tp_rank;
-	model_fp = SparkQwen38_27bModuleFingerprint(&geometry,sizeof(geometry),14695981039346656037ull);
+	model_fp = SparkStageModuleFingerprint(&geometry,sizeof(geometry),14695981039346656037ull);
 	layout_bits[0] = state->cache_layer_stride;
 	layout_bits[1] = state->cache_block_stride;
 	layout_bits[2] = SPARK_QWEN38_27B_RESIDENT_DECODE_STAGE_KV_BLOCK_TOKENS;
-	layout_fp = SparkQwen38_27bModuleFingerprint(layout_bits,sizeof(layout_bits),model_fp);
+	layout_fp = SparkStageModuleFingerprint(layout_bits,sizeof(layout_bits),model_fp);
 	return(SparkStageKvClientOpen(&state->kv_client,SPARK_QWEN38_27B_MODULE_TAG,provider,state->stage_index,state->first_layer_index,state->layer_count,model_fp,layout_fp,service,socket_path,pool_bytes,workers));
 }
 

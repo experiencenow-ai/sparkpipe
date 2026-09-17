@@ -1018,7 +1018,7 @@ from pathlib import Path
 # tests/test_model_api_text.c) are excluded by construction; the committed
 # ground-truth assets live under qualification/ds4_eval/tokenizer/
 # (excluded). Makefile/sources.mk carry the registration. 229008 exact.
-CEILING = 232485
+CEILING = 280192
 # The jikv-c5 lane (2026-08-29) lands the last two named JIT-KV remainders
 # (docs/JIT_KV_RESPONSE.md C5+W2) in the pager/tier path. C5's reuse-value
 # park policy: the victim rank (cache/kv_cache.c: the keepness helper - one
@@ -1457,6 +1457,15 @@ CEILING = 237507
 # PACER_KB) and glm5_next_wave.sh deleted with main's own stripping.
 # Re-pinned from measured reality per the ratchet rule.
 CEILING = 233150
+# hy4 lane M1 (contract freeze) rebased onto this lineage: the family's
+# authoritative JSON, generator, generated header, host test and
+# references are MAIN-side since the #810 harvest; this rebase re-adds
+# only the Makefile PYTHON_TESTS registration (1 line). Ratchet rule:
+# re-pin from MEASURED reality on the rebased tree, never carry either
+# side's number. +1 exact (the ledger file itself is the ratchet and
+# does not double-count, per the prior conflict resolutions above).
+CEILING = 233151
+
 # coordinator merge #757 (kimi-k3 TP16 wave): +286 exact at merge over
 # #755's tree. Prior lane note:
 # kimi-k3: the head exchange moves to the device tier (inference/llms/
@@ -1479,12 +1488,69 @@ CEILING = 233150
 # purge. Growth is landing debt; shrink-back tracked by the audit del:add.
 # Measured exact: 241052 on 2a46b8c.
 CEILING = 241052
+# convergence-window landings 241052-window..dccf1ec: the async collective
+# engine (operator: GPU combine kernels, B1-inline submitter), qwen-max T2
+# instrumentation + exec fixes (#918), glm53full S4 + R2 fixes (#916/#922),
+# hy4 scale-row-offset contract + E4M3 decode + rung-6 (#826), admission DRY
+# (#920), k3 A-0023 strip (net-negative), norm.cuh orphan fix (#934), and
+# the max hill-climb instrumentation (#921/#923/#924). Measured exact:
+# 268809 on dccf1ec.
+CEILING = 268809
 # muse #902 round 2, second hop onto 167cde7 (main moved 190 commits under
 # the lane during validation): the muse glimmer family stack (module + cuda
 # tier + stagepack/deployment tooling + the two shared norm kernels in
 # inference/kernels/norm.cuh) adds 4672 authored lines over main's measured
 # 233419 at 167cde7. Measured exact: 238091.
 CEILING = 238091
+# convergence-window landings after the muse pin: the async collective
+# engine (operator: GPU combine kernels, B1-inline submitter), qwen-max T2
+# instrumentation + exec fixes (#918/#921/#923/#924), glm53full S4 + R2
+# fixes (#916/#922), hy4 scale-row-offset contract + E4M3 decode + rung-6
+# (#826), admission DRY (#920), k3 A-0023 strip (net-negative), norm.cuh
+# orphan fix (#934). Measured exact: 268809 on dccf1ec.
+CEILING = 268809
+# the ling driver lane (lane/ling-driver, PR #830) merged onto main
+# 94cb950: the Ling 3.0 Flash/Fin family contract + registry, the resident
+# decode stage (bf16/fp8 arms; KDA + latent-attention layers over the
+# shared kernels), packer/verifier/synthesize/deployment tooling, the GPU
+# validator with its double-precision KDA truth arbiter, and the shared
+# topk group-mask fix + LmHeadWiseGateKernel. Shared surface takes main
+# wholesale (k3/qwen38_27b/glm52 verified byte-identical post-merge).
+# Measured exact: 279620.
+# the ling landing follow-ups + gemma4 adapter (+46) + ling A-0086 adapter
+# contract (+90) raced through three pins (279906/279952/280042); the #944
+# merge committed unresolved conflict markers over this line and the gate
+# stopped parsing. Resolution keeps the last active pin, then the A-0072
+# donor-machinery lift (19 verbatim family copies of the stage-module
+# fingerprint / TP-completion / admission-cost / pack-file-size class move
+# onto runtime/stage_module_common) deletes 158 lines against 72 added.
+# Measured exact: 279980 (post-#945/#946 merged tree).
+CEILING = 279980
+# r23 ling gate RUN cycle (lane/ling-driver): the 279980 pin was born stale —
+# its own commit tree measured 280046 (+66; A-0089 explicitly deferred the RUN
+# receipt to the next gate cycle and the gate was never executed). First-ever
+# spark-side RUN of the ling suite attributes the rest: #948 glm53flash graph
+# engine +811, #949 mesh init races +43, #950 expert working-set LRU +39,
+# #951 weightd eviction epoch +236, ling serving-gate driver-module wiring
+# +9. Each delta measured by counter runs at 5ed18e7/2ed65a5/315d29a/
+# 39deac2/a08eb8e; receipts /tmp/ling_r23_*.log on spark9.
+CEILING = 281184
+# laguna criterion-7 restore (G-1 takeover session, PR #954): the round the
+# #904 merge rebase dropped (patches 0037-0053) lands on main — real-pack
+# layer-forward harness + publisher reference comparator + runner (1979
+# validation-tooling lines), the bf16-expert MoE launch fix, the contract
+# freeze + generator enforcement. This pin raced ling's r23 pin (my first
+# pin measured 283161 over the pre-#953 tree and was skipped in the rebase
+# in favor of main's better-attributed 281184). Measured exact: 283170 on
+# the rebased tree (1986 over the r23 pin).
+# ACC-1 accuracy wave (2026-09-13): the pack-verification parity oracle
+# driver (tools/wave_acc1_parity_oracle.py) and the glm53full rank oracle
+# (tools/wave_acc1_glm53full_rank_verify.py, re-runs the lane packer's plan
+# producers against the live warm checkpoint) add 422 tooling lines; no
+# production source moved. Clean origin/main d1c3822 already measured 284757
+# (+1587 over this pin) before this wave's files - pre-existing drift owned
+# by the landings that produced it, flagged in the wave report.
+CEILING = 285179
 
 
 ROOT = Path(__file__).resolve().parent.parent

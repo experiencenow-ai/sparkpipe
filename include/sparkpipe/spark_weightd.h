@@ -27,7 +27,7 @@ extern "C" {
 #define SPARK_WEIGHTD_IPC_MESSAGE_BYTES_MAX 8192u
 
 #define SPARK_WEIGHTD_ARENA_COUNT_MAX 16u
-#define SPARK_WEIGHTD_CONNECTION_COUNT_MAX 16u
+#define SPARK_WEIGHTD_CONNECTION_COUNT_MAX 128u
 #define SPARK_WEIGHTD_ATTACHES_PER_CONNECTION_MAX 8u
 
 #define SPARK_WEIGHTD_DEVICE_BYTES_MAX_DEFAULT (110ull * 1024ull * 1024ull * 1024ull)
@@ -58,27 +58,52 @@ extern "C" {
 #define SPARK_WEIGHTD_IPC_KIND_MESH_WRITE_RESULT 22u
 #define SPARK_WEIGHTD_IPC_KIND_MESH_BROADCAST 23u
 #define SPARK_WEIGHTD_IPC_KIND_MESH_BROADCAST_RESULT 24u
+#define SPARK_WEIGHTD_IPC_KIND_EPOCH_EXPORT 25u
+#define SPARK_WEIGHTD_IPC_KIND_EPOCH_EXPORT_RESULT 26u
+#define SPARK_WEIGHTD_IPC_KIND_LANE_ACQUIRE 27u
+#define SPARK_WEIGHTD_IPC_KIND_LANE_ACQUIRE_RESULT 28u
+#define SPARK_WEIGHTD_IPC_KIND_EVICT 29u
+#define SPARK_WEIGHTD_IPC_KIND_EVICT_RESULT 30u
 
-#define SPARK_WEIGHTD_MESH_SLOT_BYTES (16u * 1024u * 1024u)
+#define SPARK_WEIGHTD_MESH_MAX_LANES 8u
+#define SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES (64u * 1024u)
+#define SPARK_WEIGHTD_MESH_MAX_BATCH_ROWS 128u
+#define SPARK_WEIGHTD_MESH_ROW_BYTES_MAX (16u * 1024u * 2u)
+#define SPARK_WEIGHTD_MESH_SLOT_BYTES \
+    (SPARK_WEIGHTD_MESH_MAX_BATCH_ROWS * SPARK_WEIGHTD_MESH_ROW_BYTES_MAX)
 #define SPARK_WEIGHTD_MESH_RANKS_PER_BAND 16u
 #define SPARK_WEIGHTD_MESH_RANKS SPARK_WEIGHTD_MESH_RANKS_PER_BAND
-#define SPARK_WEIGHTD_MESH_SLOTS_PER_RANK 2u
+#define SPARK_WEIGHTD_MESH_SLOTS_PER_RANK 16u
 #define SPARK_WEIGHTD_MESH_SLOTS_PER_BAND \
     (SPARK_WEIGHTD_MESH_RANKS_PER_BAND * SPARK_WEIGHTD_MESH_SLOTS_PER_RANK)
-#define SPARK_WEIGHTD_MESH_BANDS 4u
+#define SPARK_WEIGHTD_MESH_BANDS (2u * SPARK_WEIGHTD_MESH_MAX_LANES)
 #define SPARK_WEIGHTD_MESH_BUFFER_BYTES \
-    (SPARK_WEIGHTD_MESH_SLOT_BYTES * SPARK_WEIGHTD_MESH_SLOTS_PER_BAND * \
-     SPARK_WEIGHTD_MESH_BANDS)
-#define SPARK_WEIGHTD_MESH_DOORBELL_BYTES 4096u
+    ((uint64_t)SPARK_WEIGHTD_MESH_SLOT_BYTES * \
+     SPARK_WEIGHTD_MESH_SLOTS_PER_BAND * SPARK_WEIGHTD_MESH_BANDS)
+#define SPARK_WEIGHTD_MESH_DOORBELL_BYTES 8192u
 #define SPARK_WEIGHTD_MESH_REGION_BYTES \
-    (SPARK_WEIGHTD_MESH_BUFFER_BYTES + SPARK_WEIGHTD_MESH_DOORBELL_BYTES)
+    (SPARK_WEIGHTD_MESH_BUFFER_BYTES + (uint64_t)SPARK_WEIGHTD_MESH_DOORBELL_BYTES)
 #define SPARK_WEIGHTD_MESH_DOORBELL_OFFSET SPARK_WEIGHTD_MESH_BUFFER_BYTES
+#define SPARK_WEIGHTD_MESH_DOORBELL_ENTRY_BYTES 24u
+#define SPARK_WEIGHTD_MESH_DOORBELL_RANK_CELLS \
+    (SPARK_WEIGHTD_MESH_BANDS * SPARK_WEIGHTD_MESH_RANKS_PER_BAND)
+#define SPARK_WEIGHTD_MESH_DOORBELL_CELL_BASE \
+    (SPARK_WEIGHTD_MESH_DOORBELL_RANK_CELLS)
+#define SPARK_WEIGHTD_MESH_DOORBELL_CELL_CANCEL \
+    (SPARK_WEIGHTD_MESH_DOORBELL_CELL_BASE + 1u)
 #define SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(band,rank) \
     (SPARK_WEIGHTD_MESH_DOORBELL_OFFSET + \
-     (((band) * SPARK_WEIGHTD_MESH_RANKS_PER_BAND + (rank)) * 24u))
-_Static_assert(SPARK_WEIGHTD_MESH_BANDS * SPARK_WEIGHTD_MESH_RANKS_PER_BAND * \
-    24u <= SPARK_WEIGHTD_MESH_DOORBELL_BYTES,
+     (((band) * SPARK_WEIGHTD_MESH_RANKS_PER_BAND + (rank)) * \
+         SPARK_WEIGHTD_MESH_DOORBELL_ENTRY_BYTES))
+#if !defined(__cplusplus)
+_Static_assert(SPARK_WEIGHTD_MESH_DOORBELL_RANK_CELLS * \
+    SPARK_WEIGHTD_MESH_DOORBELL_ENTRY_BYTES <= SPARK_WEIGHTD_MESH_DOORBELL_BYTES,
     "doorbell entries must fit the doorbell page");
+_Static_assert((SPARK_WEIGHTD_MESH_DOORBELL_RANK_CELLS + 2u * \
+        SPARK_WEIGHTD_MESH_BANDS) * SPARK_WEIGHTD_MESH_DOORBELL_ENTRY_BYTES <= \
+    SPARK_WEIGHTD_MESH_DOORBELL_BYTES,
+    "control cells must fit the doorbell page");
+#endif
 
 #define SPARK_WEIGHTD_EXPERT_COUNT_MAX 40960u
 #define SPARK_WEIGHTD_LAZY_POOL_BYTES_DEFAULT (8ull * 1024ull * 1024ull * 1024ull)
@@ -87,9 +112,11 @@ _Static_assert(SPARK_WEIGHTD_MESH_BANDS * SPARK_WEIGHTD_MESH_RANKS_PER_BAND * \
 #define SPARK_WEIGHTD_EXPERT_MANIFEST_VERSION 1u
 
 #define SPARK_WEIGHTD_EXPORT_BATCH_MAX 64u
+#if !defined(__cplusplus)
 _Static_assert(SPARK_WEIGHTD_EXPORT_BATCH_MAX <= 253u,
     "SPARK_WEIGHTD_EXPORT_BATCH_MAX must stay inside the kernel's "
     "SCM_MAX_FD (253): one EXPORT batch is one message's fd payload");
+#endif
 
 #define SPARK_WEIGHTD_MAP_CHUNK_COUNT_MAX 65536u
 
@@ -228,9 +255,56 @@ typedef struct SparkWeightdIpcAttachLazyResult
     uint32_t loaded_from_pack;
     uint32_t mesh_ready;
     uint64_t mesh_send_buffer_addr;
-    uint32_t mesh_send_buffer_bytes;
+    uint64_t mesh_send_buffer_bytes;
     uint8_t manifest_sha256[32];
 } SparkWeightdIpcAttachLazyResult;
+
+typedef struct SparkWeightdIpcEpochExport
+{
+    SparkWeightdIpcHeader header;
+    uint64_t arena_generation;
+    uint32_t reserved;
+} SparkWeightdIpcEpochExport;
+
+typedef struct SparkWeightdIpcEpochExportResult
+{
+    SparkWeightdIpcHeader header;
+    uint32_t status;
+    uint32_t reserved;
+} SparkWeightdIpcEpochExportResult;
+
+typedef struct SparkWeightdIpcLaneAcquire
+{
+    SparkWeightdIpcHeader header;
+} SparkWeightdIpcLaneAcquire;
+
+typedef struct SparkWeightdIpcLaneAcquireResult
+{
+    SparkWeightdIpcHeader header;
+    uint32_t status;
+    uint32_t lane;
+} SparkWeightdIpcLaneAcquireResult;
+
+typedef struct SparkWeightdIpcEvict
+{
+    SparkWeightdIpcHeader header;
+    uint32_t target_lane;
+    uint32_t reserved;
+} SparkWeightdIpcEvict;
+
+typedef struct SparkWeightdIpcEvictResult
+{
+    SparkWeightdIpcHeader header;
+    uint32_t status;
+    uint32_t released_leases;
+} SparkWeightdIpcEvictResult;
+
+#define SPARK_WEIGHTD_IPC_EVICT_BYTES ((uint32_t)sizeof(SparkWeightdIpcEvict))
+#define SPARK_WEIGHTD_IPC_EVICT_RESULT_BYTES \
+    ((uint32_t)sizeof(SparkWeightdIpcEvictResult))
+
+#define SPARK_WEIGHTD_IPC_EPOCH_EXPORT_BYTES ((uint32_t)sizeof(SparkWeightdIpcEpochExport))
+#define SPARK_WEIGHTD_IPC_EPOCH_EXPORT_RESULT_BYTES ((uint32_t)sizeof(SparkWeightdIpcEpochExportResult))
 
 typedef struct SparkWeightdIpcMeshWrite
 {
@@ -336,7 +410,9 @@ typedef struct SparkWeightdIpcExportLeaseResult
 	uint32_t chunk_indices[SPARK_WEIGHTD_EXPORT_BATCH_MAX];
 } SparkWeightdIpcExportLeaseResult;
 
+#if !defined(__cplusplus)
 _Static_assert(sizeof(SparkWeightdIpcAcquire) <= SPARK_WEIGHTD_IPC_MESSAGE_BYTES_MAX,"working set request exceeds IPC frame");
+#endif
 
 #define SPARK_WEIGHTD_IPC_HEADER_BYTES ((uint32_t)sizeof(SparkWeightdIpcHeader))
 #define SPARK_WEIGHTD_IPC_HELLO_BYTES ((uint32_t)sizeof(SparkWeightdIpcHello))
@@ -456,7 +532,7 @@ typedef struct SparkWeightdLazyAttachResult
     uint32_t loaded_from_pack;
     uint32_t mesh_ready;
     uint64_t mesh_send_buffer_addr;
-    uint32_t mesh_send_buffer_bytes;
+    uint64_t mesh_send_buffer_bytes;
     void *mesh_mapping;
     uint64_t chunk_bytes;
     uint32_t chunk_count;
@@ -479,6 +555,7 @@ SparkStatus SparkWeightdClientConnect(const char *socket_path,
     SparkWeightdHelloResult *hello_out);
 
 void SparkWeightdClientClose(SparkWeightdClient *client);
+uint32_t SparkWeightdClientAlive(const SparkWeightdClient *client);
 
 SparkStatus SparkWeightdClientMeshWrite(SparkWeightdClient *client,
     uint32_t peer_rank,
@@ -550,6 +627,20 @@ SparkStatus SparkWeightdClientExportBatch(SparkWeightdClient *client,
 SparkStatus SparkWeightdClientDetach(SparkWeightdClient *client,
     uint64_t arena_generation,
     SparkWeightdDetachResult *result,
+    uint64_t timeout_nanoseconds);
+
+SparkStatus SparkWeightdClientEpochExport(SparkWeightdClient *client,
+    uint64_t arena_generation,
+    int *fd_out,
+    uint64_t timeout_nanoseconds);
+
+SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
+    uint32_t *lane_out,
+    uint64_t timeout_nanoseconds);
+
+SparkStatus SparkWeightdClientEvict(SparkWeightdClient *client,
+    uint32_t target_lane,
+    uint32_t *released_leases_out,
     uint64_t timeout_nanoseconds);
 
 SparkStatus SparkWeightdClientReclaim(SparkWeightdClient *client,

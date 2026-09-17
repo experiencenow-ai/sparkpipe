@@ -62,6 +62,12 @@ typedef struct SparkGlm5NextExecutionSlot
 	void *stream;
 	void *route_ready_event;
 	uint32_t route_recorded;
+	void *graph_exec_a;
+	void *graph_exec_b;
+	uint32_t graph_ready;
+	uint32_t graph_alt;
+	uint32_t graph_bound;
+	uint32_t graph_disabled;
 	void *host_staging;
 	uint32_t *host_token_ids;
 	uint32_t *host_resident_slots;
@@ -194,7 +200,11 @@ typedef struct SparkGlm5NextCudaWave
 	// A lazy wave must bind its current layer lease before expert submission.
 	uint32_t lazy_experts;
 	uint32_t expert_lease_local_layer;
+	uint32_t expert_lease_all;
 	const uint8_t *expert_lease_base;
+	const uint32_t *expert_cover;
+	uint32_t expert_cover_stride;
+	void *expert_miss;
 	SparkGlm5NextExecutionSlot *slot;
 	uint8_t *kv_cache;
 	uint64_t kv_layer_stride_bytes;
@@ -266,9 +276,13 @@ int32_t SparkGlm5NextLaunchCudaLayerMlpPost(const SparkGlm5NextCudaWave *wave,ui
 int32_t SparkGlm5NextLaunchCudaWaveHead(const SparkGlm5NextCudaWave *wave);
 cudaError_t SparkGlm5NextLaunchHeadMaxlocPack(cudaStream_t stream,const float *scores,const uint32_t *token_ids,uint64_t *maxloc,uint32_t row_count,uint32_t rank_offset);
 cudaError_t SparkGlm5NextLaunchHeadMaxlocUnpack(cudaStream_t stream,const uint64_t *maxloc,uint32_t *token_ids,uint32_t row_count);
+cudaError_t SparkGlm5NextLaunchEpochSample(cudaStream_t stream,const void *epoch_device,void *seen);
 cudaError_t SparkGlm5NextLaunchHeadCertifiedQuantize(cudaStream_t stream,const void *head_bf16,uint8_t *certified_payload,float *certified_scale_f32,float *certified_norm_f32,uint32_t vocabulary,uint32_t hidden_dimension);
-cudaError_t SparkGlm5NextLaunchDirectSum(cudaStream_t stream,void *destination,const void *const *rank_devices,uint32_t local_rank,uint32_t rows,uint32_t width);
 cudaError_t SparkGlm5NextLaunchAccumAdd(cudaStream_t stream,void *destination_bf16,const void *source_bf16,uint32_t row_count,uint32_t width);
+cudaError_t SparkGlm5NextLaunchSumRanksF32(cudaStream_t stream,void *destination,const void *const *sources,uint32_t source_count,uint32_t element_count);
+cudaError_t SparkGlm5NextLaunchSeedF32(cudaStream_t stream,float *destination_f32,const void *source_a_bf16,const void *source_b_bf16,uint32_t element_count);
+cudaError_t SparkGlm5NextLaunchAddF32(cudaStream_t stream,float *destination_f32,const void *source_bf16,uint32_t element_count);
+cudaError_t SparkGlm5NextLaunchRoundF32(cudaStream_t stream,void *destination_bf16,const float *source_f32,uint32_t element_count);
 cudaError_t SparkGlm5NextLaunchAccumU64Max(cudaStream_t stream,uint64_t *destination,const uint64_t *source,uint32_t element_count);
 int32_t SparkGlm5NextLaunchCudaMtpDraft(const SparkGlm5NextCudaWave *wave,const SparkGlm5NextMtpDraftOps *ops,uint16_t *committed_hidden_bf16,uint32_t first_token,uint32_t *host_draft_tokens);
 int32_t SparkGlm5NextLaunchCudaMtpCommit(const SparkGlm5NextCudaWave *wave,uint32_t committed_steps);

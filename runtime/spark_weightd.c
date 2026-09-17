@@ -130,8 +130,13 @@ typedef struct SparkWeightdArena
     SparkWeightdLeaseTable *leases;
     uint8_t *needed_chunks;
     uint8_t *created_chunks;
-    uint8_t staging[65536];
+    void *epoch_device;
+    void *epoch_handle;
+    uint64_t epoch;
+    uint8_t *staging;
 } SparkWeightdArena;
+
+#define SPARK_WEIGHTD_ARENA_STAGING_BYTES (4ull * 1024ull * 1024ull)
 
 typedef struct SparkWeightdAttachRef
 {
@@ -165,6 +170,7 @@ typedef struct SparkWeightdConnection
      * other path — flush error, connection death, server teardown. */
     uint32_t response_fd_count;
     int response_fds[SPARK_WEIGHTD_EXPORT_BATCH_MAX];
+    uint32_t lane_mask;
     SparkWeightdAttachRef attaches[SPARK_WEIGHTD_ATTACHES_PER_CONNECTION_MAX];
 } SparkWeightdConnection;
 
@@ -178,6 +184,7 @@ struct SparkWeightdServer
     uint64_t next_owner;
     uint32_t arena_count;
     uint64_t resident_bytes;
+    uint16_t lane_owner[SPARK_WEIGHTD_MESH_MAX_LANES];
     SparkWeightdArena arenas[SPARK_WEIGHTD_ARENA_COUNT_MAX];
     SparkWeightdConnection connections[SPARK_WEIGHTD_CONNECTION_COUNT_MAX];
 };
@@ -187,6 +194,29 @@ struct SparkWeightdClient
     int fd;
     uint64_t next_request_id;
 };
+
+uint32_t SparkWeightdClientAlive(const SparkWeightdClient *client)
+{
+    struct pollfd pfd;
+    char probe;
+    ssize_t got;
+    if ( client == 0 || client->fd < 0 )
+        return(0u);
+    memset(&pfd,0,sizeof(pfd));
+    pfd.fd = client->fd;
+    pfd.events = POLLIN | POLLHUP | POLLERR | POLLRDHUP;
+    if ( poll(&pfd,1,0) < 0 )
+        return(0u);
+    if ( (pfd.revents & (POLLHUP | POLLERR | POLLRDHUP)) != 0 )
+        return(0u);
+    if ( (pfd.revents & POLLIN) != 0 )
+    {
+        got = recv(client->fd,&probe,1u,MSG_PEEK | MSG_DONTWAIT);
+        if ( got == 0 )
+            return(0u);
+    }
+    return(1u);
+}
 
 static uint64_t SparkWeightdMonotonicTimeNs(void)
 {
@@ -329,6 +359,18 @@ static uint32_t SparkWeightdKindBodyBytes(uint32_t kind)
             return sizeof(SparkWeightdIpcExportLease) - SPARK_WEIGHTD_IPC_HEADER_BYTES;
         case SPARK_WEIGHTD_IPC_KIND_EXPORT_LEASE_RESULT:
             return sizeof(SparkWeightdIpcExportLeaseResult) - SPARK_WEIGHTD_IPC_HEADER_BYTES;
+        case SPARK_WEIGHTD_IPC_KIND_EPOCH_EXPORT:
+            return sizeof(SparkWeightdIpcEpochExport) - SPARK_WEIGHTD_IPC_HEADER_BYTES;
+        case SPARK_WEIGHTD_IPC_KIND_LANE_ACQUIRE:
+            return sizeof(SparkWeightdIpcLaneAcquire) - SPARK_WEIGHTD_IPC_HEADER_BYTES;
+        case SPARK_WEIGHTD_IPC_KIND_LANE_ACQUIRE_RESULT:
+            return sizeof(SparkWeightdIpcLaneAcquireResult) - SPARK_WEIGHTD_IPC_HEADER_BYTES;
+        case SPARK_WEIGHTD_IPC_KIND_EVICT:
+            return SPARK_WEIGHTD_IPC_EVICT_BYTES - SPARK_WEIGHTD_IPC_HEADER_BYTES;
+        case SPARK_WEIGHTD_IPC_KIND_EVICT_RESULT:
+            return SPARK_WEIGHTD_IPC_EVICT_RESULT_BYTES - SPARK_WEIGHTD_IPC_HEADER_BYTES;
+        case SPARK_WEIGHTD_IPC_KIND_EPOCH_EXPORT_RESULT:
+            return sizeof(SparkWeightdIpcEpochExportResult) - SPARK_WEIGHTD_IPC_HEADER_BYTES;
         case SPARK_WEIGHTD_IPC_KIND_ACQUIRE:
             return sizeof(SparkWeightdIpcAcquire) - SPARK_WEIGHTD_IPC_HEADER_BYTES;
         case SPARK_WEIGHTD_IPC_KIND_ACQUIRE_RESULT:
@@ -376,6 +418,12 @@ static uint32_t SparkWeightdKindResultKind(uint32_t kind)
     {
         case SPARK_WEIGHTD_IPC_KIND_EXPORT_LEASE:
             return SPARK_WEIGHTD_IPC_KIND_EXPORT_LEASE_RESULT;
+        case SPARK_WEIGHTD_IPC_KIND_EPOCH_EXPORT:
+            return SPARK_WEIGHTD_IPC_KIND_EPOCH_EXPORT_RESULT;
+        case SPARK_WEIGHTD_IPC_KIND_LANE_ACQUIRE:
+            return SPARK_WEIGHTD_IPC_KIND_LANE_ACQUIRE_RESULT;
+        case SPARK_WEIGHTD_IPC_KIND_EVICT:
+            return SPARK_WEIGHTD_IPC_KIND_EVICT_RESULT;
         case SPARK_WEIGHTD_IPC_KIND_ACQUIRE:
             return SPARK_WEIGHTD_IPC_KIND_ACQUIRE_RESULT;
         case SPARK_WEIGHTD_IPC_KIND_RELEASE:
@@ -452,11 +500,30 @@ SparkStatus SparkWeightdIpcValidateHeader(const SparkWeightdIpcHeader *header,
 
 static SparkStatus SparkWeightdStatusFromWire(uint32_t wire_status)
 {
-    if (wire_status > (uint32_t)SPARK_STATUS_UNSUPPORTED)
+    if (wire_status > (uint32_t)SPARK_STATUS_EVICT_DENIED)
     {
         SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
     }
     return (SparkStatus)wire_status;
+}
+
+static uint32_t SparkWeightdConnectionLane(
+    const SparkWeightdConnection *connection)
+{
+    uint32_t lane;
+    if (connection->lane_mask == 0u ||
+        (connection->lane_mask & (connection->lane_mask - 1u)) != 0u)
+    {
+        return SPARK_WEIGHTD_LANE_NONE;
+    }
+    for (lane = 0u; lane < SPARK_WEIGHTD_MESH_MAX_LANES; lane++)
+    {
+        if ((connection->lane_mask & (uint16_t)(1u << lane)) != 0u)
+        {
+            return lane;
+        }
+    }
+    return SPARK_WEIGHTD_LANE_NONE;
 }
 
 /* ------------------------------ server: VMM arenas ------------------------------ */
@@ -506,6 +573,8 @@ static void SparkWeightdVmmRelease(SparkWeightdArena *arena)
         free(arena->chunk_handles);
     }
     free(arena->chunk_refs);
+    free(arena->staging);
+    arena->staging = 0;
     if (base != 0)
     {
         (void)cuMemAddressFree(base, (size_t)arena->virtual_bytes);
@@ -603,7 +672,9 @@ static SparkStatus SparkWeightdVmmAllocate(uint64_t arena_bytes,
         arena->virtual_bytes = chunk_count * chunk_bytes;
         arena->chunk_bytes = chunk_bytes;
         arena->chunk_count = chunk_count;
-        return SPARK_STATUS_OK;
+        arena->staging = (uint8_t *)malloc(SPARK_WEIGHTD_ARENA_STAGING_BYTES);
+        if (arena->staging != 0)
+            return SPARK_STATUS_OK;
     }
     /* unwind: unmap what was mapped, release what was created, free the VA */
     if (mapped != 0u)
@@ -661,19 +732,54 @@ static SparkStatus SparkWeightdVmmReserve(uint64_t arena_bytes,
         arena->chunk_refs = 0;
         SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
     }
-    if (cuMemAddressReserve(&base,
-            (size_t)(chunk_count * chunk_bytes), 0u, 0ull, 0ull) != CUDA_SUCCESS)
     {
-        free(arena->chunk_handles);
-        free(arena->chunk_refs);
-        arena->chunk_handles = 0;
-        arena->chunk_refs = 0;
-        SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
+        CUmemAccessDesc access_stub;
+        memset(&access_stub,0,sizeof(access_stub));
+        access_stub.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+        access_stub.location.id = device;
+        access_stub.flags = CU_MEM_ACCESS_FLAGS_PROT_READ;
+        if (cuMemAddressReserve(&base,
+                (size_t)((chunk_count + 1ull) * chunk_bytes), 0u, 0ull,
+                0ull) != CUDA_SUCCESS ||
+            cuMemCreate((CUmemGenericAllocationHandle *)
+                &arena->epoch_handle,(size_t)chunk_bytes,&prop,0ull) !=
+                CUDA_SUCCESS ||
+            cuMemMap(base + (CUdeviceptr)chunk_count * chunk_bytes,
+                (size_t)chunk_bytes,0u,
+                (CUmemGenericAllocationHandle)arena->epoch_handle,0ull) !=
+                CUDA_SUCCESS ||
+            cuMemSetAccess(base + (CUdeviceptr)chunk_count * chunk_bytes,
+                (size_t)chunk_bytes,&access_stub,1u) != CUDA_SUCCESS)
+        {
+            if ( base != 0 )
+                (void)cuMemAddressFree(base,
+                    (size_t)((chunk_count + 1ull) * chunk_bytes));
+            if ( arena->epoch_handle != 0 )
+            {
+                (void)cuMemRelease((CUmemGenericAllocationHandle)
+                    arena->epoch_handle);
+                arena->epoch_handle = 0;
+            }
+            free(arena->chunk_handles);
+            free(arena->chunk_refs);
+            arena->chunk_handles = 0;
+            arena->chunk_refs = 0;
+            SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
+        }
+        arena->epoch_device = (void *)(uintptr_t)
+            (base + (CUdeviceptr)chunk_count * chunk_bytes);
+        arena->epoch = 0ull;
     }
     arena->device_base = (void *)(uintptr_t)base;
     arena->virtual_bytes = chunk_count * chunk_bytes;
     arena->chunk_bytes = chunk_bytes;
     arena->chunk_count = chunk_count;
+    arena->staging = (uint8_t *)malloc(SPARK_WEIGHTD_ARENA_STAGING_BYTES);
+    if (arena->staging == 0)
+    {
+        SparkWeightdVmmRelease(arena);
+        SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
+    }
     return SPARK_STATUS_OK;
 }
 
@@ -1184,6 +1290,10 @@ static void SparkWeightdServerStageMeshFd(SparkWeightdConnection *connection)
     connection->response_fds[connection->response_fd_count++] = fd;
 }
 
+static SparkStatus SparkWeightdPreloadSpine(SparkWeightdServer *server,
+    SparkWeightdArena *arena,int32_t fd);
+static SparkStatus SparkWeightdArenaChunkEnsure(SparkWeightdServer *server,
+    SparkWeightdArena *arena,uint32_t first_chunk,uint32_t last_chunk);
 static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
     SparkWeightdConnection *connection,
     const SparkWeightdIpcAttachLazy *request,
@@ -1244,11 +1354,13 @@ static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
             result->status = status;
             return;
         }
-        if (arena->lazy == 0u || arena->expert_pool_bytes != request->expert_pool_bytes)
+        if (arena->lazy == 0u)
         {
             result->status = (uint32_t)SPARK_STATUS_INVALID_ARGUMENT;
             return;
         }
+        if (request->expert_pool_bytes > arena->expert_pool_bytes)
+            arena->expert_pool_bytes = request->expert_pool_bytes;
         slot = (uint32_t)(arena - server->arenas);
         status = SparkWeightdServerAttachRegister(server, connection, slot);
         result->status = (uint32_t)status;
@@ -1322,6 +1434,22 @@ static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
         return;
     }
 
+    {
+        int32_t pack_fd = open(request->pack_path,O_RDONLY);
+        if ( pack_fd >= 0 )
+        {
+            status = SparkWeightdPreloadSpine(server,arena,pack_fd);
+            (void)close(pack_fd);
+            if ( status != SPARK_STATUS_OK )
+                fprintf(stderr,"WD-SPINE-PRELOAD-FAIL status=%s\n",
+                    SparkStatusToString(status));
+            else
+                printf("weightd spine preloaded spans=%u bytes=%llu\n",
+                    arena->manifest.spine_count,
+                    (unsigned long long)arena->manifest.spine_bytes);
+        }
+    }
+
     status = SparkWeightdServerAttachRegister(server, connection, slot);
     if (status != SPARK_STATUS_OK)
     {
@@ -1356,6 +1484,56 @@ static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
     fflush(stdout);
 }
 
+static SparkStatus SparkWeightdPreloadSpine(SparkWeightdServer *server,
+    SparkWeightdArena *arena,int32_t fd)
+{
+    const SparkWeightdSpan *span;
+    uint64_t span_offset,span_end;
+    uint32_t first_chunk,last_chunk,chunk,index;
+    size_t moved;
+    if ( arena->staging == 0 || arena->manifest.spine_count == 0u )
+        return(SPARK_STATUS_INVALID_ARGUMENT);
+    for ( index = 0u; index < arena->manifest.spine_count; index++ )
+    {
+        span = &arena->manifest.spine[index];
+        first_chunk = (uint32_t)(span->offset / arena->chunk_bytes);
+        last_chunk = (uint32_t)((span->offset + span->bytes - 1u) /
+            arena->chunk_bytes);
+        for ( chunk = first_chunk; chunk <= last_chunk; chunk++ )
+        {
+            if ( arena->chunk_handles[chunk] == 0 )
+            {
+                SparkStatus chunk_status;
+                chunk_status = SparkWeightdArenaChunkEnsure(server,arena,
+                    chunk,chunk);
+                if ( chunk_status != SPARK_STATUS_OK )
+                    SPARK_RETURN(chunk_status);
+                arena->needed_chunks[chunk] = 1u;
+            }
+        }
+    }
+    for ( index = 0u; index < arena->manifest.spine_count; index++ )
+    {
+        span = &arena->manifest.spine[index];
+        span_offset = span->offset;
+        span_end = span->offset + span->bytes;
+        while ( span_offset < span_end )
+        {
+            uint64_t remain = span_end - span_offset;
+            size_t bytes = remain < SPARK_WEIGHTD_ARENA_STAGING_BYTES ?
+                (size_t)remain : (size_t)SPARK_WEIGHTD_ARENA_STAGING_BYTES;
+            moved = pread(fd,arena->staging,bytes,(off_t)span_offset);
+            if ( moved <= 0 )
+                return(SPARK_STATUS_IO_ERROR);
+            if ( cudaMemcpy((uint8_t *)arena->device_base + span_offset,
+                    arena->staging,moved,cudaMemcpyHostToDevice) != cudaSuccess )
+                return(SPARK_STATUS_IO_ERROR);
+            span_offset += (uint64_t)moved;
+        }
+    }
+    return(SPARK_STATUS_OK);
+}
+
 static SparkStatus SparkWeightdArenaChunkEnsure(SparkWeightdServer *server,SparkWeightdArena *arena,
     uint32_t first_chunk,
     uint32_t last_chunk)
@@ -1383,12 +1561,16 @@ static SparkStatus SparkWeightdArenaChunkEnsure(SparkWeightdServer *server,Spark
             if (cuMemCreate(&handle, (size_t)arena->chunk_bytes, &prop,
                     0ull) != CUDA_SUCCESS)
             {
+                fprintf(stderr,"WD-CHUNK-FAIL create idx=%u bytes=%llu\n",
+                    (unsigned)index,(unsigned long long)arena->chunk_bytes);
                 SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
             }
             if (cuMemMap(base + (CUdeviceptr)index * arena->chunk_bytes,
                     (size_t)arena->chunk_bytes, 0u, handle, 0ull) != CUDA_SUCCESS)
             {
                 (void)cuMemRelease(handle);
+                fprintf(stderr,"WD-CHUNK-FAIL map idx=%u bytes=%llu\n",
+                    (unsigned)index,(unsigned long long)arena->chunk_bytes);
                 SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
             }
             arena->chunk_handles[index] = (void *)handle;
@@ -1476,6 +1658,10 @@ static SparkStatus SparkWeightdEvictGroup(SparkWeightdServer *server,SparkWeight
 		arena->expert_present_bytes -= range->bytes;
 	}
 	arena->experts[group_index].present = 0u;
+	arena->epoch++;
+	if ( arena->epoch_device != 0 )
+		(void)cudaMemcpy(arena->epoch_device,&arena->epoch,
+		    sizeof(uint64_t),cudaMemcpyHostToDevice);
 	return(SPARK_STATUS_OK);
 }
 
@@ -1540,10 +1726,20 @@ static SparkStatus SparkWeightdLoadRange(SparkWeightdArena *arena,int32_t fd,con
 		if ( moved < 0 && errno == EINTR )
 			continue;
 		if ( moved <= 0 )
+		{
+			fprintf(stderr,"WD-LOADRANGE-FAIL pread fd=%d off=%llu req=%llu moved=%ld errno=%d\n",
+				fd,(unsigned long long)(range->offset + offset),
+				(unsigned long long)bytes,(long)moved,errno);
 			return(SPARK_STATUS_IO_ERROR);
+		}
 		SparkCk128Update(&context,arena->staging,(size_t)moved);
 		if ( cudaMemcpy((uint8_t *)arena->device_base + range->offset + offset,arena->staging,(size_t)moved,cudaMemcpyHostToDevice) != cudaSuccess )
+		{
+			fprintf(stderr,"WD-LOADRANGE-FAIL memcpy dst_off=%llu bytes=%llu cuda=%s\n",
+				(unsigned long long)(range->offset + offset),
+				(unsigned long long)moved,cudaGetErrorString(cudaGetLastError()));
 			return(SPARK_STATUS_IO_ERROR);
+		}
 		offset += (uint64_t)moved;
 	}
 	SparkCk128Finalize(&context,digest);
@@ -1636,7 +1832,10 @@ static SparkStatus SparkWeightdAcquireWorkingSet(SparkWeightdServer *server,Spar
 		return(SPARK_STATUS_INVALID_ARGUMENT);
 	if ( arena->failure_status != SPARK_STATUS_OK )
 		return(arena->failure_status);
-	status = SparkWeightdLeaseAcquire(arena->leases,connection->owner,keys,count,identifier);
+	{
+		uint32_t lease_lane = SparkWeightdConnectionLane(connection);
+		status = SparkWeightdLeaseAcquire(arena->leases,connection->owner,lease_lane,keys,count,identifier);
+	}
 	if ( status != SPARK_STATUS_OK )
 		SPARK_RETURN(status);
 	lease = SparkWeightdLeaseFind(arena->leases,connection->owner,*identifier);
@@ -1893,13 +2092,33 @@ static uint32_t SparkWeightdServerDispatch(SparkWeightdServer *server,
         {
             if ( request_header->kind == SPARK_WEIGHTD_IPC_KIND_RELEASE )
             {
+                uint32_t occ_i,occ_n = 0u;
+                for (occ_i = 0u; occ_i < SPARK_WEIGHTD_LEASE_COUNT_MAX; occ_i++)
+                    if ( arena->leases->leases[occ_i].count != 0u )
+                        occ_n++;
                 result->lease_identifier = release->lease_identifier;
                 result->status = SparkWeightdLeaseRelease(arena->leases,connection->owner,release->lease_identifier);
+                fprintf(stderr,"WD-LEASE-TRACE kind=release owner=%llu id=%llu status=%d occupied=%u\n",
+                    (unsigned long long)connection->owner,
+                    (unsigned long long)release->lease_identifier,
+                    (int)result->status,occ_n);
             }
             else if ( acquire->reserved0 != 0u )
                 result->status = SPARK_STATUS_INVALID_ARGUMENT;
             else
+            {
+                uint32_t occ_i,occ_n = 0u;
+                for (occ_i = 0u; occ_i < SPARK_WEIGHTD_LEASE_COUNT_MAX; occ_i++)
+                    if ( arena->leases->leases[occ_i].count != 0u )
+                        occ_n++;
                 result->status = SparkWeightdAcquireWorkingSet(server,connection,arena,acquire->keys,acquire->count,&result->lease_identifier);
+                fprintf(stderr,"WD-LEASE-TRACE kind=%s owner=%llu keys=%u status=%d occupied=%u id=%llu\n",
+                    request_header->kind == SPARK_WEIGHTD_IPC_KIND_ACQUIRE ? "acquire" : "release",
+                    (unsigned long long)connection->owner,
+                    request_header->kind == SPARK_WEIGHTD_IPC_KIND_ACQUIRE ? (unsigned)acquire->count : 0u,
+                    (int)result->status,occ_n,
+                    (unsigned long long)result->lease_identifier);
+            }
         }
         result->resident_bytes = server->resident_bytes;
         return(sizeof(*result));
@@ -1981,6 +2200,105 @@ static uint32_t SparkWeightdServerDispatch(SparkWeightdServer *server,
         return SPARK_WEIGHTD_IPC_DETACH_RESULT_BYTES;
     }
 
+    if (request_header->kind == SPARK_WEIGHTD_IPC_KIND_LANE_ACQUIRE)
+    {
+        SparkWeightdIpcLaneAcquireResult *result =
+            (SparkWeightdIpcLaneAcquireResult *)response;
+        uint32_t lane;
+        memset(result,0,sizeof(*result));
+        SparkWeightdBuildHeader(response,result_kind,request_id);
+        result->status = (uint32_t)SPARK_STATUS_NO_LANE;
+        for (lane = 0u; lane < SPARK_WEIGHTD_MESH_MAX_LANES; lane++)
+            if (server->lane_owner[lane] == 0u)
+            {
+                server->lane_owner[lane] =
+                    (uint16_t)(connection - server->connections) + 1u;
+                connection->lane_mask |= (uint16_t)(1u << lane);
+                result->status = (uint32_t)SPARK_STATUS_OK;
+                result->lane = lane;
+                break;
+            }
+        return(sizeof(*result));
+    }
+
+    if (request_header->kind == SPARK_WEIGHTD_IPC_KIND_EVICT)
+    {
+        SparkWeightdIpcEvictResult *result =
+            (SparkWeightdIpcEvictResult *)response;
+        const SparkWeightdIpcEvict *request =
+            (const SparkWeightdIpcEvict *)request_header;
+        uint32_t requester_lane;
+        uint32_t released;
+        uint32_t arena_slot;
+        memset(result,0,sizeof(*result));
+        SparkWeightdBuildHeader(response,result_kind,request_id);
+        requester_lane = SparkWeightdConnectionLane(connection);
+        if (request->target_lane >= SPARK_WEIGHTD_MESH_MAX_LANES ||
+            requester_lane == SPARK_WEIGHTD_LANE_NONE)
+        {
+            result->status = (uint32_t)SPARK_STATUS_INVALID_ARGUMENT;
+            return sizeof(*result);
+        }
+        if (requester_lane >= request->target_lane)
+        {
+            result->status = (uint32_t)SPARK_STATUS_EVICT_DENIED;
+            fprintf(stderr,
+                "weightd evict_denied requester_lane=%u target_lane=%u\n",
+                requester_lane,request->target_lane);
+            return sizeof(*result);
+        }
+        released = 0u;
+        for (arena_slot = 0u; arena_slot < server->arena_count; arena_slot++)
+        {
+            SparkWeightdLeaseTable *leases =
+                server->arenas[arena_slot].leases;
+            uint32_t lane_released = 0u;
+            if (leases == 0)
+            {
+                continue;
+            }
+            if (SparkWeightdLeaseReleaseForLane(leases,request->target_lane,
+                    &lane_released) == SPARK_STATUS_OK)
+            {
+                released += lane_released;
+            }
+        }
+        if (released == 0u && server->lane_owner[request->target_lane] == 0u)
+        {
+            result->status = (uint32_t)SPARK_STATUS_NOT_FOUND;
+            return sizeof(*result);
+        }
+        fprintf(stderr,"weightd evict requester_lane=%u target_lane=%u released=%u\n",
+            requester_lane,request->target_lane,released);
+        result->status = (uint32_t)SPARK_STATUS_OK;
+        result->released_leases = released;
+        return sizeof(*result);
+    }
+
+    if (request_header->kind == SPARK_WEIGHTD_IPC_KIND_EPOCH_EXPORT)
+    {
+        SparkWeightdIpcEpochExportResult *result =
+            (SparkWeightdIpcEpochExportResult *)response;
+        const SparkWeightdIpcEpochExport *request =
+            (const SparkWeightdIpcEpochExport *)request_header;
+        SparkWeightdArena *arena;
+        memset(result, 0, sizeof(*result));
+        SparkWeightdBuildHeader(response, result_kind, request_id);
+        arena = SparkWeightdAttachedArena(server, connection,
+            request->arena_generation);
+        if (arena == 0 || arena->epoch_handle == 0 ||
+            SparkWeightdServerExportOne(connection, arena->epoch_handle) !=
+                SPARK_STATUS_OK)
+        {
+            if (arena != 0 && arena->epoch_handle != 0)
+                SparkWeightdServerCloseStagedFds(connection);
+            result->status = (uint32_t)SPARK_STATUS_NOT_FOUND;
+            return SPARK_WEIGHTD_IPC_EPOCH_EXPORT_RESULT_BYTES;
+        }
+        result->status = (uint32_t)SPARK_STATUS_OK;
+        return SPARK_WEIGHTD_IPC_EPOCH_EXPORT_RESULT_BYTES;
+    }
+
     if (request_header->kind == SPARK_WEIGHTD_IPC_KIND_RECLAIM)
     {
         SparkWeightdIpcReclaimResult *result =
@@ -2014,6 +2332,13 @@ static void SparkWeightdServerCloseConnection(SparkWeightdServer *server,
     uint32_t connection_index)
 {
     SparkWeightdConnection *connection = &server->connections[connection_index];
+    if (connection->owner != 0u)
+    {
+        uint32_t arena_index;
+        for (arena_index = 0u; arena_index < server->arena_count; arena_index++)
+            if (server->arenas[arena_index].leases != 0)
+                (void)SparkWeightdLeaseReleaseOwner(server->arenas[arena_index].leases,connection->owner);
+    }
     while (connection->attach_count != 0u)
     {
         /* consumer death drops a refcount — every one of them */
@@ -2022,6 +2347,16 @@ static void SparkWeightdServerCloseConnection(SparkWeightdServer *server,
     if (connection->fd >= 0)
     {
         (void)close(connection->fd);
+    }
+    if (connection->lane_mask != 0u)
+    {
+        uint32_t lane;
+        for (lane = 0u; lane < SPARK_WEIGHTD_MESH_MAX_LANES; lane++)
+            if ((connection->lane_mask & (uint16_t)(1u << lane)) != 0u &&
+                server->lane_owner[lane] ==
+                    (uint16_t)(connection - server->connections) + 1u)
+                server->lane_owner[lane] = 0u;
+        connection->lane_mask = 0u;
     }
     SparkWeightdServerCloseStagedFds(connection); /* unsent chunk fds die here */
     connection->fd = -1;
@@ -2830,15 +3165,26 @@ SparkStatus SparkWeightdClientAttachLazy(SparkWeightdClient *client,
         }
         if (fds_received != 0u)
         {
-            void *mapping = mmap(0, wire_result.mesh_send_buffer_bytes,
+            uint64_t slack = wire_result.mesh_send_buffer_bytes +
+                SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES -
+                wire_result.mesh_send_buffer_bytes %
+                    SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES -
+                wire_result.mesh_send_buffer_bytes;
+            uint8_t *raw = mmap(0,
+                wire_result.mesh_send_buffer_bytes + slack,
                 PROT_READ | PROT_WRITE, MAP_SHARED, fds[0], 0);
             (void)close(fds[0]);
-            if (mapping == MAP_FAILED)
+            if (raw == MAP_FAILED)
             {
                 SPARK_FAIL(SPARK_STATUS_IO_ERROR);
             }
-            wire_result.mesh_send_buffer_addr = (uint64_t)(uintptr_t)mapping;
-            result->mesh_mapping = mapping;
+            {
+                uintptr_t aligned = ((uintptr_t)raw +
+                    SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES - 1u) &
+                    ~(uintptr_t)(SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES - 1u);
+                wire_result.mesh_send_buffer_addr = (uint64_t)aligned;
+                result->mesh_mapping = (void *)aligned;
+            }
         }
     }
     if (wire_result.status != (uint32_t)SPARK_STATUS_OK)
@@ -2938,6 +3284,68 @@ SparkStatus SparkWeightdClientMeshBroadcast(
         (uint32_t)sizeof(wire_result), timeout_nanoseconds);
     if ( status != SPARK_STATUS_OK )
         SPARK_RETURN(status);
+    if ( wire_result.status != (uint32_t)SPARK_STATUS_OK )
+        return SparkWeightdStatusFromWire(wire_result.status);
+    return SPARK_STATUS_OK;
+}
+
+SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
+    uint32_t *lane_out, uint64_t timeout_nanoseconds)
+{
+    SparkWeightdIpcLaneAcquire wire;
+    SparkWeightdIpcLaneAcquireResult wire_result;
+    SparkStatus status;
+
+    if ( client == 0 || lane_out == 0 )
+        SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+    memset(&wire, 0, sizeof(wire));
+    wire.header.magic = SPARK_WEIGHTD_IPC_MAGIC;
+    wire.header.abi_version = SPARK_WEIGHTD_IPC_ABI_VERSION;
+    wire.header.kind = SPARK_WEIGHTD_IPC_KIND_LANE_ACQUIRE;
+    wire.header.body_bytes =
+        sizeof(wire) - SPARK_WEIGHTD_IPC_HEADER_BYTES;
+    wire.header.request_id = ++client->next_request_id;
+    memset(&wire_result, 0, sizeof(wire_result));
+    status = SparkWeightdClientExchange(client, &wire,
+        (uint32_t)sizeof(wire), &wire_result,
+        (uint32_t)sizeof(wire_result), timeout_nanoseconds);
+    if ( status != SPARK_STATUS_OK )
+        SPARK_RETURN(status);
+    if ( wire_result.status != (uint32_t)SPARK_STATUS_OK )
+        return SparkWeightdStatusFromWire(wire_result.status);
+    if ( wire_result.lane >= SPARK_WEIGHTD_MESH_MAX_LANES )
+        SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
+    *lane_out = wire_result.lane;
+    return SPARK_STATUS_OK;
+}
+
+SparkStatus SparkWeightdClientEvict(SparkWeightdClient *client,
+    uint32_t target_lane,
+    uint32_t *released_leases_out,
+    uint64_t timeout_nanoseconds)
+{
+    SparkWeightdIpcEvict wire;
+    SparkWeightdIpcEvictResult wire_result;
+    SparkStatus status;
+
+    if ( client == 0 || released_leases_out == 0 ||
+        target_lane >= SPARK_WEIGHTD_MESH_MAX_LANES )
+        SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+    memset(&wire, 0, sizeof(wire));
+    wire.header.magic = SPARK_WEIGHTD_IPC_MAGIC;
+    wire.header.abi_version = SPARK_WEIGHTD_IPC_ABI_VERSION;
+    wire.header.kind = SPARK_WEIGHTD_IPC_KIND_EVICT;
+    wire.header.body_bytes =
+        sizeof(wire) - SPARK_WEIGHTD_IPC_HEADER_BYTES;
+    wire.header.request_id = ++client->next_request_id;
+    wire.target_lane = target_lane;
+    memset(&wire_result, 0, sizeof(wire_result));
+    status = SparkWeightdClientExchange(client, &wire,
+        (uint32_t)sizeof(wire), &wire_result,
+        (uint32_t)sizeof(wire_result), timeout_nanoseconds);
+    if ( status != SPARK_STATUS_OK )
+        SPARK_RETURN(status);
+    *released_leases_out = wire_result.released_leases;
     if ( wire_result.status != (uint32_t)SPARK_STATUS_OK )
         return SparkWeightdStatusFromWire(wire_result.status);
     return SPARK_STATUS_OK;
@@ -3259,6 +3667,42 @@ SparkStatus SparkWeightdClientExportLeaseBatch(SparkWeightdClient *client,uint64
 	batch->batch_offset = response.base.batch_offset;
 	batch->batch_count = response.base.batch_count;
 	memcpy(batch->chunk_indices,response.chunk_indices,sizeof(batch->chunk_indices));
+	return(SPARK_STATUS_OK);
+}
+
+SparkStatus SparkWeightdClientEpochExport(SparkWeightdClient *client,
+    uint64_t arena_generation,
+    int *fd_out,
+    uint64_t timeout_nanoseconds)
+{
+	SparkWeightdIpcEpochExport request;
+	SparkWeightdIpcEpochExportResult response;
+	int fds[1];
+	uint32_t received = 0u;
+	SparkStatus status;
+	if (client == 0 || fd_out == 0)
+		return(SPARK_STATUS_INVALID_ARGUMENT);
+	*fd_out = -1;
+	if (client->next_request_id == UINT64_MAX)
+		return(SPARK_STATUS_CAPACITY_EXCEEDED);
+	memset(&request,0,sizeof(request));
+	memset(&response,0,sizeof(response));
+	fds[0] = -1;
+	SparkWeightdBuildHeader((uint8_t *)&request,
+	    SPARK_WEIGHTD_IPC_KIND_EPOCH_EXPORT,++client->next_request_id);
+	request.arena_generation = arena_generation;
+	status = SparkWeightdClientExportExchange(client,&request,
+	    sizeof(request),&response,sizeof(response),fds,&received,
+	    timeout_nanoseconds);
+	if (status != SPARK_STATUS_OK)
+		SPARK_RETURN(status);
+	if (response.status != (uint32_t)SPARK_STATUS_OK || received != 1u)
+	{
+		while (received != 0u)
+			(void)close(fds[--received]);
+		return(SPARK_STATUS_IO_ERROR);
+	}
+	*fd_out = fds[0];
 	return(SPARK_STATUS_OK);
 }
 

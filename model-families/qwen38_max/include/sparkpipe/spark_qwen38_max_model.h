@@ -13,7 +13,9 @@
 #define SPARK_QWEN38_MAX_MODEL_OUTPUT_VOCAB_COUNT SPARK_QWEN38_MAX_MODEL_VOCAB_COUNT
 #define SPARK_QWEN38_MAX_MODEL_MAXIMUM_CONTEXT_TOKENS 262144u
 #define SPARK_QWEN38_MAX_MODEL_RMS_NORM_EPSILON 1e-06f
+#ifndef SPARK_QWEN38_MAX_MODEL_MTP_LAYER_COUNT
 #define SPARK_QWEN38_MAX_MODEL_MTP_LAYER_COUNT 1u
+#endif
 
 #define SPARK_QWEN38_MAX_MODEL_ATTENTION_PERIOD 4u
 #define SPARK_QWEN38_MAX_MODEL_FULL_ATTENTION_PHASE 3u
@@ -55,9 +57,6 @@
 #define SPARK_QWEN38_MAX_MODEL_ATTN_LOCAL_KV_HEAD_COUNT(tp_degree) \
 	(SPARK_QWEN38_MAX_MODEL_ATTN_KV_HEAD_COUNT \
 		/ SPARK_QWEN38_MAX_MODEL_ATTN_KV_SHARD_COUNT(tp_degree))
-/* The rank's first kv head, in whole-head units. For degrees dividing the
- * kv head count this is the plain rank*local block; for replicating
- * degrees it is the shared group's head (ranks 0..3 -> head 0 at TP16). */
 #define SPARK_QWEN38_MAX_MODEL_ATTN_RANK_KV_HEAD_BASE(tp_degree, tp_rank) \
 	((((uint32_t)(tp_rank)) * SPARK_QWEN38_MAX_MODEL_ATTN_KV_HEAD_COUNT) \
 		/ (uint32_t)(tp_degree))
