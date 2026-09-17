@@ -983,7 +983,13 @@ static SparkStatus SparkModelResidentClientRead(
 		{
 			status = SparkModelResidentClientProcessMessage(client,client->input,client->input_target_bytes);
 			if ( status != SPARK_STATUS_OK )
+			{
+				fprintf(stderr,"client message rejected rank=%u kind=%u status=%u\n",
+					(unsigned)client->rank_index,
+					(unsigned)((const SparkModelResidentIpcHeader *)message)->kind,
+					(unsigned)status);
 				SPARK_RETURN(status);
+			}
 			client->input_bytes = 0u;
 			client->input_target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
 			processed++;

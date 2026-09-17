@@ -173,15 +173,17 @@ static void SparkModelPipelineClientRecordFailure(
 }
 
 static void SparkModelPipelineClientSetFailure(
-	SparkModelPipelineClient *pipeline,
-	SparkStatus status,
-	uint32_t stage_index)
+    SparkModelPipelineClient *pipeline,
+    SparkStatus status,
+    uint32_t stage_index)
 {
 	uint32_t rank,slot;
 	if ( pipeline->failed_status != SPARK_STATUS_OK )
 		return;
 	pipeline->failed_status = status;
 	pipeline->failed_stage_index = stage_index;
+	fprintf(stderr,"pipeline set-failure status=%u stage=%u\n",
+		(unsigned)status,(unsigned)stage_index);
 	for (rank=0u; rank<pipeline->rank_count; rank++)
 		SparkModelResidentClientFailStop(pipeline->clients[rank]);
 	for (slot=0u; slot<pipeline->runtime_limits.resident_sequence_capacity;
