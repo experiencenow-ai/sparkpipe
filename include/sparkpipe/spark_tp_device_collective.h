@@ -351,9 +351,6 @@ SparkStatus SparkTpDeviceCollectiveArmCapture(
 SparkStatus SparkTpDeviceCollectiveDisarmCapture(
     SparkTpDeviceCollective *collective);
 
-SparkStatus SparkTpDeviceCollectiveGraphReplaySeed(
-    SparkTpDeviceCollective *collective,void *stream);
-
 uint64_t SparkTpDeviceCollectiveGraphProgress(
     SparkTpDeviceCollective *collective,
     uint64_t *cell_out);

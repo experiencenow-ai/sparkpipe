@@ -1179,21 +1179,6 @@ SparkStatus SparkTpDeviceCollectiveArmCapture(
     return(SPARK_STATUS_OK);
 }
 
-SparkStatus SparkTpDeviceCollectiveGraphReplaySeed(
-    SparkTpDeviceCollective *collective,void *stream)
-{
-    SparkTpDeviceCollectiveImplementation *implementation;
-    if ( collective == 0 || collective->implementation == 0 )
-        SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
-    implementation = collective->implementation;
-    if ( implementation->seq_cell == 0 || implementation->capture_armed != 0u )
-        SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
-    if ( cudaMemcpyAsync(implementation->seq_cell,
-            &implementation->capture_seq_base,sizeof(uint64_t),
-            SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE,stream) != 0 )
-        SPARK_FAIL(SPARK_STATUS_IO_ERROR);
-    return(SPARK_STATUS_OK);
-}
 
 SparkStatus SparkTpDeviceCollectiveDisarmCapture(
     SparkTpDeviceCollective *collective)
