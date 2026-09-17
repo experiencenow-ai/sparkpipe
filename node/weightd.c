@@ -247,7 +247,14 @@ int main(int argument_count, char **arguments)
     signal(SIGTERM, SparkWeightdSignal);
 
     {
-        int singleton_fd = open("/tmp/spark_weightd.singleton", O_CREAT | O_RDWR, 0600);
+        char singleton_path[512];
+        int sn = snprintf(singleton_path, sizeof(singleton_path), "%s.singleton", socket_path);
+        if ( sn <= 0 || (size_t)sn >= sizeof(singleton_path) )
+        {
+            fprintf(stderr, "weightd: singleton path overflow\n");
+            return 1;
+        }
+        int singleton_fd = open(singleton_path, O_CREAT | O_RDWR, 0600);
         struct flock singleton_lock;
         if ( singleton_fd < 0 )
         {
