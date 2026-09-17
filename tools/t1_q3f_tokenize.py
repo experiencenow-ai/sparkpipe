@@ -95,8 +95,8 @@ def main():
 def decode_ids(ids, model):
     vocab = model["vocab"]
     inverse = {v: k for k, v in vocab.items()}
-    raw = "".join(UNICODE_TO_BYTES[c] for token in ids for c in inverse[token])
-    return raw.decode("utf-8", "replace")
+    text = "".join(UNICODE_TO_BYTES[c] for token in ids for c in inverse[token])
+    return text.encode("latin-1").decode("utf-8", "replace")
 
 
 if __name__ == "__main__":
