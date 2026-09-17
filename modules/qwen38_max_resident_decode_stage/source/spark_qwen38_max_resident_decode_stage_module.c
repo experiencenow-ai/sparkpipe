@@ -402,15 +402,40 @@ static SparkStatus SparkQwen38MaxModuleConfigure(SparkQwen38MaxModuleState *stat
 
 #include "sparkpipe/spark_pack_load_common.h"
 
+#define SPARK_QWEN38_MAX_MODULE_ROW_SHARDED_KIND_MASK \
+	((1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W1) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W3) | \
+	 (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_DOWN) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_GATE) | \
+	 (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_UP) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTN_QUERY) | \
+	 (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTN_KEY) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTN_VALUE) | \
+	 (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_GDN_QKV) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_GDN_GATE))
+#define SPARK_QWEN38_MAX_MODULE_COL_SHARDED_KIND_MASK \
+	((1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_DOWN) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_GDN_OUTPUT) | \
+	 (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTN_OUTPUT))
+
 static SparkStatus SparkQwen38MaxModuleValidateEntry(SparkQwen38MaxModuleState *state, const SparkQwen38MaxStagePackEntry *entry, uint64_t file_bytes, uint32_t *is_global)
 {
 	SparkQwen38MaxStagePackTensorShape shape;
 	uint32_t global = entry->layer_index == SPARK_QWEN38_MAX_STAGEPACK_GLOBAL_LAYER ? 1u : 0u;
-	if ( SparkQwen38MaxStagePackResolvedShape(entry->tensor_kind,global != 0u ? 0u : entry->layer_index,global,&shape) != 0 || entry->rows != shape.rows || entry->columns != shape.columns )
+	uint32_t routed_expert = entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W1 || entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W3 || entry->tensor_kind == SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_DOWN ? 1u : 0u;
+	uint32_t kind_bit = entry->tensor_kind < 32u ? (1u << entry->tensor_kind) : 0u;
+	uint32_t expected_rows;
+	uint32_t expected_columns;
+	if ( SparkQwen38MaxStagePackResolvedShape(entry->tensor_kind,global != 0u ? 0u : entry->layer_index,global,&shape) != 0 )
+		SPARK_FAIL(SPARK_STATUS_VALIDATION_FAILED);
+	expected_rows = shape.rows;
+	expected_columns = shape.columns;
+	if ( state->tp_degree > 1u )
+	{
+		if ( (kind_bit & SPARK_QWEN38_MAX_MODULE_ROW_SHARDED_KIND_MASK) != 0u )
+			expected_rows = shape.rows / state->tp_degree;
+		if ( (kind_bit & SPARK_QWEN38_MAX_MODULE_COL_SHARDED_KIND_MASK) != 0u )
+			expected_columns = shape.columns / state->tp_degree;
+	}
+	if ( entry->rows != expected_rows || entry->columns != expected_columns )
 		SPARK_FAIL(SPARK_STATUS_VALIDATION_FAILED);
 	if ( entry->weight_format != shape.natural_format )
 	{
-		if ( (shape.natural_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_MXFP4_E2M1 && shape.natural_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_FP8_E4M3_F32B128) || entry->weight_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_BF16 )
+		if ( (shape.natural_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_MXFP4_E2M1 && shape.natural_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_FP8_E4M3_F32B128) || (entry->weight_format != SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_BF16 && !(routed_expert != 0u && entry->weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_NVFP4_PACKED)) )
 			SPARK_FAIL(SPARK_STATUS_VALIDATION_FAILED);
 	}
 	if ( entry->weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_MXFP4_E2M1 ? entry->scale_group_size != SPARK_QWEN38_MAX_MODEL_MXFP4_GROUP_SIZE : (entry->weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_FP8_E4M3_F32B128 ? entry->scale_group_size != 128u : (entry->weight_format == SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_NVFP4_PACKED ? entry->scale_group_size != 16u : entry->scale_group_size != 0u)) )
@@ -658,7 +683,11 @@ static uint32_t SparkQwen38MaxModuleExpectedGlobalBits(const SparkQwen38MaxModul
 
 static uint32_t SparkQwen38MaxModuleExpectedMtpBits(void)
 {
+#if SPARK_QWEN38_MAX_MODEL_MTP_LAYER_COUNT == 0u
+	return(0u);
+#else
 	return((1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MTP_FC) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MTP_EMBED_NORM) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MTP_HIDDEN_NORM) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MTP_FINAL_NORM) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTENTION_NORM) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MLP_NORM) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_GATE) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W1) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_W3) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_DOWN) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_GATE) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_UP) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_DOWN) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_MOE_SHARED_GATE_WEIGHT) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTN_QUERY) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTN_KEY) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTN_VALUE) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTN_OUTPUT) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTN_QUERY_NORM) | (1u << SPARK_QWEN38_MAX_STAGEPACK_TENSOR_ATTN_KEY_NORM));
+#endif
 }
 
 static uint32_t SparkQwen38MaxModuleExpectedLayerBits(const SparkQwen38MaxModuleState *state, uint32_t layer)
@@ -1520,6 +1549,7 @@ static SparkStatus SparkQwen38MaxModuleRunMoe(SparkQwen38MaxModuleState *state, 
 	cudaStream_t stream = (cudaStream_t)slot->cuda_stream;
 	cudaError_t error;
 	SparkStatus status;
+	uint32_t run_experts = 1u;
 	SparkQwen38MaxLinearView w1 = weights->experts_w1,w3 = weights->experts_w3,w2 = weights->experts_w2;
 	SparkStageModuleStageTimingBegin(&state->stage_timing,stream,SPARK_QWEN38_MAX_MODULE_STAGE_MOE_NORM_ROUTE);
 	error = SparkQwen38MaxLaunchFusedResidualRmsNorm(stream,slot->hidden_bf16,slot->delta_bf16,mlp_norm_bf16,slot->normalized_bf16,rows,SPARK_QWEN38_MAX_MODEL_HIDDEN_DIMENSION,SPARK_QWEN38_MAX_MODEL_RMS_NORM_EPSILON);
@@ -1529,27 +1559,50 @@ static SparkStatus SparkQwen38MaxModuleRunMoe(SparkQwen38MaxModuleState *state, 
 		error = SparkQwen38MaxLaunchGateSelect(stream,slot->moe_scores_f32,0,rows,SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT,SPARK_QWEN38_MAX_MODEL_EXPERTS_PER_TOKEN,1.0f,slot->moe_indices_u32,slot->moe_weights_f32);
 	if ( error == cudaSuccess )
 		error = SparkQwen38MaxLaunchMoeRoute(stream,slot->moe_indices_u32,rows,SPARK_QWEN38_MAX_MODEL_EXPERT_INTERMEDIATE_DIMENSION,slot->moe_group_offset_u32,slot->moe_inverse_u32,slot->moe_grouped_rows_u32,slot->moe_tile_prefix_w1_u32,slot->moe_tile_prefix_w2_u32);
+	if ( error == cudaSuccess )
+		error = cudaMemsetAsync(slot->moe_slot_out_bf16,0,(size_t)rows * SPARK_QWEN38_MAX_MODEL_EXPERTS_PER_TOKEN * SPARK_QWEN38_MAX_MODEL_HIDDEN_DIMENSION * sizeof(uint16_t),stream) == cudaSuccess ? cudaSuccess : cudaErrorInvalidValue;
 	SparkStageModuleStageTimingEnd(&state->stage_timing,stream);
 	if ( error == cudaSuccess && state->lazy_pack != 0 )
 	{
 		SparkStageModuleStageTimingBegin(&state->stage_timing,stream,SPARK_QWEN38_MAX_MODULE_STAGE_MOE_LEASE);
 		uint32_t host_offsets[SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT + 1u];
+		uint32_t local_offsets[SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT + 1u];
 		SparkWeightdExpertKey keys[SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT];
 		uint32_t key_count = 0u;
 		SparkWeightdMap *map = state->lazy_pack->map;
 		void *address = 0;
-		if ( cudaMemcpy(host_offsets,slot->moe_group_offset_u32,(SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT + 1u) * sizeof(uint32_t),cudaMemcpyDeviceToHost) != cudaSuccess )
-			error = cudaErrorInvalidValue;
 		if ( error == cudaSuccess )
-			error = SparkWeightdRouteKeys(layer_ordinal_arg,host_offsets,SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT,rows * SPARK_QWEN38_MAX_MODEL_EXPERTS_PER_TOKEN,keys,SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT,&key_count) == SPARK_STATUS_OK ? cudaSuccess : cudaErrorInvalidValue;
+			error = (cudaMemcpyAsync(host_offsets,slot->moe_group_offset_u32,(SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT + 1u) * sizeof(uint32_t),cudaMemcpyDeviceToHost,stream) == cudaSuccess && cudaStreamSynchronize(stream) == cudaSuccess) ? cudaSuccess : cudaErrorInvalidValue;
 		if ( error == cudaSuccess )
+		{
+			uint32_t resident = SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT / state->tp_degree;
+			uint32_t first = state->tp_rank * resident;
+			uint32_t window = host_offsets[first];
+			uint32_t k;
+			uint32_t total;
+			for ( k = 0u; k <= resident; k++ )
+				local_offsets[k] = host_offsets[first + k] - window;
+			total = local_offsets[resident];
+			if ( total != 0u )
+				error = SparkWeightdRouteKeys(layer_ordinal_arg,local_offsets,resident,total,keys,SPARK_QWEN38_MAX_MODEL_ROUTED_EXPERT_COUNT,&key_count) == SPARK_STATUS_OK ? cudaSuccess : cudaErrorInvalidValue;
+			for ( k = 0u; k < key_count; k++ )
+				keys[k].expert += first;
+			if ( key_count != 0u )
+			{
+				fprintf(stderr,"%s route_keys layer=%u rank=%u base=%u total=%u count=%u ids=",SPARK_QWEN38_MAX_MODULE_TAG,layer_ordinal_arg,state->tp_rank,first,total,key_count);
+				for ( k = 0u; k < key_count; k++ )
+					fprintf(stderr,"%u ",keys[k].expert);
+				fprintf(stderr,"\n");
+			}
+		}
+		if ( error == cudaSuccess && key_count != 0u )
 		{
 			error = SparkWeightdMapAcquire(map,keys,key_count,&state->lazy_lease_identifier,SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS) == SPARK_STATUS_OK ? cudaSuccess : cudaErrorInvalidValue;
 			state->lazy_lease_active = state->lazy_lease_identifier != 0u ? 1u : 0u;
 		}
-		if ( error == cudaSuccess )
+		if ( error == cudaSuccess && key_count != 0u )
 			error = SparkWeightdMapBeginUse(map,state->lazy_lease_identifier,&address) == SPARK_STATUS_OK ? cudaSuccess : cudaErrorInvalidValue;
-		if ( error == cudaSuccess )
+		if ( error == cudaSuccess && key_count != 0u )
 		{
 			w1.weight_payload = (uint8_t *)address + weights->experts_w1_payload_offset;
 			w3.weight_payload = (uint8_t *)address + weights->experts_w3_payload_offset;
@@ -1570,8 +1623,9 @@ static SparkStatus SparkQwen38MaxModuleRunMoe(SparkQwen38MaxModuleState *state, 
 			state->lazy_lease_active = 0u;
 		}
 		SparkStageModuleStageTimingEnd(&state->stage_timing,stream);
+		run_experts = key_count != 0u ? 1u : 0u;
 	}
-	if ( error == cudaSuccess )
+	if ( error == cudaSuccess && run_experts != 0u )
 	{
 		SparkStageModuleStageTimingBegin(&state->stage_timing,stream,SPARK_QWEN38_MAX_MODULE_STAGE_MOE_EXPERTS);
 		if ( rows >= SPARK_QWEN38_MAX_MODULE_MOE_TILE_ROWS )
@@ -1631,9 +1685,15 @@ static SparkStatus SparkQwen38MaxModuleRunMoe(SparkQwen38MaxModuleState *state, 
 		if ( error == cudaSuccess )
 			error = SparkQwen38MaxLaunchLinear(stream,&weights->shared_up,slot->normalized_bf16,slot->shared_up_bf16,rows);
 		if ( error == cudaSuccess )
-			error = SparkQwen38MaxLaunchSwiGlu(stream,slot->shared_gate_bf16,slot->shared_up_bf16,rows,SPARK_QWEN38_MAX_MODEL_EXPERT_INTERMEDIATE_DIMENSION);
+			error = SparkQwen38MaxLaunchSwiGlu(stream,slot->shared_gate_bf16,slot->shared_up_bf16,rows,weights->shared_gate.output_dimension);
 		if ( error == cudaSuccess )
 			error = SparkQwen38MaxLaunchLinear(stream,&weights->shared_down,slot->shared_up_bf16,slot->shared_down_bf16,rows);
+		if ( error == cudaSuccess && state->tp_degree > 1u )
+		{
+			status = SparkQwen38MaxModuleTpAllReduceHidden(state,slot,slot->shared_down_bf16,rows);
+			if ( status != SPARK_STATUS_OK )
+				SPARK_RETURN(status);
+		}
 		if ( error == cudaSuccess )
 			error = SparkQwen38MaxLaunchSharedGate(stream,slot->shared_down_bf16,weights->shared_gate_weight_bf16,slot->normalized_bf16,rows,SPARK_QWEN38_MAX_MODEL_HIDDEN_DIMENSION);
 		if ( error == cudaSuccess )

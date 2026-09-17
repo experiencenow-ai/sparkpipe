@@ -75,13 +75,28 @@ static void sort_groups(uint32_t *groups,uint32_t count)
 static SparkStatus prepare_groups(SparkWeightdLeaseTable *table,SparkWeightdLease *lease,const SparkWeightdExpertKey *keys,uint32_t count,uint32_t *unique)
 {
 	const SparkWeightdRangeGroup *group;
-	uint32_t i;
+	uint32_t i,scan,layer_groups,lo,hi;
 	*unique = 0u;
 	for (i=0u; i<count; i++)
 	{
 		group = SparkWeightdManifestFind(table->manifest,keys[i].layer,keys[i].expert);
 		if ( group == 0 )
+		{
+			layer_groups = 0u;
+			lo = 0u;
+			hi = 0u;
+			for ( scan = 0u; scan < table->manifest->group_count; scan++ )
+				if ( table->manifest->groups[scan].layer == keys[i].layer )
+				{
+					if ( layer_groups == 0u || table->manifest->groups[scan].expert < lo )
+						lo = table->manifest->groups[scan].expert;
+					if ( layer_groups == 0u || table->manifest->groups[scan].expert > hi )
+						hi = table->manifest->groups[scan].expert;
+					layer_groups++;
+				}
+			fprintf(stderr,"weightd_parity lease_miss layer=%u expert=%u layer_groups=%u lo=%u hi=%u groups=%u\n",keys[i].layer,keys[i].expert,layer_groups,lo,hi,table->manifest->group_count);
 			SPARK_FAIL(SPARK_STATUS_NOT_FOUND);
+		}
 		lease->groups[i] = (uint32_t)(group - table->manifest->groups);
 	}
 	sort_groups(lease->groups,count);
