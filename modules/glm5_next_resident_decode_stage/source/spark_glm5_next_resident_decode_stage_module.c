@@ -3237,7 +3237,6 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 			     chain->wave_rows == 1u &&
 			     chain->next_layer >= 900u )
 			{
-				SparkStatus submit_status;
 				if ( SparkGlm5NextLaunchCudaLayerMlpRoute(&chain->wave,chain->next_layer) != 0 ||
 				     cudaStreamSynchronize((cudaStream_t)chain->slot->stream) != cudaSuccess )
 				{
@@ -4061,8 +4060,6 @@ void SparkGlm5NextResidentDecodeStageDestroy(void *module_state)
 	}
 	if ( SparkStageModuleCudaStatus(SPARK_GLM5_NEXT_MODULE_TAG,cudaStreamSynchronize((cudaStream_t)state->execution_stream),"destroy_stream_drain") != SPARK_STATUS_OK )
 		return;
-		SparkGlm5NextBuildWave(chain);
-		SparkGlm5NextT1Wave(&chain->wave);
 	if ( state->decode_cover_host != 0 )
 		(void)cudaFreeHost(state->decode_cover_host);
 	if ( state->decode_miss_host != 0 )
