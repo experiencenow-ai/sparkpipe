@@ -76,33 +76,42 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 		return;
 	sequence = round_seq[0];
 	stop_at = SparkGlm5NextGlobalTimerNs() + deadline_ns;
-	for ( peer = 0u; peer < degree - 1u; peer++ )
 	{
-		uint32_t peer_rank = peer < rank ? peer : peer + 1u;
-		end_word = (volatile uint64_t *)
-			((uint8_t *)band_base +
-			((uint64_t)peer_rank * slots_per_rank +
-				(ring & (slots_per_rank - 1ull))) * slot_bytes +
-			slot_bytes - 8u);
-		while ( *end_word < sequence )
+		unsigned long long spins = 0ull;
+		unsigned long long spin_cap = deadline_ns / 200ull;
+		if ( spin_cap < 1000000ull )
+			spin_cap = 1000000ull;
+		for ( peer = 0u; peer < degree - 1u; peer++ )
 		{
-			if ( *error_word != 0ull )
-				return;
-			if ( SparkGlm5NextGlobalTimerNs() >= stop_at )
+			uint32_t peer_rank = peer < rank ? peer : peer + 1u;
+			end_word = (volatile uint64_t *)
+				((uint8_t *)band_base +
+				((uint64_t)peer_rank * slots_per_rank +
+					(ring & (slots_per_rank - 1ull))) * slot_bytes +
+				slot_bytes - 8u);
+			while ( *end_word < sequence )
 			{
-				unsigned long long off = (unsigned long long)
-					((uint8_t *)end_word - (uint8_t *)band_base);
-				unsigned long long got = *end_word;
-				atomicExch((unsigned long long *)diag_word,
-					((unsigned long long)peer_rank << 56ull) |
-					((ring & 0xffull) << 48ull) |
-					((off / slot_bytes) << 32ull) |
-					((sequence & 0xffffull) << 16ull) |
-					(got & 0xffffull));
-				atomicExch((unsigned long long *)error_word,sequence);
-				return;
+				if ( *error_word != 0ull )
+					return;
+				spins++;
+				if ( (spins & 4095ull) == 0ull &&
+				     ( spins >= spin_cap ||
+				       SparkGlm5NextGlobalTimerNs() >= stop_at ) )
+				{
+					unsigned long long off = (unsigned long long)
+						((uint8_t *)end_word - (uint8_t *)band_base);
+					unsigned long long got = *end_word;
+					atomicExch((unsigned long long *)diag_word,
+						((unsigned long long)peer_rank << 56ull) |
+						((ring & 0xffull) << 48ull) |
+						((off / slot_bytes) << 32ull) |
+						((sequence & 0xffffull) << 16ull) |
+						(got & 0xffffull));
+					atomicExch((unsigned long long *)error_word,sequence);
+					return;
+				}
+				__nanosleep(200u);
 			}
-			__nanosleep(200u);
 		}
 	}
 }
