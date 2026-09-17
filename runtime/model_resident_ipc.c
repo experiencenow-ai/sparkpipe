@@ -151,9 +151,18 @@ SparkStatus SparkModelResidentIpcInitializeHelloAck(
 	SparkStatus copy_status;
 	copy_status = SparkModelServingAdapterValidateRuntimeLimits(descriptor,runtime_limits);
 	if ( ack == 0 || message_id == 0u || client_generation == 0u )
+	{
+		fprintf(stderr,"IPC-ACK-SENTINEL ack=%p msgid=%llu gen=%llu\n",
+			(void *)ack,
+			(unsigned long long)message_id,
+			(unsigned long long)client_generation);
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	}
 	if ( copy_status != SPARK_STATUS_OK )
+	{
+		fprintf(stderr,"IPC-ACK-LIMITS status=%u\n",(unsigned)copy_status);
 		return(copy_status);
+	}
 	if ( rank_index >= descriptor->stage_count || stage_index >= descriptor->stage_count )
 	{
 		fprintf(stderr,"IPC-ACK-FAIL rank=%u stage=%u stage_count=%u gen=%llu msgid=%llu\n",
