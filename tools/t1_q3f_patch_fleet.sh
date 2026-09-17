@@ -8,7 +8,7 @@ binary_host=spark7
 mkdir -p "$runs_dir"
 case $arm in
 	tp8)
-		hosts="spark0 spark1 spark2 spark3 spark4 spark5 spark6 spark7 spark8 spark9 sparka sparkb sparkc sparkd sparke sparkf"
+		hosts=${HOSTS:-"spark0 spark1 spark2 spark3 spark4 spark5 spark6 spark7 spark8 spark9 sparka sparkb sparkc sparkd sparke sparkf"}
 		tp_degree=8
 		pack_dir='sparkdata/qwen3flash.fp8.tp8/packs'
 		prefix='qwenflash.tp8.fp8.rank'
