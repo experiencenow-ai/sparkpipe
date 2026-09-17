@@ -63,10 +63,8 @@ typedef struct SparkGlm5NextExecutionSlot
 	void *route_ready_event;
 	uint32_t route_recorded;
 	void *graph_exec_a;
-	void *graph_exec_b;
 	uint32_t graph_ready;
-	uint32_t graph_alt;
-	uint32_t graph_bound;
+		uint32_t graph_bound;
 	uint32_t graph_disabled;
 	void *host_staging;
 	uint32_t *host_token_ids;

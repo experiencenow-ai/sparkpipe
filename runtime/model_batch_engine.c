@@ -35,6 +35,8 @@ typedef struct SparkModelBatchRequestState
 	uint32_t cancel_pending;
 	uint32_t resident_bound;
 	uint32_t busy_restore_count;
+	uint32_t busy_retry_backoff_ms;
+	uint64_t busy_retry_not_before_ns;
 	uint32_t resident_sequence_slot;
 	uint32_t terminal_event_kind;
 	uint32_t terminal_status;
@@ -667,6 +669,8 @@ static void SparkModelBatchRestoreRejectedRequest(
 		request->state = SPARK_MODEL_BATCH_REQUEST_QUEUED_RELEASE;
 }
 
+static uint64_t SparkModelBatchNowNs(void);
+
 static void SparkModelBatchHandleRejected(
 	SparkModelBatchEngine *engine,
 	SparkModelBatchSubmissionState *submission,
@@ -674,17 +678,27 @@ static void SparkModelBatchHandleRejected(
 {
 	uint32_t *request_slots;
 	uint32_t lane;
-	fprintf(stderr,"batch_rejected status=%u kind=%u submission=%llu\n",
-		(uint32_t)status,submission->work_kind,
-		(unsigned long long)submission->submission_id);
 	request_slots = SparkModelBatchSubmissionRequestSlots(engine,submission);
+	fprintf(stderr,"batch_rejected status=%u kind=%u submission=%llu request=%llu\n",
+		(uint32_t)status,submission->work_kind,
+		(unsigned long long)submission->submission_id,
+		submission->lane_count != 0u ?
+		    (unsigned long long)engine->requests[request_slots[0]].request_id : 0ull);
 	for (lane=0u; lane<submission->lane_count; lane++)
 	{
 		SparkModelBatchRequestState *request;
 		request = &engine->requests[request_slots[lane]];
 		if ( (status == SPARK_STATUS_BUSY || status == SPARK_STATUS_IO_ERROR) && request->busy_restore_count < 10000u )
 		{
+			uint64_t now = SparkModelBatchNowNs();
 			request->busy_restore_count++;
+			if ( request->busy_retry_backoff_ms == 0u )
+				request->busy_retry_backoff_ms = 10u;
+			else if ( request->busy_retry_backoff_ms < 200u )
+				request->busy_retry_backoff_ms *= 2u;
+			if ( now != 0u )
+				request->busy_retry_not_before_ns = now +
+				    (uint64_t)request->busy_retry_backoff_ms * UINT64_C(1000000);
 			SparkModelBatchRestoreRejectedRequest(request,submission->work_kind);
 		}
 		else
@@ -1525,12 +1539,17 @@ static uint32_t SparkModelBatchSelectRequestPass(
 	uint32_t *prefill_span_budget)
 {
 	SparkModelBatchRequestState *request;
+	uint64_t now_ns;
 	uint32_t aged,context,index,resident_bound,slot;
+	now_ns = SparkModelBatchNowNs();
 	for (index=0u; index<engine->request_capacity && selected<lane_limit; index++)
 	{
 		slot = (engine->next_request_scan + index) % engine->request_capacity;
 		request = &engine->requests[slot];
 		if ( request->state != state )
+			continue;
+		if ( request->busy_retry_not_before_ns != 0u && now_ns != 0u &&
+		     now_ns < request->busy_retry_not_before_ns )
 			continue;
 		aged = request->scheduling_bypass_count >= engine->submission_capacity;
 		if ( (selection == SPARK_MODEL_BATCH_SELECT_AGED && aged == 0u) || (selection == SPARK_MODEL_BATCH_SELECT_PRIORITY && (aged != 0u || request->priority != maximum_priority)) || (selection == SPARK_MODEL_BATCH_SELECT_FILL && (aged != 0u || request->priority == maximum_priority)) )
@@ -1908,7 +1927,7 @@ static void SparkModelBatchRecordSubmission(
 		request_slots[lane] = engine->scratch_request_slots[lane];
 		prefill_counts[lane] = state->work_kind == SPARK_MODEL_SERVING_WORK_KIND_PREFILL ? engine->scratch_prefill_counts[lane] : 0u;
 		engine->requests[request_slots[lane]].state = inflight_state;
-		engine->requests[request_slots[lane]].busy_restore_count = 0u;
+		engine->requests[request_slots[lane]].busy_retry_backoff_ms = 0u;
 	}
 	engine->inflight_submission_count++;
 	engine->inflight_kv_page_count = engine->selected_kv_page_count;

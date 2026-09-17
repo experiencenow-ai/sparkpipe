@@ -348,7 +348,17 @@ void SparkTpDeviceCollectiveRoundStats(
 SparkStatus SparkTpDeviceCollectiveArmCapture(
     SparkTpDeviceCollective *collective);
 
+SparkStatus SparkTpDeviceCollectiveGraphCancelSeed(
+    SparkTpDeviceCollective *collective,void *stream);
+
 SparkStatus SparkTpDeviceCollectiveDisarmCapture(
+    SparkTpDeviceCollective *collective);
+
+uint64_t SparkTpDeviceCollectiveGraphProgress(
+    SparkTpDeviceCollective *collective,
+    uint64_t *cell_out);
+
+uint64_t SparkTpDeviceCollectiveGraphStuckDump(
     SparkTpDeviceCollective *collective);
 
 uint64_t SparkTpDeviceCollectiveGraphDiag(

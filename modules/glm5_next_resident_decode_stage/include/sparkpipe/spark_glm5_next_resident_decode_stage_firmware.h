@@ -9,22 +9,8 @@
 
 #include "sparkpipe/spark_glm5_next_batch_tuning.h"
 
-#define SPARK_GLM5_NEXT_ROUTE_UNION_MAX 2400u
-#define SPARK_GLM5_NEXT_ROUTE_UNION_TRIM 1888u
-#define SPARK_GLM5_NEXT_ROUTE_UNION_TRIM_CHUNK 512u
-#define SPARK_GLM5_NEXT_ROUTE_SWEEP_RETRY_MAX 3u
-#if SPARK_GLM5_NEXT_ROUTE_UNION_TRIM >= SPARK_GLM5_NEXT_ROUTE_UNION_MAX
-#error "trim must precede cap"
-#endif
-
 #ifdef __cplusplus
 extern "C" {
-#endif
-
-#define SPARK_GLM5_NEXT_ROUTE_UNION_MAX 2400u
-#define SPARK_GLM5_NEXT_ROUTE_UNION_TRIM 1888u
-#if SPARK_GLM5_NEXT_ROUTE_UNION_TRIM >= SPARK_GLM5_NEXT_ROUTE_UNION_MAX
-#error "trim must precede cap"
 #endif
 
 #define SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_NODE_CONTEXT_ABI_VERSION 7u

@@ -46,6 +46,8 @@ typedef enum cudaStreamCaptureMode
 typedef void (*cudaHostFn_t)(void *user_data);
 
 cudaError_t cudaMalloc(void **pointer, size_t bytes);
+cudaError_t cudaHostAlloc(void **pointer, size_t bytes, unsigned int flags);
+cudaError_t cudaStreamSynchronize(cudaStream_t stream);
 cudaError_t cudaFree(void *pointer);
 cudaError_t cudaMemset(void *pointer, int value, size_t bytes);
 cudaError_t cudaMemsetAsync(

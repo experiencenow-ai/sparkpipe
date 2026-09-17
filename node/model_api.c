@@ -832,10 +832,18 @@ static void handle_completion(int fd, char *body, uint32_t body_len,
 		cancel_submitted = req->submitted;
 		cancel_handle = cancel_submitted ? req->handle : 0;
 		req->orphaned = 1;
+		req->status = req->status == 0u ? SPARK_STATUS_IO_ERROR : req->status;
 		req->done = 1;
 		pthread_mutex_unlock(&req->mutex);
 		if (cancel_submitted && cancel_handle != 0)
 			(void)SparkModelBatchEngineCancel(S.engine, cancel_handle);
+	}
+	else if (!req->done)
+	{
+		pthread_mutex_lock(&req->mutex);
+		if (!req->done && req->status == 0u)
+			req->status = SPARK_STATUS_INTERNAL_ERROR;
+		pthread_mutex_unlock(&req->mutex);
 	}
 	if (req->status == 0 && HaveSidecar)
 	{

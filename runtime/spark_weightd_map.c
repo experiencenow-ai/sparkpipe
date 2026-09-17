@@ -28,6 +28,7 @@ struct SparkWeightdMap
 	CUcontext context;
 	CUdeviceptr base;
 	uint64_t generation,span_bytes,chunk_bytes;
+	uint64_t validated_epoch;
 	void *epoch_device;
 	void *epoch_handle;
 	uint32_t chunk_count;
@@ -134,7 +135,7 @@ static SparkStatus map_initialize_cuda(SparkWeightdMap *map)
 	    CUDA_SUCCESS ? SPARK_STATUS_OK : SPARK_STATUS_CAPACITY_EXCEEDED);
 }
 
-SparkStatus SparkWeightdMapCreate(SparkWeightdClient *client,const SparkWeightdLazyAttachResult *attached,int epoch_fd,SparkWeightdMap **out)
+SparkStatus SparkWeightdMapCreate(SparkWeightdClient *client,const SparkWeightdLazyAttachResult *attached,int epoch_fd,int pool_fd,SparkWeightdMap **out)
 {
 	SparkWeightdMap *map;
 	SparkStatus status;
@@ -192,6 +193,45 @@ SparkStatus SparkWeightdMapCreate(SparkWeightdClient *client,const SparkWeightdL
 		(void)map_free_initial(map);
 		SPARK_RETURN(status);
 	}
+	if ( status == SPARK_STATUS_OK && pool_fd >= 0 )
+	{
+		CUmemGenericAllocationHandle pool_handle = 0;
+		CUmemAccessDesc access;
+		if ( cuMemImportFromShareableHandle(&pool_handle,
+		         (void *)(intptr_t)pool_fd,
+			         CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) !=
+			     CUDA_SUCCESS ||
+		     cuMemMap(map->base,(size_t)map->span_bytes,0u,pool_handle,0ull) !=
+		             CUDA_SUCCESS )
+		{
+			fprintf(stderr,"WD-MAP-POOL-IMPORT-FAIL chunk_count=%u span=%llu\n",
+			    map->chunk_count,(unsigned long long)map->span_bytes);
+			status = SPARK_STATUS_IO_ERROR;
+		}
+		else
+		{
+			uint32_t i;
+			memset(&access,0,sizeof(access));
+			access.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+			access.location.id = map->device;
+			access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+			if ( cuMemSetAccess(map->base,(size_t)map->span_bytes,
+			        &access,1u) != CUDA_SUCCESS )
+				status = SPARK_STATUS_IO_ERROR;
+			else
+			{
+				for ( i = 0u; i < map->chunk_count; i++ )
+				{
+					map->handles[i] = pool_handle;
+					map->mapped[i] = 1u;
+				}
+				fprintf(stderr,
+				    "WD-MAP-POOL-BULK chunks=%u span=%llu — all chunks mapped in ONE import\n",
+				    map->chunk_count,(unsigned long long)map->span_bytes);
+			}
+		}
+		(void)close(pool_fd);
+	}
 	*out = map;
 	return(SPARK_STATUS_OK);
 }
@@ -239,18 +279,6 @@ static SparkStatus map_drop_slot(SparkWeightdMap *map,uint32_t slot)
 			map->owners[i] &= ~bit;
 			continue;
 		}
-		if ( map->mapped[i] != 0u )
-		{
-			if ( cuMemUnmap(map->base + (i * map->chunk_bytes),(size_t)map->chunk_bytes) != CUDA_SUCCESS )
-				SPARK_FAIL(SPARK_STATUS_IO_ERROR);
-			map->mapped[i] = 0u;
-		}
-		if ( map->handles[i] != 0 )
-		{
-			if ( cuMemRelease(map->handles[i]) != CUDA_SUCCESS )
-				SPARK_FAIL(SPARK_STATUS_IO_ERROR);
-			map->handles[i] = 0;
-		}
 		map->owners[i] = 0u;
 	}
 	return(SPARK_STATUS_OK);
@@ -292,6 +320,11 @@ SparkStatus SparkWeightdMapRelease(SparkWeightdMap *map,uint64_t identifier,uint
 
 static SparkStatus map_import_chunk(SparkWeightdMap *map,uint32_t slot,uint32_t chunk,int32_t fd)
 {
+	if ( map->mapped[chunk] != 0u )
+	{
+		(void)close(fd);
+		return(SPARK_STATUS_OK);
+	}
 	CUmemAccessDesc access;
 	uint64_t bit = (UINT64_C(1) << slot);
 	if ( map->owners[chunk] != 0u )
@@ -421,6 +454,25 @@ SparkStatus SparkWeightdMapBeginUse(SparkWeightdMap *map,uint64_t identifier,voi
 		SPARK_FAIL(SPARK_STATUS_NOT_FOUND);
 	if ( slot->state != MAP_ACQUIRED )
 		SPARK_FAIL(SPARK_STATUS_BUSY);
+	if ( map->epoch_device != 0 )
+	{
+		uint64_t current_epoch;
+		if ( cudaMemcpy(&current_epoch,map->epoch_device,
+		    sizeof(current_epoch),cudaMemcpyDeviceToHost) != cudaSuccess )
+			SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+		if ( current_epoch != map->validated_epoch )
+		{
+			uint32_t i;
+			map->validated_epoch = current_epoch;
+			for ( i = 0u; i < map->chunk_count; i++ )
+				map->mapped[i] = 0u;
+			fprintf(stderr,
+			    "WEIGHTD-MAP-EPOCH-MOVE epoch=%llu — all chunk mappings invalidated, next access re-imports\n",
+			    (unsigned long long)current_epoch);
+			slot->state = MAP_ACQUIRED;
+			SPARK_FAIL(SPARK_STATUS_BUSY);
+		}
+	}
 	slot->state = MAP_INFLIGHT;
 	*address = (void *)(uintptr_t)map->base;
 	return(SPARK_STATUS_OK);
