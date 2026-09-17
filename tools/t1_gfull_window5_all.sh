@@ -22,6 +22,9 @@ wave)
     ;;
 api)
     cd "$HUB"
+    export SPARK_GLM52_SERVING_FLAT_RANKS=16
+    export SPARK_GLM52_T1=1
+    export LD_LIBRARY_PATH=$HUB/lib
     nohup ./bin/sparkpipe_model_api --deployment config/model_resident.json --runtime-root "$HUB" --port 8477 > model_api_t1.log 2>&1 < /dev/null &
     echo "api pid $!"
     sleep 3
