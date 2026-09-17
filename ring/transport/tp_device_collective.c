@@ -1180,7 +1180,7 @@ SparkStatus SparkTpDeviceCollectiveGraphReplaySeed(
         SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
     if ( cudaMemcpyAsync(implementation->seq_cell,
             &implementation->capture_seq_base,sizeof(uint64_t),
-            SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE,(cudaStream_t)stream) != 0 )
+            SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE,stream) != 0 )
         SPARK_FAIL(SPARK_STATUS_IO_ERROR);
     return(SPARK_STATUS_OK);
 }
