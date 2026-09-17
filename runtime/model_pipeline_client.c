@@ -731,21 +731,16 @@ void SparkModelPipelineClientDestroy(SparkModelPipelineClient *pipeline)
 }
 
 static SparkStatus SparkModelPipelineClientPreflight(
-	SparkModelPipelineClient *pipeline,
-	uint32_t *failed_stage_index_out)
+	SparkModelPipelineClient *pipeline)
 {
 	SparkModelResidentClientView view;
 	SparkStatus status;
 	uint32_t rank;
-	*failed_stage_index_out = SPARK_MODEL_PIPELINE_CLIENT_INVALID_STAGE_INDEX;
 	for (rank=0u; rank<pipeline->rank_count; rank++)
 	{
 		status = SparkModelResidentClientGetView(pipeline->clients[rank],&view);
 		if ( status != SPARK_STATUS_OK || view.connected == 0u )
-		{
-			*failed_stage_index_out = rank;
 			return(status != SPARK_STATUS_OK ? status : SPARK_STATUS_IO_ERROR);
-		}
 		if ( view.queued_message_count >= view.queue_capacity || view.pending_submission_count >= view.queue_capacity )
 			SPARK_FAIL(SPARK_STATUS_BUSY);
 	}
@@ -864,7 +859,7 @@ SparkStatus SparkModelPipelineClientSubmit(
 {
 	SparkModelPipelineTransaction *transaction;
 	SparkStatus status;
-	uint32_t continuation,failed_stage_index,rank;
+	uint32_t continuation,rank;
 	if ( pipeline == 0 || submission == 0 )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	if ( pipeline->failed_status != SPARK_STATUS_OK )
@@ -874,13 +869,9 @@ SparkStatus SparkModelPipelineClientSubmit(
 		SPARK_RETURN(status);
 	if ( submission->submission_id <= pipeline->last_submission_id )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
-	status = SparkModelPipelineClientPreflight(pipeline,&failed_stage_index);
+	status = SparkModelPipelineClientPreflight(pipeline);
 	if ( status != SPARK_STATUS_OK )
-	{
-		if ( failed_stage_index != SPARK_MODEL_PIPELINE_CLIENT_INVALID_STAGE_INDEX )
-			SparkModelPipelineClientSetFailure(pipeline,status,failed_stage_index);
 		SPARK_RETURN(status);
-	}
 	continuation = SparkModelPipelineClientCanContinue(pipeline,submission);
 	if ( continuation != 0u )
 	{

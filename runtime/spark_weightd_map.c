@@ -456,8 +456,10 @@ SparkStatus SparkWeightdMapBeginUse(SparkWeightdMap *map,uint64_t identifier,voi
 		SPARK_FAIL(SPARK_STATUS_BUSY);
 	if ( map->epoch_device != 0 )
 	{
-		uint64_t current_epoch =
-		    *(volatile uint64_t *)map->epoch_device;
+		uint64_t current_epoch;
+		if ( cudaMemcpy(&current_epoch,map->epoch_device,
+		    sizeof(current_epoch),cudaMemcpyDeviceToHost) != cudaSuccess )
+			SPARK_FAIL(SPARK_STATUS_IO_ERROR);
 		if ( current_epoch != map->validated_epoch )
 		{
 			uint32_t i;
