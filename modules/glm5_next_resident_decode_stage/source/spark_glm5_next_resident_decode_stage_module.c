@@ -3034,7 +3034,7 @@ static SparkStatus SparkGlm5NextGraphRouteSweep(
 	return(SPARK_STATUS_OK);
 }
 
-#define SPARK_GLM5_NEXT_GRAPH_REPLAY_WATCH_NS (15ull * 1000000000ull)
+#define SPARK_GLM5_NEXT_GRAPH_REPLAY_WATCH_NS (35ull * 1000000000ull)
 
 static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
     SparkStatus *status_out)
@@ -3044,6 +3044,17 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 	void *exec;
 	state = chain->state;
 	status = SPARK_STATUS_OK;
+	if ( state->tp_device_collective_initialized != 0u &&
+	     SparkTpDeviceCollectiveGraphReplaySeed(
+	         &state->tp_device_collective,chain->slot->stream) !=
+	         SPARK_STATUS_OK )
+		status = SPARK_STATUS_IO_ERROR;
+	if ( status == SPARK_STATUS_OK &&
+	     state->tp_device_collective_hc_initialized != 0u &&
+	     SparkTpDeviceCollectiveGraphReplaySeed(
+	         &state->tp_device_collective_hc,chain->slot->stream) !=
+	         SPARK_STATUS_OK )
+		status = SPARK_STATUS_IO_ERROR;
 	if ( status == SPARK_STATUS_OK )
 	{
 		exec = chain->slot->graph_exec_a;
@@ -3116,6 +3127,14 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 					cudaGetErrorString(poll));
 				(void)cudaGetLastError();
 				status = SPARK_STATUS_IO_ERROR;
+			}
+			else if ( state->tp_device_collective_initialized != 0u )
+			{
+				(void)SparkTpDeviceCollectiveDisarmCapture(
+				    &state->tp_device_collective);
+				if ( state->tp_device_collective_hc_initialized != 0u )
+					(void)SparkTpDeviceCollectiveDisarmCapture(
+					    &state->tp_device_collective_hc);
 			}
 		}
 	}

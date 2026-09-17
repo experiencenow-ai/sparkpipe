@@ -5,7 +5,7 @@
 #if defined(__CUDACC__)
 #include <cuda_runtime.h>
 #include <stdio.h>
-#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V3-PARITY-TAIL-ABORT-DIAG"
+#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V4-TAILWRITE-SEQPARITY"
 #if defined(__CUDACC__)
 __constant__ char SparkTpMeshKernelsBuildMarker[] =
     SPARK_TP_MESH_KERNELS_MARKER;
@@ -26,7 +26,8 @@ __global__ void SparkGlm5NextMeshPublishKernel(
 	unsigned long long *seq_cell,
 	unsigned long long *round_seq,
 	uint64_t bytes,
-	uint64_t slot_index)
+	uint64_t slot_index,
+	volatile uint64_t *slot_tail)
 {
 	unsigned long long sequence;
 	if ( threadIdx.x != 0u || blockIdx.x != 0u )
@@ -35,6 +36,8 @@ __global__ void SparkGlm5NextMeshPublishKernel(
 	round_seq[0] = sequence;
 	entry[2] = slot_index;
 	entry[1] = bytes;
+	__threadfence_system();
+	*slot_tail = sequence;
 	__threadfence_system();
 	entry[0] = sequence;
 }
@@ -323,11 +326,12 @@ extern "C" cudaError_t SparkGlm5NextLaunchMeshCopyDown(
 
 extern "C" cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
 	volatile void *entry,void *seq_cell,void *round_seq,uint64_t bytes,
-	uint64_t slot_index)
+	uint64_t slot_index,volatile void *slot_tail)
 {
 	SparkGlm5NextMeshPublishKernel<<<1,32,0u,stream>>>(
 		(volatile uint64_t *)entry,(unsigned long long *)seq_cell,
-		(unsigned long long *)round_seq,bytes,slot_index);
+		(unsigned long long *)round_seq,bytes,slot_index,
+		(volatile uint64_t *)slot_tail);
 	return(cudaPeekAtLastError());
 }
 

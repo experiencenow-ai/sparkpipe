@@ -75,6 +75,7 @@ typedef struct SparkTpDeviceCollectiveImplementation
     void *round_seq_device;
     void *error_word;
     void *diag_word;
+    uint64_t capture_seq_base;
     uint32_t capture_armed;
     uint32_t round_rebased;
     uint64_t cancel_seen;
@@ -1156,16 +1157,31 @@ SparkStatus SparkTpDeviceCollectiveArmCapture(
             SPARK_FAIL(SPARK_STATUS_IO_ERROR);
         }
     }
-    if ( cudaMemcpy(implementation->seq_cell,&zero,
-            sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
-         cudaMemcpy(implementation->round_seq_device,&zero,
+    if ( cudaMemcpy(implementation->seq_cell,&implementation->round_seq,
             sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
          cudaMemcpy(implementation->error_word,&zero,
             sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
          cudaMemcpy(implementation->diag_word,&zero,
             sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 )
         SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+    implementation->capture_seq_base = implementation->round_seq;
     implementation->capture_armed = 1u;
+    return(SPARK_STATUS_OK);
+}
+
+SparkStatus SparkTpDeviceCollectiveGraphReplaySeed(
+    SparkTpDeviceCollective *collective,void *stream)
+{
+    SparkTpDeviceCollectiveImplementation *implementation;
+    if ( collective == 0 || collective->implementation == 0 )
+        SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+    implementation = collective->implementation;
+    if ( implementation->seq_cell == 0 || implementation->capture_armed != 0u )
+        SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
+    if ( cudaMemcpyAsync(implementation->seq_cell,
+            &implementation->capture_seq_base,sizeof(uint64_t),
+            SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE,(cudaStream_t)stream) != 0 )
+        SPARK_FAIL(SPARK_STATUS_IO_ERROR);
     return(SPARK_STATUS_OK);
 }
 
