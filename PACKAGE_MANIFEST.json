@@ -9183,8 +9183,8 @@
     },
     {
       "path": "tests/test_weightd_mesh_doorbell.c",
-      "sha256": "4b988ef78d8753ba5a9ee98129cfea2acaf61369aa993d794e8ed9b614f76eac",
-      "size_bytes": 7435
+      "sha256": "a76dbfe7a359e3e8e74ad759661325517f060d7701fbb662e34daa92ed2be1b5",
+      "size_bytes": 7455
     },
     {
       "path": "tests/test_weightd_mesh_source.py",
@@ -14790,5 +14790,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 55878819
+  "total_bytes": 55878839
 }
