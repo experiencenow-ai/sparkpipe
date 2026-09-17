@@ -55,7 +55,7 @@ sync() {
 start() {
     local h i=0 ready err line deadline n
     for h in "${HOSTS[@]}"; do
-        $SSH "$h" "cd '$(rr "$h")' && ln -sf stage_$(printf %02d $i).json config/stage.json && mkdir -p /home/$h/kvcache/ling.bf16.tp16 && mv residentd.log residentd.log.prev 2>/dev/null; LD_LIBRARY_PATH='$(rr "$h")'/lib SPARK_LING_T1='${SPARK_LING_T1:-1}' nohup ./bin/sparkpipe_model_residentd --deployment model_resident.json --rank-index $i > residentd.log 2>&1 < /dev/null &" &
+        $SSH "$h" "cd '$(rr "$h")' && ln -sf stage_$(printf %02d $i).json config/stage.json && mkdir -p /home/$h/kvcache/$NAME && mv residentd.log residentd.log.prev 2>/dev/null; LD_LIBRARY_PATH='$(rr "$h")'/lib SPARK_LING_T1='${SPARK_LING_T1:-1}' nohup ./bin/sparkpipe_model_residentd --deployment model_resident.json --rank-index $i > residentd.log 2>&1 < /dev/null &" &
         i=$((i+1))
     done
     wait
