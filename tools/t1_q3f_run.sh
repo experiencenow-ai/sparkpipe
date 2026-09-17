@@ -5,7 +5,7 @@
 # only, fail loud, no rerun-until-pass.
 set -eu
 
-REPO=/Users/mac/q3ft1
+REPO=${REPO:-/Users/mac/q3ft1r}
 BUILD_NODE=spark7
 LOCAL_SCRATCH="$REPO/.rt"
 REMOTE_RT='$HOME/q3ft1_rt'
