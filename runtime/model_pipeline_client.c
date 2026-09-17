@@ -495,6 +495,9 @@ static void SparkModelPipelineClientRankResult(
 		transaction->prepared_mask |= rank_mask;
 	else
 	{
+		fprintf(stderr,"RANK-RESULT-FAIL rank=%u id=%llu status=%u\n",
+			context != 0 ? context->stage_index : 999u,
+			(unsigned long long)submission_id,(unsigned)status);
 		SparkModelPipelineClientRecordFailure(transaction,status);
 		if ( transaction->continued != 0u )
 			SparkModelPipelineClientSetFailure(context->pipeline,status,
