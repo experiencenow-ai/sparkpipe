@@ -1267,6 +1267,59 @@ uint64_t SparkTpDeviceCollectiveGraphProgress(
     return(round);
 }
 
+uint64_t SparkTpDeviceCollectiveGraphStuckDump(
+    SparkTpDeviceCollective *collective)
+{
+    SparkTpDeviceCollectiveImplementation *implementation;
+    volatile uint64_t *entry;
+    uint64_t sequence = 0ull;
+    uint64_t parity;
+    uint32_t peer,band_index;
+    if ( collective == 0 || collective->implementation == 0 )
+        return(0ull);
+    implementation = collective->implementation;
+    if ( implementation->round_seq_device == 0 ||
+         implementation->mesh_buffer == 0 )
+        return(0ull);
+    if ( cudaMemcpy(&sequence,implementation->round_seq_device,
+            sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST) != 0 )
+        return(0ull);
+    parity = sequence &
+        (uint64_t)(SPARK_WEIGHTD_MESH_SLOTS_PER_RANK - 1u);
+    band_index = (uint32_t)(implementation->band_base /
+        (SPARK_WEIGHTD_MESH_SLOT_BYTES *
+         SPARK_WEIGHTD_MESH_SLOTS_PER_BAND));
+    entry = (volatile uint64_t *)(implementation->mesh_buffer +
+        SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(band_index,
+            implementation->tp_rank));
+    fprintf(stderr,
+        "STUCK-TAILS rank=%u seq=%llu parity=%llu doorbell=(%llu,%llu,%llu) tails:",
+        implementation->tp_rank,
+        (unsigned long long)sequence,
+        (unsigned long long)parity,
+        (unsigned long long)entry[0],(unsigned long long)entry[1],
+        (unsigned long long)entry[2]);
+    for ( peer = 0u;
+          peer < 16u && peer < implementation->tp_degree; peer++ )
+    {
+        volatile uint64_t *end_word;
+        if ( peer == implementation->tp_rank )
+        {
+            fprintf(stderr," self");
+            continue;
+        }
+        end_word = (volatile uint64_t *)(implementation->mesh_buffer +
+            implementation->band_base +
+            ((uint64_t)peer *
+                SPARK_WEIGHTD_MESH_SLOTS_PER_RANK + parity) *
+            SPARK_WEIGHTD_MESH_SLOT_BYTES +
+            SPARK_WEIGHTD_MESH_SLOT_BYTES - 8u);
+        fprintf(stderr," %u:%llu",peer,(unsigned long long)*end_word);
+    }
+    fprintf(stderr,"\n");
+    return(sequence);
+}
+
 uint64_t SparkTpDeviceCollectiveGraphDiag(
     SparkTpDeviceCollective *collective)
 {

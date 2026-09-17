@@ -3106,6 +3106,8 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 					uint64_t stuck_cell = 0ull;
 					uint64_t stuck_progress = SparkTpDeviceCollectiveGraphProgress(
 						&state->tp_device_collective,&stuck_cell);
+					(void)SparkTpDeviceCollectiveGraphStuckDump(
+						&state->tp_device_collective);
 				stuck_error = SparkTpDeviceCollectiveGraphError(
 					&state->tp_device_collective);
 				stuck_diag = SparkTpDeviceCollectiveGraphDiag(
