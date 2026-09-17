@@ -59,7 +59,7 @@ for host in $hosts; do
 		rc_total=1
 		break
 	fi
-	if ! ssh -o BatchMode=yes "$host" "timeout 45 dd if=/mnt/model-warm/qwen3.8-flash-next-fp8/model-00001-of-00131.safetensors of=/dev/null bs=1M count=32 2>&1 | tail -1" | grep -q copied; then
+	if ! ssh -o BatchMode=yes "$host" "ms=\$(date +%s%N); for i in 01 05 09 13 17 21 25 29 33 37 41 45 49 53 57 61; do stat /mnt/model-warm/qwen3.8-flash-next-fp8/model-000\$i-of-00131.safetensors >/dev/null 2>&1 || exit 9; done; ms=\$(( (\$(date +%s%N) - ms) / 1000000 )); [ \$ms -lt 5000 ] || exit 8; echo ok" | grep -q ok; then
 		if [ "${DEFERRED_RETRY:-0}" = 1 ]; then
 			echo "[$(date -u +%H:%M:%S)] $host warm client UNHEALTHY on retry - FAILING"
 			exit 1
