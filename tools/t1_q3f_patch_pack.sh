@@ -9,7 +9,13 @@ warm=${WARM:-/mnt/model-warm/qwen3.8-flash-next-fp8}
 lock_state=$(lsattr -d "$pack" 2>/dev/null || sudo -n lsattr -d "$pack")
 case $lock_state in
 	*i*) ;;
-	*) echo "pack not chattr +i locked: $pack ($lock_state)" >&2; exit 1 ;;
+	*)
+		if [ ! -f "$pack.patch.json" ]; then
+			echo "pack not chattr +i locked and no prior patch evidence: $pack ($lock_state)" >&2
+			exit 1
+		fi
+		echo "resuming unlocked pack with prior patch evidence: $pack"
+		;;
 esac
 if command -v lsof >/dev/null 2>&1; then
 	holders=$(lsof -t "$pack" 2>/dev/null || true)
