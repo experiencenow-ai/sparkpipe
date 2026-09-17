@@ -40,9 +40,21 @@ fi
 rc=0
 resume_flag=""
 [ "$resume" = 1 ] && resume_flag="--resume"
-python3 "$tools/qwen4_flash_scale_plane_patch.py" $resume_flag --pack "$pack" --warm "$warm" \
-	--tp-degree "$tp_degree" --tp-rank "$tp_rank" --write \
-	--json-out "$pack.patch.json" || rc=$?
+bundle_flag=""
+if [ -n "${5:-}" ]; then
+	bundle_flag="--apply-planes $5"
+elif [ "$resume" = 1 ]; then
+	resume_flag="--resume"
+fi
+if [ -n "$bundle_flag" ]; then
+	python3 "$tools/qwen4_flash_scale_plane_patch.py" --pack "$pack" $bundle_flag \
+		--tp-degree "$tp_degree" --tp-rank "$tp_rank" --write \
+		--json-out "$pack.patch.json" || rc=$?
+else
+	python3 "$tools/qwen4_flash_scale_plane_patch.py" $resume_flag --pack "$pack" --warm "$warm" \
+		--tp-degree "$tp_degree" --tp-rank "$tp_rank" --write \
+		--json-out "$pack.patch.json" || rc=$?
+fi
 if [ "$rc" != 0 ]; then
 	echo "PATCH FAILED rc=$rc - $pack left UNLOCKED, evidence: $pack.patch.json" >&2
 	exit "$rc"

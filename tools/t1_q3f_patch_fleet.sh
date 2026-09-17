@@ -25,11 +25,12 @@ case $arm in
 		;;
 esac
 scp -q "$tools_dir/qwen4_flash_scale_plane_patch.py" \
-	"$tools_dir/qwen4_flash_pack_stamp_check.py" \
-	"$tools_dir/qwen4_flash_pack_verify.py" \
+	"$tools_dir/qwen4_flash_pack_stamp_check.py" 	"$tools_dir/qwen4_flash_pack_verify.py" \
 	"$tools_dir/spark_pack_common.py" \
 	"$tools_dir/qwen4_flash_stagepack.py" \
 	"$binary_host:q3ft1_rt_stage/"
+echo "[$(date -u +%H:%M:%S)] emitting scale-plane bundles on $binary_host"
+ssh -o BatchMode=yes "$binary_host" "python3 q3ft1_rt_stage/qwen4_flash_scale_plane_patch.py --emit-planes q3ft1_rt_stage/planes --warm /mnt/model-warm/qwen3.8-flash-next-fp8 --tp-degree $tp_degree"
 rc_total=0
 deferred=""
 for host in $hosts; do
@@ -78,7 +79,10 @@ for host in $hosts; do
 		"$binary_host:q3ft1_rt_stage/qwen4_flash_stagepack.py" \
 		"$host:q3ft1_rt_patch/"
 	scp -q "$tools_dir/t1_q3f_patch_pack.sh" "$host:q3ft1_rt_patch/"
-	if ssh -o BatchMode=yes "$host" "timeout 2400 sh $remote_tools/t1_q3f_patch_pack.sh '$pack' $tp_degree $tp_rank $remote_tools" \
+	scp -q "$binary_host:q3ft1_rt_stage/planes/planes_tp${tp_degree}_r${tp_rank}.bin" \
+		"$binary_host:q3ft1_rt_stage/planes/planes_tp${tp_degree}_r${tp_rank}.json" \
+		"$host:q3ft1_rt_patch/" 2>/dev/null || true
+	if ssh -o BatchMode=yes "$host" "timeout 2400 sh $remote_tools/t1_q3f_patch_pack.sh '$pack' $tp_degree $tp_rank $remote_tools '$remote_tools/planes_tp${tp_degree}_r${tp_rank}.bin'" \
 		> "$runs_dir/$host.log" 2>&1; then
 		echo "[$(date -u +%H:%M:%S)] $host OK"
 		scp -q "$host:$pack.patch.json" "$runs_dir/$host.patch.json" || true
