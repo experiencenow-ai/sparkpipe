@@ -390,7 +390,8 @@ class Qwen4FlashEngine:
         delta = self.moe(index, mixed, sink)
         return self.hc_inject(streams, inject_pre, delta)
 
-    def decode_step(self, token_id, position, states, caches, capture):
+    def decode_step(self, token_id, position, states, caches, capture,
+                    capture_streams=None):
         if token_id < 0 or token_id >= self.vocab:
             raise ValueError(f"token {token_id} outside vocabulary {self.vocab}")
         if position > INDEXER_ALL_VISIBLE_MAX_CONTEXT:
@@ -409,6 +410,8 @@ class Qwen4FlashEngine:
             streams = self.forward_layer(i, streams, states, caches, sink, history)
             if sink:
                 capture[(position, i)] = sink
+            if capture_streams is not None:
+                capture_streams(i, streams)
             if not np.isfinite(streams).all():
                 raise ValueError(f"nonfinite reference state at layer {i}")
         self.ple_history = history[-2:]
