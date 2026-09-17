@@ -32,7 +32,8 @@ __global__ void SparkGlm5NextMeshPublishKernel(
 	unsigned long long sequence;
 	if ( threadIdx.x != 0u || blockIdx.x != 0u )
 		return;
-	sequence = 1ull + atomicAdd((unsigned long long *)seq_cell,1ull);
+	(void)seq_cell;
+	sequence = *slot_tail + 1ull;
 	round_seq[0] = sequence;
 	entry[2] = slot_index;
 	entry[1] = bytes;
