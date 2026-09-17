@@ -2026,6 +2026,10 @@ static SparkStatus SparkModelResidentdProcessDecision(
 			&route->submission,resolution);
 	}
 	pthread_mutex_lock(&runtime->mutex);
+	fprintf(stderr,"DECISION id=%llu decision=%u status=%u slot=%u\n",
+		(unsigned long long)decision->submission_id,
+		(unsigned)decision->decision,(unsigned)status,
+		(unsigned)(slot_index == UINT32_MAX ? 999u : slot_index));
 	if ( slot_index != UINT32_MAX && (route != &runtime->routes[slot_index] ||
 		route->active == 0u ||
 		route->state != SPARK_MODEL_RESIDENTD_ROUTE_RESOLVING ||
