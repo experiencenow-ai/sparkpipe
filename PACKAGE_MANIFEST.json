@@ -11678,8 +11678,8 @@
     },
     {
       "path": "tools/qwen4_flash_scale_plane_patch.py",
-      "sha256": "ccb82cdc2844ac3901fb5f51429dd25de1ebb80f0d5bb63330494be4b9a9fdb0",
-      "size_bytes": 6100
+      "sha256": "c2ede18ba7da78ce722b2803c8c916384f2553d6c7ad39416eabd0da7adcd424",
+      "size_bytes": 7521
     },
     {
       "path": "tools/qwen4_flash_stagepack.py",
