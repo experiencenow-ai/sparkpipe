@@ -3103,6 +3103,9 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 			{
 				uint64_t stuck_error;
 				uint64_t stuck_diag;
+					uint64_t stuck_cell = 0ull;
+					uint64_t stuck_progress = SparkTpDeviceCollectiveGraphProgress(
+						&state->tp_device_collective,&stuck_cell);
 				stuck_error = SparkTpDeviceCollectiveGraphError(
 					&state->tp_device_collective);
 				stuck_diag = SparkTpDeviceCollectiveGraphDiag(
@@ -3110,9 +3113,11 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 				state->graph_path_enabled = 0u;
 				state->degrade_graph_stuck++;
 				fprintf(stderr,
-					"DEGRADE graph-stuck slot=%u alt=%u err=%llu diag_peer=%llu ring=%llu slotidx=%llu want=%llu got=%llu\n",
+					"DEGRADE graph-stuck slot=%u alt=%u err=%llu diag_peer=%llu ring=%llu slotidx=%llu want=%llu got=%llu last_mesh_seq=%llu cell=%llu\n",
 					chain->slot_index,chain->slot->graph_alt,
-					(unsigned long long)stuck_error,
+					(unsigned long long)stuck_progress,
+						(unsigned long long)stuck_cell,
+						(unsigned long long)stuck_error,
 					(unsigned long long)(stuck_diag >> 56),
 					(unsigned long long)((stuck_diag >> 48) & 0xff),
 					(unsigned long long)((stuck_diag >> 32) & 0xffff),

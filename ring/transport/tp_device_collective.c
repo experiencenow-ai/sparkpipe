@@ -1243,6 +1243,30 @@ void SparkTpDeviceCollectiveBroadcastCancel(
     }
 }
 
+uint64_t SparkTpDeviceCollectiveGraphProgress(
+    SparkTpDeviceCollective *collective,
+    uint64_t *cell_out)
+{
+    SparkTpDeviceCollectiveImplementation *implementation;
+    uint64_t round = 0ull;
+    if ( cell_out != 0 )
+        *cell_out = 0ull;
+    if ( collective == 0 || collective->implementation == 0 )
+        return(0ull);
+    implementation = collective->implementation;
+    if ( implementation->round_seq_device == 0 ||
+         implementation->seq_cell == 0 )
+        return(0ull);
+    if ( cudaMemcpy(&round,implementation->round_seq_device,
+            sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST) != 0 )
+        return(0ull);
+    if ( cell_out != 0 &&
+         cudaMemcpy(cell_out,implementation->seq_cell,sizeof(uint64_t),
+             SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST) != 0 )
+        *cell_out = 0ull;
+    return(round);
+}
+
 uint64_t SparkTpDeviceCollectiveGraphDiag(
     SparkTpDeviceCollective *collective)
 {
