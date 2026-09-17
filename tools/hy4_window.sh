@@ -29,6 +29,7 @@ stage_build() {
 	say "bundling lane/hy4-t1 for $BUILD_NODE"
 	rm -rf "$STAGE"
 	mkdir -p "$STAGE"
+	ssh "$BUILD_NODE" "rm -rf $STAGE && mkdir -p $STAGE"
 	git -C "$REPO" bundle create "$STAGE/hy4.bundle" lane/hy4-t1
 	scp -q "$STAGE/hy4.bundle" "$BUILD_NODE:$STAGE/"
 	ssh "$BUILD_NODE" "rm -rf $STAGE/tree && git clone -q -b lane/hy4-t1 $STAGE/hy4.bundle $STAGE/tree"
@@ -45,7 +46,7 @@ stage_build() {
 			-DSPARK_HY4_MODULE_BUILD=1 \
 			tools/hy4_stub_harness.c \
 			build/modules/hy4_resident_decode_stage/libhy4_resident_decode_stage.a \
-			build/libsparkpipe_core.a \
+			build/libsparkpipe_model_common.a build/libsparkpipe_core.a \
 			-L/usr/local/cuda/lib64 -lcudart -lcuda -o $STAGE/hy4_stub 2> $STAGE/nvcc_stub.log
 		cc -std=c11 -O3 -D_GNU_SOURCE -I. -Iinclude \
 			-I/usr/local/cuda/include \
