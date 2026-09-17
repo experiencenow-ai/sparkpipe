@@ -310,7 +310,7 @@ sync_rendezvous() {
 }
 
 apply_manifest() {
-    local name="$1" root="$2" scope="$3" manifest_cur manifest_applied
+    local name="$1" root="$2" scope="${3:-/dev/null}" manifest_cur manifest_applied
     manifest_cur="/tmp/fleet_manifest_$name.txt"
     manifest_applied="$root/.applied_manifest"
     if ! curl -sf --max-time 8 "$RELEASE_HTTP/$name/MANIFEST" -o "$manifest_cur"; then
