@@ -7,6 +7,7 @@ WARM=/mnt/model-warm/qwen3.8-flash-next-fp8
 TREE=${TREE:-/tmp/t1q3f_stage/tree}
 OUT=$TREE/qualification/t1_reference/qwen4_flash
 PROMPTS=$OUT/prompts_qwen4flash.json
+mkdir -p "$OUT"
 
 cd "$TREE"
 python3 tools/t1_q3f_tokenize.py --tokenizer "$WARM/tokenizer.json" --prompts "$TREE/tools/t1_q3f_prompts_source.json" --output "$PROMPTS"
