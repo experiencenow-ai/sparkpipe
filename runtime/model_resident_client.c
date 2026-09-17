@@ -986,7 +986,7 @@ static SparkStatus SparkModelResidentClientRead(
 			{
 				fprintf(stderr,"client message rejected rank=%u kind=%u status=%u\n",
 					(unsigned)client->rank_index,
-					(unsigned)((const SparkModelResidentIpcHeader *)message)->kind,
+					(unsigned)((const SparkModelResidentIpcHeader *)client->input)->kind,
 					(unsigned)status);
 				SPARK_RETURN(status);
 			}
