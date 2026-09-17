@@ -1,0 +1,31 @@
+{
+  "checkpoint": {
+    "config_sha256": "99c11efba4012d0f760f4e4831a8d6cafd845044e21d0aa9e6d9e70a15a90a8d",
+    "index_sha256": "0419e2c2dfbb925257d7409405433a793cf7ff7d96f3eba882a815ec6d9fe7a6",
+    "path": "/mnt/model-warm/qwen3.8-flash-next-fp8"
+  },
+  "defines_config_mismatches": [],
+  "family": "qwen4_flash",
+  "fixtures": {
+    "capital_of_france.t1r": {
+      "bytes": 797073,
+      "sha256": "4ab48701441dc4aa4cf6aaca5f4c90ee201e483ba06bdd7a3489ab9ed588aa21"
+    },
+    "count_up.t1r": {
+      "bytes": 1063431,
+      "sha256": "f4ec28d362a1571148dc67a6e4c73bca8d200b78d22c5ec59408453a5352cc03"
+    }
+  },
+  "generated_utc": "2026-09-17T17:40:18Z",
+  "generator": "t1_reference_decoder.py",
+  "host": "spark7",
+  "llm_defines_sha256": "f6a23dbe584c7f595c0f814e09a159803be572ce6220d20414431cb95208c29b",
+  "numpy_version": "2.5.3",
+  "prompts_sha256": "1b94ae528c9568383f7b272d661a78314f49bb0629d3040de852429012b1dc1e",
+  "python_version": "3.12.3",
+  "threading_env": {
+    "MKL_NUM_THREADS": null,
+    "OMP_NUM_THREADS": null,
+    "OPENBLAS_NUM_THREADS": null
+  }
+}
