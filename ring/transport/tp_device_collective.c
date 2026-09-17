@@ -24,6 +24,8 @@ extern int cudaHostRegister(void *address,size_t bytes,unsigned int flags);
 extern int cudaMemcpy(void *destination,const void *source,
     size_t bytes,int kind);
 extern int cudaMalloc(void **address,size_t bytes);
+extern int cudaHostAlloc(void **address,size_t bytes,unsigned int flags);
+extern int cudaStreamSynchronize(void *stream);
 extern int SparkGlm5NextLaunchMeshCopyDown(void *stream,
     volatile void *destination,const void *source,uint64_t bytes);
 extern int SparkGlm5NextLaunchMeshPublish(void *stream,
