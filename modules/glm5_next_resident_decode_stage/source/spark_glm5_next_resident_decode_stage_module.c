@@ -3275,6 +3275,19 @@ static void SparkGlm5NextGraphEnsure(SparkGlm5NextTpChain *chain,
 		*status_out = status;
 		return;
 	}
+	if ( state->decode_lease_base_saved == 0 &&
+	     state->lazy_pack != 0 &&
+	     state->lazy_pack->map != 0 )
+	{
+		void *lease_base = 0;
+		if ( SparkWeightdMapBase(state->lazy_pack->map,
+		        &lease_base) == SPARK_STATUS_OK && lease_base != 0 )
+			state->decode_lease_base_saved =
+			    (const uint8_t *)lease_base;
+	}
+	chain->wave.expert_lease_base = state->decode_lease_base_saved;
+	chain->wave.expert_lease_local_layer = 0u;
+	chain->wave.expert_lease_all = 1u;
 	bound = chain->wave.maximum_context +
 		SPARK_GLM5_NEXT_GRAPH_CONTEXT_MARGIN;
 	if ( bound > chain->wave.max_sequence_positions )
