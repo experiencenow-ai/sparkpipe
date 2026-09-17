@@ -74,7 +74,7 @@ def derive_planes(source, tp_degree, tp_rank):
 					raise SystemExit(f"{name}: {meta['dtype']} {meta['shape']} unexpected")
 				planes.setdefault((layer, kind), bytearray())
 				request = (shard, data_offset, s_rows * s_cols * 2)
-				planes[(layer, kind)].extend(request)
+				planes[(layer, kind)].append(request)
 	return planes
 
 
