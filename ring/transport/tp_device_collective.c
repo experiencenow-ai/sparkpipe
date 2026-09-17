@@ -77,6 +77,7 @@ typedef struct SparkTpDeviceCollectiveImplementation
     void *error_word;
     void *diag_word;
     void *cancel_expected;
+    volatile uint64_t *published_host_cell;
     uint32_t capture_armed;
     uint32_t round_rebased;
     uint64_t cancel_seen;
@@ -665,9 +666,12 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
             implementation->round_seq_device,bytes,slot_index,
             slot + slot_bytes - 8u) != 0 )
         return SPARK_STATUS_IO_ERROR;
-    if ( cudaMemcpy(&published,implementation->round_seq_device,
-            sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST) != 0 )
+    if ( cudaMemcpyAsync((void *)implementation->published_host_cell,
+            implementation->round_seq_device,sizeof(uint64_t),
+            SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST,submission->cuda_stream) != 0 ||
+         cudaStreamSynchronize(submission->cuda_stream) != 0 )
         return SPARK_STATUS_IO_ERROR;
+    published = *implementation->published_host_cell;
     {
         uint32_t peers_remaining = implementation->tp_degree - 1u;
         uint32_t peer_passed[SPARK_TP_DEVICE_COLLECTIVE_MAX_DEGREE] = {0u};
@@ -1119,7 +1123,9 @@ SparkStatus SparkTpDeviceCollectiveArmCapture(
             SPARK_FAIL(SPARK_STATUS_IO_ERROR);
         }
         if ( cudaMemcpy(implementation->seq_cell,&zero,
-                sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 )
+                sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
+             cudaHostAlloc(&implementation->published_host_cell,
+                 sizeof(uint64_t),cudaHostAllocDefault) != 0 )
             SPARK_FAIL(SPARK_STATUS_IO_ERROR);
     }
     if ( cudaMemcpy(implementation->error_word,&zero,
