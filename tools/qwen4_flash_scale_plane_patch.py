@@ -114,11 +114,13 @@ def main():
 	parser.add_argument("--apply-planes", default=None, metavar="BUNDLE")
 	parser.add_argument("--warm", default="/mnt/model-warm/qwen3.8-flash-next-fp8")
 	parser.add_argument("--tp-degree", type=int, default=8)
-	parser.add_argument("--tp-rank", type=int, required=True)
+	parser.add_argument("--tp-rank", type=int, default=None)
 	parser.add_argument("--write", action="store_true")
 	parser.add_argument("--resume", action="store_true")
 	parser.add_argument("--json-out", default=None)
 	arguments = parser.parse_args()
+	if not arguments.emit_planes and arguments.tp_rank is None:
+		parser.error("--tp-rank is required in pack mode")
 	if arguments.emit_planes:
 		source = SafetensorsSource(Path(arguments.warm))
 		emit_planes(source, arguments.tp_degree, arguments.emit_planes)
