@@ -2792,8 +2792,32 @@ static void SparkGlm5NextGraphLeaseTrim(
 	}
 }
 
+static SparkStatus SparkGlm5NextGraphCoverEnsure(
+	SparkGlm5NextModuleState *state)
+{
+	uint32_t words;
+	if ( state->decode_cover_device != 0 )
+		return(SPARK_STATUS_OK);
+	words = (SPARK_GLM5_NEXT_MODEL_LAYER_COUNT *
+	    SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT + 31u) / 32u;
+	if ( cudaHostAlloc((void **)&state->decode_cover_host,
+	         (size_t)words * sizeof(uint32_t),
+	         cudaHostAllocMapped) != cudaSuccess ||
+	     cudaHostAlloc((void **)&state->decode_miss_host,
+	         SPARK_GLM5_NEXT_MODEL_MISS_RING_BYTES,
+	         cudaHostAllocMapped) != cudaSuccess ||
+	     cudaMalloc((void **)&state->decode_cover_device,
+	         (size_t)words * sizeof(uint32_t)) != cudaSuccess )
+		SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
+	memset(state->decode_cover_host,0,(size_t)words * sizeof(uint32_t));
+	memset(state->decode_miss_host,0,
+	    SPARK_GLM5_NEXT_MODEL_MISS_RING_BYTES);
+	state->decode_cover_words = words;
+	return(SPARK_STATUS_OK);
+}
+
 static SparkStatus SparkGlm5NextGraphRouteSweep(
-    SparkGlm5NextTpChain *chain)
+	SparkGlm5NextTpChain *chain)
 {
 	SparkGlm5NextModuleState *state;
 	SparkWeightdMap *map;
@@ -3241,7 +3265,7 @@ static void SparkGlm5NextGraphEnsure(SparkGlm5NextTpChain *chain,
 		*status_out = SPARK_STATUS_BUSY;
 		return;
 	}
-	status = SparkGlm5NextGraphRouteSweep(chain);
+	status = SparkGlm5NextGraphCoverEnsure(state);
 	if ( status != SPARK_STATUS_OK )
 	{
 		*status_out = status;
