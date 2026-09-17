@@ -192,7 +192,8 @@ start_root() {
     cd "$rr" || return 1
     ln -sf "stage_$(printf %02d "$RANK").json" config/stage.json
     [ -s residentd.log ] && mv residentd.log "residentd-$(date +%Y%m%d-%H%M%S).log" 2>/dev/null
-    SPARK_WEIGHTD_EXPERT_POOL_BYTES="${G5_EXPERT_POOL_BYTES:-34359738368}" \
+    env SPARK_WEIGHTD_EXPERT_POOL_BYTES="${G5_EXPERT_POOL_BYTES:-34359738368}" \
+    ${G5_GRAPH_PATH:+SPARK_GLM5_NEXT_GRAPH_PATH=$G5_GRAPH_PATH} \
     LD_LIBRARY_PATH="$rr/lib" nohup ./bin/sparkpipe_model_residentd \
         --deployment model_resident.json --rank-index "$RANK" \
         > residentd.log 2>&1 < /dev/null &
@@ -309,7 +310,7 @@ sync_rendezvous() {
 }
 
 apply_manifest() {
-    local name="$1" root="$2" scope="$3" manifest_cur manifest_applied
+    local name="$1" root="$2" scope="${3:-/dev/null}" manifest_cur manifest_applied
     manifest_cur="/tmp/fleet_manifest_$name.txt"
     manifest_applied="$root/.applied_manifest"
     if ! curl -sf --max-time 8 "$RELEASE_HTTP/$name/MANIFEST" -o "$manifest_cur"; then

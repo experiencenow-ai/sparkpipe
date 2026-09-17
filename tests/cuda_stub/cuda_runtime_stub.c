@@ -1099,18 +1099,23 @@ CUresult cuMemAddressFree(CUdeviceptr pointer, size_t bytes)
 
 cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
     volatile void *entry,void *seq_cell,void *round_seq,uint64_t bytes,
-    uint64_t slot_index)
+    uint64_t slot_index,volatile void *slot_tail)
 {
     (void)stream;(void)entry;
     (void)seq_cell;(void)round_seq;(void)bytes;(void)slot_index;
+    (void)slot_tail;
     return cudaSuccess;
 }
 
 cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
     volatile void *band_base,uint64_t slot_bytes,const void *round_seq,
-    uint64_t parity,uint32_t rank,uint32_t degree)
+    uint64_t parity,uint32_t rank,uint32_t degree,void *error_word,
+    unsigned long long deadline_ns,void *diag_word,volatile void *cancel_cell,
+    const void *cancel_expected)
 {
     (void)stream;(void)band_base;
     (void)slot_bytes;(void)round_seq;(void)parity;(void)rank;(void)degree;
+    (void)error_word;(void)deadline_ns;(void)diag_word;
+    (void)cancel_cell;(void)cancel_expected;
     return cudaSuccess;
 }

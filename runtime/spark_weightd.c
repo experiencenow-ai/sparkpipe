@@ -134,6 +134,7 @@ typedef struct SparkWeightdArena
     void *epoch_device;
     void *epoch_handle;
     uint64_t epoch;
+    void *pool_export_handle;
     uint8_t *staging;
 } SparkWeightdArena;
 
@@ -1304,6 +1305,18 @@ static void SparkWeightdServerStageMeshFd(SparkWeightdConnection *connection)
     connection->response_fds[connection->response_fd_count++] = fd;
 }
 
+static SparkStatus SparkWeightdArenaChunkEnsure(
+    SparkWeightdServer *server,SparkWeightdArena *arena,
+    uint32_t first_chunk,uint32_t last_chunk);
+static SparkStatus SparkWeightdPremapPool(SparkWeightdServer *server,
+    SparkWeightdArena *arena)
+{
+	(void)server;
+	(void)arena;
+	fprintf(stderr,"WD-POOL-PREMAP-SKIP (pool pre-map disabled: overwrites spine mapping — needs separate VA ranges)\n");
+	return(SPARK_STATUS_OK);
+}
+
 static SparkStatus SparkWeightdPreloadSpine(SparkWeightdServer *server,
     SparkWeightdArena *arena,int32_t fd);
 static SparkStatus SparkWeightdArenaChunkEnsure(SparkWeightdServer *server,
@@ -1452,6 +1465,10 @@ static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
         int32_t pack_fd = open(request->pack_path,O_RDONLY);
         if ( pack_fd >= 0 )
         {
+            status = SparkWeightdPremapPool(server,arena);
+            if ( status != SPARK_STATUS_OK )
+                fprintf(stderr,"WD-POOL-PREMAP-FAIL status=%s\n",
+                    SparkStatusToString(status));
             status = SparkWeightdPreloadSpine(server,arena,pack_fd);
             (void)close(pack_fd);
             if ( status != SPARK_STATUS_OK )
@@ -1491,6 +1508,20 @@ static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
     result->mesh_send_buffer_addr = SparkWeightdMeshBufferAddress();
     result->mesh_send_buffer_bytes = SPARK_WEIGHTD_MESH_REGION_BYTES;
     SparkWeightdServerStageMeshFd(connection);
+    if ( arena->pool_export_handle != 0 &&
+         connection->response_fd_count < SPARK_WEIGHTD_EXPORT_BATCH_MAX )
+    {
+        int pool_fd = -1;
+        if ( cuMemExportToShareableHandle(&pool_fd,
+                 (CUmemGenericAllocationHandle)(uintptr_t)arena->pool_export_handle,
+                 CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,0ull) == CUDA_SUCCESS &&
+             pool_fd >= 0 )
+        {
+            (void)fcntl(pool_fd,F_SETFD,FD_CLOEXEC);
+            connection->response_fds[connection->response_fd_count++] = pool_fd;
+            result->pool_fd_staged = 1u;
+        }
+    }
     (void)SparkWeightdManifestIdentity(&server->arenas[slot].manifest,result->manifest_sha256);
     printf("weightd lazy-attach model=%s experts=%u arena=%llu pool=%llu\n",
         identity.model, expert_count,
@@ -1632,6 +1663,9 @@ static void SparkWeightdMarkGroupChunks(SparkWeightdArena *arena,uint32_t group_
 
 static SparkStatus SparkWeightdFreeChunk(SparkWeightdServer *server,SparkWeightdArena *arena,uint32_t index)
 {
+	if ( arena->pool_export_handle != 0 &&
+	     arena->chunk_handles[index] == arena->pool_export_handle )
+		return(SPARK_STATUS_OK);
 	CUdeviceptr base = (CUdeviceptr)(uintptr_t)arena->device_base;
 	if ( arena->chunk_handles[index] == 0 )
 		return(SPARK_STATUS_OK);

@@ -112,8 +112,10 @@ static SparkStatus lazy_pack_initialize(SparkWeightdLazyPack *pack,int32_t fd,co
 			int epoch_fd = -1;
 			(void)SparkWeightdClientEpochExport(pack->client,
 			    pack->attached.arena_generation,&epoch_fd,timeout);
-			status = SparkWeightdMapCreate(pack->client,
-			    &pack->attached,epoch_fd,&pack->map);
+			{
+				status = SparkWeightdMapCreate(pack->client,
+				    &pack->attached,epoch_fd,-1,&pack->map);
+			}
 		}
 	if ( status == SPARK_STATUS_OK )
 		status = SparkWeightdWorkerCreate(&pack->worker);

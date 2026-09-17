@@ -436,6 +436,13 @@ void SparkModelResidentClientFailStop(SparkModelResidentClient *client)
 		close(client->fd);
 		client->fd = -1;
 	}
+	memset(client->pending,0,(size_t)client->queue_capacity * sizeof(client->pending[0]));
+	client->pending_count = 0u;
+	memset(client->outputs,0,(size_t)client->queue_capacity * sizeof(client->outputs[0]));
+	client->output_count = 0u;
+	client->output_head = 0u;
+	client->input_bytes = 0u;
+	client->input_target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
 }
 
 static SparkStatus SparkModelResidentClientEnsureConnected(
@@ -976,7 +983,13 @@ static SparkStatus SparkModelResidentClientRead(
 		{
 			status = SparkModelResidentClientProcessMessage(client,client->input,client->input_target_bytes);
 			if ( status != SPARK_STATUS_OK )
+			{
+				fprintf(stderr,"client message rejected rank=%u kind=%u status=%u\n",
+					(unsigned)client->rank_index,
+					(unsigned)((const SparkModelResidentIpcHeader *)client->input)->kind,
+					(unsigned)status);
 				SPARK_RETURN(status);
+			}
 			client->input_bytes = 0u;
 			client->input_target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
 			processed++;

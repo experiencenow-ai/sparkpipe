@@ -5,7 +5,7 @@
 #if defined(__CUDACC__)
 #include <cuda_runtime.h>
 #include <stdio.h>
-#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V3-PARITY-TAIL-ABORT-DIAG"
+#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V5-CANCELPOLL-ORDPARITY"
 #if defined(__CUDACC__)
 __constant__ char SparkTpMeshKernelsBuildMarker[] =
     SPARK_TP_MESH_KERNELS_MARKER;
@@ -26,7 +26,8 @@ __global__ void SparkGlm5NextMeshPublishKernel(
 	unsigned long long *seq_cell,
 	unsigned long long *round_seq,
 	uint64_t bytes,
-	uint64_t slot_index)
+	uint64_t slot_index,
+	volatile uint64_t *slot_tail)
 {
 	unsigned long long sequence;
 	if ( threadIdx.x != 0u || blockIdx.x != 0u )
@@ -35,6 +36,8 @@ __global__ void SparkGlm5NextMeshPublishKernel(
 	round_seq[0] = sequence;
 	entry[2] = slot_index;
 	entry[1] = bytes;
+	__threadfence_system();
+	*slot_tail = sequence;
 	__threadfence_system();
 	entry[0] = sequence;
 }
@@ -63,7 +66,9 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 	uint32_t degree,
     unsigned long long *error_word,
     unsigned long long deadline_ns,
-    unsigned long long *diag_word)
+    unsigned long long *diag_word,
+    volatile uint64_t *cancel_cell,
+    const unsigned long long *cancel_expected)
 {
 	uint32_t peer;
 	volatile uint64_t *end_word;
@@ -73,33 +78,48 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 		return;
 	sequence = round_seq[0];
 	stop_at = SparkGlm5NextGlobalTimerNs() + deadline_ns;
-	for ( peer = 0u; peer < degree - 1u; peer++ )
+	if ( cancel_cell != 0 && cancel_expected != 0 &&
+	     *cancel_cell != *cancel_expected )
+		return;
 	{
-		uint32_t peer_rank = peer < rank ? peer : peer + 1u;
-		end_word = (volatile uint64_t *)
-			((uint8_t *)band_base +
-			((uint64_t)peer_rank * slots_per_rank +
-				(ring & (slots_per_rank - 1ull))) * slot_bytes +
-			slot_bytes - 8u);
-		while ( *end_word < sequence )
+		unsigned long long spins = 0ull;
+		unsigned long long spin_cap = deadline_ns / 200ull;
+		if ( spin_cap < 1000000ull )
+			spin_cap = 1000000ull;
+		for ( peer = 0u; peer < degree - 1u; peer++ )
 		{
-			if ( *error_word != 0ull )
-				return;
-			if ( SparkGlm5NextGlobalTimerNs() >= stop_at )
+			uint32_t peer_rank = peer < rank ? peer : peer + 1u;
+			end_word = (volatile uint64_t *)
+				((uint8_t *)band_base +
+				((uint64_t)peer_rank * slots_per_rank +
+					(ring & (slots_per_rank - 1ull))) * slot_bytes +
+				slot_bytes - 8u);
+			while ( *end_word < sequence )
 			{
-				unsigned long long off = (unsigned long long)
-					((uint8_t *)end_word - (uint8_t *)band_base);
-				unsigned long long got = *end_word;
-				atomicExch((unsigned long long *)diag_word,
-					((unsigned long long)peer_rank << 56ull) |
-					((ring & 0xffull) << 48ull) |
-					((off / slot_bytes) << 32ull) |
-					((sequence & 0xffffull) << 16ull) |
-					(got & 0xffffull));
-				atomicExch((unsigned long long *)error_word,sequence);
-				return;
+				if ( *error_word != 0ull )
+					return;
+				if ( cancel_cell != 0 && cancel_expected != 0 &&
+				     *cancel_cell != *cancel_expected )
+					return;
+				spins++;
+				if ( (spins & 4095ull) == 0ull &&
+				     ( spins >= spin_cap ||
+				       SparkGlm5NextGlobalTimerNs() >= stop_at ) )
+				{
+					unsigned long long off = (unsigned long long)
+						((uint8_t *)end_word - (uint8_t *)band_base);
+					unsigned long long got = *end_word;
+					atomicExch((unsigned long long *)diag_word,
+						((unsigned long long)peer_rank << 56ull) |
+						((ring & 0xffull) << 48ull) |
+						((off / slot_bytes) << 32ull) |
+						((sequence & 0xffffull) << 16ull) |
+						(got & 0xffffull));
+					atomicExch((unsigned long long *)error_word,sequence);
+					return;
+				}
+				__nanosleep(200u);
 			}
-			__nanosleep(200u);
 		}
 	}
 }
@@ -323,24 +343,28 @@ extern "C" cudaError_t SparkGlm5NextLaunchMeshCopyDown(
 
 extern "C" cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
 	volatile void *entry,void *seq_cell,void *round_seq,uint64_t bytes,
-	uint64_t slot_index)
+	uint64_t slot_index,volatile void *slot_tail)
 {
 	SparkGlm5NextMeshPublishKernel<<<1,32,0u,stream>>>(
 		(volatile uint64_t *)entry,(unsigned long long *)seq_cell,
-		(unsigned long long *)round_seq,bytes,slot_index);
+		(unsigned long long *)round_seq,bytes,slot_index,
+		(volatile uint64_t *)slot_tail);
 	return(cudaPeekAtLastError());
 }
 
 extern "C" cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
 	volatile void *band_base,uint64_t slot_bytes,const void *round_seq,
 	uint64_t slots_per_rank,uint64_t ring,uint32_t rank,uint32_t degree,
-	void *error_word,unsigned long long deadline_ns,void *diag_word)
+	void *error_word,unsigned long long deadline_ns,void *diag_word,
+	volatile void *cancel_cell,const void *cancel_expected)
 {
 	SparkGlm5NextMeshWaitKernel<<<1,32,0u,stream>>>(
 		(volatile uint64_t *)band_base,slot_bytes,
 		(const unsigned long long *)round_seq,slots_per_rank,ring,rank,
 		degree,(unsigned long long *)error_word,deadline_ns,
-		(unsigned long long *)diag_word);
+		(unsigned long long *)diag_word,
+		(volatile uint64_t *)cancel_cell,
+		(const unsigned long long *)cancel_expected);
 	return(cudaPeekAtLastError());
 }
 

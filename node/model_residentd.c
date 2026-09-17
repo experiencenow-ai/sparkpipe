@@ -139,6 +139,7 @@ typedef struct SparkModelResidentdClient
 	uint32_t output_capacity;
 	uint32_t output_message_capacity;
 	uint32_t input_capacity;
+	uint64_t had_active_routes;
 	uint64_t generation;
 	uint64_t pending_client_reset;
 	uint64_t reset_done;
@@ -1370,10 +1371,14 @@ static void SparkModelResidentdCloseClientLocked(
 	runtime->client.output_count = 0u;
 	if ( runtime->routes != 0 )
 		for (index=0u; index<runtime->route_capacity; index++)
+		{
+			if ( runtime->routes[index].active != 0u )
+				runtime->client.had_active_routes = 1u;
 			if ( runtime->routes[index].active != 0u && runtime->routes[index].client_generation == runtime->client.generation )
 				if ( runtime->routes[index].state !=
 					SPARK_MODEL_RESIDENTD_ROUTE_RESERVED )
 					runtime->routes[index].abandoned = 1u;
+		}
 }
 
 static void SparkModelResidentdCloseClient(SparkModelResidentdRuntime *runtime)
@@ -1537,7 +1542,12 @@ static void SparkModelResidentdAcceptClient(SparkModelResidentdRuntime *runtime)
 {
 	int32_t fd;
 	if ( runtime->client.fd >= 0 )
-		return;
+	{
+		fprintf(stderr,
+		    "model_residentd takeover: closing old client fd=%d for new connection\n",
+		    runtime->client.fd);
+		SparkModelResidentdCloseClient(runtime);
+	}
 	fd = accept(runtime->listen_fd,0,0);
 	if ( fd < 0 )
 		return;
@@ -2016,6 +2026,10 @@ static SparkStatus SparkModelResidentdProcessDecision(
 			&route->submission,resolution);
 	}
 	pthread_mutex_lock(&runtime->mutex);
+	fprintf(stderr,"DECISION id=%llu decision=%u status=%u slot=%u\n",
+		(unsigned long long)decision->submission_id,
+		(unsigned)decision->decision,(unsigned)status,
+		(unsigned)(slot_index == UINT32_MAX ? 999u : slot_index));
 	if ( slot_index != UINT32_MAX && (route != &runtime->routes[slot_index] ||
 		route->active == 0u ||
 		route->state != SPARK_MODEL_RESIDENTD_ROUTE_RESOLVING ||
