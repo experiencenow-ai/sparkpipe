@@ -62,8 +62,16 @@ def main():
 	parser.add_argument("--tp-degree", type=int, default=8)
 	parser.add_argument("--tp-rank", type=int, required=True)
 	parser.add_argument("--write", action="store_true")
+	parser.add_argument("--resume", action="store_true")
 	parser.add_argument("--json-out", default=None)
 	arguments = parser.parse_args()
+	probes_inherited = 0
+	if arguments.resume:
+		prior_path = arguments.json_out or (str(Path(arguments.pack)) + ".patch.json")
+		prior = json.load(open(prior_path))
+		if prior.get("payload_probe_failures") != 0 or prior.get("problems"):
+			raise SystemExit("resume refused: prior patch evidence records failures")
+		probes_inherited = prior.get("payload_probes", 0)
 	expert_count = EXPERTS_TOTAL // arguments.tp_degree
 	expert_start = arguments.tp_rank * expert_count
 	pack_path = Path(arguments.pack)
@@ -76,7 +84,11 @@ def main():
 	problems = []
 	probe_requests = []
 	probe_meta = []
+	if probes_inherited:
+		print(f"resume: inheriting {probes_inherited} payload probes from prior evidence", file=sys.stderr, flush=True)
 	for entry in fp8_entries:
+		if probes_inherited:
+			break
 		kind = entry["kind"]
 		layer = entry["layer"]
 		proj = PROJ[kind]
@@ -176,6 +188,7 @@ def main():
 		"write": arguments.write,
 		"fp8_entries": len(fp8_entries),
 		"payload_probes": len(probe_meta),
+		"payload_probes_inherited": probes_inherited,
 		"payload_probe_failures": 0,
 		"planes_clean": clean_planes,
 		"planes_patched": patched_planes,

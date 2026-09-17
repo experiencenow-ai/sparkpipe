@@ -6,48 +6,57 @@ tp_rank=$3
 tools=$4
 warm=${WARM:-/mnt/model-warm/qwen3.8-flash-next-fp8}
 [ -f "$pack" ] || { echo "no pack: $pack" >&2; exit 1; }
-lock_state=$(lsattr -d "$pack" 2>/dev/null || sudo -n lsattr -d "$pack")
-case $lock_state in
-	*i*) ;;
+resume=0
+[ -f "$pack.patch.json" ] && resume=1
+locked_files=""
+for f in "$pack" "$pack.experts" "$pack.sha256" "$pack.receipt.json" "$pack.g5nsp.receipt.json"; do
+	[ -f "$f" ] || continue
+	state=$(lsattr -d "$f" 2>/dev/null || sudo -n lsattr -d "$f")
+	case $state in
+		*i*) locked_files="$locked_files $f" ;;
+	esac
+done
+case " $locked_files " in
+	*" $pack "*) ;;
 	*)
-		if [ ! -f "$pack.patch.json" ]; then
-			echo "pack not chattr +i locked and no prior patch evidence: $pack ($lock_state)" >&2
+		if [ "$resume" != 1 ]; then
+			echo "pack not chattr +i locked and no prior patch evidence: $pack" >&2
 			exit 1
 		fi
 		echo "resuming unlocked pack with prior patch evidence: $pack"
 		;;
 esac
-if command -v lsof >/dev/null 2>&1; then
-	holders=$(lsof -t "$pack" 2>/dev/null || true)
-elif command -v fuser >/dev/null 2>&1; then
-	holders=$(fuser "$pack" 2>/dev/null || true)
+if [ -z "$locked_files" ]; then
+	echo "nothing locked for: $pack"
 else
-	echo "neither lsof nor fuser available for the hold pre-check" >&2
-	exit 1
+	sudo -n chattr -i $locked_files
 fi
-[ -z "$holders" ] || { echo "pack held by: $holders" >&2; exit 1; }
-old_sha=$(cut -d' ' -f1 "$pack.sha256")
-sudo -n chattr -i "$pack"
+if [ -f "$pack.experts" ]; then
+	if [ -f "$pack.experts.pre-repair" ]; then
+		rm -f "$pack.experts.pre-repair"
+	fi
+	mv "$pack.experts" "$pack.experts.pre-repair"
+fi
 rc=0
-python3 "$tools/qwen4_flash_scale_plane_patch.py" --pack "$pack" --warm "$warm" \
+resume_flag=""
+[ "$resume" = 1 ] && resume_flag="--resume"
+python3 "$tools/qwen4_flash_scale_plane_patch.py" $resume_flag --pack "$pack" --warm "$warm" \
 	--tp-degree "$tp_degree" --tp-rank "$tp_rank" --write \
 	--json-out "$pack.patch.json" || rc=$?
 if [ "$rc" != 0 ]; then
 	echo "PATCH FAILED rc=$rc - $pack left UNLOCKED, evidence: $pack.patch.json" >&2
 	exit "$rc"
 fi
-if [ -f "$pack.experts" ]; then
-	mv "$pack.experts" "$pack.experts.pre-repair"
-fi
 "$tools/build-qwen4flash-experts-manifest" "$pack" "$tp_degree" "$tp_rank"
-python3 - "$pack" "$old_sha" <<'PYEOF'
+python3 - "$pack" <<'PYEOF'
 import hashlib
 import json
 import sys
 from pathlib import Path
 import time
 pack = Path(sys.argv[1])
-old_sha = sys.argv[2]
+old = Path(str(pack) + ".sha256")
+old_sha = old.read_text().split(" ", 1)[0] if old.is_file() else "unknown"
 digest = hashlib.sha256()
 with pack.open("rb") as fh:
 	while True:
@@ -119,6 +128,8 @@ for suffix in (".receipt.json", ".g5nsp.receipt.json"):
 	receipt["verified_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 	path.write_text(json.dumps(receipt, indent=1) + "\n")
 PYEOF
-sudo -n chattr +i "$pack"
-lsattr -d "$pack" "$pack.experts" "$pack.sha256" "$pack.receipt.json"
+if [ -n "$locked_files" ]; then
+	sudo -n chattr +i $locked_files
+fi
+lsattr -d "$pack" "$pack.experts" "$pack.sha256" "$pack.receipt.json" 2>/dev/null || true
 echo "PATCH+VERIFY+RELOCK OK: $pack"
