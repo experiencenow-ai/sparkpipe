@@ -119,6 +119,7 @@ typedef struct SparkWeightdArena
     uint32_t refcount;
     uint32_t lazy;
     uint64_t expert_pool_bytes;
+    uint64_t preload_chunk_bytes;
     uint64_t pool_committed_bytes;
     uint64_t expert_present_bytes;
     uint32_t expert_count;
@@ -561,6 +562,18 @@ static void SparkWeightdVmmRelease(SparkWeightdArena *arena)
             }
         }
     }
+    if (base != 0 && arena->epoch_device != 0)
+    {
+        (void)cuMemUnmap(
+            (CUdeviceptr)(uintptr_t)arena->epoch_device,
+            (size_t)arena->chunk_bytes);
+    }
+    if (arena->epoch_handle != 0)
+    {
+        (void)cuMemRelease(
+            (CUmemGenericAllocationHandle)arena->epoch_handle);
+        arena->epoch_handle = 0;
+    }
     if (arena->chunk_handles != 0)
     {
         for (index = 0u; index < arena->chunk_count; index++)
@@ -586,6 +599,7 @@ static void SparkWeightdVmmRelease(SparkWeightdArena *arena)
     arena->device_base = 0;
     arena->virtual_bytes = 0ull;
     arena->chunk_bytes = 0ull;
+    arena->epoch_device = 0;
 }
 
 static SparkStatus SparkWeightdVmmAllocate(uint64_t arena_bytes,
@@ -1466,6 +1480,7 @@ static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
                     (unsigned long long)arena->manifest.spine_bytes);
         }
     }
+    arena->preload_chunk_bytes = arena->pool_committed_bytes;
 
     status = SparkWeightdServerAttachRegister(server, connection, slot);
     if (status != SPARK_STATUS_OK)
@@ -1539,7 +1554,6 @@ static SparkStatus SparkWeightdPreloadSpine(SparkWeightdServer *server,
                     chunk,chunk);
                 if ( chunk_status != SPARK_STATUS_OK )
                     SPARK_RETURN(chunk_status);
-                arena->needed_chunks[chunk] = 1u;
             }
         }
     }
@@ -1726,7 +1740,7 @@ static SparkStatus SparkWeightdAcquireBudget(SparkWeightdServer *server,SparkWei
 	for (;;)
 	{
 		bytes = SparkWeightdAcquisitionBytes(arena);
-		if ( bytes <= arena->expert_pool_bytes && bytes <= (server->config.device_bytes_max - other) )
+		if ( bytes <= (arena->expert_pool_bytes + arena->preload_chunk_bytes) && bytes <= (server->config.device_bytes_max - other) )
 			return(SPARK_STATUS_OK);
 		victim = arena->manifest.group_count;
 		oldest = UINT64_MAX;
