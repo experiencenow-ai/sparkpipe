@@ -34,7 +34,8 @@ extern int SparkGlm5NextLaunchMeshGuard(void *stream,
 extern int SparkGlm5NextLaunchMeshWait(void *stream,
     volatile void *band_base,uint64_t slot_bytes,const void *round_seq,
     uint64_t slots_per_rank,uint64_t ring,uint32_t rank,uint32_t degree,
-    void *error_word,unsigned long long deadline_ns,void *diag_word);
+    void *error_word,unsigned long long deadline_ns,void *diag_word,
+    volatile void *cancel_cell,const void *cancel_expected);
 
 #define SPARK_TP_DEVICE_COLLECTIVE_STAGING_SETS \
     (SPARK_WEIGHTD_MESH_SLOTS_PER_RANK * 16u)
@@ -537,7 +538,6 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
 {
     uint64_t bytes;
     uint64_t ordinal;
-    uint64_t round_seq;
     uint64_t deadline;
     uint64_t slot_bytes;
     uint64_t slot_index;
@@ -570,9 +570,6 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
         if ( implementation->round_index >=
                 (1ull << SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ROUND_BITS) )
             return SPARK_STATUS_CAPACITY_EXCEEDED;
-        round_seq = (implementation->chain_key <<
-            SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ROUND_BITS) |
-            implementation->round_index;
         implementation->round_index++;
     }
     else
@@ -587,7 +584,7 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
         if ( implementation->round_seq + 1ull >=
                 implementation->round_wave_limit )
             return SPARK_STATUS_CAPACITY_EXCEEDED;
-        round_seq = ++implementation->round_seq;
+        implementation->round_seq++;
     }
     ordinal = submission->ordinal;
     slot_bytes = implementation->slot_bytes;
