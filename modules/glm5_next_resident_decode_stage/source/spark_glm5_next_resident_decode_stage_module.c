@@ -2724,6 +2724,10 @@ static void SparkGlm5NextGraphRecord(SparkGlm5NextTpChain *chain,
 	if ( cudaStreamEndCapture(stream,&graph) != cudaSuccess ||
 	     graph == 0 || failed != 0u )
 	{
+		fprintf(stderr,
+		    "GRAPH-RECORD-FAIL failed=%u end_graph=%p pending=%s\n",
+		    (unsigned)failed,graph,
+		    cudaGetErrorString(cudaGetLastError()));
 		if ( graph != 0 )
 			(void)cudaGraphDestroy(graph);
 		return;
@@ -2731,6 +2735,10 @@ static void SparkGlm5NextGraphRecord(SparkGlm5NextTpChain *chain,
 	if ( cudaGraphInstantiate(&exec,graph,0) != cudaSuccess ||
 	     cudaGraphUpload(exec,stream) != cudaSuccess )
 	{
+		fprintf(stderr,
+		    "GRAPH-INSTANTIATE-FAIL inst=%s upload=%s\n",
+		    cudaGetErrorString(cudaGetLastError()),
+		    cudaGetErrorString(cudaGetLastError()));
 		(void)cudaGraphDestroy(graph);
 		return;
 	}
