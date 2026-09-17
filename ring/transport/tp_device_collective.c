@@ -1125,7 +1125,7 @@ SparkStatus SparkTpDeviceCollectiveArmCapture(
         if ( cudaMemcpy(implementation->seq_cell,&zero,
                 sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
              cudaHostAlloc(&implementation->published_host_cell,
-                 sizeof(uint64_t),cudaHostAllocDefault) != 0 )
+                 sizeof(uint64_t),0u) != 0 )
             SPARK_FAIL(SPARK_STATUS_IO_ERROR);
     }
     if ( cudaMemcpy(implementation->error_word,&zero,
