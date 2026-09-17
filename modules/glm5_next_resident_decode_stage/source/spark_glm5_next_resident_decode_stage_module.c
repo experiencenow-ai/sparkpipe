@@ -2652,6 +2652,7 @@ static void SparkGlm5NextGraphRecord(SparkGlm5NextTpChain *chain,
 	cudaGraph_t graph;
 	cudaGraphExec_t exec;
 	uint32_t failed = 0u;
+	uint32_t failed_site = 0u;
 	uint32_t layer;
 	state = chain->state;
 	wave = &chain->wave;
@@ -2666,55 +2667,50 @@ static void SparkGlm5NextGraphRecord(SparkGlm5NextTpChain *chain,
 	         (void *)((uint64_t *)state->decode_miss_host +
 		             SPARK_GLM5_NEXT_MODEL_MISS_EPOCH_WORD_U64)) !=
 	             cudaSuccess )
-		failed = 1u;
+		{ failed = 1u; failed_site = 1u; }
 	if ( SparkGlm5NextLaunchCudaWaveBegin(wave) != 0 )
-		failed = 1u;
+		{ failed = 1u; failed_site = 2u; }
 	if ( failed == 0u &&
 	     SparkGlm5NextModuleReduceHidden(chain,
 	         chain->slot->hidden_bf16) != SPARK_STATUS_OK )
-		failed = 1u;
+		{ failed = 1u; failed_site = 3u; }
 	for ( layer = 0u;
 	      layer < wave->layer_count && failed == 0u &&
 	          state->graph_record_stop == 0u;
 	      layer++ )
 	{
-		if ( SparkGlm5NextLaunchCudaLayerAttention(wave,layer) != 0 ||
-		     SparkGlm5NextGraphReduce(chain,wave->slot->attention_out_bf16,
-				0u) != SPARK_STATUS_OK ||
-		     SparkGlm5NextLaunchCudaLayerAttentionPost(wave,layer) != 0 )
-		{
-			failed = 1u;
-			break;
-		}
+		if ( SparkGlm5NextLaunchCudaLayerAttention(wave,layer) != 0 )
+			{ failed = 1u; failed_site = 4u; break; }
+		if ( SparkGlm5NextGraphReduce(chain,wave->slot->attention_out_bf16,
+				0u) != SPARK_STATUS_OK )
+			{ failed = 1u; failed_site = 5u; break; }
+		if ( SparkGlm5NextLaunchCudaLayerAttentionPost(wave,layer) != 0 )
+			{ failed = 1u; failed_site = 6u; break; }
 		if ( (wave->first_layer_index + layer) >=
 		        SPARK_GLM5_NEXT_MODEL_FIRST_ROUTED_LAYER )
 		{
-			if ( SparkGlm5NextLaunchCudaLayerMlpRoute(wave,layer) != 0 ||
-			     SparkGlm5NextLaunchCudaLayerMlpExperts(wave,layer) != 0 )
-			{
-				failed = 1u;
-				break;
-			}
+			if ( SparkGlm5NextLaunchCudaLayerMlpRoute(wave,layer) != 0 )
+				{ failed = 1u; failed_site = 7u; break; }
+			if ( SparkGlm5NextLaunchCudaLayerMlpExperts(wave,layer) != 0 )
+				{ failed = 1u; failed_site = 8u; break; }
 		}
 		else if ( SparkGlm5NextLaunchCudaLayerMlp(wave,layer) != 0 )
-		{
-			failed = 1u;
-			break;
-		}
+			{ failed = 1u; failed_site = 9u; break; }
 		if ( SparkGlm5NextGraphReduce(chain,wave->slot->attention_out_bf16,
-				0u) != SPARK_STATUS_OK ||
-		     SparkGlm5NextLaunchCudaLayerMlpPost(wave,layer) != 0 )
-		{
-			failed = 1u;
-			break;
-		}
+				0u) != SPARK_STATUS_OK )
+			{ failed = 1u; failed_site = 10u; break; }
+		if ( SparkGlm5NextLaunchCudaLayerMlpPost(wave,layer) != 0 )
+			{ failed = 1u; failed_site = 11u; break; }
 	}
+	if ( failed == 0u && SparkGlm5NextLaunchCudaWaveHead(wave) != 0 )
+		{ failed = 1u; failed_site = 12u; }
 	if ( failed == 0u &&
-	     (SparkGlm5NextLaunchCudaWaveHead(wave) != 0 ||
-	      SparkGlm5NextGraphReduceHead(chain) != SPARK_STATUS_OK ||
-	      SparkGlm5NextLaunchHeadMaxlocUnpack(stream,wave->slot->head_maxloc_u64,
-			wave->slot->output_token,wave->row_count) != cudaSuccess) )
-		failed = 1u;
+	     SparkGlm5NextGraphReduceHead(chain) != SPARK_STATUS_OK )
+		{ failed = 1u; failed_site = 13u; }
+	if ( failed == 0u &&
+	     SparkGlm5NextLaunchHeadMaxlocUnpack(stream,wave->slot->head_maxloc_u64,
+			wave->slot->output_token,wave->row_count) != cudaSuccess )
+		{ failed = 1u; failed_site = 14u; }
 	if ( failed == 0u && state->owns_final_head != 0u )
 		failed = cudaMemcpyAsync(
 			wave->slot->host_output_token_ids + chain->first_row,
@@ -2725,8 +2721,8 @@ static void SparkGlm5NextGraphRecord(SparkGlm5NextTpChain *chain,
 	     graph == 0 || failed != 0u )
 	{
 		fprintf(stderr,
-		    "GRAPH-RECORD-FAIL failed=%u end_graph=%p pending=%s\n",
-		    (unsigned)failed,graph,
+		    "GRAPH-RECORD-FAIL failed=%u site=%u layer=%u end_graph=%p pending=%s\n",
+		    (unsigned)failed,(unsigned)failed_site,(unsigned)layer,graph,
 		    cudaGetErrorString(cudaGetLastError()));
 		if ( graph != 0 )
 			(void)cudaGraphDestroy(graph);
