@@ -85,6 +85,19 @@ Detokenize with `/home/spec/sparkpipe-build/qualification/ds4_eval/tokenizer/glm
 ## 7. What remains (priority order)
 
 ### 7.1 The allreduce: 1.3ms/round → 50-100µs target
+
+**PR #1030 state (lane/glm53-graph-replay) — as of 2026-09-17:** the graph path
+captures and replay #1 runs; replay hangs with ALL peers' slot tails reading 0
+while doorbells land (relay/copy layer, not the sequence protocol — per-slot
+generation counters are in, ruling out cross-rank counter skew). The fleet run
+also exposed: `apply_manifest` scope-arg crash-loop (`set -u`), the env-word
+bash trap in the agent launch, and an eager-admission regression on the branch
+(KV_CAPACITY rejects on fresh engines — from the -614-line module surgery).
+Do NOT merge until: (a) the admission regression is found, (b) a replay #N≥3
+completes repeatedly on the live fleet, (c) CHAIN-TIME shows replay beating
+1.3ms/round warm eager. Graph stays opt-in (`G5_GRAPH_PATH=1` drop-in per node;
+agent passes it as SPARK_GLM5_NEXT_GRAPH_PATH).
+
 `CHAIN-TIME` shows 91 rounds/chain ≈ 130ms of ~500ms. Pure host spin is already at its floor (peer-skew + 5 stream-ordered memcpys + RDMA/doorbell propagation per round). **The real lever is the GPU-side mesh path** (`capture_armed`: `SparkGlm5NextLaunchMeshPublish/Wait` run publish+wait on-GPU, no host round-trips). It's wired but disabled: `SPARK_GLM5_NEXT_GRAPH_PATH=1` opts in (default off since merge). Main's compile-time default is ON — re-validate before flipping the default. Steps: (1) enable env on ONE node config, probe; (2) watch for the historical graph-path issues (chainfail poisoning, EPOCH-MOVE lease drops); (3) measure CHAIN-TIME allreduce_ms. The characterize bench `tools/hardware/spark_tp_device_collective_characterize.cu` doesn't link (needs `SparkGlm5NextLaunchMesh*` from the module + `-lcuda`) — fix its Makefile rule when a low-level A/B is needed.
 
 ### 7.2 Host overhead: ~370ms/chunk (~7.5ms/layer)

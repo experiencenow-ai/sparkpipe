@@ -787,6 +787,30 @@ uint64_t SparkModelPipelineClientSessionFingerprint(
 	return(fingerprint);
 }
 
+void SparkModelPipelineClientClearTransactions(
+    SparkModelPipelineClient *pipeline)
+{
+    uint32_t index;
+    uint32_t cleared = 0u;
+    if ( pipeline == 0 )
+        return;
+    for (index=0u; index<pipeline->transaction_capacity; index++)
+        if ( pipeline->transactions[index].active != 0u )
+        {
+            pipeline->transactions[index].active = 0u;
+            pipeline->transactions[index].decision_expected_mask = 0u;
+            pipeline->transactions[index].decision_result_mask = 0u;
+            pipeline->transactions[index].prepared_mask = 0u;
+            pipeline->transactions[index].result_mask = 0u;
+            pipeline->transactions[index].completion_mask = 0u;
+            cleared++;
+        }
+    if ( cleared != 0u )
+        fprintf(stderr,
+            "pipeline transactions cleared: %u stale transaction(s) discarded\n",
+            cleared);
+}
+
 SparkStatus SparkModelPipelineClientRecover(
 	SparkModelPipelineClient *pipeline)
 {
@@ -810,6 +834,25 @@ SparkStatus SparkModelPipelineClientRecover(
 	pipeline->failed_stage_index = SPARK_MODEL_PIPELINE_CLIENT_INVALID_STAGE_INDEX;
 	for (rank=0u; rank<pipeline->rank_count; rank++)
 		(void)SparkModelResidentClientProgress(pipeline->clients[rank],1u);
+	{
+		uint32_t index;
+		uint32_t cleared = 0u;
+		for (index=0u; index<pipeline->transaction_capacity; index++)
+			if (pipeline->transactions[index].active != 0u)
+			{
+				pipeline->transactions[index].active = 0u;
+				pipeline->transactions[index].decision_expected_mask = 0u;
+				pipeline->transactions[index].decision_result_mask = 0u;
+				pipeline->transactions[index].prepared_mask = 0u;
+				pipeline->transactions[index].result_mask = 0u;
+				pipeline->transactions[index].completion_mask = 0u;
+				cleared++;
+			}
+		if (cleared != 0u)
+			fprintf(stderr,
+			    "pipeline recovered: cleared %u stale transaction(s) — their in-flight completions will be ignored\n",
+			    cleared);
+	}
 	return(SPARK_STATUS_OK);
 }
 

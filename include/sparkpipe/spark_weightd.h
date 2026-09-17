@@ -66,7 +66,6 @@ extern "C" {
 #define SPARK_WEIGHTD_IPC_KIND_EVICT_RESULT 30u
 
 #define SPARK_WEIGHTD_MESH_MAX_LANES 8u
-#define SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES (64u * 1024u)
 #define SPARK_WEIGHTD_MESH_MAX_BATCH_ROWS 128u
 #define SPARK_WEIGHTD_MESH_ROW_BYTES_MAX (16u * 1024u * 2u)
 #define SPARK_WEIGHTD_MESH_SLOT_BYTES \
@@ -555,6 +554,7 @@ SparkStatus SparkWeightdClientConnect(const char *socket_path,
     SparkWeightdHelloResult *hello_out);
 
 void SparkWeightdClientClose(SparkWeightdClient *client);
+uint32_t SparkWeightdClientAlive(const SparkWeightdClient *client);
 
 SparkStatus SparkWeightdClientMeshWrite(SparkWeightdClient *client,
     uint32_t peer_rank,
