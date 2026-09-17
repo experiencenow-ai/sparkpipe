@@ -1164,6 +1164,16 @@ SparkStatus SparkTpDeviceCollectiveArmCapture(
          cudaMemcpy(implementation->diag_word,&zero,
             sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 )
         SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+    if ( implementation->f32_scratch == 0 &&
+         implementation->slot_bytes != 0u )
+    {
+        uint64_t pre_bytes = 2ull * implementation->slot_bytes;
+        if ( cudaMalloc((void **)&implementation->f32_scratch,
+                 (size_t)pre_bytes) == 0 )
+            implementation->f32_scratch_bytes = pre_bytes;
+        else
+            implementation->f32_scratch = 0;
+    }
     implementation->capture_seq_base = implementation->round_seq;
     implementation->capture_armed = 1u;
     return(SPARK_STATUS_OK);
