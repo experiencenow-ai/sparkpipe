@@ -4,19 +4,19 @@
 # Laws: poll never blind-sleep, sparkcap on every pack/compute step, fail loud.
 set -eu
 
-REPO=/Users/mac/t1qmax
+REPO=/Users/mac/t1qmaxw
 BUILD_NODE=spark7
 SCRATCH=/tmp/t1qmax
 STAGE_DIR=/tmp/t1qmax_stage
 RUNTIME_PACKS='$HOME/sparkdata/qwenmax.nvfp4.tp16/packs'
-PROMPT_IDS=760,6511,314,9338,369
-NEW_TOKENS=2
+PROMPT_IDS="${PROMPT_IDS:-760,6511,314,9338,369}"
+NEW_TOKENS="${NEW_TOKENS:-2}"
 PORT_BASE=21504
 TP_IDENTIFIER=2141723
 HOSTS="spark0 spark1 spark2 spark3 spark4 spark5 spark6 spark7 spark8 spark9 sparka sparkb sparkc sparkd sparke sparkf"
 EXPERT_POOL_BYTES=8589934592
 SPINE_BUDGET_BYTES=17179869184
-EXPORT_ROOT=/Users/mac/t1qmax/runs/t1qmax
+EXPORT_ROOT=/Users/mac/t1qmaxw/runs/t1qmax
 REVISION=d2dc35658bcf77e66643428cb52e774cc3b5bd29
 
 say() {
@@ -60,13 +60,13 @@ lease_release() {
 }
 
 stage_build() {
-	say "bundling lane/t1-qmax for $BUILD_NODE"
+	say "bundling lane/t1-qmax-wave4 for $BUILD_NODE"
 	rm -rf "$SCRATCH"
 	mkdir -p "$SCRATCH"
 	ssh "$BUILD_NODE" "rm -rf $STAGE_DIR && mkdir -p $STAGE_DIR $SCRATCH"
-	git -C "$REPO" bundle create "$SCRATCH/t1qmax.bundle" lane/t1-qmax
+	git -C "$REPO" bundle create "$SCRATCH/t1qmax.bundle" lane/t1-qmax-wave4
 	scp -q "$SCRATCH/t1qmax.bundle" "$BUILD_NODE:$STAGE_DIR/"
-	ssh "$BUILD_NODE" "rm -rf $STAGE_DIR/tree && git clone -q -b lane/t1-qmax $STAGE_DIR/t1qmax.bundle $STAGE_DIR/tree"
+	ssh "$BUILD_NODE" "rm -rf $STAGE_DIR/tree && git clone -q -b lane/t1-qmax-wave4 $STAGE_DIR/t1qmax.bundle $STAGE_DIR/tree"
 	say "building on $BUILD_NODE"
 	scp -q "$REPO/tools/t1_qmax_build.sh" "$BUILD_NODE:$STAGE_DIR/"
 	ssh "$BUILD_NODE" "sh $STAGE_DIR/t1_qmax_build.sh"

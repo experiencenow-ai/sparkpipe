@@ -22,6 +22,10 @@ nvcc -std=c++17 -O3 -arch=sm_121a \
 	build/libsparkpipe_core.a \
 	-L/usr/local/cuda/lib64 -lcudart -lcuda -o "$T1_RUNTIME/t1_qmax_harness"
 cp build/sparkpipe_weightd build/libhidden_transport_spark_host_rdma_verbs.so "$T1_RUNTIME/"
-cp "$T1_RUNTIME/t1_qmax_harness" build/sparkpipe_weightd build/libhidden_transport_spark_host_rdma_verbs.so "$T1_STAGE/"
-chmod +x "$T1_RUNTIME/t1_qmax_harness" "$T1_RUNTIME/sparkpipe_weightd"
-ls -la "$T1_STAGE/t1_qmax_harness" "$T1_STAGE/libhidden_transport_spark_host_rdma_verbs.so" "$T1_STAGE/sparkpipe_weightd"
+cc -std=c11 -O2 -D_POSIX_C_SOURCE=200809L -I. -Iinclude \
+	tools/qwen38max_parity_probe.c \
+	runtime/spark_weightd_manifest.c runtime/spark_weightd_lease.c \
+	-o "$T1_RUNTIME/qwen38max_parity_probe"
+cp "$T1_RUNTIME/t1_qmax_harness" build/sparkpipe_weightd build/libhidden_transport_spark_host_rdma_verbs.so "$T1_RUNTIME/qwen38max_parity_probe" "$T1_STAGE/"
+chmod +x "$T1_RUNTIME/t1_qmax_harness" "$T1_RUNTIME/sparkpipe_weightd" "$T1_RUNTIME/qwen38max_parity_probe"
+ls -la "$T1_STAGE/t1_qmax_harness" "$T1_STAGE/libhidden_transport_spark_host_rdma_verbs.so" "$T1_STAGE/sparkpipe_weightd" "$T1_STAGE/qwen38max_parity_probe"

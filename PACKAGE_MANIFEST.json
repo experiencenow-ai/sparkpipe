@@ -1,5 +1,5 @@
 {
-  "file_count": 2955,
+  "file_count": 2965,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "e5e53c72b94cf02a785d38b05425e02936d62e7814735084d200e8c4f5d7e0c9",
-      "size_bytes": 112786
+      "sha256": "f490a83e4ea8924d72e82ec474fb2a2d990bec60cdc30146520429b5e852a382",
+      "size_bytes": 113000
     },
     {
       "path": "NCCL_16WIDE_RECEIPTS.md",
@@ -547,6 +547,16 @@
       "size_bytes": 3577
     },
     {
+      "path": "docs/AGENT_LANE_BRIEFS/reports/audit-shadow-2026-09-16.json",
+      "sha256": "0341c8b6f5986f0a988a5116cf582fbd7a87b5ab6a31cd5465859c9bacd010d7",
+      "size_bytes": 653776
+    },
+    {
+      "path": "docs/AGENT_LANE_BRIEFS/reports/audit-shadow-2026-09-16.md",
+      "sha256": "33517d81c843776b42121e05dafccfa113d6e5c3b3fab7fcbc035a31bacd6c76",
+      "size_bytes": 19618
+    },
+    {
       "path": "docs/AGENT_LANE_BRIEFS/reports/bridge-rtt-sparkf-5090-2026-09-03.md",
       "sha256": "580fea37db7085f447cce18bc06ae90a3d49ac5f9ed0893e9b414217c8f78828",
       "size_bytes": 1398
@@ -825,6 +835,11 @@
       "path": "docs/AGENT_LANE_BRIEFS/reports/perf-r1-2026-08-28.md",
       "sha256": "75a8ed7e8849d8d20276d2daa14c39c945066c773c007d6506c8d102cabe7e7b",
       "size_bytes": 10672
+    },
+    {
+      "path": "docs/AGENT_LANE_BRIEFS/reports/prep3-transport-2026-09-16.md",
+      "sha256": "5065036afa5f55c2b67f7d3a4dcaec15e7d03027981f538505daccc91045c78b",
+      "size_bytes": 9241
     },
     {
       "path": "docs/AGENT_LANE_BRIEFS/reports/probe-fix-2026-08-29.md",
@@ -1325,6 +1340,11 @@
       "path": "docs/STAGEPACK_NAMING.md",
       "sha256": "c08ba44f2655350ad5323d987c2c863b3e7b5b3303f00f54df7701275e394fa3",
       "size_bytes": 3262
+    },
+    {
+      "path": "docs/T1_QMAX_RUN_RECEIPT.md",
+      "sha256": "efb1a2d5b3b3c505cc977c0ea1d929d711fc0e951503817fcb7a59d2c81334c8",
+      "size_bytes": 11044
     },
     {
       "path": "docs/T1_REFERENCE_COMPARE.md",
@@ -3523,8 +3543,8 @@
     },
     {
       "path": "include/sparkpipe/spark_weightd.h",
-      "sha256": "7de9abf297ce72fe9224a78252bb563ea919c44b5ae1731a4686c685f4a0a6b4",
-      "size_bytes": 20627
+      "sha256": "b461ee4d15eba7ac3b3785636875bf4377e152b595585f9aa5b7f09b3574f895",
+      "size_bytes": 20570
     },
     {
       "path": "include/sparkpipe/spark_weightd_attach.h",
@@ -4723,8 +4743,8 @@
     },
     {
       "path": "modules/glm5_next_resident_decode_stage/include/sparkpipe/spark_glm5_next_resident_decode_stage_firmware.h",
-      "sha256": "8419bc670f147dcabb602e7c577c68eb13153093f56e1bc4408d14d7005c2ade",
-      "size_bytes": 9511
+      "sha256": "6178a0e437defcf34cb231fefccd90363e1e6e2c1ee9d1d3d44ddfbf3d5ed15e",
+      "size_bytes": 9602
     },
     {
       "path": "modules/glm5_next_resident_decode_stage/include/sparkpipe/spark_glm5_next_serving_adapter.h",
@@ -5403,13 +5423,13 @@
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/source/spark_qwen38_max_resident_decode_stage_cuda.cu",
-      "sha256": "4d2a5df40c341b14a5e61b0a4338b7ca54a0a5cfd4caf75cfedc49f9c7798634",
-      "size_bytes": 77650
+      "sha256": "ef09ce42ec00b239330e95bf0a24a6e5ff92f2d8545106656f0d701043f72bd2",
+      "size_bytes": 77536
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/source/spark_qwen38_max_resident_decode_stage_module.c",
-      "sha256": "90cfa1875137becaf5292ba8b7fc67f75f9a19653ab270f9615fc3f538ada7ff",
-      "size_bytes": 123918
+      "sha256": "7a81e6a2cf7516c57cf381b1dde57748e660dac1ffc787be4f01b6d9d8381295",
+      "size_bytes": 127199
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/source/spark_qwen38_max_serving_adapter.c",
@@ -7093,8 +7113,8 @@
     },
     {
       "path": "runtime/spark_weightd.c",
-      "sha256": "fed6ee5f22b830c9acba978b8c05b4f2209c438781cd20b362dd30dc8fc4ee0c",
-      "size_bytes": 147463
+      "sha256": "728321f337d65191f038792be7c8453f0fceb8601689369bf9f2f7bcb9cd9e89",
+      "size_bytes": 146941
     },
     {
       "path": "runtime/spark_weightd_attach.c",
@@ -7108,8 +7128,8 @@
     },
     {
       "path": "runtime/spark_weightd_lease.c",
-      "sha256": "ab086241990aa3c0ff21f629da3ce5c529157589a27e458534dad49c3f7f80fb",
-      "size_bytes": 7384
+      "sha256": "68f2dcb551e1a4c712f1e23d4f66a74336e70717ffa862299ad2e690df42cf99",
+      "size_bytes": 8059
     },
     {
       "path": "runtime/spark_weightd_manifest.c",
@@ -9177,6 +9197,11 @@
       "size_bytes": 24001
     },
     {
+      "path": "tests/test_weightd_mesh_doorbell.c",
+      "sha256": "a76dbfe7a359e3e8e74ad759661325517f060d7701fbb662e34daa92ed2be1b5",
+      "size_bytes": 7455
+    },
+    {
       "path": "tests/test_weightd_mesh_source.py",
       "sha256": "ff2fd9d03c0517ec6801302324a1757add4464e3da9a1dbccce7812cbae65b12",
       "size_bytes": 1620
@@ -9230,6 +9255,16 @@
       "path": "tools/audit_core_boundaries.py",
       "sha256": "69b1e0e343712c9ebbae4269d467ffc5c7d86f6f8732427e8c79b8dad5142d8d",
       "size_bytes": 10218
+    },
+    {
+      "path": "tools/audit_shadow.py",
+      "sha256": "6083b827abf1b7f27a12fdc3f8cad89c08c8b11456edda99dcdd9621063c8f06",
+      "size_bytes": 32643
+    },
+    {
+      "path": "tools/audit_shadow_allowlist.txt",
+      "sha256": "386302022d0877103de1ed14b52220428a043109e4450b62db3c4ee15622baec",
+      "size_bytes": 599
     },
     {
       "path": "tools/breakdown.sh",
@@ -11157,9 +11192,24 @@
       "size_bytes": 5845
     },
     {
+      "path": "tools/qwen38max_parity_probe.c",
+      "sha256": "880c6e82be37f01b98db97350b7e085189e7d20f1bb9c4a61ad854135c8c07b0",
+      "size_bytes": 3605
+    },
+    {
+      "path": "tools/qwen38max_patch_all.sh",
+      "sha256": "d3314b3bb4da30308c1db97f483b885447889088ffd23bd02d964e7fa85f4c1b",
+      "size_bytes": 2492
+    },
+    {
       "path": "tools/qwen38max_patch_pack.py",
       "sha256": "862da22380409f7efe0c7104d5bbd434d1d82ef44f7eb9c8a3119ea458dcaeca",
       "size_bytes": 7528
+    },
+    {
+      "path": "tools/qwen38max_patch_rank.sh",
+      "sha256": "a32cce55643d84d821f081e606cd5df4798ed41f6fe91423cddf04a67acc43b9",
+      "size_bytes": 7033
     },
     {
       "path": "tools/qwen38max_rebuild_all.sh",
@@ -11438,8 +11488,8 @@
     },
     {
       "path": "tools/t1_qmax_build.sh",
-      "sha256": "507e9da7e5a7512bf0699a7047df4f77b46cc0649ab654f8b99f402d5da099d2",
-      "size_bytes": 1759
+      "sha256": "fed314783c26f81402e42317eee6320557ba6d996f8f6a6db5894362aa7d3347",
+      "size_bytes": 2067
     },
     {
       "path": "tools/t1_qmax_harness.c",
@@ -11453,8 +11503,8 @@
     },
     {
       "path": "tools/t1_qmax_rank.sh",
-      "sha256": "c46cffa416ca11a295c6d31e8e828d9a1ffd7d715c062f6cb45e1ee3552b5cd2",
-      "size_bytes": 1596
+      "sha256": "8d52f74021c9572fe3d12b3d8d3a447e442b21057f29c8b078dbe569ba220ce8",
+      "size_bytes": 1620
     },
     {
       "path": "tools/t1_qmax_rates.py",
@@ -11463,8 +11513,8 @@
     },
     {
       "path": "tools/t1_qmax_run.sh",
-      "sha256": "637b6763299a6ca788ae52236c845914313bd77f9d6ce5f3242b65b721f9dee0",
-      "size_bytes": 6053
+      "sha256": "7f35d850fd99a66c152e534f3c8fb758808a00d24f6e2361bc6f1faa9869c916",
+      "size_bytes": 6107
     },
     {
       "path": "tools/t1_reference_common.py",
@@ -14780,5 +14830,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 55862177
+  "total_bytes": 56613637
 }
