@@ -133,6 +133,30 @@ disconnect / request retirement.
 
 Then: warm probes (expect fast tokens), re-arm graph, fixture, merges.
 
+## Late-night addendum
+
+- A WARM chain completes a full token in 313ms eager (91 rounds,
+  allreduce 63ms -> ~695us/round, 7-10x above the 50-100us target).
+- COLD chains cost 283-452s/token: per-layer lazy expert loads dominate
+  (stage_ms[3] = 99% of chain time). The expert pool churns per token.
+- CKEY base-cell broadcasts from rank 0 do NOT land on peers
+  (sparkc waited on cell (10,...) while rank 0 had written (13,...));
+  cancel cells appear locally because each rank writes its own on
+  chainfail. New diag: CKEY-BCAST-FAIL prints if the MeshBroadcast IPC
+  itself fails (deployed in driver 965a... era = tip ba60539).
+- The API retry cap (10000 restores at <=200ms) keeps dead requests
+  storming the engines for tens of minutes; combined with
+  slot_index = request_id % 4 dispatch, four unlucky colliding requests
+  pin all four pipeline slots. Engines self-heal in ~30-60s per stale
+  chain ONLY if probes stop arriving.
+- Engines that outlive a weightd restart keep an ORPHANED mesh mapping
+  (old memfd): they publish into a buffer nobody reads. The engine must
+  re-attach its mesh mapping on lease reset (or restart). Until then:
+  after any weightd restart, restart the engines too.
+- Probe discipline that works: full clean bounce (kill all residentd +
+  weightd, let agents converge, all 16 listeners), ONE probe with a
+  600s+ budget, no parallel probes.
+
 ## Open work, in order
 
 1. Tail contract `(epoch<<32)|ordinal` in the publish kernel + wait
