@@ -29,7 +29,8 @@ extern int cudaStreamSynchronize(void *stream);
 extern int SparkGlm5NextLaunchMeshCopyDown(void *stream,
     volatile void *destination,const void *source,uint64_t bytes);
 extern int SparkGlm5NextLaunchMeshPublish(void *stream,
-    volatile void *entry,void *seq_cell,void *round_seq,uint64_t bytes,
+    volatile void *entry,void *seq_cell,const void *epoch_cell,
+    void *round_seq,uint64_t bytes,
     uint64_t slot_index,volatile void *slot_tail);
 extern int SparkGlm5NextLaunchMeshGuard(void *stream,
     volatile void *error_word,void *output);
@@ -75,6 +76,7 @@ typedef struct SparkTpDeviceCollectiveImplementation
     SparkTpDeviceCollectiveStagingSet
         staging[SPARK_TP_DEVICE_COLLECTIVE_STAGING_SETS];
     void *seq_cell;
+    void *epoch_cell;
     void *round_seq_device;
     void *error_word;
     void *diag_word;
@@ -528,6 +530,20 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
             (unsigned long long)implementation->chain_epoch);
         implementation->chain_epoch = epoch;
         implementation->round_index = 0ull;
+        if ( SparkTpDeviceCollectiveEnsureCells(implementation) ==
+                SPARK_STATUS_OK )
+        {
+            uint64_t zero = 0ull;
+            if ( cudaMemcpy(implementation->epoch_cell,&epoch,
+                    sizeof(uint64_t),
+                    SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
+                 cudaMemcpy(implementation->seq_cell,&zero,
+                    sizeof(uint64_t),
+                    SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 )
+                SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+        }
+        else
+            SPARK_FAIL(SPARK_STATUS_IO_ERROR);
     }
     implementation->chain_key =
         (epoch << SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_BITS) | request_id;
@@ -617,7 +633,8 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
                 implementation->mesh_buffer +
                 SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(band_index,
                     implementation->tp_rank),
-                implementation->seq_cell,implementation->round_seq_device,
+                implementation->seq_cell,implementation->epoch_cell,
+                implementation->round_seq_device,
                 bytes,slot_index,
                 implementation->mesh_buffer +
                 implementation->band_base + slot_index * slot_bytes +
@@ -679,6 +696,7 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
     }
     if ( SparkGlm5NextLaunchMeshPublish(submission->cuda_stream,
             (volatile void *)entry,implementation->seq_cell,
+            implementation->epoch_cell,
             implementation->round_seq_device,bytes,slot_index,
             slot + slot_bytes - 8u) != 0 )
     {
@@ -1140,15 +1158,18 @@ static SparkStatus SparkTpDeviceCollectiveEnsureCells(
     SparkTpDeviceCollectiveImplementation *implementation)
 {
     uint64_t seed;
+    uint64_t zero_epoch = 0ull;
     if ( implementation->seq_cell != 0 )
         return SPARK_STATUS_OK;
     if ( cudaMalloc(&implementation->seq_cell,8u) != 0 ||
+         cudaMalloc(&implementation->epoch_cell,8u) != 0 ||
          cudaMalloc(&implementation->round_seq_device,8u) != 0 ||
          cudaMalloc(&implementation->error_word,8u) != 0 ||
          cudaMalloc(&implementation->diag_word,8u) != 0 ||
          cudaMalloc(&implementation->cancel_expected,8u) != 0 )
     {
         implementation->seq_cell = 0;
+        implementation->epoch_cell = 0;
         implementation->round_seq_device = 0;
         implementation->error_word = 0;
         implementation->diag_word = 0;
@@ -1157,6 +1178,8 @@ static SparkStatus SparkTpDeviceCollectiveEnsureCells(
     }
     seed = implementation->round_seq;
     if ( cudaMemcpy(implementation->seq_cell,&seed,
+            sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
+         cudaMemcpy(implementation->epoch_cell,&zero_epoch,
             sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
          cudaHostAlloc((void **)&implementation->published_host_cell,
              sizeof(uint64_t),0u) != 0 )
