@@ -391,6 +391,9 @@ SparkStatus SparkTpDeviceCollectiveChainRetire(
     return(SPARK_STATUS_OK);
 }
 
+static SparkStatus SparkTpDeviceCollectiveEnsureCells(
+    SparkTpDeviceCollectiveImplementation *implementation);
+
 SparkStatus SparkTpDeviceCollectiveChainKey(
     SparkTpDeviceCollective *collective,uint64_t request_id)
 {
