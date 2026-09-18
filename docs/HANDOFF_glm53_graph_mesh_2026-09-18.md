@@ -52,8 +52,12 @@ branch: `lane/fleet-resilience` (tip 92d857b, PR #1036 open). Graph PR #1030.
   `tail >= my_published` across counters that skew per rank. After churn
   the values interleave wrongly (observed: doorbell seq=3073 but slot tail
   =3072/5120 from other generations). Design fix: tail should be
-  `(epoch << 32) | chain_ordinal` (CKEY epoch already exists) so the wait
-  compares the SAME quantity on all ranks. This is the next real code task.
+  `(boot_epoch << 32) | chain_ordinal`, where boot_epoch comes from the
+  attached weightd's record boot_ns — a restarted rank is always newer
+  than anything in the surviving memfd, so monotonicity is free and no
+  fencing/high-water machinery is needed (stale state is recognizable as
+  stale, never adoptable). The wait then compares the same quantity on
+  all ranks. This is the next real code task.
 
 ## The two amplifier bugs (fix these, they turn any hiccup into a fleet outage)
 
@@ -108,4 +112,3 @@ branch: `lane/fleet-resilience` (tip 92d857b, PR #1036 open). Graph PR #1030.
    wire-format change.
 6. Fuzz harness: random weightd/residentd kills, measure time-to-serve,
    must never wedge.
-7. Epoch high-water fencing in mesh records (restart-proof).
