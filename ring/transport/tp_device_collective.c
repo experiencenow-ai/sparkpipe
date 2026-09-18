@@ -662,17 +662,35 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
     }
     if ( SparkGlm5NextLaunchMeshCopyDown(submission->cuda_stream,
             slot,submission->local_device,bytes) != 0 )
+    {
+        fprintf(stderr,"MESH-COPYDOWN-FAIL rank=%u bytes=%llu slot=%llu cuda=%s\n",
+            implementation->tp_rank,(unsigned long long)bytes,
+            (unsigned long long)slot_index,
+            cudaGetErrorString(cudaGetLastError()));
         return SPARK_STATUS_IO_ERROR;
+    }
     if ( SparkGlm5NextLaunchMeshPublish(submission->cuda_stream,
             (volatile void *)entry,implementation->seq_cell,
             implementation->round_seq_device,bytes,slot_index,
             slot + slot_bytes - 8u) != 0 )
+    {
+        fprintf(stderr,"MESH-PUBLISH-FAIL rank=%u bytes=%llu slot=%llu cuda=%s\n",
+            implementation->tp_rank,(unsigned long long)bytes,
+            (unsigned long long)slot_index,
+            cudaGetErrorString(cudaGetLastError()));
         return SPARK_STATUS_IO_ERROR;
+    }
     if ( cudaMemcpyAsync((void *)implementation->published_host_cell,
             implementation->round_seq_device,sizeof(uint64_t),
             SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST,submission->cuda_stream) != 0 ||
          cudaStreamSynchronize(submission->cuda_stream) != 0 )
+    {
+        fprintf(stderr,"MESH-READBACK-FAIL rank=%u bytes=%llu slot=%llu cuda=%s\n",
+            implementation->tp_rank,(unsigned long long)bytes,
+            (unsigned long long)slot_index,
+            cudaGetErrorString(cudaGetLastError()));
         return SPARK_STATUS_IO_ERROR;
+    }
     published = *implementation->published_host_cell;
     {
         uint32_t peers_remaining = implementation->tp_degree - 1u;
