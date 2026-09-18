@@ -3988,8 +3988,8 @@
     },
     {
       "path": "model-families/gemma4/include/sparkpipe/llm_defines.h",
-      "sha256": "021dfe3a18d4849e297a341960cbe3dc818475c0b7c43341c8cc2ec47a200286",
-      "size_bytes": 11774
+      "sha256": "722244fb716df4c44c75f34ab1ce933f7a6307da80281eef44fa77945a76c9ea",
+      "size_bytes": 12817
     },
     {
       "path": "model-families/gemma4/include/sparkpipe/spark_gemma4_model.h",
@@ -11628,8 +11628,8 @@
     },
     {
       "path": "tools/t1_reference_common.py",
-      "sha256": "209210d8c3bc58ea4dc5c750841a4a8eb5fb4e7c13b0000c5a86f73d01e7a58c",
-      "size_bytes": 9447
+      "sha256": "cdd6144282300bd0ac8899ed901b993a4e8c265ae581f98aff33db50cfca6393",
+      "size_bytes": 10006
     },
     {
       "path": "tools/t1_reference_compare.py",
@@ -14965,5 +14965,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 59010760
+  "total_bytes": 59012362
 }
