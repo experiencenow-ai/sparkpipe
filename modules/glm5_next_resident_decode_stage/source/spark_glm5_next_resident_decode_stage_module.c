@@ -166,6 +166,8 @@ struct SparkGlm5NextModuleState
 	uint8_t *head_certified_fp8_payload;
 	float *head_certified_fp8_scale_f32;
 	float *head_certified_fp8_norm_f32;
+	uint64_t expert_pin_leases[32];
+	uint32_t expert_pin_lease_count;
 	uint8_t *kv_cache;
 	uint64_t kv_layer_stride_bytes;
 	uint8_t *index_cache;
@@ -625,6 +627,13 @@ static SparkStatus SparkGlm5NextLazyOpen(SparkGlm5NextModuleState *state,const c
 		state->epoch_device = SparkWeightdMapEpochDevice(
 			state->lazy_pack->map);
 		state->epoch_validated = 0ull;
+	}
+	if ( status == SPARK_STATUS_OK )
+	{
+		const char *pin_env = getenv("SPARK_GLM5_NEXT_PIN_EXPERTS");
+		if ( pin_env != 0 && pin_env[0] == '1' && state->lazy_pack != 0 &&
+		     state->lazy_pack->map != 0 )
+			status = SparkGlm5NextPinAllExperts(state);
 	}
 	SPARK_RETURN(status);
 }
@@ -2315,6 +2324,7 @@ static void CUDART_CB SparkGlm5NextMtpResolveHost(void *context)
 }
 
 static void SparkGlm5NextLazyRetryRetained(void *context);
+static SparkStatus SparkGlm5NextPinAllExperts(SparkGlm5NextModuleState *state);
 
 static void SparkGlm5NextScheduleRetainedRetry(SparkGlm5NextModuleState *state)
 {
@@ -2435,6 +2445,45 @@ static void SparkGlm5NextTpChainReduceMlp(SparkGlm5NextTpChain *chain)
 	status = SparkGlm5NextModuleReduceAttentionOut(chain,chain->slot->attention_out_bf16);
 	if ( status != SPARK_STATUS_OK )
 		SparkGlm5NextTpChainFail(chain,status);
+}
+
+static SparkStatus SparkGlm5NextPinAllExperts(SparkGlm5NextModuleState *state)
+{
+	SparkWeightdExpertKey keys[SPARK_WEIGHTD_LEASE_GROUPS_MAX];
+	uint32_t count = 0u;
+	uint32_t layer,expert;
+	SparkStatus status = SPARK_STATUS_OK;
+	for ( layer = state->first_layer_index + SPARK_GLM5_NEXT_MODEL_FIRST_ROUTED_LAYER;
+	      layer < state->first_layer_index + state->layer_count &&
+	          status == SPARK_STATUS_OK; layer++ )
+		for ( expert = 0u;
+		      expert < SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT &&
+		          status == SPARK_STATUS_OK; expert++ )
+		{
+			keys[count].layer = layer;
+			keys[count].expert = expert;
+			count++;
+			if ( count == SPARK_WEIGHTD_LEASE_GROUPS_MAX ||
+			     ( layer + 1u == state->first_layer_index + state->layer_count &&
+			       expert + 1u == SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT ) )
+			{
+				uint64_t lease = 0u;
+				status = SparkWeightdMapAcquire(state->lazy_pack->map,keys,
+				    count,&lease,SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
+				if ( status == SPARK_STATUS_OK )
+				{
+					if ( state->expert_pin_lease_count <
+					        (uint32_t)(sizeof(state->expert_pin_leases)/
+					            sizeof(state->expert_pin_leases[0])) )
+						state->expert_pin_leases[state->expert_pin_lease_count++] = lease;
+					fprintf(stderr,"EXPERT-PIN lease=%llu keys=%u total_leases=%u\n",
+						(unsigned long long)lease,(unsigned)count,
+						(unsigned)state->expert_pin_lease_count);
+				}
+				count = 0u;
+			}
+		}
+	SPARK_RETURN(status);
 }
 
 static SparkStatus SparkGlm5NextLazyExperts(SparkGlm5NextTpChain *chain)
