@@ -217,3 +217,26 @@ Then: warm probes (expect fast tokens), re-arm graph, fixture, merges.
   the request dies with the client (~60-120s) while the first cold token
   needs ~450s. Warmup hook (agent fires one long-deadline request per
   engine generation) remains the one-line service unlock.
+
+
+## Overnight addendum 3 — the completion return path is the blocker
+
+Fleet state: engines complete chains (CHAIN-TIME status=0, warm ~350ms),
+the warmup hook works (first API-visible tokens served:
+{"tokens":[3764,10,4999,1725]}). BUT no user request completes:
+request_measurements show engine_completed=0 for every request — chain
+completions never assemble into request completions at the API.
+
+Evidence: chains complete at the engines (status=0, tokens produced);
+the API's batch engine sits at served=0; requests die on client timeout
+or pipeline set-failure. The completion return path
+(engine residentd -> socket -> API pipeline client -> batch engine
+AcceptToken) is the unbroken-looking but non-delivering link. Next debug
+target with a name: trace ONE completion from SparkModelResidentdCompletion
+(engine sends) to the API's resident-client message dispatch (does the
+message arrive? does its submission_id match a live transaction? does
+the pipeline collect it?).
+
+Also fixed tonight: batch-engine lane release now queues on ERROR
+terminals too (5a8855a) — the 16-lane permanent-leak wall. Warmup hook
+with single-flight + retry (f94d4e3, lane/fleet-resilience).
