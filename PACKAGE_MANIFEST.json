@@ -2843,27 +2843,27 @@
     },
     {
       "path": "examples/model_descriptions/glm52_resident_decode_stage_fp8_firmware.json",
-      "sha256": "6cc49c51cb7876db40520a70127d986f82144bfcdc95c75f865f0ea46041e7d1",
+      "sha256": "6d9751b3983e6c5011caef109d2a81b62b13b8e02af4434266b1481100a0308a",
       "size_bytes": 3352
     },
     {
       "path": "examples/model_descriptions/glm52_resident_decode_stage_int6_firmware.json",
-      "sha256": "2ba62a7d6b2395223b3393b3780c247295dd2a0a3f414eaf8587a0ce56e8286d",
+      "sha256": "be26950abf26d868d6accb02f756727d90064cae0bff7203265f474a8f41dd1b",
       "size_bytes": 3352
     },
     {
       "path": "examples/model_descriptions/glm52_resident_decode_stage_int7_firmware.json",
-      "sha256": "264902b87cc5caa185852b639f88e14de1f8aa26722bc4743103aeeb615a2f04",
+      "sha256": "e6fa6d5773303e84bb3ba1af76acbee64b7fa6215f4280baf399d59de30d813c",
       "size_bytes": 3353
     },
     {
       "path": "examples/model_descriptions/glm52_resident_decode_stage_int8_firmware.json",
-      "sha256": "7bc3fbe0778d72c97801ae057587dd023cd6a13aa1740e56efcf36de62139036",
+      "sha256": "a6665a8751617e98629ca0f3bf7b3858cb5bf29fcc6b26fdd9b89484389f8cf4",
       "size_bytes": 3353
     },
     {
       "path": "examples/model_descriptions/glm52_resident_decode_stage_mxfp4_firmware.json",
-      "sha256": "597475b735507c444d3f5bf89614028635b283a912931cceb50059b1417163c4",
+      "sha256": "a6bec17eb35910635f580f11f7c08acddb6919a6bcee95c565d21227e2600800",
       "size_bytes": 3358
     },
     {
@@ -4278,8 +4278,8 @@
     },
     {
       "path": "model_contracts/glm52.json",
-      "sha256": "54bfe8b5ae6f40c5ca113f17f2f15fbaf9bf52b8f4fd464426f8258d21af5d00",
-      "size_bytes": 1787
+      "sha256": "c7e2f832937dd854eab5d442a1b921bd25ca1492f7fe77758a8ac4be537a18d4",
+      "size_bytes": 1818
     },
     {
       "path": "model_contracts/glm52_authoritative.json",
@@ -15155,5 +15155,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 60680393
+  "total_bytes": 60680424
 }
