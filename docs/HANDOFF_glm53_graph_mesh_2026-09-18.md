@@ -1,0 +1,111 @@
+# GLM 5.3 Flash TP16 — graph/mesh handoff (2026-09-18)
+
+Branch under test: `lane/glm53-graph-replay` (tip 35d4e8e). Resilience agent
+branch: `lane/fleet-resilience` (tip 92d857b, PR #1036 open). Graph PR #1030.
+
+## What was fixed today (all pushed to lane/glm53-graph-replay)
+
+1. **seq_cell NULL (the illegal-memory-access root cause)** — 35d4e8e.
+   `SparkGlm5NextMeshPublishKernel` did `atomicAdd(seq_cell)` with
+   seq_cell == NULL: the device sequence cells were only allocated in
+   `ArmCapture` (graph mode) but the branch's eager round also uses the
+   kernel publish. First eager round atomicked address 0, poisoned the
+   CUDA context, and every later failure was a sticky-error ghost.
+   Found with compute-sanitizer on spark0 (Invalid __global__ atomic,
+   access to 0x0, spark_tp_mesh_kernels.cuh:35). Fix: `EnsureCells` at
+   round entry and ArmCapture; seq_cell seeded from round_seq (not 0).
+2. **Whole-region mesh registration** — e1a8e76. `PrepareReceiveBf16`
+   registered only one 2GB lane of the 16GB mesh region for CUDA and a
+   static pointer guard prevented registering the rest; kernel access to
+   other lanes was illegal. Now registers `SPARK_WEIGHTD_MESH_REGION_BYTES`.
+3. **SumRanksF32 grid-stride** — a34a54f. The fused allreduce combine
+   kernel ignored blockIdx.x: every block recomputed the entire output
+   (8x redundant at 8KiB payloads, 64x at 64KiB, 1024x at 1MiB).
+   External review finding, confirmed and fixed; per-pair accumulation
+   order (numerics) unchanged.
+4. Diagnostics now in the driver: MESH-SPIN-TIMEOUT names missing peer
+   ranks; chainfail prints the CUDA error string; eager round failure
+   sites are tagged (MESH-COPYDOWN/PUBLISH/READBACK-FAIL);
+   GRAPH-LAUNCH-ERR splits sticky (pre=) vs launch (rc=) errors.
+5. **Agent logs unbuffered** (lane/fleet-resilience 92d857b): residentd
+   and model_api launch under `stdbuf -o0 -e0`. Before this, engine
+   stdout was block-buffered to the log — "engine idle" log reads were
+   LIES and sent diagnosis wrong for hours. Trust only unbuffered logs.
+
+## Current state of the fleet
+
+- Eager mode (G5_GRAPH_PATH=0 via drop-in `zzeager.conf` — the agent maps
+  G5_GRAPH_PATH to SPARK_GLM5_NEXT_GRAPH_PATH; the unit's own
+  `Environment=SPARK_GLM5_NEXT_GRAPH_PATH=1` and `graph.conf` set G5_GRAPH_PATH=1).
+- Transport VERIFIED WORKING end-to-end at the byte level: engine kernel
+  publishes land in the memfd doorbell (idx = band*16+rank), weightd
+  doorbell loop ships them (WD-SHIP), RDMA writes deliver payload+tail to
+  peers' memfds (verified rank0→spark1: payload bytes + tail present).
+  Wiring records (.rec) fresh and consistent after a clean weightd bounce.
+- The first chain's rounds COMPLETE when peers are warm: a chain reached
+  stage 4 (REDUCE_MLP) — attention reduce (round 1) passed.
+- **Failure that remains**: mesh round times out (30s, MESH-SPIN-TIMEOUT)
+  under any peer skew (cold expert loads take up to ~120s; a single slow
+  rank kills the round), then the engine EXITS (see below) → crash loop.
+- Slot-tail/sequence contract needs redesign: tail = kernel's global
+  seq_cell counter; slot parity = per-chain ordinal. Peers compare
+  `tail >= my_published` across counters that skew per rank. After churn
+  the values interleave wrongly (observed: doorbell seq=3073 but slot tail
+  =3072/5120 from other generations). Design fix: tail should be
+  `(epoch << 32) | chain_ordinal` (CKEY epoch already exists) so the wait
+  compares the SAME quantity on all ranks. This is the next real code task.
+
+## The two amplifier bugs (fix these, they turn any hiccup into a fleet outage)
+
+1. **Engine exits on chain IO_ERROR.** Chain timeout → chainfail →
+   `route_failed reason=9 (CLIENT_LEASE_DISCONNECT)` → `run=io_error` →
+   process exit. The completion handler already fails the *request*
+   non-fatally when a route exists (model_residentd.c ~1064); the fatal
+   path fires for route==0. The lease disconnect itself follows from the
+   teardown. Policy needed: round timeout = fail request, keep process.
+2. **weightd restart kills every engine on the node** (lease socket drop
+   is fatal per above). WEIGHTSD_BIN exe-sha recycling therefore caused a
+   rolling fleet engine massacre today. WEIGHTSD_BIN is PINNED to the
+   running build (40067f05 = marker-ship weightd). Do not republish
+   WEIGHTSD_BIN unless the weightd source actually changed.
+
+## Operational playbook (verified today)
+
+- Publish: worktree /Users/mac/lane-g53graph; `./tools_local/m` (ships
+  curated sources to sparkf:~/sparkpipe-build-958, builds aarch64 driver +
+  weightd, publishes to ~/release). Then on sparkf: touch
+  ~/release/glm53flash.fp8.tp16/UPDATE; rsync both roots to
+  spec@10.10.250.2:~/release/. Agents pull from http://100.123.97.61:8802.
+- The 5090 is reached from the Mac via `ssh spec@100.123.97.61`
+  (10.10.250.2 only works FROM sparkf). API = g53-api.service on the 5090,
+  port 8433. Probe: POST /v1/completions {"prompt_token_ids":[1..8],
+  "max_tokens":16,"temperature":0}.
+- Engine recycle wedge: agents pull a new driver but a running engine
+  stays; sweep with `pkill -9 -f "sparkpipe_model_resident[d]"` on all 16
+  (the bracket avoids pkill self-match killing your ssh).
+- weightd bounce: `pkill -TERM -f "sparkdata/weight[d]/sparkpipe_weightd"`
+  per node; agent restarts it with correct args. This KILLS ENGINES
+  (lease drop) — sweep engines too.
+- Ground truth past log buffering: the mesh memfd is directly readable:
+  `ls /proc/$(pgrep -f weightd)/fd` for the spark-mesh fd; doorbell region
+  at 0x400000000 (24-byte entries, idx = band*16+rank: seq, bytes, slot);
+  band N base = N * 0x40000000; slot tail = band_base + (rank*16+slot)*4MB
+  + 4MB - 8.
+- The doorbell loop can be proven alive by planting a fake entry
+  (band 15 rank 15 = idx 255) and watching for WD-SHIP.
+
+## Open work, in order
+
+1. Tail contract `(epoch<<32)|ordinal` in the publish kernel + wait
+   (kills the cross-rank counter-skew deadlock class for good).
+2. Non-fatal chain failure (request-level error, engine survives).
+3. Re-arm graph (G5_GRAPH_PATH=1 drop-in removal of zzeager.conf),
+   3+ sequential probes, then the 176-token fixture (case 0, answer "B").
+4. Merge #1036 (fleet-resilience) and #1030 (graph branch).
+5. Mesh region right-size: 16GB pinned for 128KB of live B1 data is
+   absurd (slot = 128 max rows x 32KB max row = 4MB, x16-deep ring, x16
+   ranks, x16 bands). Size from real hidden x batch cap; coordinated
+   wire-format change.
+6. Fuzz harness: random weightd/residentd kills, measure time-to-serve,
+   must never wedge.
+7. Epoch high-water fencing in mesh records (restart-proof).
