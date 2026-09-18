@@ -98,6 +98,41 @@ branch: `lane/fleet-resilience` (tip 92d857b, PR #1036 open). Graph PR #1030.
 - The doorbell loop can be proven alive by planting a fake entry
   (band 15 rank 15 = idx 255) and watching for WD-SHIP.
 
+## Evening update — TAIL CONTRACT WORKS, chains complete end-to-end
+
+Deployed (branch tip 417aa09):
+- Tail contract `(chain_epoch<<32)|chain_round` live: publishes fleet-wide
+  carry identical tags (verified across 8 nodes: all `(12,1)`).
+- The marker-ship weightd was NEVER actually running until tonight — the
+  announced WEIGHTSD_BIN predated the marker-ship build, and two "fake
+  entry" probe tests only passed because the full-slot recovery path
+  masked the missing tail ship (band-15 fake shipped tail via recovery;
+  a band-1 fake with no seq gap exposed payload-lands-but-tail-doesn't).
+  With weightd f922f476 fleet-wide, tails land and rounds complete.
+- residentd is now non-fatal on route-less/late completions (FailLocked
+  removed): engines survive round timeouts and weightd lease resets
+  ("client_lease_disconnect live_leases reset", process stays up).
+- publish pipeline hardened: m rsyncs the full source set with -R and
+  --no-times (was: curated scp list that silently drifted + preserved
+  mtimes that made make link stale archives; residentd in releases was
+  a Sep-12 binary until tonight). publish_local honors SPARK_TREE.
+- 5090 api + adapter must be rebuilt from the same commit (x86):
+  ~/sparkpipe-build reset to the tip, make build/sparkpipe_model_api,
+  make -C modules/glm5_next_resident_decode_stage adapter ... sm_90a,
+  cp into ~/glm53flash.fp8.tp16/{bin,lib}, restart g53-api.
+
+Measured: a full 61-layer chain completes — CHAIN-TIME status=0
+rounds=91, allreduce 116.6s of 379s; the 379s is first-token cold expert
+loading (stage MLP dominates), not the mesh. A warm fleet should be
+orders faster.
+
+Remaining blocker: slot/lane lifecycle across failed requests — after a
+client gives up mid-chain, later submits hit `submit -> 15` (BUSY):
+stale chains hold engine slots. Need chain reclamation on client
+disconnect / request retirement.
+
+Then: warm probes (expect fast tokens), re-arm graph, fixture, merges.
+
 ## Open work, in order
 
 1. Tail contract `(epoch<<32)|ordinal` in the publish kernel + wait
