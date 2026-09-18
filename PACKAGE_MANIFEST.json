@@ -1,5 +1,5 @@
 {
-  "file_count": 3059,
+  "file_count": 3077,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -23,8 +23,8 @@
     },
     {
       "path": ".gitignore",
-      "sha256": "fcd91ce75b2342913402f6eddfe2ac16f43cd755ccee363afc9b8e1597b79b28",
-      "size_bytes": 257
+      "sha256": "3626994959160ff40f9810ae0c99491b4edfb0a1ceb89a42d7224846e4d5f27e",
+      "size_bytes": 262
     },
     {
       "path": ".updaterepo-policy",
@@ -4317,6 +4317,11 @@
       "size_bytes": 318
     },
     {
+      "path": "model-families/qwen4_flash/include/sparkpipe/llm_defines.h",
+      "sha256": "f6a23dbe584c7f595c0f814e09a159803be572ce6220d20414431cb95208c29b",
+      "size_bytes": 1106
+    },
+    {
       "path": "model-families/qwen4_flash/include/sparkpipe/spark_qwen4_flash_model.h",
       "sha256": "04364c8e0f12ce42bd55b2732d03f7b640077e1f6d5722b862b1678e6d10a8b3",
       "size_bytes": 5269
@@ -5578,8 +5583,8 @@
     },
     {
       "path": "modules/qwen4_flash_resident_decode_stage/include/sparkpipe/spark_qwen4_flash_resident_decode_stage_firmware.h",
-      "sha256": "330e86d0d9cbd56b3df84ae70093a98b0c4c289787c18fd117050df8d1c50c25",
-      "size_bytes": 11959
+      "sha256": "fbb64a82719b648b61c89f27b271acb927fa7b496aa2fbd226e254cc54c4c700",
+      "size_bytes": 12175
     },
     {
       "path": "modules/qwen4_flash_resident_decode_stage/include/sparkpipe/spark_qwen4_flash_serving_adapter.h",
@@ -5588,13 +5593,13 @@
     },
     {
       "path": "modules/qwen4_flash_resident_decode_stage/source/spark_qwen4_flash_resident_decode_stage_cuda.cu",
-      "sha256": "781eb49af60f8aac47dd9e9e531a000a3df244c8ffabd6c27ef40868b61ad939",
-      "size_bytes": 124244
+      "sha256": "d2853acd69bebb9e64aba159f4b3d58a76d36e0e2ce28fce89d0aa68b6aaa095",
+      "size_bytes": 125565
     },
     {
       "path": "modules/qwen4_flash_resident_decode_stage/source/spark_qwen4_flash_resident_decode_stage_module.c",
-      "sha256": "9aaa23bc1c88bf35cf082abd5406a5f95eb7422def0a1650a93807d598278d57",
-      "size_bytes": 163012
+      "sha256": "b98f1fd636b867512579fb98c42834a221215e3f47cbaa405bfc04849c6ca5ac",
+      "size_bytes": 179799
     },
     {
       "path": "modules/qwen4_flash_resident_decode_stage/source/spark_qwen4_flash_serving_adapter.c",
@@ -7190,6 +7195,26 @@
       "path": "qualification/t1_reference/qwen38_max/prompts_tiny.json",
       "sha256": "e70a99dc62c3d6c0d5fc269e8b2e6495a59d70d1667c8d8c5418d3366009d237",
       "size_bytes": 316
+    },
+    {
+      "path": "qualification/t1_reference/qwen4_flash/MANIFEST.json",
+      "sha256": "e2dc59677c5a996097042e272f5adb9b5b3529f9206f858279e0d0ced32e6843",
+      "size_bytes": 1078
+    },
+    {
+      "path": "qualification/t1_reference/qwen4_flash/capital_of_france.t1r",
+      "sha256": "4ab48701441dc4aa4cf6aaca5f4c90ee201e483ba06bdd7a3489ab9ed588aa21",
+      "size_bytes": 797073
+    },
+    {
+      "path": "qualification/t1_reference/qwen4_flash/count_up.t1r",
+      "sha256": "f4ec28d362a1571148dc67a6e4c73bca8d200b78d22c5ec59408453a5352cc03",
+      "size_bytes": 1063431
+    },
+    {
+      "path": "qualification/t1_reference/qwen4_flash/prompts_qwen4flash.json",
+      "sha256": "1b94ae528c9568383f7b272d661a78314f49bb0629d3040de852429012b1dc1e",
+      "size_bytes": 507
     },
     {
       "path": "qwen38_tp4_build.sh",
@@ -11662,9 +11687,19 @@
       "size_bytes": 20756
     },
     {
+      "path": "tools/qwen4_flash_pack_stamp_check.py",
+      "sha256": "bb42b13d4e6017b693a692739c81b28e4645a64a3b3038337d3044fce1dabc1d",
+      "size_bytes": 11806
+    },
+    {
       "path": "tools/qwen4_flash_pack_verify.py",
-      "sha256": "6fcd9345dfca8258260da3857bb4436c0ab55ad6dacdefa70131c22428424694",
-      "size_bytes": 30166
+      "sha256": "e3f4680be63292ad7a1ca9d1f9f7134a7339b94bf475e2b1c6237a4f721cf77a",
+      "size_bytes": 34221
+    },
+    {
+      "path": "tools/qwen4_flash_scale_plane_patch.py",
+      "sha256": "476f931704b27586748f6cdf62dd1c6aafcf818659a9b7e51ce6392a751cae7e",
+      "size_bytes": 11100
     },
     {
       "path": "tools/qwen4_flash_stagepack.py",
@@ -11922,6 +11957,56 @@
       "size_bytes": 5631
     },
     {
+      "path": "tools/t1_q3f_build.sh",
+      "sha256": "6d8e898b6ea469d54f291c6103c600a2f5d4d8b2668ffae1bf36fa5f17afa1b7",
+      "size_bytes": 1860
+    },
+    {
+      "path": "tools/t1_q3f_fixtures.sh",
+      "sha256": "442634ad11e73a101f7b77a6b3e9fb3d716e4f5cebc5aa2848762e3a4e3cc28b",
+      "size_bytes": 3398
+    },
+    {
+      "path": "tools/t1_q3f_harness.c",
+      "sha256": "f5fb5abdfcca01191a5c55a3c1667287eb606eb56206592b06165a9e9743f01d",
+      "size_bytes": 4798
+    },
+    {
+      "path": "tools/t1_q3f_pack.py",
+      "sha256": "cf48793485e4a8bf5e1ad1a3c96cf57d0ff5d092db81df14d912d7a5395bacfc",
+      "size_bytes": 4647
+    },
+    {
+      "path": "tools/t1_q3f_patch_fleet.sh",
+      "sha256": "214ee736c512c98880a59970e19af3b458791463fa9a8e838e04db1717e2800c",
+      "size_bytes": 4043
+    },
+    {
+      "path": "tools/t1_q3f_patch_pack.sh",
+      "sha256": "aec21da8a2acece0162c9838a3c03beaaff02be5ae097f251efba78e2b63ee16",
+      "size_bytes": 4979
+    },
+    {
+      "path": "tools/t1_q3f_prompts_source.json",
+      "sha256": "3fd56305c9ead45632f19a6131716f072d85a0c36e3fb9dc742c603fa211f89c",
+      "size_bytes": 253
+    },
+    {
+      "path": "tools/t1_q3f_rank.sh",
+      "sha256": "99c343fef74323da3592aca1ffd75639ef9bfabb5725c9659c18a235c2efe4a0",
+      "size_bytes": 1709
+    },
+    {
+      "path": "tools/t1_q3f_run.sh",
+      "sha256": "2abe8fdd07ad348f45c0870b896cd52bb776e26299f3ae555aa72fc49d899d26",
+      "size_bytes": 6382
+    },
+    {
+      "path": "tools/t1_q3f_tokenize.py",
+      "sha256": "b89f0d1ba15bc992017c1f7034b8d113e63669cb04d0f93f500c1a02a1e52511",
+      "size_bytes": 3658
+    },
+    {
       "path": "tools/t1_qmax_build.sh",
       "sha256": "fed314783c26f81402e42317eee6320557ba6d996f8f6a6db5894362aa7d3347",
       "size_bytes": 2067
@@ -11963,8 +12048,8 @@
     },
     {
       "path": "tools/t1_reference_decoder.py",
-      "sha256": "1787eb5e15fafab1dfef3f50545e47e2d957d43b0db3b77c371558d09ab0939c",
-      "size_bytes": 5123
+      "sha256": "0c3df5fa186214103586ece32a6ce834833fbea82a5043e81ecce50e8467f6d2",
+      "size_bytes": 5692
     },
     {
       "path": "tools/t1_reference_gemma4.py",
@@ -12000,6 +12085,11 @@
       "path": "tools/t1_reference_qwen38_max.py",
       "sha256": "73cce934d9355c099d5efa9e5bf054f31e8666e9dfba8aca95d979cd2b622eeb",
       "size_bytes": 14075
+    },
+    {
+      "path": "tools/t1_reference_qwen4_flash.py",
+      "sha256": "82cfb5e57898681c616be7651bb2518f6de13db3ce360095b33e3afb24132b19",
+      "size_bytes": 20106
     },
     {
       "path": "tools/validate_dsv4_tp16_pack.sh",
@@ -15300,5 +15390,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 60815413
+  "total_bytes": 62780300
 }

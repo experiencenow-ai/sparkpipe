@@ -26,7 +26,6 @@ Run on a spark node next to the warm checkpoint:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -42,15 +41,18 @@ from qwen4_flash_stagepack import (  # noqa: E402
     EXPERTS_PER_TOKEN, EXPERT_INTERMEDIATE, FP8_BLOCK, FORMAT_VERSION,
     FULL_PHASE, GDN_CONV_KERNEL, GDN_HEAD_KEY_DIM, GDN_HEAD_VALUE_DIM,
     GDN_KEY_HEADS, GDN_QK_DIM, GDN_VALUE_DIM, GDN_VALUE_HEADS, HEADER_BYTES,
-    HEADER_STRUCT, HIDDEN, LAYER_COUNT, MAGIC, MTP_LAYERS, MTP_LAYER,
-    MXFP4_GROUP, PLE_LAYER, PLE_NGRAM_HEAD_DIM, PLE_NGRAM_ROWS, VOCAB,
-    WEIGHT_BF16, WEIGHT_F32, WEIGHT_I64, WEIGHT_FP8_E8M0B128,
+    HEADER_STRUCT, HIDDEN, LAYER_COUNT, LAYER_PREFIX, MAGIC, MTP_LAYERS,
+    MTP_LAYER, MXFP4_GROUP, PLE_LAYER, PLE_NGRAM_HEAD_DIM, PLE_NGRAM_ROWS,
+    VOCAB, WEIGHT_BF16, WEIGHT_F32, WEIGHT_I64, WEIGHT_FP8_E8M0B128,
     WEIGHT_FP8_F32B128, build_inventory, is_gdn_layer, kind_shape,
     layer_tensor_name, shard_ref, SafetensorsSource,
 )
-from spark_pack_common import PackFailure, align_up  # noqa: E402
+from spark_pack_common import PackFailure, align_up, sha256_file  # noqa: E402
 
 WEIGHT_NVFP4_PACKED = 8
+
+FP8_OFFICIAL_PROJ = {6: "gate_proj", 7: "up_proj", 8: "down_proj"}
+FP8_OFFICIAL_PROBE_BYTES = 65536
 
 REPLICATED_NOTE = "replicated"
 
@@ -211,24 +213,82 @@ def dequantize_block(payload: bytes, scales: bytes, wire_format: int):
     return values, scale
 
 
+def fp8_official_trace(file, payload, scales, source, ref, kind, layer, entry):
+    import numpy as np
+    problems = []
+    if kind not in FP8_OFFICIAL_PROJ:
+        return [f"kind={kind} layer={layer} unexpected fp8-official kind"]
+    proj = FP8_OFFICIAL_PROJ[kind]
+    expert_start, expert_count = getattr(ref, "expert_slice", (0, EXPERT_COUNT))
+    rows_per_expert = entry["rows"] // expert_count
+    s_rows = rows_per_expert // FP8_BLOCK
+    s_cols = entry["columns"] // FP8_BLOCK
+    want_scale_bytes = expert_count * s_rows * s_cols * 4
+    if len(scales) != want_scale_bytes:
+        return [f"kind={kind} layer={layer} scale_bytes {len(scales)} != {want_scale_bytes}"]
+    expected_plane = bytearray()
+    for e_local in range(expert_count):
+        name = f"{LAYER_PREFIX}{layer}.mlp.experts.{expert_start + e_local}.{proj}.weight_scale_inv"
+        shard, meta, data_offset = source.resolve(name)
+        if meta["dtype"] != "BF16":
+            return [f"{name}: dtype {meta['dtype']}, expected BF16"]
+        if meta["shape"] != [s_rows, s_cols]:
+            return [f"{name}: shape {meta['shape']}, expected [{s_rows},{s_cols}]"]
+        with (source.root / shard).open("rb") as shard_file:
+            shard_file.seek(data_offset)
+            raw = shard_file.read(s_rows * s_cols * 2)
+        if len(raw) != s_rows * s_cols * 2:
+            raise ValueError(f"short read on {name}: {len(raw)} of {s_rows * s_cols * 2} bytes")
+        expected_plane += (np.frombuffer(raw, dtype="<u2").astype("<u4") << 16).view(np.float32).tobytes()
+    if scales != bytes(expected_plane):
+        problems.append(f"kind={kind} layer={layer} fp8-official scale plane mismatch (all {expert_count} experts, byte-exact)")
+    row_bytes = rows_per_expert * entry["columns"]
+    probe_bytes = min(FP8_OFFICIAL_PROBE_BYTES, row_bytes)
+    for probe in (0, expert_count // 2, expert_count - 1):
+        name = f"{LAYER_PREFIX}{layer}.mlp.experts.{expert_start + probe}.{proj}.weight"
+        shard, meta, data_offset = source.resolve(name)
+        if meta["dtype"] != "F8_E4M3":
+            return [f"{name}: dtype {meta['dtype']}, expected F8_E4M3"]
+        if meta["shape"] != [rows_per_expert, entry["columns"]]:
+            return [f"{name}: shape {meta['shape']}, expected [{rows_per_expert},{entry['columns']}]"]
+        with (source.root / shard).open("rb") as shard_file:
+            shard_file.seek(data_offset)
+            want_head = shard_file.read(probe_bytes)
+            shard_file.seek(data_offset + row_bytes - probe_bytes)
+            want_tail = shard_file.read(probe_bytes)
+        base = probe * row_bytes
+        if payload[base:base + probe_bytes] != want_head or \
+                payload[base + row_bytes - probe_bytes:base + row_bytes] != want_tail:
+            problems.append(f"kind={kind} layer={layer} fp8-official payload probe mismatch expert {expert_start + probe}")
+    return problems
+
+
 def sample_trace(pack: Path, entries: list[dict], source: SafetensorsSource,
                  tp_degree: int, tp_rank: int, sample_count: int,
-                 fp8_relative_l2: float) -> list[str]:
+                 fp8_relative_l2: float, source_layout: str = "fused-bf16") -> list[str]:
     import numpy as np
     problems: list[str] = []
     candidates = [entry for entry in entries
                   if entry["weight_format"] in (WEIGHT_BF16, WEIGHT_F32, WEIGHT_I64, WEIGHT_NVFP4_PACKED)
                   or entry["weight_format"] in (WEIGHT_FP8_F32B128, WEIGHT_FP8_E8M0B128)]
-    # Guarantee wire-8 coverage: a uniform stride can skip the expert
-    # entries entirely, and they are exactly the samples that matter.
+    # Guarantee wire-8 AND fp8 coverage: a uniform stride can skip the
+    # expert entries entirely, and they are exactly the samples that
+    # matter (the fp8.tp8 fleet defect hid from an 8-sample pass that
+    # landed on zero fp8 entries).
     wire8 = [entry for entry in candidates if entry["weight_format"] == WEIGHT_NVFP4_PACKED]
-    others = [entry for entry in candidates if entry["weight_format"] != WEIGHT_NVFP4_PACKED]
-    general_count = max(1, sample_count - min(3, len(wire8)))
+    wire4 = [entry for entry in candidates if entry["weight_format"] in
+             (WEIGHT_FP8_F32B128, WEIGHT_FP8_E8M0B128)]
+    forced_count = min(3, len(wire8)) + min(3, len(wire4))
+    others = [entry for entry in candidates if entry not in wire8 and entry not in wire4]
+    general_count = max(1, sample_count - forced_count)
     stride = max(1, len(others) // general_count)
     sampled = others[::stride][:general_count]
     if wire8:
         wstride = max(1, len(wire8) // min(3, len(wire8)))
         sampled += wire8[::wstride][:3]
+    if wire4:
+        fstride = max(1, len(wire4) // min(3, len(wire4)))
+        sampled += wire4[::fstride][:3]
     with pack.open("rb") as file:
         for entry in sampled:
             kind, layer = entry["tensor_kind"], entry["layer_index"]
@@ -391,6 +451,10 @@ def sample_trace(pack: Path, entries: list[dict], source: SafetensorsSource,
                     if not np.allclose(got, want, rtol=0, atol=0):
                         problems.append(f"kind={kind} layer={layer} f32 widen mismatch")
             else:
+                if source_layout == "fp8-official":
+                    problems.extend(fp8_official_trace(
+                        file, payload, scales, source, ref, kind, layer, entry))
+                    continue
                 # FP8 experts: block-dequantize and compare amplitudes.
                 matrix = expert_source_matrix(source, ref, kind, layer)
                 values, scale = dequantize_block(payload, scales, entry["weight_format"])
@@ -487,6 +551,11 @@ def main() -> int:
     parser.add_argument("--tp-rank", type=int, default=0)
     parser.add_argument("--sample", type=int, default=8)
     parser.add_argument("--fp8-relative-l2", type=float, default=0.2)
+    parser.add_argument("--source-layout", choices=("fused-bf16", "fp8-official"),
+                        default="fused-bf16",
+                        help="fp8-official: the checkpoint carries split per-expert "
+                             "F8_E4M3 weights + BF16 weight_scale_inv planes; sampled "
+                             "fp8 entries compare byte-exact instead of dequant-l2")
     parser.add_argument("--no-mtp", action="store_true",
                         help="the pack was built --no-mtp (MTP tail absent)")
     args = parser.parse_args()
@@ -513,7 +582,7 @@ def main() -> int:
     source = SafetensorsSource(args.checkpoint)
     source.check_config()  # the qwen4_flash subclass pins text_config expectations
     problems = sample_trace(args.pack, entries, source, args.tp_degree, args.tp_rank,
-                            args.sample, args.fp8_relative_l2)
+                            args.sample, args.fp8_relative_l2, args.source_layout)
     if problems:
         for problem in problems:
             print(f"FAIL {problem}", file=sys.stderr)
@@ -522,7 +591,7 @@ def main() -> int:
     receipt_note = ""
     if receipt_path.is_file():
         receipt = json.loads(receipt_path.read_text())
-        digest = hashlib.sha256(args.pack.read_bytes()).hexdigest()
+        digest = sha256_file(args.pack)
         if receipt.get("output_sha256") != digest:
             print("FAIL receipt output_sha256 mismatch", file=sys.stderr)
             return 1
