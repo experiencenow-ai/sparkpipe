@@ -702,11 +702,28 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
             }
             if ( SparkTpDeviceCollectiveTimeNs() >= deadline )
             {
+                char missing[128];
+                uint32_t missing_len = 0u;
+                missing[0] = 0;
+                for ( peer = 0u; peer < implementation->tp_degree - 1u; peer++ )
+                {
+                    if ( peer_passed[peer] == 0u )
+                    {
+                        uint32_t peer_rank =
+                            peer < implementation->tp_rank ? peer : peer + 1u;
+                        int wrote = snprintf(missing + missing_len,
+                            sizeof(missing) - missing_len,"%u ",peer_rank);
+                        if ( wrote > 0 )
+                            missing_len += (uint32_t)wrote < sizeof(missing) - missing_len ?
+                                (uint32_t)wrote : sizeof(missing) - missing_len - 1u;
+                    }
+                }
                 fprintf(stderr,
-                    "MESH-SPIN-TIMEOUT rank=%u pub=%llu remaining=%u bytes=%llu slot=%llu\n",
+                    "MESH-SPIN-TIMEOUT rank=%u pub=%llu remaining=%u missing=%s bytes=%llu slot=%llu\n",
                     implementation->tp_rank,
                     (unsigned long long)published,
                     (unsigned)peers_remaining,
+                    missing,
                     (unsigned long long)bytes,
                     (unsigned long long)slot_index);
                 return SPARK_STATUS_BUSY;
