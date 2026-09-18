@@ -12048,8 +12048,8 @@
     },
     {
       "path": "tools/t1_reference_decoder.py",
-      "sha256": "601e52bb6926ea0d8cf8de0a1b433ab430c1882f324e8d214a2d113be2221f41",
-      "size_bytes": 5243
+      "sha256": "0c3df5fa186214103586ece32a6ce834833fbea82a5043e81ecce50e8467f6d2",
+      "size_bytes": 5692
     },
     {
       "path": "tools/t1_reference_gemma4.py",
@@ -15390,5 +15390,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 62779851
+  "total_bytes": 62780300
 }

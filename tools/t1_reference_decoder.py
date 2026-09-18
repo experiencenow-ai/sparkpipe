@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import importlib
+import inspect
 import json
 import os
 import platform
@@ -38,6 +39,7 @@ def run_prompt(engine, spec):
     tokens = list(prompt_ids)
     generated = []
     total = len(prompt_ids) + budget
+    snap_params = "capture_streams" in inspect.signature(engine.decode_step).parameters
     for position in range(total):
         anchor_set = set(anchors)
 
@@ -46,8 +48,15 @@ def run_prompt(engine, spec):
                 arrays[f"pos{position:04d}_layer{layer_index:04d}_streams"] = \
                     f32_to_bf16_u16(layer_streams.reshape(-1))
 
-        streams = engine.decode_step(tokens[position], position, states, caches,
-                                     capture, snap)
+        if snap_params:
+            streams = engine.decode_step(tokens[position], position, states,
+                                         caches, capture, snap)
+        else:
+            streams = engine.decode_step(tokens[position], position, states,
+                                         caches, capture)
+            for layer in anchors:
+                arrays[f"pos{position:04d}_layer{layer:04d}_streams"] = \
+                    f32_to_bf16_u16(streams.reshape(-1))
         print(json.dumps({"prompt": spec["name"], "position": position,
                           "done": True}), flush=True)
         token, score = engine.logits(streams)
