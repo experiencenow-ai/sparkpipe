@@ -7,6 +7,8 @@
 #include "modules/ling_resident_decode_stage/source/cuda/unity.cu"
 #include "spark_ling_resident_decode_stage_internal.h"
 
+#include "sparkpipe/spark_tp_mesh_kernels.cuh"
+
 #define SPARK_LING_CUDA_THREADS 256u
 
 __global__ static void SparkLingBoundaryLoadKernel(
