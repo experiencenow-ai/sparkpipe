@@ -1,5 +1,5 @@
 {
-  "file_count": 2992,
+  "file_count": 3018,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -4057,6 +4057,11 @@
       "size_bytes": 71950
     },
     {
+      "path": "model-families/hy4/include/sparkpipe/llm_defines.h",
+      "sha256": "ab4c5098a005105adcae255628ccbf2fdfc06b0380507ec538e6d9a646ef2c5d",
+      "size_bytes": 1882
+    },
+    {
       "path": "model-families/hy4/include/sparkpipe/spark_hy4_model.h",
       "sha256": "1882136c9a97ead084ad404f7b8af4784468ec011a4f4acb777d08ae76e4df13",
       "size_bytes": 3660
@@ -6697,6 +6702,86 @@
       "size_bytes": 559
     },
     {
+      "path": "qualification/hy4/v2_emission/old_rank_00.sha256",
+      "sha256": "cce8513fd8798a9c8d5d63a29bc08d58f29b61a7d25269446b378001a3a396e7",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_01.sha256",
+      "sha256": "21bc4126f926b8928095d0a7579f4f665647ef8c6760f2022ac0e1f9e47f07b5",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_02.sha256",
+      "sha256": "d0b5691045d752a9c0485993b79adaf0ed73c409673abe50923bc5b669a8038e",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_03.sha256",
+      "sha256": "9f4987291fdb6bca59032343af50acfaefdc5a8462fae6e2810c06730d59c73b",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_04.sha256",
+      "sha256": "a65ea09f30b748790e5fa70f3f4e87ade58c1d30fba8cdb697ff8a811b8dff64",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_05.sha256",
+      "sha256": "a292ee8862ce0535d461bec6abf827f0282f2513eb0dec913339708d0d5397ea",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_06.sha256",
+      "sha256": "0fa29daf5c3b797429e76385beffdbd4dc0db704f65f7a928d4046068a549608",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_07.sha256",
+      "sha256": "bb439b95ffe9dd0a5057434036950f2c346c6e2c03efeac34023236f8f49a996",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_08.sha256",
+      "sha256": "1878a25f80b8fc76eb59d8f8b85582d8cc5b433fee365085d011928575c687b1",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_09.sha256",
+      "sha256": "a0a2e436f7dd9fb798cfb1a4d85675e8064ee39250eaebf53a957d136b60e145",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_10.sha256",
+      "sha256": "c9d10ba32e947bbe9a44df346d3d71c1312ed9b2048a25e87f9fc69702350b89",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_11.sha256",
+      "sha256": "7a16919b43c7a0e140f2f38a3efeba142e78995c9fbe25e2e2b42ab8a67f5a3f",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_12.sha256",
+      "sha256": "20e81a723dcdd8e9f6c72e77e094d21f8c8b06ab00847fa6ebb46c27868262be",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_13.sha256",
+      "sha256": "8626c6a351b48e2281070d616db9b1570e3c481f97914213b664b194cddfce55",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_14.sha256",
+      "sha256": "bc339b146db108e20dc0a163242be59ace6a8cb6b280a2094e6d15625a48fa04",
+      "size_bytes": 101
+    },
+    {
+      "path": "qualification/hy4/v2_emission/old_rank_15.sha256",
+      "sha256": "1d37cb8b18460e7e0f829269bb750a981ca25ca5ad98f043e880f940edeca1c0",
+      "size_bytes": 101
+    },
+    {
       "path": "qualification/spark/configs/ring_13node_handoff/index.json",
       "sha256": "eabdbddabce6e2ad05b54b1ba8955e91e4aadd3a8ba6a270e5587462280f4076",
       "size_bytes": 2558
@@ -6915,6 +7000,11 @@
       "path": "qualification/t1_reference/glm5_next/prompts.json",
       "sha256": "3d362f5ae3ac4d1d4e1cfed48f443981294d4931dc40f91a0ed092c2fea75e4a",
       "size_bytes": 642
+    },
+    {
+      "path": "qualification/t1_reference/hy4/prompts.json",
+      "sha256": "a6d51e1d2793b832a9044f18a83a121682bd7cfa3fff5c33e93f56e82c9bd564",
+      "size_bytes": 644
     },
     {
       "path": "qualification/t1_reference/laguna/MANIFEST.json",
@@ -9172,6 +9262,11 @@
       "size_bytes": 17668
     },
     {
+      "path": "tests/test_t1_reference_hy4.py",
+      "sha256": "26b17fed66e09877856f88ff723b6acd11d2c5adbb46be3cf7eda79c16bd216a",
+      "size_bytes": 19599
+    },
+    {
       "path": "tests/test_template_adoption.py",
       "sha256": "d36f2ec6ffc1cdfc4ae8822f71c98c84ce9d61a6901a79376e907c395a94ae54",
       "size_bytes": 4957
@@ -10402,6 +10497,11 @@
       "size_bytes": 3141
     },
     {
+      "path": "tools/hy4_attach_harness.c",
+      "sha256": "6b25bee4f862efd5750296d576011999f6116dfee6e9a344a0c6f54f9aadf336",
+      "size_bytes": 2231
+    },
+    {
       "path": "tools/hy4_dequant/hy4_generate.c",
       "sha256": "df5a153ed36afd833af7bf7a7288adb4062042bb8a33d129917f45902d3082b6",
       "size_bytes": 31197
@@ -10488,8 +10588,8 @@
     },
     {
       "path": "tools/hy4_experts_manifest_v2.c",
-      "sha256": "95b1b04e1b255a20e714f573fd8a31313f8b304667bcf36a083676148b7cbdd9",
-      "size_bytes": 8640
+      "sha256": "214b77c56a942448eabb398b604f318d6b75765c16b3687ede7cbab60a4e4288",
+      "size_bytes": 9065
     },
     {
       "path": "tools/hy4_fp8_chain.sh",
@@ -10518,8 +10618,8 @@
     },
     {
       "path": "tools/hy4_fp8_stagepack.py",
-      "sha256": "826829d156bac526aed1e653c20745658a0c077b44c0a4dfbd21f58781fa59cd",
-      "size_bytes": 15234
+      "sha256": "3a5328e71f9b1d6cfe45cc8af82e90e0c0f230933cb1e8b41cc2e53c599fa1a2",
+      "size_bytes": 15710
     },
     {
       "path": "tools/hy4_fp8_stagepack_fanout.py",
@@ -10632,9 +10732,34 @@
       "size_bytes": 400
     },
     {
+      "path": "tools/hy4_stub_harness.c",
+      "sha256": "957faeb5a3924a734d359304f1dba4fdef8c10b4e188275feb79273109d1ed81",
+      "size_bytes": 1825
+    },
+    {
       "path": "tools/hy4_tp16_shard.py",
       "sha256": "b381d9483436fa2f8f99d2d97852c0465f62cc30c297e1bbf8ef22275c705cdb",
       "size_bytes": 30287
+    },
+    {
+      "path": "tools/hy4_v2_census.sh",
+      "sha256": "b78d6428631dd8dbf26c549ec88ee8c0d145473668ea3bd6f4fa0b9156cc9003",
+      "size_bytes": 2208
+    },
+    {
+      "path": "tools/hy4_v2_fingerprint.py",
+      "sha256": "884e05680e63e7337177867b9ac4812518b52c6bdb3d04c010545ce897f8ecc2",
+      "size_bytes": 4238
+    },
+    {
+      "path": "tools/hy4_v2_place.sh",
+      "sha256": "44822b80269ffe190e35eeca8a41b9e4e576ca216e5d8d28a84310b3cb6c0aae",
+      "size_bytes": 2795
+    },
+    {
+      "path": "tools/hy4_window.sh",
+      "sha256": "80b2bda3b157dbbea3d38e8e157a2f7a0692684dbcc7bacf362e849ef16e280f",
+      "size_bytes": 3656
     },
     {
       "path": "tools/hy4_wo_fleet_apply.c",
@@ -11650,6 +11775,11 @@
       "path": "tools/t1_reference_glm5_next.py",
       "sha256": "6caf39c737c9b21ec859455a10056f153f050781d8928f83b67d6b48b0ed7305",
       "size_bytes": 16581
+    },
+    {
+      "path": "tools/t1_reference_hy4.py",
+      "sha256": "3ec22d516daee484e67b8683376f08ee49b784756ccc57ed29c793a963eeefdc",
+      "size_bytes": 18873
     },
     {
       "path": "tools/t1_reference_laguna.py",
@@ -14965,5 +15095,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 59012362
+  "total_bytes": 59072830
 }
