@@ -14840,5 +14840,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 56627572
+  "total_bytes": 56628781
 }
