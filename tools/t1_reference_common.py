@@ -157,16 +157,29 @@ class Safetensors:
 
 
 DEFINE_RE = re.compile(r"^#define\s+SPARK_LLM_([A-Z0-9_]+)\s+(.+?)[ \t]*$", re.M)
+ANY_DEFINE_RE = re.compile(r"^#define\s+([A-Z][A-Z0-9_]+)\s+(.+?)[ \t]*$", re.M)
 
 
 def parse_llm_defines(path):
     text = open(path).read()
+    graph = {}
+    for name, value in ANY_DEFINE_RE.findall(text):
+        graph[name] = value.strip()
     defines = {}
     for name, value in DEFINE_RE.findall(text):
         value = value.strip()
         if value.startswith("SET_ME_"):
             raise ValueError(f"{path}: SPARK_LLM_{name} is unset ({value})")
-        defines[name] = value
+        resolved = value
+        for _ in range(8):
+            if resolved not in graph:
+                break
+            resolved = graph[resolved]
+        else:
+            raise ValueError(f"{path}: SPARK_LLM_{name} indirection deeper than 8")
+        if resolved.startswith("SET_ME_"):
+            raise ValueError(f"{path}: SPARK_LLM_{name} is unset ({resolved})")
+        defines[name] = resolved
     required = ["FAMILY_TAG", "HIDDEN_DIMENSION", "LAYER_COUNT", "OUTPUT_VOCAB_COUNT",
                 "RMS_NORM_EPSILON"]
     for name in required:
