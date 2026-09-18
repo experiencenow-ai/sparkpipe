@@ -995,7 +995,12 @@ static SparkStatus SparkModelResidentdQueueCompletionLocked(
 	if ( status == SPARK_STATUS_OK )
 		status = SparkModelResidentdCompleteResidentSlotsLocked(runtime,route);
 	if ( status != SPARK_STATUS_OK )
-		SPARK_RETURN(status);
+	{
+		fprintf(stderr,"model_residentd completion undeliverable (slot ownership reset under it — client generation gone); dropping route, status=%d\n",(int)status);
+		route->active = 0u;
+		route->state = SPARK_MODEL_RESIDENTD_ROUTE_IDLE;
+		return(SPARK_STATUS_OK);
+	}
 	output->message_bytes = message_bytes;
 	output->sent_bytes = 0u;
 	runtime->client.output_count++;
