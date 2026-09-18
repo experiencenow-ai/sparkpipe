@@ -440,13 +440,18 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
             (unsigned long long)*base_cell,
             (unsigned long long)request_id);
         __sync_synchronize();
-        (void)SparkWeightdClientMeshBroadcast(
-            implementation->client,
-            ((1u << SPARK_WEIGHTD_MESH_RANKS_PER_BAND) - 1u) &
-                ~(1u << implementation->tp_rank),
-            SparkTpDeviceCollectiveBaseCellOffset(band_index),
-            SparkTpDeviceCollectiveBaseCellOffset(band_index),8u,0ull,0ull,
-            implementation->round_timeout_ns);
+        {
+            SparkStatus bcast = SparkWeightdClientMeshBroadcast(
+                implementation->client,
+                ((1u << SPARK_WEIGHTD_MESH_RANKS_PER_BAND) - 1u) &
+                    ~(1u << implementation->tp_rank),
+                SparkTpDeviceCollectiveBaseCellOffset(band_index),
+                SparkTpDeviceCollectiveBaseCellOffset(band_index),8u,0ull,0ull,
+                implementation->round_timeout_ns);
+            if ( bcast != SPARK_STATUS_OK )
+                fprintf(stderr,"CKEY-BCAST-FAIL rank=0 epoch=%llu status=%d\n",
+                    (unsigned long long)epoch,(int)bcast);
+        }
     }
     else
     {
