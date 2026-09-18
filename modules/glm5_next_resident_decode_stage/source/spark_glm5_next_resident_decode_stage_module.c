@@ -577,6 +577,8 @@ static SparkStatus SparkGlm5NextManifestCheck(const SparkWeightdManifest *manife
 	return(expected == manifest->range_count ? SPARK_STATUS_OK : SPARK_STATUS_SCHEMA_ERROR);
 }
 
+static SparkStatus SparkGlm5NextPinAllExperts(SparkGlm5NextModuleState *state);
+
 static SparkStatus SparkGlm5NextLazyOpen(SparkGlm5NextModuleState *state,const char *path,uint64_t bytes,const SparkGlm5NextStagePackEntry *entries,uint32_t count)
 {
 	SparkWeightdLazyAttachRequest request;
@@ -2324,7 +2326,6 @@ static void CUDART_CB SparkGlm5NextMtpResolveHost(void *context)
 }
 
 static void SparkGlm5NextLazyRetryRetained(void *context);
-static SparkStatus SparkGlm5NextPinAllExperts(SparkGlm5NextModuleState *state);
 
 static void SparkGlm5NextScheduleRetainedRetry(SparkGlm5NextModuleState *state)
 {
