@@ -193,3 +193,27 @@ Then: warm probes (expect fast tokens), re-arm graph, fixture, merges.
    wire-format change.
 6. Fuzz harness: random weightd/residentd kills, measure time-to-serve,
    must never wedge.
+
+
+## Overnight addendum 2
+
+- Agent watchdog fix (lane/fleet-resilience 72ba993): the weightd
+  "stale or unresponsive" check raced the lazy-attach bake (30s grace,
+  single 2s probe) and killed weightds mid-attach — the vortex that kept
+  sparkb-f down for hours. Now 120s grace + 3 spaced probes. After the
+  fix the fleet converged to 16/16 cleanly.
+- Agent restarts leave a FAILED unit if a hand-started weightd lives in
+  its cgroup — systemd stop timeouts. Never hand-start weightd; let the
+  agent own it. (reset-failed + start recovers.)
+- EXPERT-PIN (SPARK_GLM5_NEXT_PIN_EXPERTS=1, agent passthrough
+  G5_PIN_EXPERTS) exists on the branch but its boot currently fails
+  (attach BUSY-storm correlation unproven); disarmed fleet-wide.
+  The pool SHOULD hold the pack (21GB < 34GB pool) yet chains re-pay
+  LAZYWORK per layer per token — suspect dead arena generations from
+  restarted engines hold pool space (audit pool accounting across attach
+  generations; the PR#1034 fix excluded spine only).
+- Serving status: engines generate tokens (HEADFIN), chains complete
+  status=0, but no API request has lived long enough to collect them:
+  the request dies with the client (~60-120s) while the first cold token
+  needs ~450s. Warmup hook (agent fires one long-deadline request per
+  engine generation) remains the one-line service unlock.
