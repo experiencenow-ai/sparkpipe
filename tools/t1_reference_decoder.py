@@ -53,11 +53,13 @@ def run_prompt(engine, spec):
             arrays[f"pos{position:04d}_head_top1_token"] = \
                 np.array([token], dtype=np.int32)
         if position + 1 < total:
-            if token == engine.eot:
-                raise ValueError(f"prompt {spec['name']}: eot at position {position}; "
-                                 "the prompt set contract must avoid eot")
-            tokens.append(token)
-            if position + 1 >= len(prompt_ids):
+            if position + 1 < len(prompt_ids):
+                tokens.append(prompt_ids[position + 1])
+            else:
+                if token == engine.eot:
+                    raise ValueError(f"prompt {spec['name']}: eot at position {position}; "
+                                     "the prompt set contract must avoid eot")
+                tokens.append(token)
                 generated.append(token)
     arrays["prompt_token_ids"] = np.array(prompt_ids, dtype=np.int32)
     arrays["generated_token_ids"] = np.array(generated, dtype=np.int32)
