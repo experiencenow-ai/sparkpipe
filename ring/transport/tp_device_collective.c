@@ -534,6 +534,9 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
     return SPARK_STATUS_OK;
 }
 
+static SparkStatus SparkTpDeviceCollectiveEnsureCells(
+    SparkTpDeviceCollectiveImplementation *implementation);
+
 static SparkStatus SparkTpDeviceCollectiveRunRound(
     SparkTpDeviceCollectiveImplementation *implementation,
     SparkTpDeviceCollectiveSubmission *submission,
@@ -588,6 +591,11 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
                 implementation->round_wave_limit )
             return SPARK_STATUS_CAPACITY_EXCEEDED;
         implementation->round_seq++;
+    }
+    {
+        SparkStatus ensure = SparkTpDeviceCollectiveEnsureCells(implementation);
+        if ( ensure != SPARK_STATUS_OK )
+            return ensure;
     }
     ordinal = submission->ordinal;
     slot_bytes = implementation->slot_bytes;
@@ -1128,6 +1136,34 @@ SparkStatus SparkTpDeviceCollectivePrepareReceiveBf16(
     return SPARK_STATUS_OK;
 }
 
+static SparkStatus SparkTpDeviceCollectiveEnsureCells(
+    SparkTpDeviceCollectiveImplementation *implementation)
+{
+    uint64_t seed;
+    if ( implementation->seq_cell != 0 )
+        return SPARK_STATUS_OK;
+    if ( cudaMalloc(&implementation->seq_cell,8u) != 0 ||
+         cudaMalloc(&implementation->round_seq_device,8u) != 0 ||
+         cudaMalloc(&implementation->error_word,8u) != 0 ||
+         cudaMalloc(&implementation->diag_word,8u) != 0 ||
+         cudaMalloc(&implementation->cancel_expected,8u) != 0 )
+    {
+        implementation->seq_cell = 0;
+        implementation->round_seq_device = 0;
+        implementation->error_word = 0;
+        implementation->diag_word = 0;
+        implementation->cancel_expected = 0;
+        SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+    }
+    seed = implementation->round_seq;
+    if ( cudaMemcpy(implementation->seq_cell,&seed,
+            sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
+         cudaHostAlloc((void **)&implementation->published_host_cell,
+             sizeof(uint64_t),0u) != 0 )
+        SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+    return SPARK_STATUS_OK;
+}
+
 SparkStatus SparkTpDeviceCollectiveArmCapture(
     SparkTpDeviceCollective *collective)
 {
@@ -1138,26 +1174,10 @@ SparkStatus SparkTpDeviceCollectiveArmCapture(
     implementation = collective->implementation;
     if ( implementation->mesh_buffer == 0 )
         SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
-    if ( implementation->seq_cell == 0 )
     {
-        if ( cudaMalloc(&implementation->seq_cell,8u) != 0 ||
-             cudaMalloc(&implementation->round_seq_device,8u) != 0 ||
-             cudaMalloc(&implementation->error_word,8u) != 0 ||
-             cudaMalloc(&implementation->diag_word,8u) != 0 ||
-             cudaMalloc(&implementation->cancel_expected,8u) != 0 )
-        {
-            implementation->seq_cell = 0;
-            implementation->round_seq_device = 0;
-            implementation->error_word = 0;
-            implementation->diag_word = 0;
-            implementation->cancel_expected = 0;
-            SPARK_FAIL(SPARK_STATUS_IO_ERROR);
-        }
-        if ( cudaMemcpy(implementation->seq_cell,&zero,
-                sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
-             cudaHostAlloc((void **)&implementation->published_host_cell,
-                 sizeof(uint64_t),0u) != 0 )
-            SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+        SparkStatus ensure = SparkTpDeviceCollectiveEnsureCells(implementation);
+        if ( ensure != SPARK_STATUS_OK )
+            return ensure;
     }
     if ( cudaMemcpy(implementation->error_word,&zero,
             sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
