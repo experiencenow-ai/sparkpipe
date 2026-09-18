@@ -703,6 +703,15 @@ void SparkWeightdMeshDoorbellLoop(void)
                 }
                 if ( seq == 0ull || bytes == 0ull )
                     continue;
+                if ( seq != weightd_mesh.doorbell_posted[index] &&
+                     (weightd_mesh.doorbell_stuck[index] % 200u) == 0u )
+                    fprintf(stderr,
+                        "WD-SEEN idx=%llu seq=%llu posted=%llu bytes=%llu slot=%llu\n",
+                        (unsigned long long)index,
+                        (unsigned long long)seq,
+                        (unsigned long long)weightd_mesh.doorbell_posted[index],
+                        (unsigned long long)bytes,
+                        (unsigned long long)slot);
                 if ( seq == weightd_mesh.doorbell_posted[index])
                 {
                     weightd_mesh.doorbell_stuck[index] = 0u;
