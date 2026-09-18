@@ -1073,19 +1073,13 @@ SparkStatus SparkTpDeviceCollectivePrepareReceiveBf16(
     implementation = collective->implementation;
     if ( SparkTpDeviceCollectiveRegisteredRegion != receive_device )
     {
-        uint64_t lane_bytes = 2ull *
-            SPARK_WEIGHTD_MESH_SLOTS_PER_BAND *
-            SPARK_WEIGHTD_MESH_SLOT_BYTES;
         if ( SparkTpDeviceCollectiveRegisteredRegion == 0 &&
-             cudaHostRegister(receive_device +
-                    implementation->band_base -
-                    (implementation->band_base % lane_bytes),
-                lane_bytes,0u) != 0 )
+             cudaHostRegister(receive_device,
+                (size_t)SPARK_WEIGHTD_MESH_REGION_BYTES,0u) != 0 )
         {
-            fprintf(stderr,"MESH-REGISTER-FALLBACK ptr=%p band=%llu lane_bytes=%llu (%s); continuing with pageable mesh memory\n",
+            fprintf(stderr,"MESH-REGISTER-FALLBACK ptr=%p region_bytes=%llu (%s); continuing with pageable mesh memory\n",
                 receive_device,
-                (unsigned long long)implementation->band_base,
-                (unsigned long long)lane_bytes,
+                (unsigned long long)SPARK_WEIGHTD_MESH_REGION_BYTES,
                 cudaGetErrorString(cudaGetLastError()));
         }
         SparkTpDeviceCollectiveRegisteredRegion = receive_device;
