@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 L=sparkf
-rsync -a --delete \
+rsync -a --no-times --delete \
   --exclude .git --exclude build --exclude "*.o" --exclude .dsv4pro_binary_cache \
   --exclude tools_local --exclude runs --exclude docs --exclude litellm-venv \
   include src runtime cache ring node modules model-families schema text \
