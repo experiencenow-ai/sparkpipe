@@ -5,11 +5,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 L=sparkf
-rsync -a --no-times --delete \
+rsync -aR --no-times --delete \
   --exclude .git --exclude build --exclude "*.o" --exclude .dsv4pro_binary_cache \
   --exclude tools_local --exclude runs --exclude docs --exclude litellm-venv \
   include src runtime cache ring node modules model-families schema text \
-  Makefile model_contracts examples/model_descriptions tools/publish_local.sh \
+  Makefile model_contracts examples/model_descriptions tools \
   $L:~/sparkpipe-build-958/ || exit 1
 ssh $L 'bash -s' <<'REMOTE'
 set -euo pipefail
