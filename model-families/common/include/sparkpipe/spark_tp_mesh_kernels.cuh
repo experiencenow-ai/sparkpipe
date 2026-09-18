@@ -155,7 +155,7 @@ static __global__ void SparkGlm5NextSumRanksF32Kernel(
 {
 	uint32_t pair;
 	float2 acc,v;
-	for (pair=threadIdx.x; pair<pair_count; pair+=blockDim.x)
+	for (pair=blockIdx.x*blockDim.x+threadIdx.x; pair<pair_count; pair+=blockDim.x*gridDim.x)
 	{
 		uint32_t source;
 		acc.x = 0.0f;
