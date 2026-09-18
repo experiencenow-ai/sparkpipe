@@ -1,5 +1,5 @@
 {
-  "file_count": 3021,
+  "file_count": 3020,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -3687,11 +3687,6 @@
       "size_bytes": 11800
     },
     {
-      "path": "inference/kernels/mesh.cuh",
-      "sha256": "1c1dd5b71d0765243466726e6172f9d1acf23f27c18200642350c7a54541651d",
-      "size_bytes": 3257
-    },
-    {
       "path": "inference/kernels/mma.cuh",
       "sha256": "66dadc2eabf5b99fd0f87d0bf34852d66ab039e64faa7673f8607fccf6c9503b",
       "size_bytes": 9715
@@ -5248,8 +5243,8 @@
     },
     {
       "path": "modules/ling_resident_decode_stage/source/spark_ling_resident_decode_stage_cuda.cu",
-      "sha256": "e506b7869596b0ef33546a392e0d4c795a0fcfde56b014055f8d2ec21a007e48",
-      "size_bytes": 24962
+      "sha256": "eaf704b694e3c11df4d07477150217a196debb342a5b6e28906b9d7b93795236",
+      "size_bytes": 24142
     },
     {
       "path": "modules/ling_resident_decode_stage/source/spark_ling_resident_decode_stage_internal.h",
@@ -7133,8 +7128,8 @@
     },
     {
       "path": "ring/transport/tp_device_collective.c",
-      "sha256": "2e4743a7777c329ae884d24d712455de9ffd40bf8f0878a550a4296bbf44cc48",
-      "size_bytes": 55496
+      "sha256": "b5395f8d6a238f1c9571f9b8eba165e4bf79d7b4469ae1807651caa6f23b32fb",
+      "size_bytes": 55480
     },
     {
       "path": "ring/transport/tp_device_collective_nccl.h",
@@ -15110,5 +15105,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 59097852
+  "total_bytes": 59093759
 }

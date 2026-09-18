@@ -33,7 +33,7 @@ extern int SparkGlm5NextLaunchMeshPublish(void *stream,
     uint64_t slot_index,volatile void *slot_tail);
 extern int SparkGlm5NextLaunchMeshGuard(void *stream,
     volatile void *error_word,void *output);
-extern int SparkTpDeviceCollectiveMeshWait(void *stream,
+extern int SparkGlm5NextLaunchMeshWait(void *stream,
     volatile void *band_base,uint64_t slot_bytes,const void *round_seq,
     uint64_t slots_per_rank,uint64_t ring,uint32_t rank,uint32_t degree,
     void *error_word,unsigned long long deadline_ns,void *diag_word,
@@ -605,7 +605,7 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
                 implementation->band_base + slot_index * slot_bytes,
                 submission->local_device,bytes) != 0 )
             return SPARK_STATUS_IO_ERROR;
-        if ( SparkTpDeviceCollectiveMeshPublish(submission->cuda_stream,
+        if ( SparkGlm5NextLaunchMeshPublish(submission->cuda_stream,
                 implementation->mesh_buffer +
                 SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(band_index,
                     implementation->tp_rank),
@@ -615,7 +615,7 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
                 implementation->band_base + slot_index * slot_bytes +
                 slot_bytes - 8u) != 0 )
             return SPARK_STATUS_IO_ERROR;
-        if ( SparkTpDeviceCollectiveMeshWait(submission->cuda_stream,
+        if ( SparkGlm5NextLaunchMeshWait(submission->cuda_stream,
                 implementation->mesh_buffer + implementation->band_base,
                 implementation->slot_bytes,
                 implementation->round_seq_device,
@@ -854,7 +854,7 @@ combine_done:
     if ( operation_kind ==
             SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_REDUCE_MAX_U64 &&
          implementation->error_word != 0 &&
-         SparkTpDeviceCollectiveMeshGuard(submission->cuda_stream,
+         SparkGlm5NextLaunchMeshGuard(submission->cuda_stream,
              implementation->error_word,submission->full_device) != 0 )
         return(SPARK_STATUS_IO_ERROR);
     if ( implementation->capture_armed == 0u )
