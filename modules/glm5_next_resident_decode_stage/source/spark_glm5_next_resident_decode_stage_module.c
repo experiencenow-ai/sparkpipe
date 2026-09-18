@@ -635,7 +635,15 @@ static SparkStatus SparkGlm5NextLazyOpen(SparkGlm5NextModuleState *state,const c
 		const char *pin_env = getenv("SPARK_GLM5_NEXT_PIN_EXPERTS");
 		if ( pin_env != 0 && pin_env[0] == '1' && state->lazy_pack != 0 &&
 		     state->lazy_pack->map != 0 )
-			status = SparkGlm5NextPinAllExperts(state);
+		{
+			SparkStatus pin_status = SparkGlm5NextPinAllExperts(state);
+			if ( pin_status != SPARK_STATUS_OK )
+			{
+				fprintf(stderr,"EXPERT-PIN-FAILED status=%d — continuing unpinned\n",
+					(int)pin_status);
+				state->expert_pin_lease_count = 0u;
+			}
+		}
 	}
 	SPARK_RETURN(status);
 }
