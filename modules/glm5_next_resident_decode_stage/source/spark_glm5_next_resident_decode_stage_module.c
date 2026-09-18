@@ -3864,7 +3864,10 @@ static SparkStatus SparkGlm5NextExecuteBatch(SparkGlm5NextModuleState *state,Spa
 	SparkStatus status;
 	status = SparkTpChainOrdinal(frame->request_id,state->pipeline_slot_count,SPARK_GLM5_NEXT_TP_COLLECTIVE_CREDITS_PER_SLOT,SPARK_GLM5_NEXT_TP_CHAIN_OPERATIONS,SPARK_GLM5_NEXT_TP_CHAIN_OPERATIONS - 1u,&last_ordinal);
 	if ( status != SPARK_STATUS_OK )
+	{
+		fprintf(stderr,"G5N-DBG submit-fail site=ordinal status=%d req=%llu\n",(int)status,(unsigned long long)frame->request_id);
 		SPARK_RETURN(status);
+	}
 	continuity.state = state;
 	continuity.batch = batch;
 	continuity.bound = simulated_bound;
@@ -3872,9 +3875,14 @@ static SparkStatus SparkGlm5NextExecuteBatch(SparkGlm5NextModuleState *state,Spa
 	continuity.next_positions = simulated_next;
 	status = SparkStageModuleIndexSetClaimAndPrepare(state->lane_states,state->resident_sequence_capacity,batch->row_resident_slots,batch->active_sequence_count,SparkGlm5NextPrepareClaimedContinuity,&continuity);
 	if ( status != SPARK_STATUS_OK )
+	{
+		fprintf(stderr,"G5N-DBG submit-fail site=lane-claim status=%d req=%llu rows=%u\n",(int)status,(unsigned long long)frame->request_id,(unsigned)batch->active_sequence_count);
 		SPARK_RETURN(status);
+	}
 	slot_index = (uint32_t)(frame->request_id % state->pipeline_slot_count);
 	status = SparkStageModuleIndexSetClaim(state->slot_states,state->pipeline_slot_count,&slot_index,1u);
+	if ( status != SPARK_STATUS_OK )
+		fprintf(stderr,"G5N-DBG submit-fail site=slot-claim status=%d req=%llu slot=%u\n",(int)status,(unsigned long long)frame->request_id,(unsigned)slot_index);
 	if ( status == SPARK_STATUS_OK )
 	{
 		slot = &state->slots[slot_index];
