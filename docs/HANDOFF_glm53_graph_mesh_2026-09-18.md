@@ -157,6 +157,28 @@ Then: warm probes (expect fast tokens), re-arm graph, fixture, merges.
   weightd, let agents converge, all 16 listeners), ONE probe with a
   600s+ budget, no parallel probes.
 
+## Final diagnosis chain (end of day)
+
+1. With the tail contract live, CKEY aligns and chains run. The first
+   chain per fleet is COLD: 283-452s (per-layer lazy expert IPC
+   acquire + load; LAZYWORK per layer per chain; MLP stage = 99%).
+   Warm chain = 313ms/token. Warm allreduce = 63ms/91 rounds = 695us.
+2. The API's batch engine BUSY-retries (200ms cap) while chains are
+   cold-slow; any rank's rejection -> pipeline SetFailure(SCHEMA) ->
+   FailStop ALL engine connections -> request dies status=6 in ~60s.
+   The engines keep the chains running and complete them (15+ chains
+   status=0 observed per engine generation) — tokens are produced with
+   no live route (dropped by design now).
+3. THE one-line fix for service: warm the fleet at deploy time (agent
+   fires one warmup request per fresh engine generation with a huge
+   deadline) so user requests only ever see 313ms chains.
+4. Slot dispatch is request_id % 4; colliding ids pin slots; cold
+   chains make collisions certain. Consider 30s round timeout ->
+   fail-fast 5s for liveness, or slot aging.
+5. Next perf target after service is stable: 695us/round eager ->
+   graph path should collapse it; then measure against the 50-100us
+   roofline target.
+
 ## Open work, in order
 
 1. Tail contract `(epoch<<32)|ordinal` in the publish kernel + wait
