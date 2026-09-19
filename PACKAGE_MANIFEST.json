@@ -1,5 +1,5 @@
 {
-  "file_count": 3137,
+  "file_count": 3145,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "d0670e863c8bec5429393784da1f2f5e036799b0c8657026c15c4dcd41dcfdac",
-      "size_bytes": 117242
+      "sha256": "a4cd2f21302e4cb0b64c76a61f474f8f22e83e35e46415b41d3083acc2442bb1",
+      "size_bytes": 118654
     },
     {
       "path": "Makefile.rej",
@@ -5803,8 +5803,8 @@
     },
     {
       "path": "node/weightd_mesh.c",
-      "sha256": "2a617c860e3316909d8d9a36f5d2f8b25c93d53ddf5b8e3b922203b21be495d7",
-      "size_bytes": 38640
+      "sha256": "e28d1feeb37586b280631ee179db0947a4d482a99f3e869e5c930d9849cb8752",
+      "size_bytes": 38793
     },
     {
       "path": "node/weightd_spawn.c",
@@ -7618,8 +7618,8 @@
     },
     {
       "path": "runtime/spark_weightd.c",
-      "sha256": "9a16e3c31a35b825f8c83c09cc967c10443f804211c6d0b5840acedfcaa26e49",
-      "size_bytes": 147401
+      "sha256": "ef573ef76c16c668d52362c942e1d423cdb992139006bb1532a56e5ea17b09e6",
+      "size_bytes": 147447
     },
     {
       "path": "runtime/spark_weightd_attach.c",
@@ -7798,8 +7798,8 @@
     },
     {
       "path": "tests/cuda_stub/cuda_runtime_stub.c",
-      "sha256": "b1478f0c04f26e32249c831139497bfa6f329e941fe416400e9d662b2303721a",
-      "size_bytes": 30309
+      "sha256": "ba63c7b8fb21db064cdfc24867eb34af3782064d65dfe4ac7ec467a80083b280",
+      "size_bytes": 31357
     },
     {
       "path": "tests/fake_model_kernel_probe_module.c",
@@ -8200,6 +8200,31 @@
       "path": "tests/host_cuda_compiler.py",
       "sha256": "dff6a273cc0d960e7efcd5dbcf180b49a92f20738053ca7d0fb105ffa467f677",
       "size_bytes": 763
+    },
+    {
+      "path": "tests/ibv_stub/infiniband/verbs.h",
+      "sha256": "6a665094f6eebca28611dc4aab974e8864480e1811a02c2c1d2a06354c3202d0",
+      "size_bytes": 5566
+    },
+    {
+      "path": "tests/ibv_stub/sys/mman.h",
+      "sha256": "789276ee71d47b163c53f7ce64550c221ddecd071e68f0036eb19becc98d07d3",
+      "size_bytes": 148
+    },
+    {
+      "path": "tests/ibv_stub/verbs.c",
+      "sha256": "fd66699cb40ce77c0e2699d14833c271e492a8bc6e4b1505528ece5d52913665",
+      "size_bytes": 11269
+    },
+    {
+      "path": "tests/mock_model_resident_client.c",
+      "sha256": "0b0e0de02f48d4dab97fe66dfa6e1a387a7b94d84ae14196fef0442dba7cba0c",
+      "size_bytes": 15948
+    },
+    {
+      "path": "tests/mock_model_resident_client.h",
+      "sha256": "9be6125897731b396833b09bec522efc74ba2cb1484c47ecc3996344e23d80a9",
+      "size_bytes": 1431
     },
     {
       "path": "tests/rdma_syntax_stub/cuda_runtime_api.h",
@@ -9257,6 +9282,11 @@
       "size_bytes": 22704
     },
     {
+      "path": "tests/test_model_batch_engine_mock.c",
+      "sha256": "63e604f0f1b6ff62618142fce9c0ebc8ffb601f1f95eeb029f219ad21d5b69da",
+      "size_bytes": 12346
+    },
+    {
       "path": "tests/test_model_description.c",
       "sha256": "daf40c2cb7171d6ab96c601e1553e3d9b857de7225c39255b435ad5ba30f0179",
       "size_bytes": 3865
@@ -9767,6 +9797,11 @@
       "size_bytes": 13380
     },
     {
+      "path": "tests/test_weightd_churn.c",
+      "sha256": "6847a124184ce329a6a8a86851d5b3fd2c0a630d0ad1bea77b7a28af0f33fb0b",
+      "size_bytes": 11611
+    },
+    {
       "path": "tests/test_weightd_expert.c",
       "sha256": "eaa8b0cb87f9a897650af31f49168209feea7482e16d375af57456572c9ae3bc",
       "size_bytes": 13911
@@ -9800,6 +9835,11 @@
       "path": "tests/test_weightd_mesh_doorbell.c",
       "sha256": "a76dbfe7a359e3e8e74ad759661325517f060d7701fbb662e34daa92ed2be1b5",
       "size_bytes": 7455
+    },
+    {
+      "path": "tests/test_weightd_mesh_mock.c",
+      "sha256": "152aa09395c207465da289b6f6ba9a883dae8dfa283672223207995c17327656",
+      "size_bytes": 14288
     },
     {
       "path": "tests/test_weightd_mesh_source.py",
@@ -15690,5 +15730,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 65112560
+  "total_bytes": 65187826
 }
