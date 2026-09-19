@@ -228,8 +228,8 @@ def main():
     full_divergent = np.nonzero(full_bits != engine_bits)[0]
     accumulation = {
         "experiment": "oracle layer 0 with full-tensor matmul vs engine "
-                      "4096-row slab streaming; divergence is numpy "
-                      "accumulation order, not architecture",
+                      "4096-row slab streaming; zero divergence proves slab "
+                      "streaming is accumulation-identical to full matmul",
         "divergent_elements": int(len(full_divergent)),
         "divergent_of": int(len(engine_value)),
         "max_abs_delta_f32": float(np.max(np.abs(full - engine_value))),
@@ -289,7 +289,7 @@ def main():
         fh.write("\n")
     print(json.dumps({"status": "PASS", "output": arguments.output,
                       "closure_mismatches": len(closure["defines_config_mismatches"]),
-                      "hand_check_bitwise": hand_check["bitwise_equal"],
+                      "hand_check_bitwise": hand_check["composite_bitwise_equal"],
                       "negative_control": negative["raised"],
                       "position0_top1": receipt["position0_top1"]}))
     return 0

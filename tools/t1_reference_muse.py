@@ -90,6 +90,8 @@ class MuseEngine:
         self.eot = int(config["eos_token_id"][0] if isinstance(
             config["eos_token_id"], list) else config["eos_token_id"])
         self.attn_group = self.heads // self.kv_heads
+        self._convert_u32 = np.empty(LINEAR_BLOCK_ROWS * self.hidden,
+                                     dtype=np.uint32)
         half = self.head_dim // 2
         exponents = np.arange(0, self.head_dim, 2, dtype=np.float32) \
             / np.float32(self.head_dim)
@@ -152,10 +154,18 @@ class MuseEngine:
             raise ValueError(f"weight {weight} shape {shape} disagrees with "
                              f"activation width {x.shape[0]}")
         out = np.empty(rows, dtype=np.float32)
+        in_dim = shape[1]
         for start in range(0, rows, LINEAR_BLOCK_ROWS):
             count = min(LINEAR_BLOCK_ROWS, rows - start)
             slab = self.st.raw_rows(weight, start, count)
-            out[start:start + count] = bf16_to_f32(slab) @ x
+            n = count * in_dim
+            if n > self._convert_u32.size:
+                self._convert_u32 = np.empty(n, dtype=np.uint32)
+            words = self._convert_u32[:n]
+            words[:] = slab.reshape(-1)
+            words <<= 16
+            out[start:start + count] = \
+                words.view(np.float32).reshape(count, in_dim) @ x
         return bf16_round_f32(out)
 
     def embed(self, token_id):

@@ -1,0 +1,31 @@
+{
+  "checkpoint": {
+    "config_sha256": "5a9df2d8a385b3d361ab6ae68d73586f4e775033933bd0cd863fb7f3820e6a14",
+    "index_sha256": "7d817b4dccb1b123fc6c1939356c65cee3a0ad462a5b821ac88280990a27d1ba",
+    "path": "/home/spark5/muse-glimmer-30b-nvme"
+  },
+  "defines_config_mismatches": [],
+  "family": "muse",
+  "fixtures": {
+    "capital_of_france.t1r": {
+      "bytes": 389575,
+      "sha256": "40bbb6f3faac28ecf88cf59c8bfbca433c4f6c0440af0104e55c51c3983a7895"
+    },
+    "count_up.t1r": {
+      "bytes": 475727,
+      "sha256": "ba97812d5c05168ced8b934421d1423ba62f3bca70c95c4a09d26f80cf67dbf7"
+    }
+  },
+  "generated_utc": "2026-09-19T06:40:44Z",
+  "generator": "t1_reference_decoder.py",
+  "host": "spark5",
+  "llm_defines_sha256": "ec7be20ee8cda01edf60658ff46e9b9432575df9974a0d3425880198901c93f9",
+  "numpy_version": "2.5.3",
+  "prompts_sha256": "11a2b9952ae1771cfdc4fa37f438004fe741a8a17fc61363e1561dc1703b859b",
+  "python_version": "3.12.3",
+  "threading_env": {
+    "MKL_NUM_THREADS": "8",
+    "OMP_NUM_THREADS": "8",
+    "OPENBLAS_NUM_THREADS": "8"
+  }
+}
