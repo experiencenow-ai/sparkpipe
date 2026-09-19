@@ -12498,8 +12498,8 @@
     },
     {
       "path": "tools/t1_reference_qwen38_27b.py",
-      "sha256": "20723471a6de0f7ca68659cc29ae5eae1e1163e0f4d8334f3c4e7b26a63e2715",
-      "size_bytes": 17181
+      "sha256": "7775afa4154fe2b907f0349c17474f549ca1b68d2a8f322c9d625b63d5f76b6e",
+      "size_bytes": 17459
     },
     {
       "path": "tools/t1_reference_qwen38_max.py",
@@ -15815,5 +15815,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 71303412
+  "total_bytes": 71303690
 }

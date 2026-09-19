@@ -171,7 +171,12 @@ class Qwen38_27bEngine:
             if raw.dtype == np.uint16:
                 stored = raw
             elif raw.dtype == np.uint8:
-                scale = self.st.raw(name + "_scale_inv").astype(np.float32)
+                scale = self.st.raw(name + "_scale_inv")
+                if scale.dtype == np.uint16:
+                    scale = bf16_to_f32(scale)
+                elif scale.dtype != np.float32:
+                    raise ValueError(f"unsupported scale_inv dtype for "
+                                     f"{name}: {scale.dtype}")
                 rows, cols = raw.shape
                 stored = fp8_block_to_bf16(raw, scale, rows, cols)
                 fresh = True
