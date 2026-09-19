@@ -1,5 +1,5 @@
 {
-  "file_count": 3115,
+  "file_count": 3118,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -7267,6 +7267,21 @@
       "size_bytes": 444
     },
     {
+      "path": "qualification/t1_reference/minimax/MANIFEST.json",
+      "sha256": "c2d8eb7888825904017aad5d11da1a7844160104bd65eff4bc58e22a73f571cc",
+      "size_bytes": 1066
+    },
+    {
+      "path": "qualification/t1_reference/minimax/capital_of_france.t1r",
+      "sha256": "f6c97578b1ea21d8513917e4c03e362b4483b97519c2d0071a335a1b3205fd6e",
+      "size_bytes": 304551
+    },
+    {
+      "path": "qualification/t1_reference/minimax/count_up.t1r",
+      "sha256": "61905cc1bbc3c578cbebad7bc397ee15e7e8bb015ec015f76d639b5d63c7305c",
+      "size_bytes": 405046
+    },
+    {
       "path": "qualification/t1_reference/minimax/prompts.json",
       "sha256": "b5a3b8c29a7c452beb5741a917e8087272e834ecc993969bf0a7e47bb98d878c",
       "size_bytes": 642
@@ -12258,8 +12273,8 @@
     },
     {
       "path": "tools/t1_reference_minimax.py",
-      "sha256": "336d2ecf01b779ded9fcd00748369abae0f4417ef26954e4a6bcc50f077ea897",
-      "size_bytes": 12763
+      "sha256": "c9ff2031d89c2774d134fdced2eb0fd0ae542576bf48876de9c2e038f018c753",
+      "size_bytes": 13881
     },
     {
       "path": "tools/t1_reference_muse.py",
@@ -15580,5 +15595,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 64261792
+  "total_bytes": 64973573
 }
