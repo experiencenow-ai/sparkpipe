@@ -1,5 +1,5 @@
 {
-  "file_count": 3162,
+  "file_count": 3168,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -7412,9 +7412,39 @@
       "size_bytes": 402
     },
     {
+      "path": "qualification/t1_reference/qwen38_27b/MANIFEST.json",
+      "sha256": "1358e876d3f6cf2bb9112787241ebc0c59fe202f6a157c4bd5c2bba0a128416c",
+      "size_bytes": 1079
+    },
+    {
+      "path": "qualification/t1_reference/qwen38_27b/capital_of_france.t1r",
+      "sha256": "27f35d84cefc57c3be8e7bbb5bf8b8eb3739a56a46f9ca6b6164c7e4aea0ef03",
+      "size_bytes": 305318
+    },
+    {
+      "path": "qualification/t1_reference/qwen38_27b/count_up.t1r",
+      "sha256": "ce1929c1858ce0f1bcfb87862c4cc5e2a574f25959fc4262d07c24e4540dbc50",
+      "size_bytes": 406182
+    },
+    {
       "path": "qualification/t1_reference/qwen38_27b/llm_defines_27b.h",
       "sha256": "22fe3d005d08a284d567ebe161e6d460508577ad7612e21dd12c94dc72480da1",
       "size_bytes": 1143
+    },
+    {
+      "path": "qualification/t1_reference/qwen38_27b/nvfp4a16/MANIFEST.json",
+      "sha256": "88ea2b7d969079eed29d605d456357c1ab8975b940c2ad070594e06826732298",
+      "size_bytes": 1084
+    },
+    {
+      "path": "qualification/t1_reference/qwen38_27b/nvfp4a16/capital_of_france.t1r",
+      "sha256": "c4228225994cd98b8c9a8188f6b3941522b84827069d33a9ad7d624e396af9b0",
+      "size_bytes": 305186
+    },
+    {
+      "path": "qualification/t1_reference/qwen38_27b/nvfp4a16/count_up.t1r",
+      "sha256": "cfd06522928acc1f6eda3903aa074d61857c7ad97b9448a27c85d2b0ac3dfa56",
+      "size_bytes": 406058
     },
     {
       "path": "qualification/t1_reference/qwen38_27b/prompts.json",
@@ -15815,5 +15845,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 71303710
+  "total_bytes": 72728617
 }
