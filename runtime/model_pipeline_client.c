@@ -455,8 +455,9 @@ static void SparkModelPipelineClientRankDecisionResult(
 	rank_mask = context != 0 ? UINT32_C(1) << context->stage_index : 0u;
 	if ( transaction == 0 || decision_kind != transaction->decision_kind || (transaction->decision_expected_mask & rank_mask) == 0u || (transaction->decision_result_mask & rank_mask) != 0u )
 	{
-		if ( context != 0 )
-			SparkModelPipelineClientSetFailure(context->pipeline,SPARK_STATUS_SCHEMA_ERROR,context->stage_index);
+		fprintf(stderr,"pipeline late/unknown decision dropped id=%llu stage=%u\n",
+			(unsigned long long)submission_id,
+			context != 0 ? (unsigned)context->stage_index : 999u);
 		return;
 	}
 	transaction->decision_result_mask |= rank_mask;
@@ -486,8 +487,9 @@ static void SparkModelPipelineClientRankResult(
 	rank_mask = context != 0 ? UINT32_C(1) << context->stage_index : 0u;
 	if ( transaction == 0 || (transaction->result_mask & rank_mask) != 0u )
 	{
-		if ( context != 0 )
-			SparkModelPipelineClientSetFailure(context->pipeline,SPARK_STATUS_SCHEMA_ERROR,context->stage_index);
+		fprintf(stderr,"pipeline late/duplicate rank result dropped id=%llu stage=%u\n",
+			(unsigned long long)submission_id,
+			context != 0 ? (unsigned)context->stage_index : 999u);
 		return;
 	}
 	transaction->result_mask |= rank_mask;
@@ -565,12 +567,18 @@ static void SparkModelPipelineClientRankCompletion(
 	context = (SparkModelPipelineRankContext *)completion_context;
 	transaction = context != 0 && completion != 0 ? SparkModelPipelineClientFind(context->pipeline,completion->submission_id) : 0;
 	rank_mask = context != 0 ? UINT32_C(1) << context->stage_index : 0u;
-	if ( transaction == 0 || (transaction->continued == 0u &&
+	if ( transaction == 0 || (transaction->completion_mask & rank_mask) != 0u )
+	{
+		fprintf(stderr,"pipeline late/duplicate completion dropped id=%llu stage=%u\n",
+			completion != 0 ? (unsigned long long)completion->submission_id : 0ull,
+			context != 0 ? (unsigned)context->stage_index : 999u);
+		return;
+	}
+	if ( (transaction->continued == 0u &&
 		(transaction->decision_kind != SPARK_MODEL_RESIDENT_IPC_DECISION_COMMIT ||
 		 transaction->decision_expected_mask != context->pipeline->all_rank_mask)) ||
 		(transaction->result_mask & rank_mask) == 0u ||
-		(transaction->prepared_mask & rank_mask) == 0u ||
-		(transaction->completion_mask & rank_mask) != 0u )
+		(transaction->prepared_mask & rank_mask) == 0u )
 	{
 		if ( context != 0 )
 			SparkModelPipelineClientSetFailure(context->pipeline,SPARK_STATUS_SCHEMA_ERROR,context->stage_index);
