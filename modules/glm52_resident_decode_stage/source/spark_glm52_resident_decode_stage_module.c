@@ -241,7 +241,7 @@ typedef struct SparkGlm52TpChain
 	SparkGlm52TpChainFail(chain,status)
 
 static void SparkGlm52TpChainFail(SparkGlm52TpChain *chain,SparkStatus status);
-static uint32_t SparkGlm52LazyRecoverLease(SparkGlm52ModuleState *state,uint32_t slot,SparkGlm52TpChain **out);
+static SparkStatus SparkGlm52LazyRecoverLease(SparkGlm52ModuleState *state,uint32_t slot,SparkGlm52TpChain **out);
 static void CUDART_CB SparkGlm52CompleteAsync(void *context);
 static SparkStatus SparkGlm52ValidateFrameBuffers(const SparkGlm52ModuleState *state,const SparkModelDriverFrame *frame,uint32_t row_count);
 static SparkStatus SparkGlm52AllocateSlotHost(SparkGlm52ExecutionSlot *slot);
