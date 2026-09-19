@@ -122,6 +122,22 @@ class Safetensors:
         data = fh.read(e["data_offsets"][1] - e["data_offsets"][0])
         return np.frombuffer(data, dtype=self._np(e["dtype"])).reshape(e["shape"])
 
+    def pread(self, name):
+        fname, e, base = self._entry(name)
+        fd = self.fds[fname].fileno()
+        off = base + e["data_offsets"][0]
+        need = e["data_offsets"][1] - e["data_offsets"][0]
+        parts = []
+        got = 0
+        while got < need:
+            chunk = os.pread(fd, need - got, off + got)
+            if not chunk:
+                raise ValueError(f"short read for {name}")
+            parts.append(chunk)
+            got += len(chunk)
+        return np.frombuffer(b"".join(parts),
+                             dtype=self._np(e["dtype"])).reshape(e["shape"])
+
     def entry(self, name):
         _, e, _ = self._entry(name)
         return e

@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -451,7 +452,7 @@ class Dsv41FlashEngine:
         self._engram_init(text, engram_ids)
         self.expert_cache = {}
         self.expert_cache_limit = int(os.environ.get(
-            "T1_REF_DSV41_EXPERT_CACHE", 300))
+            "T1_REF_DSV41_EXPERT_CACHE", 48))
         self.dequant_cache = {}
         self._head_input = None
 
@@ -601,8 +602,6 @@ class Dsv41FlashEngine:
             return bf16_round_f32(bf16_to_f32(raw) @ x)
         w = bf16_to_f32(self._dequant_weight_u16(name))
         return bf16_round_f32(w @ x)
-        raise Dsv41ConfigError(
-            f"unsupported weight dtype for {name}: {raw.dtype}")
 
     def _fp32_projector(self, name):
         raw = self.st.raw(name)
@@ -616,7 +615,7 @@ class Dsv41FlashEngine:
             raise Dsv41ConfigError(f"{name} must be BF16")
         return bf16_to_f32(raw.reshape(-1))
 
-    def _mxfp4(self, name):
+    def _mxfp4(self, name, chunk_rows=256):
         payload = self.st.read(name)
         scale = self.st.read(name[:-len(".weight")] + ".scale")
         rows, packed = payload.shape
@@ -624,26 +623,65 @@ class Dsv41FlashEngine:
         if scale.shape != (rows, cols // 32):
             raise Dsv41ConfigError(
                 f"{name}.scale {scale.shape} does not pack {rows}x{cols}")
-        nib = np.empty((rows, cols), dtype=np.int32)
-        nib[:, 0::2] = payload & 0xF
-        nib[:, 1::2] = payload >> 4
-        w = _E2M1_F32[nib].reshape(rows, cols // 32, 32)
-        s = np.exp2(scale.astype(np.int32).astype(np.float32) - 127)
-        return (w * s[:, :, None]).reshape(rows, cols)
+        exp_rows = scale.astype(np.int32).astype(np.float32) - 127
+        out = np.empty((rows, cols), dtype=np.float32)
+        for first in range(0, rows, chunk_rows):
+            last = min(first + chunk_rows, rows)
+            block = payload[first:last]
+            nib = np.empty((last - first, cols), dtype=np.int32)
+            nib[:, 0::2] = block & 0xF
+            nib[:, 1::2] = block >> 4
+            w = _E2M1_F32[nib].reshape(last - first, cols // 32, 32)
+            out[first:last] = (w * np.exp2(
+                exp_rows[first:last])[:, :, None]).reshape(
+                last - first, cols)
+        return out
 
-    def _expert_weights(self, name):
+    def _expert_weights(self, name, pool=None):
         cached = self.expert_cache.get(name)
         if cached is not None:
             self.expert_cache.pop(name)
             self.expert_cache[name] = cached
             return cached
-        weights = (f32_to_bf16_u16(self._mxfp4(name + "w1.weight")),
-                   f32_to_bf16_u16(self._mxfp4(name + "w2.weight")),
-                   f32_to_bf16_u16(self._mxfp4(name + "w3.weight")))
+        if pool is not None:
+            specs = [(name + "w1.weight", name + "w1.scale"),
+                     (name + "w2.weight", name + "w2.scale"),
+                     (name + "w3.weight", name + "w3.scale")]
+            with ThreadPoolExecutor(6) as readers:
+                parts = list(readers.map(
+                    lambda spec: (self.st.pread(spec[0]),
+                                  self.st.pread(spec[1])), specs))
+            w1, w2, w3 = [f32_to_bf16_u16(self._mxfp4_arrays(pl, sc))
+                          for pl, sc in parts]
+        else:
+            w1 = f32_to_bf16_u16(self._mxfp4(name + "w1.weight"))
+            w2 = f32_to_bf16_u16(self._mxfp4(name + "w2.weight"))
+            w3 = f32_to_bf16_u16(self._mxfp4(name + "w3.weight"))
+        weights = (w1, w2, w3)
         if len(self.expert_cache) >= self.expert_cache_limit:
             self.expert_cache.pop(next(iter(self.expert_cache)))
         self.expert_cache[name] = weights
         return weights
+
+    def _mxfp4_arrays(self, payload, scale, chunk_rows=256):
+        rows, packed = payload.shape
+        cols = packed * 2
+        if scale.shape != (rows, cols // 32):
+            raise Dsv41ConfigError(
+                f"scale {scale.shape} does not pack {rows}x{cols}")
+        exp_rows = scale.astype(np.int32).astype(np.float32) - 127
+        out = np.empty((rows, cols), dtype=np.float32)
+        for first in range(0, rows, chunk_rows):
+            last = min(first + chunk_rows, rows)
+            block = payload[first:last]
+            nib = np.empty((last - first, cols), dtype=np.int32)
+            nib[:, 0::2] = block & 0xF
+            nib[:, 1::2] = block >> 4
+            w = _E2M1_F32[nib].reshape(last - first, cols // 32, 32)
+            out[first:last] = (w * np.exp2(
+                exp_rows[first:last])[:, :, None]).reshape(
+                last - first, cols)
+        return out
 
     def _hc_mixes(self, layer, streams, kind):
         p = f"{PREFIX}{layer}.hc_{kind}_"
@@ -897,9 +935,20 @@ class Dsv41FlashEngine:
         picked = routed[selected]
         weights = picked / (picked.sum() + 1e-20) * self.route_scale
         y = np.zeros(self.hidden, dtype=np.float32)
-        for i, expert in enumerate(selected):
-            y += weights[i] * self._expert(
-                p + f"experts.{int(expert)}.", x)
+        with ThreadPoolExecutor(min(6, self.topk)) as pool:
+            futures = [pool.submit(self._expert_weights,
+                                   p + f"experts.{int(expert)}.", pool)
+                       for expert in selected]
+            expert_sets = [f.result() for f in futures]
+        for i in range(self.topk):
+            w1, w2, w3 = expert_sets[i]
+            expert_prefix = p + f"experts.{int(selected[i])}."
+            gate = np.minimum(bf16_round_f32(bf16_to_f32(w1) @ x),
+                              self.limit)
+            up = np.clip(bf16_round_f32(bf16_to_f32(w3) @ x),
+                         -self.limit, self.limit)
+            activated = bf16_round_f32(_silu(gate) * up)
+            y += weights[i] * bf16_round_f32(bf16_to_f32(w2) @ activated)
         y += self._shared_expert(layer, x)
         if _DEBUG:
             print(f"  moe {time.perf_counter() - tm:.3f}s", flush=True)
