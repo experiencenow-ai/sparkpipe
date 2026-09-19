@@ -1,5 +1,5 @@
 {
-  "file_count": 3145,
+  "file_count": 3153,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -4182,6 +4182,11 @@
       "size_bytes": 5602
     },
     {
+      "path": "model-families/dsv41_flash/include/sparkpipe/llm_defines.h",
+      "sha256": "8047799d934e7e001d7b88ae5e68a0a003b1cb9557ff3eb8e108a37ecb4ed5f7",
+      "size_bytes": 8154
+    },
+    {
       "path": "model-families/dsv41_flash/include/sparkpipe/spark_dsv41_flash_model.h",
       "sha256": "ad3916cde8d579df0859a0a7963a46df4e462f6f446f3c93693a3c967fec2d88",
       "size_bytes": 5656
@@ -7197,6 +7202,31 @@
       "size_bytes": 2842
     },
     {
+      "path": "qualification/t1_reference/dsv41/MANIFEST.json",
+      "sha256": "9f984d536794c7342f3c105dfcbb731b63cf99fda0c15116816e6dc5e7559fb0",
+      "size_bytes": 4083
+    },
+    {
+      "path": "qualification/t1_reference/dsv41/capital_of_france.t1r",
+      "sha256": "33a156f0526b2437f5e6416ac80e8d48359d2c882235596a4c8e9b071465e808",
+      "size_bytes": 1341054
+    },
+    {
+      "path": "qualification/t1_reference/dsv41/count_up.t1r",
+      "sha256": "08516a563fc051ebcdb10cee973a0748efe94ef69b24083ed1f67333d8d0a1ea",
+      "size_bytes": 3572247
+    },
+    {
+      "path": "qualification/t1_reference/dsv41/engram_token_map.npy",
+      "sha256": "fbc8c3ec76fc11430b854fb2ff267fdf923b5ff2d4f869e3c0433d8edc6479b1",
+      "size_bytes": 1034368
+    },
+    {
+      "path": "qualification/t1_reference/dsv41/prompts.json",
+      "sha256": "6b458e452a80eecf8782a6b778ddd1f11268583d1f389a644016bb4d074c248d",
+      "size_bytes": 700
+    },
+    {
       "path": "qualification/t1_reference/gemma4/MANIFEST.json",
       "sha256": "d1f49028d0320635231b822bd90a8f3be2ea2b2a952959aaf593988b55bbf88e",
       "size_bytes": 1073
@@ -9705,6 +9735,11 @@
       "path": "tests/test_t1_reference_decoder.py",
       "sha256": "155d4ea391b992c7c4fa2c7d7a3762579247118899baf7480de9d6cbe0b1a5f4",
       "size_bytes": 11862
+    },
+    {
+      "path": "tests/test_t1_reference_dsv41.py",
+      "sha256": "653e8aef8f0201cc54fed4fda00fbc2bffb404037e4d91d4cfdc6190cc9d4f4c",
+      "size_bytes": 17639
     },
     {
       "path": "tests/test_t1_reference_engines.py",
@@ -12363,8 +12398,8 @@
     },
     {
       "path": "tools/t1_reference_common.py",
-      "sha256": "ecd9f4bf73a7e438fc930711ed0e0cdbb22f5ca631327150ef75940929c283d1",
-      "size_bytes": 10312
+      "sha256": "56ee6a9d12dc7bf1d4d9e60b871e5298d0edc5d64d3b70be689b2c97ff845e55",
+      "size_bytes": 11256
     },
     {
       "path": "tools/t1_reference_compare.py",
@@ -12375,6 +12410,11 @@
       "path": "tools/t1_reference_decoder.py",
       "sha256": "0c3df5fa186214103586ece32a6ce834833fbea82a5043e81ecce50e8467f6d2",
       "size_bytes": 5692
+    },
+    {
+      "path": "tools/t1_reference_dsv41.py",
+      "sha256": "1f13619bb9ac13657ff40452fd691f04c50464ff012a59835d4a7f65f618f5a6",
+      "size_bytes": 47418
     },
     {
       "path": "tools/t1_reference_gemma4.py",
@@ -15730,5 +15770,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 65188449
+  "total_bytes": 71215056
 }
