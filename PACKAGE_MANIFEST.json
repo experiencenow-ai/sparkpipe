@@ -1,5 +1,5 @@
 {
-  "file_count": 3169,
+  "file_count": 3170,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "1c2bc389f3b5780560a5066c93644ba1a4521550f1757cf23de69abddb5c70a1",
-      "size_bytes": 119062
+      "sha256": "ff0a16b1c5cf9ab0b7b7ed0e82b7b05d8a5dfbd4001634b85ef2c8eb2ec639ff",
+      "size_bytes": 119799
     },
     {
       "path": "Makefile.rej",
@@ -4057,6 +4057,11 @@
       "size_bytes": 7922
     },
     {
+      "path": "mock-pipeline-deployment.json",
+      "sha256": "68d360cffe596ea816e0ce1316755440179f3f16fa8f8c0b696719c0e82b1ec7",
+      "size_bytes": 1687
+    },
+    {
       "path": "model-families/common/include/sparkpipe/llm_specifics.h",
       "sha256": "272fc45fd039d6b835f7f0c2ed63f325fd557c9239931beca0a42ea4aa2b32c4",
       "size_bytes": 3848
@@ -7608,8 +7613,8 @@
     },
     {
       "path": "runtime/model_batch_engine.c",
-      "sha256": "99fe43f24b7af6a39c8b735cb6f3fa7e1fdd97c208bd96bf5522dddb9cda6b8d",
-      "size_bytes": 92684
+      "sha256": "4648c63ea890fc91375f67e4b75905de205d13e2a438ed1dc99824fc58accd33",
+      "size_bytes": 92862
     },
     {
       "path": "runtime/model_batch_scheduler.h",
@@ -7628,8 +7633,8 @@
     },
     {
       "path": "runtime/model_pipeline_client.c",
-      "sha256": "3046a385197b83ac7665d3c8303ab2c44540f690a0f2cbdcc84c4701165aa4c7",
-      "size_bytes": 41563
+      "sha256": "ebcf37317453e497f01fc7c8af230420966916836ad4215cda6e83c685b91ef0",
+      "size_bytes": 42318
     },
     {
       "path": "runtime/model_resident_client.c",
@@ -8308,13 +8313,13 @@
     },
     {
       "path": "tests/mock_model_resident_client.c",
-      "sha256": "0b0e0de02f48d4dab97fe66dfa6e1a387a7b94d84ae14196fef0442dba7cba0c",
-      "size_bytes": 15948
+      "sha256": "39cb6668921ac71792b982ef2e89af0d509b1d74a5fcbc7e9627aed966f9506f",
+      "size_bytes": 16976
     },
     {
       "path": "tests/mock_model_resident_client.h",
-      "sha256": "9be6125897731b396833b09bec522efc74ba2cb1484c47ecc3996344e23d80a9",
-      "size_bytes": 1431
+      "sha256": "e35a496d091be471b2664f6465f9e3c03c519244613fb7014d4b99df1736f4be",
+      "size_bytes": 1492
     },
     {
       "path": "tests/rdma_syntax_stub/cuda_runtime_api.h",
@@ -9373,8 +9378,8 @@
     },
     {
       "path": "tests/test_model_batch_engine_mock.c",
-      "sha256": "63e604f0f1b6ff62618142fce9c0ebc8ffb601f1f95eeb029f219ad21d5b69da",
-      "size_bytes": 12346
+      "sha256": "8e898e291af49048e51b9d0b6d4c39b76a8707223cbf6a96c4d6dd090e1529a7",
+      "size_bytes": 14738
     },
     {
       "path": "tests/test_model_description.c",
@@ -15850,5 +15855,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 72753511
+  "total_bytes": 72760349
 }

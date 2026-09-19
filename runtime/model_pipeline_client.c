@@ -905,6 +905,22 @@ SparkStatus SparkModelPipelineClientSubmit(
 		if ( status != SPARK_STATUS_OK )
 		{
 			SparkModelPipelineClientRecordFailure(transaction,status);
+			if ( status == SPARK_STATUS_BUSY )
+			{
+				/* Transient backpressure from one rank is NOT a pipeline
+				 * fault: fail just this transaction, abort the ranks that
+				 * already accepted (their lanes free; the late decision
+				 * results drop cleanly), and return BUSY so the engine
+				 * retries later. SetFailure would tear down every rank
+				 * connection — the reconnect then resets every engine's
+				 * session and kills all in-flight chains fleet-wide. */
+				uint32_t abort_rank;
+				for (abort_rank=0u; abort_rank<rank; abort_rank++)
+					(void)SparkModelResidentClientAbort(pipeline->clients[abort_rank],
+						transaction->submission_id);
+				SparkModelPipelineClientRelease(pipeline,transaction);
+				return(SPARK_STATUS_BUSY);
+			}
 			if ( status != SPARK_STATUS_IO_ERROR )
 				SparkModelPipelineClientSetFailure(pipeline,
 				    status,rank);

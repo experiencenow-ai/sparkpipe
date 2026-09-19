@@ -1979,7 +1979,10 @@ static SparkStatus SparkModelBatchDispatchKind(
 	if ( status != SPARK_STATUS_OK )
 	{
 		state->active = 0u;
-		engine->consecutive_pipeline_failures++;
+		/* BUSY is transient backpressure (a rank mid-chain); it must not
+		 * count toward the circuit — the circuit exists for real faults */
+		if ( status != SPARK_STATUS_BUSY )
+			engine->consecutive_pipeline_failures++;
 		if ( engine->consecutive_pipeline_failures >= 8u )
 		{
 			fprintf(stderr,"batch circuit open: %u consecutive pipeline failures; dispatch suspended 15s\n",

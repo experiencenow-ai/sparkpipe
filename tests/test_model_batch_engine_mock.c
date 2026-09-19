@@ -258,6 +258,60 @@ static void TestScenarioRankKilledAndRevived(const SparkModelResidentDeployment 
 	SparkModelBatchEngineDestroy(engine);
 }
 
+/* A rank answering BUSY is transient backpressure, not a fault: the
+ * pipeline must NOT fail-stop (that reconnects every rank and resets every
+ * engine session, killing all in-flight chains fleet-wide). The request
+ * retries and completes; no rank ever reconnects. */
+static void TestScenarioRankBusyBackpressure(const SparkModelResidentDeployment *deployment, const char *runtime_root)
+{
+	TestBatchState state;
+	SparkModelBatchEngine *engine;
+	uint32_t step;
+	MockResidentClientReset();
+	memset(&state,0,sizeof(state));
+	engine = TestConnect(deployment,&state,runtime_root);
+	if ( engine == 0 )
+		return;
+	MockResidentClientSetAutoTokens(1u);
+	MockResidentClientSetFinalRank(TEST_RANKS - 1u,1u);
+	MockResidentClientScriptSubmitStatus(1u,SPARK_STATUS_BUSY);
+	TestSubmit(engine,1u,500u,2u);
+	for (step=0u; step<50u; step++)
+	{
+		(void)SparkModelBatchEngineProgress(engine, 8u);
+		(void)MockResidentClientDriveAll();
+		usleep(2000);
+	}
+	CHECK( state.total_terminals == 0u,
+		"busy: a BUSY rank holds the request without failing it");
+	MockResidentClientScriptSubmitStatus(1u,SPARK_STATUS_OK);
+	TestDriveUntilTerminal(engine,&state,1u,400u);
+	{
+		SparkModelBatchEngineView view;
+		if ( SparkModelBatchEngineGetView(engine,&view) == SPARK_STATUS_OK )
+			fprintf(stderr,"DBG busy-end live=%u tokens=%u terminals=%u active_txn=%u submitted=%llu completed=%llu admitted=%llu rejected=%llu\n",
+				(unsigned)view.live_request_count,(unsigned)state.token_events[1],
+				(unsigned)state.total_terminals,
+				(unsigned)view.pipeline.active_transaction_count,
+				(unsigned long long)view.pipeline.submitted_count,
+				(unsigned long long)view.pipeline.completed_count,
+				(unsigned long long)view.pipeline.admitted_count,
+				(unsigned long long)view.pipeline.rejected_count);
+	}
+	CHECK( state.completed_events[1] == 1u && state.error_events[1] == 0u,
+		"busy: the request completes once the rank drains");
+	{
+		uint32_t rank;
+		uint32_t reconnected = 0u;
+		for (rank=0u; rank<TEST_RANKS; rank++)
+			if ( MockResidentClientGeneration(rank) != 1u )
+				reconnected = 1u;
+		CHECK( reconnected == 0u,
+			"busy: no rank reconnected — no pipeline fail-stop on backpressure");
+	}
+	SparkModelBatchEngineDestroy(engine);
+}
+
 static void TestScenarioEosEarlyStop(const SparkModelResidentDeployment *deployment, const char *runtime_root)
 {
 	TestBatchState state;
@@ -317,11 +371,19 @@ int main(void)
 	deployment.eos_token_count = 1u;
 	deployment.eos_token_ids[0] = 154820u;
 
-	TestScenarioHappyPath(&deployment,runtime_root);
-	TestScenarioRankDiesMidDecode(&deployment,runtime_root);
-	TestScenarioRankKilledAndRevived(&deployment,runtime_root);
-	TestScenarioEosEarlyStop(&deployment,runtime_root);
-	TestScenarioTwoRequestsRankDies(&deployment,runtime_root);
+	if ( getenv("ONLY_BUSY") != 0 )
+	{
+		TestScenarioRankBusyBackpressure(&deployment,runtime_root);
+	}
+	else
+	{
+		TestScenarioHappyPath(&deployment,runtime_root);
+		TestScenarioRankDiesMidDecode(&deployment,runtime_root);
+		TestScenarioRankKilledAndRevived(&deployment,runtime_root);
+		TestScenarioRankBusyBackpressure(&deployment,runtime_root);
+		TestScenarioEosEarlyStop(&deployment,runtime_root);
+		TestScenarioTwoRequestsRankDies(&deployment,runtime_root);
+	}
 
 	SparkModelResidentDeploymentReset(&deployment);
 	MockResidentClientReset();
