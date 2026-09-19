@@ -1,5 +1,5 @@
 {
-  "file_count": 3095,
+  "file_count": 3101,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "be8b87939ec18979f891cbb283fa5f6a4c8fbbbde462d57dd265095e868cfc04",
-      "size_bytes": 113614
+      "sha256": "aacb6dbef6a566cc5c2605401dd8c39d1bf247f338c03fef835650d2730fe92d",
+      "size_bytes": 114492
     },
     {
       "path": "NCCL_16WIDE_RECEIPTS.md",
@@ -170,6 +170,21 @@
       "path": "cache/store/stage_kv_client.c",
       "sha256": "422e07ec838a5dfbe68e7bee520494aaf5f61d73af7b525f91f3b9340a8a20fe",
       "size_bytes": 5011
+    },
+    {
+      "path": "common/common_gdn_stage_kernels.cu",
+      "sha256": "aa9c5aa232c617837a2f9af05ec00cbfdb12ef5c4ebb3e6a8c0d37f78f7fc96a",
+      "size_bytes": 72396
+    },
+    {
+      "path": "common/common_gdn_stage_kernels.h",
+      "sha256": "f29e3a555626feeab3f4cbf9127757dba01da27b86c55bc9219d8574d611e73b",
+      "size_bytes": 7429
+    },
+    {
+      "path": "common/common_kv_frame.h",
+      "sha256": "50bd5ce4e23766fafb720fa48b4bb9ecc4d3d531a5f227e942d081a7a386a136",
+      "size_bytes": 18701
     },
     {
       "path": "config/litellm-config.yaml",
@@ -1085,6 +1100,11 @@
       "path": "docs/AGENT_LANE_BRIEFS/reports/wave-b1-stagepack-rebuild-2026-09-12.md",
       "sha256": "dfb64f00506f1665c65b34f57fddd1220153a3b5e1b66b5508f4d03a622efa91",
       "size_bytes": 11539
+    },
+    {
+      "path": "docs/AGENT_LANE_BRIEFS/reports/wave-mod-infra-q-identity-2026-09-13.md",
+      "sha256": "d6e60f336d4c3ab56995aaf561e485c896072195122e5e6d1187bef31fceda52",
+      "size_bytes": 3874
     },
     {
       "path": "docs/AGENT_LANE_BRIEFS/reports/wave-t1-offline-2026-09-14.md",
@@ -4313,13 +4333,13 @@
     },
     {
       "path": "model-families/qwen38_max/include/sparkpipe/llm_defines.h",
-      "sha256": "2478506aa9ef0d628993f2a293936de2450a41d246fdb52f2a154f61a9f92abd",
-      "size_bytes": 2860
+      "sha256": "eb13789201bae3cb1d7d4d538e3d356df2ee041f0d9c8c302c75e9240a92c5ae",
+      "size_bytes": 7301
     },
     {
       "path": "model-families/qwen38_max/include/sparkpipe/spark_qwen38_max_model.h",
-      "sha256": "92a0aa2fd14b07fdc164074aa3aec5cbf1c821d3cf505bbd7aa990688c300827",
-      "size_bytes": 4160
+      "sha256": "9c94c5f6cd921ee83540d078545bc22ef5435c555ec41d0dd6e13a4fe456f184",
+      "size_bytes": 3840
     },
     {
       "path": "model-families/qwen38_max/include/sparkpipe/spark_qwen38_max_work_control.h",
@@ -5538,13 +5558,13 @@
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/Makefile",
-      "sha256": "a4627024b4c86287a7e4a9ede683edb336932f59a9f92141806302a8b4fad526",
-      "size_bytes": 3477
+      "sha256": "dfdabb383a2b5fbf250d966a9221555a93af7ead703d5e50459e539f3a3d573c",
+      "size_bytes": 3464
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/include/sparkpipe/spark_qwen38_max_resident_decode_stage_firmware.h",
-      "sha256": "fc44dc491d0c79a51939b440f85ae44b8844cdbf968c1b45afc4340269e9a9bb",
-      "size_bytes": 10879
+      "sha256": "787647e3b38a6c197292f1cb2cad49e997f19c55c5d9c8539742a648746e2320",
+      "size_bytes": 11740
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/include/sparkpipe/spark_qwen38_max_serving_adapter.h",
@@ -5553,13 +5573,13 @@
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/source/spark_qwen38_max_resident_decode_stage_cuda.cu",
-      "sha256": "ef09ce42ec00b239330e95bf0a24a6e5ff92f2d8545106656f0d701043f72bd2",
-      "size_bytes": 77536
+      "sha256": "f827ee9505004625e90beca648f06e42d16af246afe411e4dd0f9c3ee05b4cf1",
+      "size_bytes": 14926
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/source/spark_qwen38_max_resident_decode_stage_module.c",
-      "sha256": "1b8acc54e93d11e82a70a8be5986a4f6a8a1d73600acde8fb17c5a14b88d7a29",
-      "size_bytes": 127247
+      "sha256": "4bb1d45b7e9e85a6ec30480c4ad3e650f31cfda563a563c5c359d87e57c29022",
+      "size_bytes": 114593
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/source/spark_qwen38_max_serving_adapter.c",
@@ -9007,6 +9027,16 @@
       "size_bytes": 5141
     },
     {
+      "path": "tests/test_llm_module_contract.c",
+      "sha256": "8f51008cfe6966ecf261bc72b1c492ca4312e069269012ef28e5e7e20d03f6d5",
+      "size_bytes": 14826
+    },
+    {
+      "path": "tests/test_llm_module_contract_negative.c",
+      "sha256": "5d93c57912034a3226cd4054561ddc2369a16b968118eb2734418b6092bbbb80",
+      "size_bytes": 5913
+    },
+    {
       "path": "tests/test_lossless_doorbell.py",
       "sha256": "ae5725cfbb65cb5dba481cc0cee7102d624d66220ad654e2604e4293ba2b8b6e",
       "size_bytes": 4666
@@ -11628,8 +11658,8 @@
     },
     {
       "path": "tools/qwen38_stagepack_layout_audit.py",
-      "sha256": "2111f5050bb481279d9e3bfe52a2d8d22ce43e8cd456106d223db5f1d92571dc",
-      "size_bytes": 11920
+      "sha256": "986a4adaac1e436326ec77c123cb81c479f0eefefd69753124e14f91c13a7406",
+      "size_bytes": 12235
     },
     {
       "path": "tools/qwen38_stagepack_layout_probe.c",
@@ -15480,5 +15510,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 64131324
+  "total_bytes": 64185361
 }
