@@ -1,0 +1,31 @@
+{
+  "checkpoint": {
+    "config_sha256": "d2dd0c60d01b9e195d9447c52da61c7302d28828524914c044d9c6e1b81d0427",
+    "index_sha256": "06c952c569285870b811989b794b9766493e280fb77fbcb957fc4e5fcf25403a",
+    "path": "/home/spark8/minimax_h3_text_local"
+  },
+  "defines_config_mismatches": [],
+  "family": "minimax",
+  "fixtures": {
+    "capital_of_france.t1r": {
+      "bytes": 304551,
+      "sha256": "f6c97578b1ea21d8513917e4c03e362b4483b97519c2d0071a335a1b3205fd6e"
+    },
+    "count_up.t1r": {
+      "bytes": 405046,
+      "sha256": "61905cc1bbc3c578cbebad7bc397ee15e7e8bb015ec015f76d639b5d63c7305c"
+    }
+  },
+  "generated_utc": "2026-09-19T07:59:09Z",
+  "generator": "t1_reference_decoder.py",
+  "host": "spark8",
+  "llm_defines_sha256": "ca6dc2774484ac94fff7d171eee86a220b50dd757a364af4a30c8a3edd758ee9",
+  "numpy_version": "2.5.3",
+  "prompts_sha256": "b5a3b8c29a7c452beb5741a917e8087272e834ecc993969bf0a7e47bb98d878c",
+  "python_version": "3.12.3",
+  "threading_env": {
+    "MKL_NUM_THREADS": "8",
+    "OMP_NUM_THREADS": "8",
+    "OPENBLAS_NUM_THREADS": "8"
+  }
+}

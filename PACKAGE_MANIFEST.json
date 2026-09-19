@@ -1,5 +1,5 @@
 {
-  "file_count": 3111,
+  "file_count": 3118,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -4332,6 +4332,11 @@
       "size_bytes": 2534
     },
     {
+      "path": "model-families/minimax/include/sparkpipe/llm_defines.h",
+      "sha256": "ca6dc2774484ac94fff7d171eee86a220b50dd757a364af4a30c8a3edd758ee9",
+      "size_bytes": 1056
+    },
+    {
       "path": "model-families/muse_glimmer/include/sparkpipe/llm_defines.h",
       "sha256": "ec7be20ee8cda01edf60658ff46e9b9432575df9974a0d3425880198901c93f9",
       "size_bytes": 3254
@@ -7262,6 +7267,26 @@
       "size_bytes": 444
     },
     {
+      "path": "qualification/t1_reference/minimax/MANIFEST.json",
+      "sha256": "c2d8eb7888825904017aad5d11da1a7844160104bd65eff4bc58e22a73f571cc",
+      "size_bytes": 1066
+    },
+    {
+      "path": "qualification/t1_reference/minimax/capital_of_france.t1r",
+      "sha256": "f6c97578b1ea21d8513917e4c03e362b4483b97519c2d0071a335a1b3205fd6e",
+      "size_bytes": 304551
+    },
+    {
+      "path": "qualification/t1_reference/minimax/count_up.t1r",
+      "sha256": "61905cc1bbc3c578cbebad7bc397ee15e7e8bb015ec015f76d639b5d63c7305c",
+      "size_bytes": 405046
+    },
+    {
+      "path": "qualification/t1_reference/minimax/prompts.json",
+      "sha256": "b5a3b8c29a7c452beb5741a917e8087272e834ecc993969bf0a7e47bb98d878c",
+      "size_bytes": 642
+    },
+    {
       "path": "qualification/t1_reference/muse/MANIFEST.json",
       "sha256": "47529172d57d1d95020e88a3540ec973354748fe35ba27e5882b684496ab9180",
       "size_bytes": 1063
@@ -9570,6 +9595,11 @@
       "path": "tests/test_t1_reference_hy4.py",
       "sha256": "26b17fed66e09877856f88ff723b6acd11d2c5adbb46be3cf7eda79c16bd216a",
       "size_bytes": 19599
+    },
+    {
+      "path": "tests/test_t1_reference_minimax.py",
+      "sha256": "1185b41257586d9cad16bec3b3e6bf31a96601d504415a179c561bcb29696f08",
+      "size_bytes": 17094
     },
     {
       "path": "tests/test_t1_reference_muse.py",
@@ -12240,6 +12270,11 @@
       "path": "tools/t1_reference_ling.py",
       "sha256": "638a97fb74b4b9b2508e2a80563aff23c6f121ec4d68be648bc9232e59ac334b",
       "size_bytes": 15636
+    },
+    {
+      "path": "tools/t1_reference_minimax.py",
+      "sha256": "c9ff2031d89c2774d134fdced2eb0fd0ae542576bf48876de9c2e038f018c753",
+      "size_bytes": 13881
     },
     {
       "path": "tools/t1_reference_muse.py",
@@ -15560,5 +15595,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 64230237
+  "total_bytes": 64973573
 }
