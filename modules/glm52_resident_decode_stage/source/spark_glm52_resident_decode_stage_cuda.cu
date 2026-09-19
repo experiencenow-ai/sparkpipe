@@ -95,41 +95,6 @@ __global__ void SparkGlm52MeshWaitKernel(
 	}
 }
 
-extern "C" cudaError_t SparkGlm5NextLaunchMeshGuard(cudaStream_t stream,
-	volatile void *error_word,void *output)
-{
-	SparkGlm52MeshGuardKernel<<<1,32,0u,stream>>>(
-		(volatile unsigned long long *)error_word,
-		(unsigned long long *)output);
-	return cudaPeekAtLastError();
-}
-
-extern "C" cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
-	volatile void *entry,void *seq_cell,void *round_seq,uint64_t bytes,
-	uint64_t slot_index)
-{
-	if ( entry == 0 || seq_cell == 0 || round_seq == 0 )
-		return(cudaErrorInvalidValue);
-	SparkGlm52MeshPublishKernel<<<1,32,0u,stream>>>(
-		(volatile uint64_t *)entry,(unsigned long long *)seq_cell,
-		(unsigned long long *)round_seq,bytes,slot_index);
-	return(cudaPeekAtLastError());
-}
-
-extern "C" cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
-	volatile void *band_base,uint64_t slot_bytes,const void *round_seq,
-	uint64_t slots_per_rank,uint64_t ring,uint32_t rank,uint32_t degree,
-	void *error_word,unsigned long long deadline_ns)
-{
-	if ( band_base == 0 || round_seq == 0 || degree == 0u ||
-	     error_word == 0 )
-		return(cudaErrorInvalidValue);
-	SparkGlm52MeshWaitKernel<<<1,32,0u,stream>>>(
-		(volatile uint64_t *)band_base,slot_bytes,
-		(const unsigned long long *)round_seq,slots_per_rank,ring,rank,
-		degree,(unsigned long long *)error_word,deadline_ns);
-	return(cudaPeekAtLastError());
-}
 
 
 __global__ static void SparkGlm52BoundaryLoadKernel(
