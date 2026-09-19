@@ -4188,8 +4188,8 @@
     },
     {
       "path": "model-families/glm52/include/sparkpipe/spark_glm52_model.h",
-      "sha256": "7291d2fd8984d585b4f9c38c864b5f0e1cd85bd33d27080d2e2992e1ed00ddb6",
-      "size_bytes": 6457
+      "sha256": "1a4837df30970e4ecf3e730fa0b72a2b2e45bce823ab4a013831278d87099b19",
+      "size_bytes": 5802
     },
     {
       "path": "model-families/glm52/include/sparkpipe/spark_glm52_mtp_tree.h",
@@ -15560,5 +15560,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 64231645
+  "total_bytes": 64230990
 }
