@@ -147,10 +147,10 @@ class Qwen38_27bEngine:
             return self._weights[name]
         fresh = False
         if self.has(name + "_packed"):
-            payload = self.st.raw(name + "_packed")
+            payload = self.st.pread(name + "_packed")
             if payload.dtype != np.uint8:
                 raise ValueError(f"nvfp4 payload {name}_packed must be U8")
-            scale = self.st.raw(name + "_scale")
+            scale = self.st.pread(name + "_scale")
             if scale.dtype != np.uint8:
                 raise ValueError(
                     f"nvfp4 group scales for {name} must be F8_E4M3")
@@ -160,18 +160,22 @@ class Qwen38_27bEngine:
                 raise ValueError(f"nvfp4 input dim {cols} not a multiple of 16")
             if scale.size != rows * (cols // 16):
                 raise ValueError(f"nvfp4 scale extent disagrees with {name}")
-            scalar = np.float32(self.st.raw(name + "_global_scale")
+            scalar = np.float32(self.st.pread(name + "_global_scale")
                                 .reshape(-1)[0])
-            stored = f32_to_bf16_u16(
-                nvfp4_to_f32(payload, scale.reshape(rows, -1), rows,
-                             cols) * (np.float32(0.5) / scalar))
+            stored = np.empty((rows, cols), dtype=np.uint16)
+            for r0 in range(0, rows, 512):
+                r1 = min(r0 + 512, rows)
+                w = nvfp4_to_f32(payload[r0:r1],
+                                 scale.reshape(rows, -1)[r0:r1], r1 - r0,
+                                 cols)
+                stored[r0:r1] = f32_to_bf16_u16(w * (np.float32(0.5) / scalar))
             fresh = True
         else:
-            raw = self.st.raw(name)
+            raw = self.st.pread(name)
             if raw.dtype == np.uint16:
                 stored = raw
             elif raw.dtype == np.uint8:
-                scale = self.st.raw(name + "_scale_inv")
+                scale = self.st.pread(name + "_scale_inv")
                 if scale.dtype == np.uint16:
                     scale = bf16_to_f32(scale)
                 elif scale.dtype != np.float32:
@@ -192,7 +196,12 @@ class Qwen38_27bEngine:
         return bf16_to_f32(self.weight_u16(name))
 
     def linear(self, x, name):
-        return bf16_round_f32(self.tensor(name + ".weight") @ x)
+        w16 = self.weight_u16(name + ".weight")
+        out = np.empty(w16.shape[0], dtype=np.float32)
+        for r0 in range(0, w16.shape[0], 512):
+            r1 = min(r0 + 512, w16.shape[0])
+            out[r0:r1] = bf16_to_f32(w16[r0:r1]) @ x
+        return bf16_round_f32(out)
 
     def embed(self, token_id):
         if token_id < 0 or token_id >= self.vocab:
@@ -236,8 +245,8 @@ class Qwen38_27bEngine:
         qk = self.k_heads * self.kd
         a_pre = bf16_round_f32(self.tensor(prefix + "linear_attn.in_proj_a.weight") @ x)
         b_pre = bf16_round_f32(self.tensor(prefix + "linear_attn.in_proj_b.weight") @ x)
-        a_log = bf16_to_f32(self.st.raw(prefix + "linear_attn.A_log").reshape(-1))
-        dt_bias = bf16_to_f32(self.st.raw(prefix + "linear_attn.dt_bias").reshape(-1))
+        a_log = bf16_to_f32(self.st.pread(prefix + "linear_attn.A_log").reshape(-1))
+        dt_bias = bf16_to_f32(self.st.pread(prefix + "linear_attn.dt_bias").reshape(-1))
         if a_log.shape[0] != self.v_heads or dt_bias.shape[0] != self.v_heads:
             raise Qwen38_27bConfigError(
                 "A_log/dt_bias disagree with GDN value head count")
@@ -261,7 +270,7 @@ class Qwen38_27bEngine:
             out[h] = (state[h] * q[key][:, None]).sum(axis=0)
         core = bf16_round_f32(out.reshape(-1))
         z = bf16_round_f32(self.tensor(prefix + "linear_attn.in_proj_z.weight") @ x)
-        norm_w = bf16_to_f32(self.st.raw(prefix + "linear_attn.norm.weight").reshape(-1))
+        norm_w = bf16_to_f32(self.st.pread(prefix + "linear_attn.norm.weight").reshape(-1))
         zc = core.reshape(self.v_heads, self.kd)
         variance = (zc * zc).sum(axis=1) / self.kd
         normed = zc / np.sqrt(variance + self.eps)[:, None] * norm_w[None, :]
@@ -273,8 +282,8 @@ class Qwen38_27bEngine:
         qf = qf.reshape(self.heads, 2 * self.head_dim)
         value = qf[:, 0:self.head_dim].copy()
         gate = sigmoid(qf[:, self.head_dim:])
-        qn = bf16_to_f32(self.st.raw(prefix + "self_attn.q_norm.weight").reshape(-1))
-        kn = bf16_to_f32(self.st.raw(prefix + "self_attn.k_norm.weight").reshape(-1))
+        qn = bf16_to_f32(self.st.pread(prefix + "self_attn.q_norm.weight").reshape(-1))
+        kn = bf16_to_f32(self.st.pread(prefix + "self_attn.k_norm.weight").reshape(-1))
         value = value / np.sqrt((value * value).sum(axis=1, keepdims=True)
                                 / self.head_dim + self.eps) * qn[None, :]
         value = self.partial_rope(value, position)
@@ -346,13 +355,16 @@ class Qwen38_27bEngine:
     def logits(self, streams, chunk=4096):
         norm = bf16_round_f32(rmsnorm(
             streams, self.tensor("model.language_model.norm.weight"), self.eps))
-        lm = self.st.raw("lm_head.weight")
-        if lm.dtype != np.uint16:
+        entry = self.st.entry("lm_head.weight")
+        if entry["dtype"] != "BF16":
             raise ValueError("reference lm_head must be BF16")
+        rows_total = entry["shape"][0]
         best = -np.inf
         best_token = -1
-        for start in range(0, lm.shape[0], chunk):
-            scores = bf16_to_f32(lm[start:start + chunk]) @ norm
+        for start in range(0, rows_total, chunk):
+            count = min(chunk, rows_total - start)
+            lm = self.st.raw_rows("lm_head.weight", start, count)
+            scores = bf16_to_f32(lm) @ norm
             i = int(np.argmax(scores))
             if float(scores[i]) > best:
                 best = float(scores[i])

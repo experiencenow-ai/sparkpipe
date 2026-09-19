@@ -8,15 +8,15 @@
   "family": "minimax",
   "fixtures": {
     "capital_of_france.t1r": {
-      "bytes": 304551,
-      "sha256": "f6c97578b1ea21d8513917e4c03e362b4483b97519c2d0071a335a1b3205fd6e"
+      "bytes": 304691,
+      "sha256": "931d0b5d421eb85ef731ff2c6d5e9c451ef395afbcca642b8892cf3f9d96908f"
     },
     "count_up.t1r": {
-      "bytes": 405046,
-      "sha256": "61905cc1bbc3c578cbebad7bc397ee15e7e8bb015ec015f76d639b5d63c7305c"
+      "bytes": 405311,
+      "sha256": "d80fc476295311c39872c33af57ad65b716a60047f75f01710b8f18d983cf3eb"
     }
   },
-  "generated_utc": "2026-09-19T07:59:09Z",
+  "generated_utc": "2026-09-19T12:44:14Z",
   "generator": "t1_reference_decoder.py",
   "host": "spark8",
   "llm_defines_sha256": "ca6dc2774484ac94fff7d171eee86a220b50dd757a364af4a30c8a3edd758ee9",

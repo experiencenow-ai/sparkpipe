@@ -48,10 +48,16 @@ for _i in range(16):
 
 
 def fp8_block_to_bf16(payload_u8, scale_inv, out_dim, in_dim):
-    w = _E4M3_LUT[payload_u8.reshape(out_dim, in_dim)].astype(np.float32)
-    s = np.repeat(np.repeat(scale_inv, 128, axis=0), 128, axis=1)
-    s = s[:out_dim, :in_dim]
-    return f32_to_bf16_u16(w * s)
+    flat = payload_u8.reshape(out_dim, in_dim)
+    out = np.empty((out_dim, in_dim), dtype=np.uint16)
+    step = 128
+    for r0 in range(0, out_dim, step):
+        r1 = min(r0 + step, out_dim)
+        w = _E4M3_LUT[flat[r0:r1]].astype(np.float32)
+        srows = scale_inv[r0 // 128:(r1 + 127) // 128]
+        s = np.repeat(np.repeat(srows, 128, axis=0), 128, axis=1)
+        out[r0:r1] = f32_to_bf16_u16(w * s[:r1 - r0, :in_dim])
+    return out
 
 
 def nvfp4_to_f32(payload_u8, scale_e4m3, out_dim, in_dim):

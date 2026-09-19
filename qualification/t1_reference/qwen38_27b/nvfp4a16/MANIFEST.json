@@ -8,15 +8,15 @@
   "family": "qwen38_27b",
   "fixtures": {
     "capital_of_france.t1r": {
-      "bytes": 305186,
-      "sha256": "c4228225994cd98b8c9a8188f6b3941522b84827069d33a9ad7d624e396af9b0"
+      "bytes": 305133,
+      "sha256": "a5f9128685f158c23a1b900c2101a35eb8b3641a4cdc6bc32f625e2220517694"
     },
     "count_up.t1r": {
-      "bytes": 406058,
-      "sha256": "cfd06522928acc1f6eda3903aa074d61857c7ad97b9448a27c85d2b0ac3dfa56"
+      "bytes": 406253,
+      "sha256": "5683ae3bc6cecd4ef9cca4e96235f3bcd70271e364783281b48f7dcbcbf77cea"
     }
   },
-  "generated_utc": "2026-09-19T10:32:31Z",
+  "generated_utc": "2026-09-19T15:20:21Z",
   "generator": "t1_reference_decoder.py",
   "host": "spark0",
   "llm_defines_sha256": "22fe3d005d08a284d567ebe161e6d460508577ad7612e21dd12c94dc72480da1",

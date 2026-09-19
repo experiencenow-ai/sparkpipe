@@ -457,6 +457,9 @@ class Dsv41FlashEngine:
         self.expert_cache_limit = int(os.environ.get(
             "T1_REF_DSV41_EXPERT_CACHE", 48))
         self.dequant_cache = {}
+        self.dequant_cache_bytes = 0
+        self.dequant_cache_limit = int(os.environ.get(
+            "T1_REF_DSV41_DEQUANT_CACHE_BYTES", 256 << 20))
         self._head_input = None
 
     def _freqs(self, theta, original):
@@ -579,44 +582,61 @@ class Dsv41FlashEngine:
     def _dequant_weight_u16(self, name):
         cached = self.dequant_cache.get(name)
         if cached is not None:
+            self.dequant_cache.pop(name)
+            self.dequant_cache[name] = cached
             return cached
-        raw = self.st.raw(name)
+        raw = self.st.pread(name)
         if raw.dtype == np.uint16:
-            self.dequant_cache[name] = raw
+            self._dequant_remember(name, raw)
             return raw
         if raw.dtype != np.uint8:
             raise Dsv41ConfigError(
                 f"unsupported weight dtype for {name}: {raw.dtype}")
         rows, cols = raw.shape
         scale_name = name[:-len(".weight")] + ".scale"
-        scale = self.st.raw(scale_name).astype(np.int32)
+        scale = self.st.pread(scale_name).astype(np.int32)
         row_blocks, col_blocks = scale.shape
         if rows % row_blocks or cols % col_blocks:
             raise Dsv41ConfigError(
                 f"{name} shape {(rows, cols)} does not pack into scale "
                 f"grid {scale.shape}")
-        w = _E4M3_F32[raw].reshape(row_blocks, rows // row_blocks,
-                                   col_blocks, cols // col_blocks) \
-            * _exp2_rows(scale - 127)[:, None, :, None]
-        w = f32_to_bf16_u16(w.reshape(rows, cols))
-        self.dequant_cache[name] = w
+        rb_rows = rows // row_blocks
+        w = np.empty((rows, cols), dtype=np.uint16)
+        scales = _exp2_rows(scale - 127)
+        for rb0 in range(0, row_blocks, 8):
+            rb1 = min(rb0 + 8, row_blocks)
+            r0, r1 = rb0 * rb_rows, rb1 * rb_rows
+            block = _E4M3_F32[raw[r0:r1]].reshape(
+                rb1 - rb0, rb_rows, col_blocks, cols // col_blocks) \
+                * scales[rb0:rb1, None, :, None]
+            w[r0:r1] = f32_to_bf16_u16(block.reshape(r1 - r0, cols))
+        self._dequant_remember(name, w)
         return w
 
+    def _dequant_remember(self, name, array):
+        self.dequant_cache[name] = array
+        self.dequant_cache_bytes += array.nbytes
+        while self.dequant_cache_bytes > self.dequant_cache_limit \
+                and len(self.dequant_cache) > 1:
+            oldest = next(iter(self.dequant_cache))
+            victim = self.dequant_cache.pop(oldest)
+            self.dequant_cache_bytes -= victim.nbytes
+
     def _linear(self, x, name):
-        raw = self.st.raw(name)
+        raw = self.st.pread(name)
         if raw.dtype == np.uint16:
             return bf16_round_f32(bf16_to_f32(raw) @ x)
         w = bf16_to_f32(self._dequant_weight_u16(name))
         return bf16_round_f32(w @ x)
 
     def _fp32_projector(self, name):
-        raw = self.st.raw(name)
+        raw = self.st.pread(name)
         if raw.dtype != np.uint16:
             raise Dsv41ConfigError(f"{name} must be BF16")
         return bf16_to_f32(raw)
 
     def _norm_weight(self, name):
-        raw = self.st.raw(name)
+        raw = self.st.pread(name)
         if raw.dtype != np.uint16:
             raise Dsv41ConfigError(f"{name} must be BF16")
         return bf16_to_f32(raw.reshape(-1))
@@ -699,12 +719,12 @@ class Dsv41FlashEngine:
         p = f"{PREFIX}{layer}.hc_{kind}_"
         flat = streams.reshape(-1).astype(np.float32)
         rsqrt = 1.0 / np.sqrt(flat.dot(flat) / flat.size + self.eps)
-        fn = self.st.raw(p + "fn")
+        fn = self.st.pread(p + "fn")
         if fn.dtype != np.float32:
             raise Dsv41ConfigError(f"{p}fn must be F32")
         mixes = fn.reshape(self.mix_hc, self.hc_dim) @ flat * rsqrt
-        scale = self.st.raw(p + "scale").reshape(3)
-        base = self.st.raw(p + "base").reshape(self.mix_hc)
+        scale = self.st.pread(p + "scale").reshape(3)
+        base = self.st.pread(p + "base").reshape(self.mix_hc)
         m = self.hc_mult
         pre = sigmoid(mixes[:m] * scale[0] + base[:m]) + self.hc_eps
         post = 2.0 * sigmoid(mixes[m:2 * m] * scale[1] + base[m:2 * m])
@@ -892,7 +912,7 @@ class Dsv41FlashEngine:
         if _DEBUG:
             print(f"  post-cache {time.perf_counter() - t0:.3f}s",
                   flush=True)
-        sink_raw = self.st.raw(p + "attn_sink")
+        sink_raw = self.st.pread(p + "attn_sink")
         if sink_raw.dtype != np.float32:
             raise Dsv41ConfigError(f"{p}attn_sink must be F32")
         sink = sink_raw.reshape(self.heads)
@@ -938,7 +958,7 @@ class Dsv41FlashEngine:
         p = f"{PREFIX}{layer}.ffn."
         scores = self._fp32_projector(p + "gate.weight") @ x
         routed = np.sqrt(_softplus(scores))
-        bias = self.st.raw(p + "gate.bias").reshape(self.experts)
+        bias = self.st.pread(p + "gate.bias").reshape(self.experts)
         if bias.dtype != np.float32:
             raise Dsv41ConfigError(f"{p}gate.bias must be F32")
         order = np.argsort(-(routed + bias), kind="stable")[:self.topk]
@@ -990,8 +1010,8 @@ class Dsv41FlashEngine:
                 f"{self.hc_mult}")
         key = kv[:split].reshape(self.hc_mult, self.hidden)
         value = kv[split:]
-        weight = bf16_to_f32(self.st.raw(p + "q_weight")) \
-            * bf16_to_f32(self.st.raw(p + "k_weight"))
+        weight = bf16_to_f32(self.st.pread(p + "q_weight")) \
+            * bf16_to_f32(self.st.pread(p + "k_weight"))
         h = streams.astype(np.float32)
         rstd = (1.0 / np.sqrt((h * h).mean(-1) + self.eps)) \
             * (1.0 / np.sqrt((key * key).mean(-1) + self.eps))
@@ -1080,13 +1100,16 @@ class Dsv41FlashEngine:
             raise ValueError("logits called before decode_step")
         norm = bf16_round_f32(rmsnorm(
             self._head_input, self._norm_weight("norm.weight"), self.eps))
-        head = self.st.raw("head.weight")
-        if head.dtype != np.uint16:
+        entry = self.st.entry("head.weight")
+        if entry["dtype"] != "BF16":
             raise ValueError("reference lm head must be BF16")
+        rows_total = entry["shape"][0]
         best = -np.inf
         best_token = -1
-        for start in range(0, head.shape[0], chunk):
-            scores = bf16_to_f32(head[start:start + chunk]) @ norm
+        for start in range(0, rows_total, chunk):
+            count = min(chunk, rows_total - start)
+            head = self.st.raw_rows("head.weight", start, count)
+            scores = bf16_to_f32(head) @ norm
             i = int(np.argmax(scores))
             if float(scores[i]) > best:
                 best = float(scores[i])

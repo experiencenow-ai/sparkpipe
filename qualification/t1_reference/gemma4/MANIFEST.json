@@ -8,15 +8,15 @@
   "family": "gemma4",
   "fixtures": {
     "capital_of_france.t1r": {
-      "bytes": 314783,
-      "sha256": "cb80dfaa259e15e01a342728e074099ccc2b81d628cba2f7e1d1d1d51ac12876"
+      "bytes": 315193,
+      "sha256": "b36e129d2bc8ce211848acbddbf74752bf4a746150a3f133f926cc9607d6b2bf"
     },
     "count_up.t1r": {
-      "bytes": 384056,
-      "sha256": "831d02527129831d8352404e8bdbbbf5680107d52841bccf531d5601ea39a65d"
+      "bytes": 384358,
+      "sha256": "da7e57bf423496aebe11465cfbc7f50b9bf762ac850a23d7451cc3f89f7f042c"
     }
   },
-  "generated_utc": "2026-09-14T20:50:12Z",
+  "generated_utc": "2026-09-19T15:54:55Z",
   "generator": "t1_reference_decoder.py",
   "host": "spark1",
   "llm_defines_sha256": "4a02e0b449a24cfc2fac95755bd2d0d92817ffd51ca9f1d82a99a639dd628a82",
@@ -24,8 +24,8 @@
   "prompts_sha256": "61c49987a3abcf26c023a06abebe8bd2af6e73e423a3b1353661984dce4a1b02",
   "python_version": "3.12.3",
   "threading_env": {
-    "MKL_NUM_THREADS": null,
-    "OMP_NUM_THREADS": "20",
-    "OPENBLAS_NUM_THREADS": null
+    "MKL_NUM_THREADS": "8",
+    "OMP_NUM_THREADS": "8",
+    "OPENBLAS_NUM_THREADS": "8"
   }
 }
