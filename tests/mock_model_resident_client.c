@@ -239,5 +239,9 @@ SparkStatus SparkModelResidentClientGetView(
 	memset(view,0,sizeof(*view));
 	view->connected = client->connected;
 	view->client_generation = client->client_generation;
+	view->queue_capacity = 64u;
+	view->max_active_sequence_count = 4u;
+	view->max_input_row_count = 8u;
+	view->resident_sequence_capacity = 4u;
 	return(SPARK_STATUS_OK);
 }
