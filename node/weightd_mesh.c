@@ -22,6 +22,17 @@
 #define SPARK_WEIGHTD_MESH_DIR "/tmp/weightd-mesh"
 #endif
 
+/* Two weightd-line daemons can share one host (the fleet's weightd and the
+ * driver developers' standalone weightsd): the record directory must be
+ * per-deployment or they clobber each other's mesh-<rank>.rec and .ready.
+ * Set at init; the define is only the default. */
+static const char *weightd_mesh_dir = SPARK_WEIGHTD_MESH_DIR;
+
+static void SparkWeightdMeshReadyPath(char *path, uint64_t bytes)
+{
+    (void)snprintf(path,(size_t)bytes,"%s/.ready",weightd_mesh_dir);
+}
+
 typedef struct SparkWeightdMeshQpInfo
 {
     uint32_t qp_number;
@@ -114,9 +125,9 @@ static SparkStatus SparkWeightdMeshWriteRecord(
     size_t remaining;
     ssize_t written;
 
-    (void)mkdir(SPARK_WEIGHTD_MESH_DIR,0755);
+    (void)mkdir(weightd_mesh_dir,0755);
     snprintf(path,sizeof(path),"%s/mesh-%x.rec",
-        SPARK_WEIGHTD_MESH_DIR,weightd_mesh.local_rank);
+        weightd_mesh_dir,weightd_mesh.local_rank);
     snprintf(temp,sizeof(temp),"%s.tmp",path);
     fd = open(temp,O_WRONLY | O_CREAT | O_TRUNC,0644);
     if (fd < 0)
@@ -164,7 +175,7 @@ static SparkStatus SparkWeightdMeshReadPeerRecord(
     ssize_t bytes_read;
 
     snprintf(path,sizeof(path),"%s/mesh-%x.rec",
-        SPARK_WEIGHTD_MESH_DIR,peer_rank);
+        weightd_mesh_dir,peer_rank);
     fd = open(path,O_RDONLY);
     if (fd < 0)
         return SPARK_STATUS_BUSY;
@@ -319,7 +330,9 @@ static void SparkWeightdMeshTryWireLocked(void)
         return;
     if (weightd_mesh.mesh_ready == 0u)
     {
-        FILE *marker = fopen(SPARK_WEIGHTD_MESH_DIR "/.ready","w");
+        char ready_path[256];
+        SparkWeightdMeshReadyPath(ready_path,sizeof(ready_path));
+        FILE *marker = fopen(ready_path,"w");
         if (marker != 0)
             (void)fclose(marker);
     }
@@ -342,7 +355,7 @@ static void SparkWeightdMeshTryWire(void)
 }
 
 SparkStatus SparkWeightdMeshInit(uint32_t rank, const char *interface_name,
-    uint32_t sgid_index)
+    uint32_t sgid_index, const char *mesh_dir)
 {
     struct ibv_device **devices;
     struct ibv_port_attr port_attr;
@@ -351,6 +364,8 @@ SparkStatus SparkWeightdMeshInit(uint32_t rank, const char *interface_name,
     int device_count;
     uint32_t peer;
 
+    if ( mesh_dir != 0 && mesh_dir[0] != '\0' )
+        weightd_mesh_dir = mesh_dir;
     if (rank >= SPARK_WEIGHTD_MESH_RANKS || interface_name == 0 ||
         interface_name[0] == '\0' || sgid_index > 255u)
     {
@@ -364,7 +379,11 @@ SparkStatus SparkWeightdMeshInit(uint32_t rank, const char *interface_name,
     weightd_mesh.boot_ns = SparkWeightdMeshRealtimeNs();
     weightd_mesh_boot_phase_ns = weightd_mesh.boot_ns;
     SparkWeightdMeshPhase("init-begin");
-    (void)unlink(SPARK_WEIGHTD_MESH_DIR "/.ready");
+    {
+        char ready_path[256];
+        SparkWeightdMeshReadyPath(ready_path,sizeof(ready_path));
+        (void)unlink(ready_path);
+    }
 
     devices = ibv_get_device_list(&device_count);
     if (devices == 0 || device_count == 0)
@@ -607,14 +626,18 @@ void SparkWeightdMeshPoll(void)
         SparkWeightdMeshRecord own_record;
         uint32_t peer;
         weightd_mesh.artifact_check_ns = SparkWeightdMeshRealtimeNs();
-        if (stat(SPARK_WEIGHTD_MESH_DIR "/.ready",&artifact_st) != 0)
         {
-            FILE *marker = fopen(SPARK_WEIGHTD_MESH_DIR "/.ready","w");
-            if (marker != 0)
-                (void)fclose(marker);
+            char ready_path[256];
+            SparkWeightdMeshReadyPath(ready_path,sizeof(ready_path));
+            if (stat(ready_path,&artifact_st) != 0)
+            {
+                FILE *marker = fopen(ready_path,"w");
+                if (marker != 0)
+                    (void)fclose(marker);
+            }
         }
         (void)snprintf(artifact_path,sizeof(artifact_path),"%s/mesh-%x.rec",
-            SPARK_WEIGHTD_MESH_DIR,weightd_mesh.local_rank);
+            weightd_mesh_dir,weightd_mesh.local_rank);
         if (stat(artifact_path,&artifact_st) != 0)
         {
             memset(&own_record,0,sizeof(own_record));
