@@ -164,7 +164,7 @@ class Qwen38_27bEngine:
                                 .reshape(-1)[0])
             stored = f32_to_bf16_u16(
                 nvfp4_to_f32(payload, scale.reshape(rows, -1), rows,
-                             cols) * scalar)
+                             cols) * (np.float32(0.5) / scalar))
             fresh = True
         else:
             raw = self.st.raw(name)
