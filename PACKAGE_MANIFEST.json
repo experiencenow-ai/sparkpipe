@@ -9878,8 +9878,8 @@
     },
     {
       "path": "tests/test_tp_allreduce_fuzz.c",
-      "sha256": "8d0a823b11cc6f8387a84eed2cec8ac3aeb4b90f9e7950794ce000ae3c3fe784",
-      "size_bytes": 19512
+      "sha256": "f96d8f85ef007c01ce86987312c70940b60c2c773136f59fc3d8f629066f78e2",
+      "size_bytes": 21754
     },
     {
       "path": "tests/test_tp_collective.c",
@@ -15875,5 +15875,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 72816320
+  "total_bytes": 72818562
 }

@@ -596,10 +596,75 @@ static uint32_t FuzzRun(uint32_t rounds, uint32_t seed, uint32_t kill_percent)
 	return( unrecovered != 0u ? 1u : 0u );
 }
 
+static int uint64_cmp(const void *a, const void *b)
+{
+	uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+	return( x < y ? -1 : x > y ? 1 : 0 );
+}
+
+static uint32_t BenchRun(uint32_t rounds)
+{
+	uint32_t run[FUZZ_MAX_RANKS];
+	uint32_t run_count = FuzzAllRanks(run);
+	uint64_t *times;
+	uint64_t start,total_begin,ordinal;
+	uint32_t round,i;
+	uint32_t failures_before = test_failures;
+	times = (uint64_t *)calloc(rounds != 0u ? rounds : 1u,sizeof(uint64_t));
+	if ( times == 0 )
+		return(1u);
+	ordinal = 1ull;
+	uint64_t request = 900000u;
+	/* one chain begin, then N rounds: production keys a chain once and runs
+	 * many rounds on it, so the per-round number is the steady-state
+	 * allreduce cost, not the key setup */
+	request++;
+	if ( FuzzRunSet(FuzzChainMain, request, run, run_count, "bench-chain",
+	        0u, -1) == 0u )
+	{
+		fprintf(stderr,"bench chain key failed\n");
+		free(times);
+		return(1u);
+	}
+	for ( round = 0u; round < rounds; round++ )
+	{
+		ordinal = 16ull * (uint64_t)round + 1ull;
+		start = FuzzNowNs();
+		if ( FuzzRunSet(FuzzRoundMain, ordinal, run, run_count, "bench",
+		        round, -1) == 0u )
+		{
+			fprintf(stderr,"bench round %u failed\n",(unsigned)round);
+			free(times);
+			return(1u);
+		}
+		times[round] = FuzzNowNs() - start;
+		for ( i = 0u; i < run_count; i++ )
+			CHECK( g_tasks[run[i]].status == SPARK_STATUS_OK,
+			    "bench round status ok" );
+	}
+	(void)total_begin;
+	qsort(times,rounds,sizeof(uint64_t),uint64_cmp);
+	{
+		double p50 = (double)times[rounds/2u] / 1000.0;
+		double p99 = (double)times[(rounds * 99u) / 100u] / 1000.0;
+		double total_s = 0.0;
+		for ( i = 0u; i < rounds; i++ )
+			total_s += (double)times[i];
+		total_s /= 1000000000.0;
+		fprintf(stderr,"bench: %u rounds, min=%.1fus p50=%.1fus p99=%.1fus max=%.1fus, %.0f rounds/s\n",
+		    rounds,(double)times[0]/1000.0,p50,p99,
+		    (double)times[rounds-1u]/1000.0,
+		    total_s > 0.0 ? (double)rounds/total_s : 0.0);
+	}
+	free(times);
+	return( test_failures != failures_before ? 1u : 0u );
+}
+
 int main(int argc, char **argv)
 {
 	uint32_t ranks = 4u;
 	uint32_t fuzz_rounds = 0u;
+	uint32_t bench_rounds = 0u;
 	uint32_t seed = 12345u;
 	uint32_t kill_percent = 40u;
 	uint32_t rank;
@@ -612,13 +677,15 @@ int main(int argc, char **argv)
 			ranks = (uint32_t)strtoul(argv[++arg], 0, 10);
 		else if ( strcmp(argv[arg], "--fuzz") == 0 && arg + 1 < argc )
 			fuzz_rounds = (uint32_t)strtoul(argv[++arg], 0, 10);
+		else if ( strcmp(argv[arg], "--bench") == 0 && arg + 1 < argc )
+			bench_rounds = (uint32_t)strtoul(argv[++arg], 0, 10);
 		else if ( strcmp(argv[arg], "--seed") == 0 && arg + 1 < argc )
 			seed = (uint32_t)strtoul(argv[++arg], 0, 10);
 		else if ( strcmp(argv[arg], "--kill-percent") == 0 && arg + 1 < argc )
 			kill_percent = (uint32_t)strtoul(argv[++arg], 0, 10);
 		else
 		{
-			fprintf(stderr,"usage: %s [--ranks N] [--fuzz ROUNDS] [--seed S] [--kill-percent K]\n", argv[0]);
+			fprintf(stderr,"usage: %s [--ranks N] [--fuzz ROUNDS] [--bench ROUNDS] [--seed S] [--kill-percent K]\n", argv[0]);
 			return(2);
 		}
 	}
@@ -649,7 +716,9 @@ int main(int argc, char **argv)
 	for ( rank = 0u; rank < ranks; rank++ )
 		g_tasks[rank].rank = &g_ranks[rank];
 	wedge = 0u;
-	if ( fuzz_rounds == 0u )
+	if ( bench_rounds != 0u )
+		wedge = BenchRun(bench_rounds);
+	else if ( fuzz_rounds == 0u )
 		FuzzBasic();
 	else
 		wedge = FuzzRun(fuzz_rounds, seed, kill_percent);
