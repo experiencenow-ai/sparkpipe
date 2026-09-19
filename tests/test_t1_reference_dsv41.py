@@ -84,6 +84,9 @@ CONFIG = {
 FAMILY_MACRO_NAMES = {
     "END_OF_TEXT_TOKEN_ID": "EOS_TOKEN_ID",
     "SLIDING_WINDOW_TOKENS": "SLIDING_WINDOW",
+    "MOE_ROUTED_EXPERT_COUNT": "ROUTED_EXPERT_COUNT",
+    "MOE_EXPERTS_PER_TOKEN": "EXPERTS_PER_TOKEN",
+    "CANDIDATE_TOPK_BLOCKS": "CANDIDATE_BLOCK_COUNT",
 }
 
 HEADER_VALUES = {
@@ -153,7 +156,7 @@ def write_defines(path, ratios=None, hidden=None):
     body = ", ".join(f"{v}u" for v in ratios)
     lines.append(
         "#define SPARK_DSV41_FLASH_MODEL_LAYER_COMPRESSION_RATIO"
-        f"(layer_index) ((uint32_t)[{body}][(layer_index)])")
+        f"(layer_index) ((uint32_t[]){{{body}}}[(layer_index)])")
     with open(path, "w") as fh:
         fh.write("\n".join(lines) + "\n")
 
@@ -165,8 +168,8 @@ def bf16(shape, rng, scale=0.05):
 
 def fp8(shape, rng, scale_byte=127):
     payload = rng.integers(0x08, 0x38, size=shape, dtype=np.uint8)
-    scale = np.full((shape[0], max(1, shape[1] // 32)), scale_byte,
-                    dtype=np.uint8)
+    grid = (max(1, shape[0] // 32), max(1, shape[1] // 32))
+    scale = np.full(grid, scale_byte, dtype=np.uint8)
     return payload, scale
 
 
@@ -396,17 +399,31 @@ def main():
                            env={"DSV41_FAMILY_HEADER": good_family})
         expect(ok.returncode == 0,
                f"family header closure failed: {ok.stderr}")
+        bad_ratios_family = os.path.join(workspace, "family_ratios.h")
+        divergent = list(RATIOS)
+        divergent[6] = 2
+        write_defines(bad_ratios_family, ratios=divergent)
+        recorded = run_generator(checkpoint, header, prompts,
+                                 os.path.join(workspace, "run_f"),
+                                 env={"DSV41_FAMILY_HEADER":
+                                      bad_ratios_family})
+        expect(recorded.returncode == 0,
+               f"ratio-table divergence must not block generation: "
+               f"{recorded.stderr}")
+        recorded_manifest = json.load(open(
+            os.path.join(workspace, "run_f", "dsv41", "MANIFEST.json")))
+        expect(any("family_header_ratio_table" in row for row
+                   in recorded_manifest["defines_config_mismatches"]),
+               "ratio-table divergence must be recorded in the manifest")
         bad_family = os.path.join(workspace, "family_bad.h")
-        bad_ratios = list(RATIOS)
-        bad_ratios[2] = 9
-        write_defines(bad_family, ratios=bad_ratios, hidden=17)
+        write_defines(bad_family, ratios=RATIOS, hidden=17)
         failed = run_generator(checkpoint, header, prompts,
-                               os.path.join(workspace, "run_f"),
+                               os.path.join(workspace, "run_g"),
                                env={"DSV41_FAMILY_HEADER": bad_family})
         expect(failed.returncode != 0,
-               "family header ratio disagreement must fail loud")
-        expect("compression table" in failed.stderr,
-               f"failure must name the ratio table: {failed.stderr}")
+               "family header scalar disagreement must fail loud")
+        expect("disagrees" in failed.stderr,
+               f"failure must name the disagreement: {failed.stderr}")
         shutil.rmtree(workspace, ignore_errors=True)
         print("PASS t1_reference_dsv41 synthetic proof: determinism, "
               "route-scale contract, negative control, defines/config "

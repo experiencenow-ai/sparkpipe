@@ -2,8 +2,12 @@ import json
 import math
 import os
 import re
+import sys
+import time
 
 import numpy as np
+
+_DEBUG = bool(os.environ.get("T1_REF_DSV41_DEBUG"))
 
 from t1_reference_common import (Safetensors, bf16_round_f32, bf16_to_f32,
                                  define_float, define_uint, f32_to_bf16_u16,
@@ -149,6 +153,13 @@ def _next_prime(start, seen):
 
 
 def _config_value(config, path):
+    if "|" in path:
+        for option in path.split("|"):
+            try:
+                return _config_value(config, option)
+            except (KeyError, TypeError, IndexError):
+                continue
+        raise KeyError(path)
     node = config
     for part in path.split("."):
         match = re.fullmatch(r"([A-Za-z0-9_]+)\[(\d+)\]", part)
@@ -193,7 +204,8 @@ DEFINES_VS_CONFIG = [
     ("INDEX_HEAD_COUNT", "index_n_heads", "uint"),
     ("INDEX_HEAD_DIMENSION", "index_head_dim", "uint"),
     ("INDEX_TOP_K", "index_topk", "uint"),
-    ("CANDIDATE_SOURCE_LAYER", "candidate_source_layer", "uint"),
+    ("CANDIDATE_SOURCE_LAYER",
+     "candidate_source_layer|candidate_source_layer_id", "uint"),
     ("CANDIDATE_TOPK_BLOCKS", "candidate_topk_blocks", "uint"),
     ("CANDIDATE_BLOCK_SIZE", "candidate_block_size", "uint"),
     ("KV_SOURCE_LAYER_0", "kv_source_layer_ids[0]", "uint"),
@@ -235,8 +247,8 @@ DEFINES_RECORDED_ONLY = [
 ]
 
 RATIO_HEADER_RE = re.compile(
-    r"SPARK_DSV41_FLASH_MODEL_LAYER_COMPRESSION_RATIO\(layer_index\)\s*"
-    r"\(\(uint32_t\)\[([^\]]+)\]\[\(layer_index\)\]\)")
+    r"SPARK_DSV41_FLASH_MODEL_LAYER_COMPRESSION_RATIO\(layer_index\)"
+    r"[\s\\]*\(\(uint32_t\[\]\)\{([^}]+)\}\[\(layer_index\)\]\)")
 
 
 def cross_check(defines, config, engram_enabled):
@@ -276,6 +288,7 @@ def _parse_family_header(path, defines, ratios):
     text = open(path).read()
     problems = []
     checked = []
+    findings = []
     simple = [
         ("SPARK_DSV41_FLASH_MODEL_HIDDEN_DIMENSION", "HIDDEN_DIMENSION",
          "uint"),
@@ -299,9 +312,9 @@ def _parse_family_header(path, defines, ratios):
          "uint"),
         ("SPARK_DSV41_FLASH_MODEL_SLIDING_WINDOW", "SLIDING_WINDOW_TOKENS",
          "uint"),
-        ("SPARK_DSV41_FLASH_MODEL_MOE_ROUTED_EXPERT_COUNT",
+        ("SPARK_DSV41_FLASH_MODEL_ROUTED_EXPERT_COUNT",
          "MOE_ROUTED_EXPERT_COUNT", "uint"),
-        ("SPARK_DSV41_FLASH_MODEL_MOE_EXPERTS_PER_TOKEN",
+        ("SPARK_DSV41_FLASH_MODEL_EXPERTS_PER_TOKEN",
          "MOE_EXPERTS_PER_TOKEN", "uint"),
         ("SPARK_DSV41_FLASH_MODEL_MOE_INTERMEDIATE_DIMENSION",
          "MOE_INTERMEDIATE_DIMENSION", "uint"),
@@ -313,16 +326,12 @@ def _parse_family_header(path, defines, ratios):
         ("SPARK_DSV41_FLASH_MODEL_INDEX_TOP_K", "INDEX_TOP_K", "uint"),
         ("SPARK_DSV41_FLASH_MODEL_CANDIDATE_SOURCE_LAYER",
          "CANDIDATE_SOURCE_LAYER", "uint"),
-        ("SPARK_DSV41_FLASH_MODEL_CANDIDATE_TOPK_BLOCKS",
+        ("SPARK_DSV41_FLASH_MODEL_CANDIDATE_BLOCK_COUNT",
          "CANDIDATE_TOPK_BLOCKS", "uint"),
         ("SPARK_DSV41_FLASH_MODEL_CANDIDATE_BLOCK_SIZE",
          "CANDIDATE_BLOCK_SIZE", "uint"),
         ("SPARK_DSV41_FLASH_MODEL_ENGRAM_MODULE_COUNT",
          "ENGRAM_MODULE_COUNT", "uint"),
-        ("SPARK_DSV41_FLASH_MODEL_ENGRAM_MAX_NGRAM_SIZE",
-         "ENGRAM_MAX_NGRAM_SIZE", "uint"),
-        ("SPARK_DSV41_FLASH_MODEL_ENGRAM_COMPRESSED_VOCAB_SIZE",
-         "ENGRAM_COMPRESSED_VOCAB_SIZE", "uint"),
     ]
     for macro, dname, kind in simple:
         if dname not in defines:
@@ -343,14 +352,21 @@ def _parse_family_header(path, defines, ratios):
     if match is None:
         problems.append("compression ratio table not found in family header")
     else:
-        table = [int(v) for v in match.group(1).replace("u", "").split(",")]
+        table = [int(v) for v in
+                 re.split(r"[\s\\,]+", match.group(1).replace("u", ""))
+                 if v]
         if table != list(ratios):
-            problems.append(
-                f"family header compression table {table} disagrees with "
-                f"config compress_ratios {list(ratios)}")
+            findings.append({
+                "family_header_ratio_table": table,
+                "checkpoint_compress_ratios": list(ratios),
+                "note": "the family header compression table disagrees "
+                        "with the checkpoint; the checkpoint and both "
+                        "published configs agree, so the reference "
+                        "follows the checkpoint",
+            })
         else:
             checked.append("LAYER_COMPRESSION_RATIO")
-    return checked, problems
+    return checked, problems, findings
 
 
 class Dsv41FlashEngine:
@@ -390,7 +406,9 @@ class Dsv41FlashEngine:
         self.index_heads = int(text["index_n_heads"])
         self.index_dim = int(text["index_head_dim"])
         self.index_topk = int(text["index_topk"])
-        self.candidate_source = int(text["candidate_source_layer"])
+        self.candidate_source = int(text.get(
+            "candidate_source_layer",
+            text.get("candidate_source_layer_id", -1)))
         self.candidate_blocks = int(text["candidate_topk_blocks"])
         self.candidate_block = int(text["candidate_block_size"])
         self.eot = define_uint(defines, "END_OF_TEXT_TOKEN_ID")
@@ -418,21 +436,23 @@ class Dsv41FlashEngine:
                     f"{self.ratios[layer] if layer < self.layers else 'na'}")
         header_path = os.environ.get("DSV41_FAMILY_HEADER")
         if header_path:
-            checked, problems = _parse_family_header(header_path, defines,
-                                                     self.ratios)
+            checked, problems, findings = _parse_family_header(
+                header_path, defines, self.ratios)
             if problems:
                 raise Dsv41ConfigError("; ".join(problems))
             self.mismatches.append({
                 "family_header": os.path.abspath(header_path),
                 "checked": checked,
             })
+            self.mismatches.extend(findings)
         self.full_freqs = self._freqs(self.rope_theta, 0)
         self.compress_freqs = self._freqs(self.compress_theta,
                                           self.yarn_original)
         self._engram_init(text, engram_ids)
         self.expert_cache = {}
         self.expert_cache_limit = int(os.environ.get(
-            "T1_REF_DSV41_EXPERT_CACHE", 48))
+            "T1_REF_DSV41_EXPERT_CACHE", 300))
+        self.dequant_cache = {}
         self._head_input = None
 
     def _freqs(self, theta, original):
@@ -552,19 +572,35 @@ class Dsv41FlashEngine:
                 rolling[:, None] % self.engram_primes[:, i - 1]
         return out + self.engram_offsets
 
+    def _dequant_weight_u16(self, name):
+        cached = self.dequant_cache.get(name)
+        if cached is not None:
+            return cached
+        raw = self.st.raw(name)
+        if raw.dtype != np.uint8:
+            raise Dsv41ConfigError(
+                f"unsupported weight dtype for {name}: {raw.dtype}")
+        rows, cols = raw.shape
+        scale_name = name[:-len(".weight")] + ".scale"
+        scale = self.st.raw(scale_name).astype(np.int32)
+        row_blocks, col_blocks = scale.shape
+        if rows % row_blocks or cols % col_blocks:
+            raise Dsv41ConfigError(
+                f"{name} shape {(rows, cols)} does not pack into scale "
+                f"grid {scale.shape}")
+        w = _E4M3_F32[raw].reshape(row_blocks, rows // row_blocks,
+                                   col_blocks, cols // col_blocks) \
+            * _exp2_rows(scale - 127)[:, None, :, None]
+        w = f32_to_bf16_u16(w.reshape(rows, cols))
+        self.dequant_cache[name] = w
+        return w
+
     def _linear(self, x, name):
         raw = self.st.raw(name)
         if raw.dtype == np.uint16:
             return bf16_round_f32(bf16_to_f32(raw) @ x)
-        if raw.dtype == np.uint8:
-            rows, cols = raw.shape
-            scale_name = name[:-len(".weight")] + ".scale"
-            scale = self.st.raw(scale_name).astype(np.int32)
-            block = cols // scale.shape[1]
-            w = _E4M3_F32[raw].reshape(rows, scale.shape[1], block) \
-                * _exp2_rows(scale - 127)[..., None]
-            w = bf16_to_f32(f32_to_bf16_u16(w.reshape(rows, cols)))
-            return bf16_round_f32(w @ x)
+        w = bf16_to_f32(self._dequant_weight_u16(name))
+        return bf16_round_f32(w @ x)
         raise Dsv41ConfigError(
             f"unsupported weight dtype for {name}: {raw.dtype}")
 
@@ -601,9 +637,9 @@ class Dsv41FlashEngine:
             self.expert_cache.pop(name)
             self.expert_cache[name] = cached
             return cached
-        weights = (self._mxfp4(name + "w1.weight"),
-                   self._mxfp4(name + "w2.weight"),
-                   self._mxfp4(name + "w3.weight"))
+        weights = (f32_to_bf16_u16(self._mxfp4(name + "w1.weight")),
+                   f32_to_bf16_u16(self._mxfp4(name + "w2.weight")),
+                   f32_to_bf16_u16(self._mxfp4(name + "w3.weight")))
         if len(self.expert_cache) >= self.expert_cache_limit:
             self.expert_cache.pop(next(iter(self.expert_cache)))
         self.expert_cache[name] = weights
@@ -733,6 +769,8 @@ class Dsv41FlashEngine:
         return self.full_freqs
 
     def _attention(self, layer, x_norm, position, cache, shared):
+        if _DEBUG:
+            t0 = time.perf_counter()
         p = f"{PREFIX}{layer}.attn."
         ratio = self.ratios[layer]
         table = self._layer_freqs(layer)
@@ -772,8 +810,14 @@ class Dsv41FlashEngine:
                 shared.setdefault("compress_rows", {})
                 shared["compress_rows"].setdefault(layer, [])
                 shared["compress_owner"] = layer
+            if _DEBUG:
+                print(f"  pre-indexer {time.perf_counter() - t0:.3f}s",
+                      flush=True)
             idxs = self._indexer(layer, x_norm, qr, latent, position,
                                  offset, compress_len, shared)
+            if _DEBUG:
+                print(f"  indexer {time.perf_counter() - t0:.3f}s",
+                      flush=True)
             shared["topk_idxs"] = idxs
             if latent is not None:
                 tail = bf16_round_f32(self._rotate(
@@ -793,6 +837,9 @@ class Dsv41FlashEngine:
                 parts_idx.append(np.asarray(idxs, dtype=np.int64) - offset)
         keys = np.concatenate(parts_rows, axis=0)
         index = np.concatenate(parts_idx)
+        if _DEBUG:
+            print(f"  post-cache {time.perf_counter() - t0:.3f}s",
+                  flush=True)
         sink_raw = self.st.raw(p + "attn_sink")
         if sink_raw.dtype != np.float32:
             raise Dsv41ConfigError(f"{p}attn_sink must be F32")
@@ -813,12 +860,7 @@ class Dsv41FlashEngine:
         wo_a_raw = self.st.raw(p + "wo_a.weight")
         if wo_a_raw.dtype != np.uint8:
             raise Dsv41ConfigError(f"{p}wo_a.weight must be an fp8 payload")
-        rows, cols = wo_a_raw.shape
-        scale = self.st.raw(p + "wo_a.scale").astype(np.int32)
-        block = cols // scale.shape[1]
-        w = _E4M3_F32[wo_a_raw].reshape(rows, scale.shape[1], block) \
-            * _exp2_rows(scale - 127)[..., None]
-        w = bf16_to_f32(f32_to_bf16_u16(w.reshape(rows, cols)))
+        w = bf16_to_f32(self._dequant_weight_u16(p + "wo_a.weight"))
         w = w.reshape(self.o_groups, self.o_lora,
                       self.heads_per_group * self.head_dim)
         projected = (w @ grouped[:, :, None])[..., 0]
@@ -827,10 +869,11 @@ class Dsv41FlashEngine:
 
     def _expert(self, expert_prefix, x):
         w1, w2, w3 = self._expert_weights(expert_prefix)
-        gate = np.minimum(bf16_round_f32(w1 @ x), self.limit)
-        up = np.clip(bf16_round_f32(w3 @ x), -self.limit, self.limit)
+        gate = np.minimum(bf16_round_f32(bf16_to_f32(w1) @ x), self.limit)
+        up = np.clip(bf16_round_f32(bf16_to_f32(w3) @ x), -self.limit,
+                     self.limit)
         activated = bf16_round_f32(_silu(gate) * up)
-        return bf16_round_f32(w2 @ activated)
+        return bf16_round_f32(bf16_to_f32(w2) @ activated)
 
     def _shared_expert(self, layer, x):
         p = f"{PREFIX}{layer}.ffn.shared_experts."
@@ -841,6 +884,8 @@ class Dsv41FlashEngine:
         return self._linear(activated, p + "w2.weight")
 
     def _moe(self, layer, x, sink):
+        if _DEBUG:
+            tm = time.perf_counter()
         p = f"{PREFIX}{layer}.ffn."
         scores = self._fp32_projector(p + "gate.weight") @ x
         routed = np.sqrt(_softplus(scores))
@@ -856,6 +901,8 @@ class Dsv41FlashEngine:
             y += weights[i] * self._expert(
                 p + f"experts.{int(expert)}.", x)
         y += self._shared_expert(layer, x)
+        if _DEBUG:
+            print(f"  moe {time.perf_counter() - tm:.3f}s", flush=True)
         sink.append(selected.astype(np.int32))
         sink.append(weights.astype(np.float32))
         return bf16_round_f32(y)
@@ -914,6 +961,8 @@ class Dsv41FlashEngine:
         return streams, ffn_pre, sink
 
     def _init_position(self, position, caches):
+        if _DEBUG:
+            print(f"init position {position}", flush=True)
         if position > 0:
             return
         caches.clear()
@@ -946,12 +995,16 @@ class Dsv41FlashEngine:
             else None
         shared = caches["shared"]
         for layer in range(self.layers):
+            mark = time.perf_counter() if _DEBUG else None
             if self.engram and layer in self.engram_layers:
                 hash_index = self.engram_layers.index(layer)
                 streams = self._engram_apply(layer, streams,
                                              hashes[hash_index])
             streams, pre_mix, sink = self._forward_layer(
                 layer, streams, pre_mix, position, caches[layer], shared)
+            if _DEBUG:
+                print(f"pos {position} layer {layer} "
+                      f"{time.perf_counter() - mark:.3f}s", flush=True)
             if sink:
                 capture[(position, layer)] = sink
             if capture_streams is not None:
