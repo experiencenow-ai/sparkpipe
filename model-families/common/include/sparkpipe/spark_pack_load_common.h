@@ -116,15 +116,6 @@ static void SPARK_PACK_LOAD_FN(BuildOrdinals)(SPARK_PACK_LOAD_TYPE(ModuleState) 
 }
 #endif
 
-#ifndef SPARK_PACK_LOAD_SEEN_MTP_FIELD
-#define SPARK_PACK_LOAD_SEEN_MTP_FIELD mtp_seen_bits
-#endif
-#ifndef SPARK_PACK_LOAD_SEEN_GLOBAL_FIELD
-#define SPARK_PACK_LOAD_SEEN_GLOBAL_FIELD global_seen_bits
-#endif
-#ifndef SPARK_PACK_LOAD_SEEN_LAYER_FIELD
-#define SPARK_PACK_LOAD_SEEN_LAYER_FIELD layer_seen_bits
-#endif
 #ifndef SPARK_PACK_LOAD_NO_LINEAR_VIEW
 static void SPARK_PACK_LOAD_FN(FillLinearView)(SPARK_PACK_LOAD_TYPE(LinearView) *view, const SPARK_PACK_LOAD_TYPE(StagePackEntry) *entry, void *payload, void *scale)
 {
