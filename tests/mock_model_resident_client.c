@@ -469,8 +469,7 @@ uint32_t MockResidentClientDriveCompletions(void)
 			slot->completion_driven = 1u;
 			if ( c->completion_function != 0 )
 			{
-				SparkModelServingCompletion completion;
-				memset(&completion,0,sizeof(completion));
+				SparkModelServingCompletion completion;memset(&completion,0,sizeof(completion));
 				completion.abi_version = SPARK_MODEL_SERVING_ADAPTER_ABI_VERSION;
 				completion.descriptor_bytes = SPARK_MODEL_SERVING_COMPLETION_BYTES;
 				completion.status = SPARK_STATUS_OK;
@@ -496,6 +495,15 @@ uint32_t MockResidentClientDriveCompletions(void)
 						completion.token_ids[t] = mock_token_start + t;
 				}
 				c->completion_function(c->completion_context,&completion);
+			}
+			/* the delivered completion retires the submission on the
+			 * server — free the slot (swap-remove) so long runs with many
+			 * submissions don't fill the queue */
+			{
+				uint32_t idx = (uint32_t)(slot - c->inflight);
+				c->inflight[idx] = c->inflight[c->inflight_count - 1u];
+				c->inflight_count--;
+				k--;
 			}
 			drove++;
 		}
