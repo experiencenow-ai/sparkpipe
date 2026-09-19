@@ -12408,8 +12408,8 @@
     },
     {
       "path": "tools/t1_reference_decoder.py",
-      "sha256": "0c3df5fa186214103586ece32a6ce834833fbea82a5043e81ecce50e8467f6d2",
-      "size_bytes": 5692
+      "sha256": "81f29338aa4fc8c74763f038ee7b27d72e06a8a63206b33dfc0092ed9214bd4e",
+      "size_bytes": 5619
     },
     {
       "path": "tools/t1_reference_dsv41.py",
@@ -15770,5 +15770,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 71215056
+  "total_bytes": 71214983
 }
