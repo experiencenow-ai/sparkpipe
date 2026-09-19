@@ -88,6 +88,9 @@ typedef struct SparkTpDeviceCollectiveImplementation
     uint32_t round_deadline_ms;
     pthread_mutex_t completion_lock;
     pthread_cond_t completion_wake;
+    pthread_t completion_thread;
+    uint32_t completion_thread_live;
+    uint32_t completion_stop;
     SparkTpDeviceCollectiveCompletionNode *completion_head;
     SparkTpDeviceCollectiveCompletionNode *completion_tail;
     SparkTpDeviceCollectiveCombineBf16Function combine_bf16;
@@ -152,10 +155,16 @@ static void *SparkTpDeviceCollectiveCompletionThread(void *argument)
     {
         SparkTpDeviceCollectiveCompletionNode *node;
         pthread_mutex_lock(&implementation->completion_lock);
-        while (implementation->completion_head == 0)
+        while (implementation->completion_head == 0 &&
+               implementation->completion_stop == 0u)
             pthread_cond_wait(&implementation->completion_wake,
                 &implementation->completion_lock);
         node = implementation->completion_head;
+        if ( node == 0 )
+        {
+            pthread_mutex_unlock(&implementation->completion_lock);
+            break;
+        }
         implementation->completion_head = node->next;
         if (implementation->completion_head == 0)
             implementation->completion_tail = 0;
@@ -990,8 +999,7 @@ SparkStatus SparkTpDeviceCollectiveCreate(
         SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
     }
     {
-        pthread_t completion_thread;
-        if ( pthread_create(&completion_thread,0,
+        if ( pthread_create(&implementation->completion_thread,0,
                 SparkTpDeviceCollectiveCompletionThread,
                 implementation) != 0 )
         {
@@ -999,7 +1007,7 @@ SparkStatus SparkTpDeviceCollectiveCreate(
             free(implementation);
             SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
         }
-        pthread_detach(completion_thread);
+        implementation->completion_thread_live = 1u;
     }
     collective_out->implementation = implementation;
     return SPARK_STATUS_OK;
@@ -1433,6 +1441,14 @@ void SparkTpDeviceCollectiveDestroy(SparkTpDeviceCollective *collective)
     if ( collective == 0 || collective->implementation == 0 )
         return;
     implementation = collective->implementation;
+    if ( implementation->completion_thread_live != 0u )
+    {
+        pthread_mutex_lock(&implementation->completion_lock);
+        implementation->completion_stop = 1u;
+        pthread_cond_signal(&implementation->completion_wake);
+        pthread_mutex_unlock(&implementation->completion_lock);
+        pthread_join(implementation->completion_thread,0);
+    }
     SparkWeightdClientClose(implementation->client);
     free(implementation);
     collective->implementation = 0;
