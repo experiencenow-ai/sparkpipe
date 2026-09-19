@@ -1,5 +1,5 @@
 {
-  "file_count": 3171,
+  "file_count": 3172,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "ee059895b7d51f9bd03217b2d8565fbd830cbea2226ca5afcb83194e6732de6f",
-      "size_bytes": 120058
+      "sha256": "95a23d78536f0311f2d8c663ef4a8608814a51be3a43834126e531e3b2a41ac2",
+      "size_bytes": 120434
     },
     {
       "path": "Makefile.rej",
@@ -7563,8 +7563,8 @@
     },
     {
       "path": "ring/transport/tp_device_collective.c",
-      "sha256": "2521e7540c249e3f67e12dfb38508147d86fee58269a334954c1c1347e555c5a",
-      "size_bytes": 58782
+      "sha256": "1341c545912537a25bf5273da71a0e6f84e9dce4fad172006b2a3631e87a2d83",
+      "size_bytes": 59421
     },
     {
       "path": "ring/transport/tp_device_collective_nccl.h",
@@ -9865,6 +9865,11 @@
       "path": "tests/test_topology_switch.c",
       "sha256": "4aa1f03fb225169295f76e4132c1eb9d1e004fdd4645074e5bbf0ddb5a11e2dd",
       "size_bytes": 19409
+    },
+    {
+      "path": "tests/test_tp_allreduce_fuzz.c",
+      "sha256": "8d0a823b11cc6f8387a84eed2cec8ac3aeb4b90f9e7950794ce000ae3c3fe784",
+      "size_bytes": 19512
     },
     {
       "path": "tests/test_tp_collective.c",
@@ -15860,5 +15865,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 72769249
+  "total_bytes": 72789776
 }
