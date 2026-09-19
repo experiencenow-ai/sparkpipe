@@ -1,0 +1,31 @@
+{
+  "checkpoint": {
+    "config_sha256": "74227dd615bf1ea975aa676bdf355a0379858c12f394b5365cd9dfa5fc2c70bc",
+    "index_sha256": "f0838c766951bdfe76d6afbdb2771a8f67aaa2231dedb3d33cebd817729843a2",
+    "path": "/home/spark0/sparkdata/qwen3.8-27b-fp8-nvme"
+  },
+  "defines_config_mismatches": [],
+  "family": "qwen38_27b",
+  "fixtures": {
+    "capital_of_france.t1r": {
+      "bytes": 305318,
+      "sha256": "27f35d84cefc57c3be8e7bbb5bf8b8eb3739a56a46f9ca6b6164c7e4aea0ef03"
+    },
+    "count_up.t1r": {
+      "bytes": 406182,
+      "sha256": "ce1929c1858ce0f1bcfb87862c4cc5e2a574f25959fc4262d07c24e4540dbc50"
+    }
+  },
+  "generated_utc": "2026-09-19T05:06:07Z",
+  "generator": "t1_reference_decoder.py",
+  "host": "spark0",
+  "llm_defines_sha256": "22fe3d005d08a284d567ebe161e6d460508577ad7612e21dd12c94dc72480da1",
+  "numpy_version": "1.26.4",
+  "prompts_sha256": "9c9b92cd0085939ca312ee1088d0a8294211ff5cd255673a1cd0c77f80cc20d0",
+  "python_version": "3.12.3",
+  "threading_env": {
+    "MKL_NUM_THREADS": "8",
+    "OMP_NUM_THREADS": "8",
+    "OPENBLAS_NUM_THREADS": "8"
+  }
+}
