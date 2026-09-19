@@ -460,6 +460,10 @@ janitor() {
     for q in $(pgrep -f "sparkpipe_weightd"); do
         a=$(ps -o etimes= -p "$q" 2>/dev/null | tr -d ' ')
         [ -n "$a" ] && [ "$a" -gt 1800 ] || continue
+        case "$(readlink /proc/$q/exe 2>/dev/null)" in
+            "$HOME/sparkdata/weightd/"*) ;;
+            *) continue ;;
+        esac
         holder_exe=$(sudo -n fuser /tmp/spark_weightd.singleton 2>/dev/null | tr -s ' ' | cut -d: -f2 | tr -d ' ')
         [ "$q" = "$holder_exe" ] && continue
         echo "$(date +%T) janitor: killing stale weightd pid=$q age=${a}s (not the singleton holder)" >&2
@@ -498,9 +502,11 @@ ensure_weightd() {
             sleep 2
         done
         [ "$probe_ok" = 1 ] && return 0
-        echo "$(date +%T) weightd: stale or unresponsive instance(s); clearing"
+        echo "$(date +%T) weightd: stale or unresponsive instance(s); clearing (production channel only)"
         for p in $(ls -l /proc/[0-9]*/exe 2>/dev/null | grep sparkpipe_weightd | sed "s|.*/proc/\([0-9]*\)/exe.*|\1|"); do
-            kill -9 "$p" 2>/dev/null
+            case "$(readlink /proc/$p/exe 2>/dev/null)" in
+                "$HOME/sparkdata/weightd/"*) kill -9 "$p" 2>/dev/null ;;
+            esac
         done
         sleep 2
         rm -f /tmp/spark_weightd.sock

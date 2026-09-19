@@ -1373,8 +1373,8 @@
     },
     {
       "path": "docs/SPARKDEV_HANDOFF_GLM53FLASH.md",
-      "sha256": "957d4b0d0c764e7947ac6fca062521d68afd67659fbf58092694c5f735560aae",
-      "size_bytes": 14748
+      "sha256": "b54fae36a775d88cf157fd50a8a1a0c4fadfe2e29ce3c21809772473d2ef8603",
+      "size_bytes": 16958
     },
     {
       "path": "docs/SPARKPIPE_SERVING_CHARTER.md",
@@ -5673,8 +5673,8 @@
     },
     {
       "path": "node/weightd_mesh.c",
-      "sha256": "f53bfe866260519fd3ebb191bff9dd6280e77e64c06fc8c929adec9a6b31728a",
-      "size_bytes": 37578
+      "sha256": "2a617c860e3316909d8d9a36f5d2f8b25c93d53ddf5b8e3b922203b21be495d7",
+      "size_bytes": 38640
     },
     {
       "path": "node/weightd_spawn.c",
@@ -7328,8 +7328,8 @@
     },
     {
       "path": "runtime/model_batch_engine.c",
-      "sha256": "a05c740020771c017f63a80ee2aa6d8211e3aa206cfc20dbe16adfe0bc1d3b2b",
-      "size_bytes": 92440
+      "sha256": "68904f42422b0e0b035fa0c3b1a0253f53ac28b4f9761715c0506ac2978151f1",
+      "size_bytes": 92713
     },
     {
       "path": "runtime/model_batch_scheduler.h",
@@ -10183,8 +10183,8 @@
     },
     {
       "path": "tools/fleet_node_agent.sh",
-      "sha256": "4b386eb2a4b693047cdcfe9941a3dcb6731f899be4a1154243fa315904a493ec",
-      "size_bytes": 19440
+      "sha256": "d4cfc27048e2b272311666da84aa5f8f38d56a812b99a658bc98ee3380d0543c",
+      "size_bytes": 24332
     },
     {
       "path": "tools/fleet_preflight.sh",
@@ -15390,5 +15390,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 62780300
+  "total_bytes": 62788737
 }
