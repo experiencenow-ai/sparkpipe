@@ -728,8 +728,9 @@ static uint64_t SparkQwen4FlashModuleExpectedGlobalBits(const SparkQwen4FlashMod
 	return(bits);
 }
 
-static uint64_t SparkQwen4FlashModuleExpectedMtpBits(void)
+static uint64_t SparkQwen4FlashModuleExpectedMtpBits(const SparkQwen4FlashModuleState *state)
 {
+	(void)state;
 #if SPARK_QWEN4_FLASH_MODEL_MTP_LAYER_COUNT == 0
 	return(0ull);
 #else
