@@ -3992,6 +3992,12 @@ static SparkStatus SparkGlm5NextReset(SparkGlm5NextModuleState *state,const Spar
 	SparkStatus status;
 	if ( SparkModelDriverAdmissionRequestIsValid(request) == 0u )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	/* A reset kills this rank's in-flight chains; every peer is potentially
+	 * waiting on this rank's cells for those chains. Cancel first so the
+	 * peers' waits fail fast (CKEY-CANCEL) instead of wedging 30s per chain
+	 * — the session-reset cascade turned one rank's reconnect into a
+	 * fleet-wide stall. */
+	SparkTpDeviceCollectiveBroadcastCancel(&state->tp_device_collective);
 	for (index=0u; index<state->pipeline_slot_count; index++)
 		slots[index] = index;
 	for (index=0u; index<state->resident_sequence_capacity; index++)
