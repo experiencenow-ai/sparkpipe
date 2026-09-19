@@ -1,0 +1,53 @@
+{
+  "prompts": [
+    {
+      "capture_layers": [
+        0,
+        3,
+        20,
+        39
+      ],
+      "name": "capital_of_france",
+      "new_tokens": 4,
+      "prompt_token_ids": [
+        671,
+        6102,
+        294,
+        8760,
+        344
+      ]
+    },
+    {
+      "capture_layers": [
+        0,
+        3,
+        20,
+        39
+      ],
+      "name": "count_up",
+      "new_tokens": 4,
+      "prompt_token_ids": [
+        8420,
+        28,
+        223,
+        19,
+        14,
+        223,
+        20,
+        14,
+        223,
+        21,
+        14,
+        223,
+        22,
+        14,
+        223,
+        23,
+        14,
+        223,
+        24,
+        14
+      ]
+    }
+  ]
+}

@@ -112,7 +112,15 @@ class Safetensors:
     @staticmethod
     def _np(dt):
         return {"BF16": np.uint16, "F32": np.float32, "F16": np.float16,
-                "U8": np.uint8, "F8_E4M3": np.uint8, "I64": np.int64}[dt]
+                "U8": np.uint8, "I8": np.int8, "F8_E4M3": np.uint8,
+                "F8_E8M0": np.uint8, "I64": np.int64}[dt]
+
+    def read(self, name):
+        fname, e, base = self._entry(name)
+        fh = self.fds[fname]
+        fh.seek(base + e["data_offsets"][0])
+        data = fh.read(e["data_offsets"][1] - e["data_offsets"][0])
+        return np.frombuffer(data, dtype=self._np(e["dtype"])).reshape(e["shape"])
 
     def entry(self, name):
         _, e, _ = self._entry(name)
