@@ -3217,16 +3217,30 @@ SparkStatus SparkWeightdClientAttachLazy(SparkWeightdClient *client,
         }
         if (fds_received != 0u)
         {
+            /* the GPU-side mesh kernels address the region in 64KB host
+             * pages; mmap only guarantees the system page, so map with
+             * slack and align up — an unaligned base lands every doorbell
+             * and tail in the wrong slot */
+            uint64_t slack = wire_result.mesh_send_buffer_bytes +
+                SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES -
+                wire_result.mesh_send_buffer_bytes %
+                    SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES -
+                wire_result.mesh_send_buffer_bytes;
             uint8_t *raw = mmap(0,
-                wire_result.mesh_send_buffer_bytes,
+                wire_result.mesh_send_buffer_bytes + slack,
                 PROT_READ | PROT_WRITE, MAP_SHARED, fds[0], 0);
             (void)close(fds[0]);
             if (raw == MAP_FAILED)
             {
                 SPARK_FAIL(SPARK_STATUS_IO_ERROR);
             }
-            wire_result.mesh_send_buffer_addr = (uint64_t)(uintptr_t)raw;
-            result->mesh_mapping = raw;
+            {
+                uintptr_t aligned = ((uintptr_t)raw +
+                    SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES - 1u) &
+                    ~(uintptr_t)(SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES - 1u);
+                wire_result.mesh_send_buffer_addr = (uint64_t)aligned;
+                result->mesh_mapping = (void *)aligned;
+            }
         }
     }
     if (wire_result.status != (uint32_t)SPARK_STATUS_OK)
