@@ -1,5 +1,5 @@
 {
-  "file_count": 3134,
+  "file_count": 3137,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -1160,6 +1160,11 @@
       "path": "docs/AGENT_LANE_BRIEFS/reports/wave-acc1-accuracy-2026-09-13.md",
       "sha256": "4812368009045d202e3e62caf769c360459468d33c5f5a8d824fe36b412c8580",
       "size_bytes": 21490
+    },
+    {
+      "path": "docs/AGENT_LANE_BRIEFS/reports/wave-acc2-accuracy-2026-09-13.md",
+      "sha256": "9444195ceb44bf47f9151772e83d47af53915e4ffbf53e8f19c3571f4a076828",
+      "size_bytes": 20573
     },
     {
       "path": "docs/AGENT_LANE_BRIEFS/reports/wave-adopt-qf-identity-2026-09-13.md",
@@ -8252,6 +8257,11 @@
       "size_bytes": 6121
     },
     {
+      "path": "tests/test_acc_parity_oracle.py",
+      "sha256": "46e26423374a15b0f187100ce03722def2ad7597c858a9cd3c86a4f05d164c42",
+      "size_bytes": 6628
+    },
+    {
       "path": "tests/test_api_stress.py",
       "sha256": "5031cd0c41603aa005b192fdc3b8c94359a8b520211de5f2e77d308e1def3b5f",
       "size_bytes": 2638
@@ -8303,8 +8313,8 @@
     },
     {
       "path": "tests/test_code_size.py",
-      "sha256": "a2f365b0c3cc186866128d2a7898a5b16836557fe57201c001cd13764403ec97",
-      "size_bytes": 104933
+      "sha256": "2641d5655c86ee73ec97fd31a7dcca6ec63930aa1cf8492696c10bc01cc4dfad",
+      "size_bytes": 105451
     },
     {
       "path": "tests/test_common_glm_cuda_tree.c",
@@ -9830,6 +9840,11 @@
       "path": "text/tokenizer_sidecar.c",
       "sha256": "c9e12edd388f2b54900214796bdf322154a34632e7db558810cbeb4bd568a304",
       "size_bytes": 8830
+    },
+    {
+      "path": "tools/acc_parity_oracle.py",
+      "sha256": "4e2abb665822eec2297c00973e1993ae45cf590a3a51023c87a4ec1c5fb0c1ee",
+      "size_bytes": 21829
     },
     {
       "path": "tools/adapter_interface_probe.c",
@@ -15675,5 +15690,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 65063012
+  "total_bytes": 65112560
 }

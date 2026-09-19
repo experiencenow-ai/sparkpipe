@@ -1551,6 +1551,14 @@ CEILING = 281184
 # (+1587 over this pin) before this wave's files - pre-existing drift owned
 # by the landings that produced it, flagged in the wave report.
 CEILING = 285179
+# wave-acc2 accuracy lane (lane/wave-acc2-accuracy) rebased onto the ACC-1
+# main: the pack-verification parity oracle joins as
+# tools/acc_parity_oracle.py + tests/test_acc_parity_oracle.py. The rebased
+# tree measures 375598 exact: this pin carries the +89936 un-ratcheted main
+# drift already flagged in the ACC-1 entry and quantified in the wave report
+# (docs/AGENT_LANE_BRIEFS/reports/wave-acc2-accuracy-2026-09-13.md) - that
+# drift is owned by the landings that produced it, not by this lane.
+CEILING = 375598
 
 
 ROOT = Path(__file__).resolve().parent.parent
