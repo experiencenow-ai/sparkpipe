@@ -1,5 +1,5 @@
 {
-  "file_count": 3080,
+  "file_count": 3082,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -6882,6 +6882,11 @@
       "size_bytes": 101
     },
     {
+      "path": "qualification/pack_sweep/2026-09-19/matrix.md",
+      "sha256": "c3a2c4bc0236dbb8cd958cfa5a19f5da1922769394909d534b3e8458625f3ff5",
+      "size_bytes": 14577
+    },
+    {
       "path": "qualification/spark/configs/ring_13node_handoff/index.json",
       "sha256": "eabdbddabce6e2ad05b54b1ba8955e91e4aadd3a8ba6a270e5587462280f4076",
       "size_bytes": 2558
@@ -8950,6 +8955,11 @@
       "path": "tests/test_ling_serving_adapter.c",
       "sha256": "7237c2c1ee26c0aacd97463469c6d7ce174041268cd35a92e29b02b782a199e3",
       "size_bytes": 11864
+    },
+    {
+      "path": "tests/test_ling_verify_pack.py",
+      "sha256": "e3720fbc8e05c1a37f73240c5a0aaa58d3cc731c140126ef71424202db7334d4",
+      "size_bytes": 5141
     },
     {
       "path": "tests/test_lossless_doorbell.py",
@@ -11198,8 +11208,8 @@
     },
     {
       "path": "tools/ling_verify_pack.py",
-      "sha256": "be189ae54196bfe376c0a106f406ba761b8fd1ce41c28a91eb752a6cdee837d0",
-      "size_bytes": 13865
+      "sha256": "44f320ac8a49774fd2e100d0205dd7ea434e4a41ee01258107cd3d4ec801a95e",
+      "size_bytes": 14694
     },
     {
       "path": "tools/litellm_mock_upstream.py",
@@ -15405,5 +15415,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 63182250
+  "total_bytes": 63202797
 }
