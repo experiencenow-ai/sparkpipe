@@ -1,5 +1,5 @@
 {
-  "file_count": 3158,
+  "file_count": 3162,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -7412,6 +7412,16 @@
       "size_bytes": 402
     },
     {
+      "path": "qualification/t1_reference/qwen38_27b/llm_defines_27b.h",
+      "sha256": "22fe3d005d08a284d567ebe161e6d460508577ad7612e21dd12c94dc72480da1",
+      "size_bytes": 1143
+    },
+    {
+      "path": "qualification/t1_reference/qwen38_27b/prompts.json",
+      "sha256": "9c9b92cd0085939ca312ee1088d0a8294211ff5cd255673a1cd0c77f80cc20d0",
+      "size_bytes": 443
+    },
+    {
       "path": "qualification/t1_reference/qwen38_max/MANIFEST.json",
       "sha256": "6a3cf881f72669ce96a25a64eae3749fd1ffefb962329be74173efdd9bfaeaa4",
       "size_bytes": 820
@@ -9780,6 +9790,11 @@
       "path": "tests/test_t1_reference_muse.py",
       "sha256": "109dd5fe5b4558b32eac574198f16ae08c092a588342dc953f138393c5357e4a",
       "size_bytes": 12136
+    },
+    {
+      "path": "tests/test_t1_reference_qwen38_27b.py",
+      "sha256": "f1d3815d7dcaf318d7d6162d6cbade5891ce1e76ca9ee37211038f8cb8b42bcc",
+      "size_bytes": 15797
     },
     {
       "path": "tests/test_template_adoption.py",
@@ -12480,6 +12495,11 @@
       "path": "tools/t1_reference_muse.py",
       "sha256": "9ad05796849a79aec86ea3af2c047f6953e21351c06502feccb8c31a6add9533",
       "size_bytes": 14543
+    },
+    {
+      "path": "tools/t1_reference_qwen38_27b.py",
+      "sha256": "20723471a6de0f7ca68659cc29ae5eae1e1163e0f4d8334f3c4e7b26a63e2715",
+      "size_bytes": 17181
     },
     {
       "path": "tools/t1_reference_qwen38_max.py",
@@ -15795,5 +15815,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 71268848
+  "total_bytes": 71303412
 }
