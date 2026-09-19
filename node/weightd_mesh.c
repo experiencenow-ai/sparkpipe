@@ -18,7 +18,9 @@
     (SPARK_WEIGHTD_MESH_RANKS_PER_BAND - 1u)
 #define SPARK_WEIGHTD_MESH_CQ_ENTRIES 16384u
 #define SPARK_WEIGHTD_MESH_MAGIC UINT64_C(0x4d45534830303031)
+#ifndef SPARK_WEIGHTD_MESH_DIR
 #define SPARK_WEIGHTD_MESH_DIR "/tmp/weightd-mesh"
+#endif
 
 typedef struct SparkWeightdMeshQpInfo
 {
