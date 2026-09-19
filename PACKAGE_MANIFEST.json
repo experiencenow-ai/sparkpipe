@@ -1,5 +1,5 @@
 {
-  "file_count": 3170,
+  "file_count": 3171,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "ff0a16b1c5cf9ab0b7b7ed0e82b7b05d8a5dfbd4001634b85ef2c8eb2ec639ff",
-      "size_bytes": 119799
+      "sha256": "ee059895b7d51f9bd03217b2d8565fbd830cbea2226ca5afcb83194e6732de6f",
+      "size_bytes": 120058
     },
     {
       "path": "Makefile.rej",
@@ -9922,6 +9922,11 @@
       "size_bytes": 13911
     },
     {
+      "path": "tests/test_weightd_expert_stress.c",
+      "sha256": "15f5f2c508410f48b67f01401468c571dd269630899fe460dfa633fa77114771",
+      "size_bytes": 8641
+    },
+    {
       "path": "tests/test_weightd_fd_frames.c",
       "sha256": "507880f8ff224c279b50f940f75bde723dbea378d2ba28e38d27e9a35c7d7a49",
       "size_bytes": 4446
@@ -15855,5 +15860,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 72760349
+  "total_bytes": 72769249
 }

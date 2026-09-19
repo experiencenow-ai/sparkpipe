@@ -323,6 +323,7 @@ TEST_NAMES := \
     test_weightd_lease \
     test_weightd_working_set \
     test_weightd_churn \
+    test_weightd_expert_stress \
     test_glm5_next_lazy_dispatch \
     test_weightd_worker \
     test_weightd_fd_frames \
@@ -1289,6 +1290,9 @@ build/test_weightd_working_set: tests/test_weightd_working_set.c $(RUNTIME_LIBRA
 	$(CC) $(CORE_INCLUDE_FLAGS) -Itests/cuda_stub $(CFLAGS) $^ $(LDFLAGS) -o $@
 
 build/test_weightd_churn: tests/test_weightd_churn.c $(RUNTIME_LIBRARY) $(CORE_LIBRARY) tests/cuda_stub/cuda_runtime_stub.c | build
+	$(CC) $(CORE_INCLUDE_FLAGS) -Itests/cuda_stub $(CFLAGS) $^ $(LDFLAGS) -o $@
+
+build/test_weightd_expert_stress: tests/test_weightd_expert_stress.c $(RUNTIME_LIBRARY) $(CORE_LIBRARY) tests/cuda_stub/cuda_runtime_stub.c | build
 	$(CC) $(CORE_INCLUDE_FLAGS) -Itests/cuda_stub $(CFLAGS) $^ $(LDFLAGS) -o $@
 
 build/test_glm5_next_lazy_dispatch: tests/test_glm5_next_lazy_dispatch.c runtime/spark_weightd_lease.c tests/cuda_stub/cuda_runtime_stub.c runtime/spark_weightd_manifest.c modules/glm5_next_resident_decode_stage/source/spark_glm5_next_resident_decode_stage_module.c modules/glm5_next_resident_decode_stage/source/spark_glm5_next_resident_decode_stage_internal.h | build
