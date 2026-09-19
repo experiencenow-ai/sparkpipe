@@ -1,5 +1,5 @@
 {
-  "file_count": 3172,
+  "file_count": 3174,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "95a23d78536f0311f2d8c663ef4a8608814a51be3a43834126e531e3b2a41ac2",
-      "size_bytes": 120434
+      "sha256": "20162093d7cc10715eeba98405ad4ff32e586f48684ce7910eb1a7c4997f83d4",
+      "size_bytes": 121429
     },
     {
       "path": "Makefile.rej",
@@ -5813,8 +5813,8 @@
     },
     {
       "path": "node/model_residentd.c",
-      "sha256": "671119260dd12c251c693cd36d03f67a3707e4e562ff58166c088d804cd80c8c",
-      "size_bytes": 118750
+      "sha256": "9293f59c76c9bf3deb183b5f4d96aec6b401c0b3b07f408fa302e682ac172375",
+      "size_bytes": 118922
     },
     {
       "path": "node/weightd.c",
@@ -8142,6 +8142,11 @@
       "size_bytes": 193
     },
     {
+      "path": "tests/fuzz_system_loopback.sh",
+      "sha256": "902217fe50e406f36b39c4c0d008cbe14e8a4004a3a610d5df008cda0fa3ca32",
+      "size_bytes": 201
+    },
+    {
       "path": "tests/glm52_validator_oracle_selftest_stubs.cpp",
       "sha256": "ad1a79a1f89097fdd05f2e15e3e44c9f372192406bb58be5e0b7fb85c60a9737",
       "size_bytes": 1308
@@ -9800,6 +9805,11 @@
       "path": "tests/test_support.h",
       "sha256": "17ff8495a1158ebfbd8e472c7c1396fdf7a10a98e832acc4c03e739478b45318",
       "size_bytes": 1269
+    },
+    {
+      "path": "tests/test_system_loopback.c",
+      "sha256": "f5ceee3c7e321256b2b72882f3e5da7d5c11f98745223dc8b7625ce17dfbc996",
+      "size_bytes": 24690
     },
     {
       "path": "tests/test_t1_reference_decoder.py",
@@ -15865,5 +15875,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 72789776
+  "total_bytes": 72815834
 }

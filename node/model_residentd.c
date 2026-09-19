@@ -1,5 +1,9 @@
 #define _POSIX_C_SOURCE 200809L
 
+#if defined(__APPLE__)
+#define _DARWIN_C_SOURCE 1
+#endif
+
 #include <errno.h>
 #include "sparkpipe/spark_error_site.h"
 #include <fcntl.h>
@@ -1560,7 +1564,11 @@ static void SparkModelResidentdAcceptClient(SparkModelResidentdRuntime *runtime)
 			int32_t keepidle = 10;
 			int32_t keepintvl = 5;
 			int32_t keepcnt = 3;
+#if defined(__APPLE__)
+			(void)setsockopt(fd,IPPROTO_TCP,TCP_KEEPALIVE,&keepidle,sizeof(keepidle));
+#else
 			(void)setsockopt(fd,IPPROTO_TCP,TCP_KEEPIDLE,&keepidle,sizeof(keepidle));
+#endif
 			(void)setsockopt(fd,IPPROTO_TCP,TCP_KEEPINTVL,&keepintvl,sizeof(keepintvl));
 			(void)setsockopt(fd,IPPROTO_TCP,TCP_KEEPCNT,&keepcnt,sizeof(keepcnt));
 		}
