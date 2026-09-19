@@ -15,7 +15,22 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 from t1_reference_common import (bf16_round_f32, bf16_to_f32,  # noqa: E402
                                  f32_to_bf16_u16, parse_llm_defines,
                                  read_fixture)
-from t1_reference_minimax import MiniMaxEngine  # noqa: E402
+from t1_reference_minimax import (MiniMaxEngine,  # noqa: E402
+                                  bf16_expand, bf16_round_u16)
+
+
+def conversion_bit_equivalence():
+    rng = np.random.default_rng(5)
+    x = rng.standard_normal(4096).astype(np.float32) * rng.choice(
+        [1e-3, 1.0, 100.0, 1e8, 1e-8], 4096)
+    for value in (0.0, -0.0, np.inf, -np.inf, np.nan):
+        x[0:8] = value
+    expect(np.array_equal(bf16_round_u16(x), f32_to_bf16_u16(x)),
+           "fast bf16 rounding must be bit-identical to the framework")
+    u = f32_to_bf16_u16(x)
+    expect(np.array_equal(bf16_expand(u).view(np.uint32),
+                          bf16_to_f32(u).view(np.uint32)),
+           "fast bf16 expand must be bit-identical to the framework")
 
 HIDDEN = 16
 LAYERS = 2
@@ -268,6 +283,7 @@ def hand_check(engine):
 def main():
     workspace = tempfile.mkdtemp(prefix="t1ref-minimax-")
     try:
+        conversion_bit_equivalence()
         checkpoint = os.path.join(workspace, "checkpoint")
         write_checkpoint(checkpoint)
         header = os.path.join(workspace, "llm_defines.h")

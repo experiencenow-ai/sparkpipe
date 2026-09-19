@@ -1,13 +1,30 @@
 import numpy as np
 
-from t1_reference_common import (Safetensors, bf16_round_f32, bf16_to_f32,
-                                 define_float, define_uint, f32_to_bf16_u16,
+from t1_reference_common import (Safetensors, define_float, define_uint,
                                  rmsnorm, sigmoid)
 
 PREFIX = "model.language_model.layers."
 EMBED_NAME = "model.language_model.embed_tokens.weight"
 FINAL_NORM_NAME = "model.language_model.norm.weight"
 LM_HEAD_NAME = "lm_head.weight"
+
+
+def bf16_expand(u16):
+    u32 = u16.astype(np.uint32)
+    np.left_shift(u32, np.uint32(16), out=u32)
+    return u32.view(np.float32)
+
+
+def bf16_round_u16(x):
+    u = x.astype(np.float32).view(np.uint32)
+    r = u + np.uint32(0x7FFF)
+    r += (u >> np.uint32(16)) & np.uint32(1)
+    r >>= np.uint32(16)
+    return r.astype(np.uint16)
+
+
+def bf16_round(x):
+    return bf16_expand(bf16_round_u16(x))
 
 
 class MiniMaxConfigError(ValueError):
@@ -153,18 +170,22 @@ class MiniMaxEngine:
                 f"reference lm_head must be BF16, got {head_dtype}")
 
     def tensor(self, name):
-        raw = self.st.raw(name)
+        shape = self.st.entry(name)["shape"]
+        if len(shape) < 2:
+            raw = self.st.raw(name)
+        else:
+            raw = self.st.raw_rows(name, 0, shape[0])
         if raw.dtype == np.uint16:
-            return bf16_to_f32(raw)
+            return bf16_expand(raw)
         return raw.astype(np.float32)
 
     def linear(self, x, name):
-        return bf16_round_f32(self.tensor(name + ".weight") @ x)
+        return bf16_round(self.tensor(name + ".weight") @ x)
 
     def embed(self, token_id):
         if token_id < 0 or token_id >= self.vocab:
             raise ValueError(f"token {token_id} outside vocabulary {self.vocab}")
-        return bf16_to_f32(self.st.raw_rows(EMBED_NAME, token_id, 1)[0])
+        return bf16_expand(self.st.raw_rows(EMBED_NAME, token_id, 1)[0])
 
     def rope(self, rows, position):
         if position < 0 or position >= self.max_context:
@@ -185,26 +206,26 @@ class MiniMaxEngine:
         return rows / np.sqrt(variance + self.eps)[:, None] * gain[None, :]
 
     def attention(self, prefix, x, cache, position):
-        q = bf16_round_f32(self.tensor(
+        q = bf16_round(self.tensor(
             prefix + "self_attn.q_proj.weight") @ x).reshape(
             self.heads, self.head_dim)
         q = self.head_rmsnorm(q, self.tensor(
             prefix + "self_attn.q_norm.weight").reshape(-1))
         q = self.rope(q, position)
-        k = bf16_round_f32(self.tensor(
+        k = bf16_round(self.tensor(
             prefix + "self_attn.k_proj.weight") @ x).reshape(
             self.kv_heads, self.head_dim)
         k = self.head_rmsnorm(k, self.tensor(
             prefix + "self_attn.k_norm.weight").reshape(-1))
         k = self.rope(k, position)
-        v = bf16_round_f32(self.tensor(
+        v = bf16_round(self.tensor(
             prefix + "self_attn.v_proj.weight") @ x).reshape(
             self.kv_heads, self.head_dim)
-        cache.append((f32_to_bf16_u16(k.reshape(-1)),
-                      f32_to_bf16_u16(v.reshape(-1))))
-        keys = bf16_to_f32(np.stack([row[0] for row in cache])).reshape(
+        cache.append((bf16_round_u16(k.reshape(-1)),
+                      bf16_round_u16(v.reshape(-1))))
+        keys = bf16_expand(np.stack([row[0] for row in cache])).reshape(
             len(cache), self.kv_heads, self.head_dim)
-        values = bf16_to_f32(np.stack([row[1] for row in cache])).reshape(
+        values = bf16_expand(np.stack([row[1] for row in cache])).reshape(
             len(cache), self.kv_heads, self.head_dim)
         out = np.empty((self.heads, self.head_dim), dtype=np.float32)
         scale = np.float32(1.0) / np.sqrt(np.float32(self.head_dim))
@@ -214,25 +235,25 @@ class MiniMaxEngine:
             weights = np.exp(scores - scores.max())
             weights = weights / weights.sum()
             out[h] = weights @ values[:, kvh, :]
-        attended = bf16_round_f32(out.reshape(-1))
+        attended = bf16_round(out.reshape(-1))
         return self.linear(attended, prefix + "self_attn.o_proj")
 
     def mlp(self, prefix, x):
         gate = self.linear(x, prefix + "mlp.gate_proj")
         up = self.linear(x, prefix + "mlp.up_proj")
-        activated = bf16_round_f32(swish(gate) * up)
+        activated = bf16_round(swish(gate) * up)
         return self.linear(activated, prefix + "mlp.down_proj")
 
     def forward_layer(self, index, streams, caches, position):
         prefix = PREFIX + str(index) + "."
-        x = bf16_round_f32(rmsnorm(
+        x = bf16_round(rmsnorm(
             streams, self.tensor(prefix + "input_layernorm.weight"), self.eps))
         attention = self.attention(prefix, x, caches[index], position)
-        streams = bf16_round_f32(streams + attention)
-        x = bf16_round_f32(rmsnorm(
+        streams = bf16_round(streams + attention)
+        x = bf16_round(rmsnorm(
             streams, self.tensor(prefix + "post_attention_layernorm.weight"),
             self.eps))
-        return bf16_round_f32(streams + self.mlp(prefix, x))
+        return bf16_round(streams + self.mlp(prefix, x))
 
     def decode_step(self, token_id, position, states, caches, capture,
                     capture_streams=None):
@@ -252,7 +273,7 @@ class MiniMaxEngine:
         return streams
 
     def logits(self, streams, chunk=4096):
-        norm = bf16_round_f32(rmsnorm(
+        norm = bf16_round(rmsnorm(
             streams, self.tensor(FINAL_NORM_NAME), self.eps))
         if self._lm_head_u16 is None:
             self._lm_head_u16 = self.st.raw(LM_HEAD_NAME)
@@ -262,7 +283,7 @@ class MiniMaxEngine:
         best = -np.inf
         best_token = -1
         for start in range(0, lm.shape[0], chunk):
-            scores = bf16_to_f32(lm[start:start + chunk]) @ norm
+            scores = bf16_expand(lm[start:start + chunk]) @ norm
             i = int(np.argmax(scores))
             if float(scores[i]) > best:
                 best = float(scores[i])
