@@ -1,5 +1,5 @@
 {
-  "file_count": 3082,
+  "file_count": 3091,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -4247,6 +4247,11 @@
       "size_bytes": 2534
     },
     {
+      "path": "model-families/muse_glimmer/include/sparkpipe/llm_defines.h",
+      "sha256": "ec7be20ee8cda01edf60658ff46e9b9432575df9974a0d3425880198901c93f9",
+      "size_bytes": 3254
+    },
+    {
       "path": "model-families/muse_glimmer/include/sparkpipe/spark_muse_glimmer_model.h",
       "sha256": "114b189c416a3aa6be08753a4c6d1d6d6d32b7c870b837eddce8408410e7d24c",
       "size_bytes": 4761
@@ -7197,6 +7202,31 @@
       "size_bytes": 444
     },
     {
+      "path": "qualification/t1_reference/muse/MANIFEST.json",
+      "sha256": "47529172d57d1d95020e88a3540ec973354748fe35ba27e5882b684496ab9180",
+      "size_bytes": 1063
+    },
+    {
+      "path": "qualification/t1_reference/muse/capital_of_france.t1r",
+      "sha256": "40bbb6f3faac28ecf88cf59c8bfbca433c4f6c0440af0104e55c51c3983a7895",
+      "size_bytes": 389575
+    },
+    {
+      "path": "qualification/t1_reference/muse/count_up.t1r",
+      "sha256": "ba97812d5c05168ced8b934421d1423ba62f3bca70c95c4a09d26f80cf67dbf7",
+      "size_bytes": 475727
+    },
+    {
+      "path": "qualification/t1_reference/muse/muse_validation_receipts.json",
+      "sha256": "70ef9262bc928541b2e6e781cb95c621031de8f3c6349b5cbc15d1c08b9fb37c",
+      "size_bytes": 3049
+    },
+    {
+      "path": "qualification/t1_reference/muse/prompts.json",
+      "sha256": "11a2b9952ae1771cfdc4fa37f438004fe741a8a17fc61363e1561dc1703b859b",
+      "size_bytes": 402
+    },
+    {
       "path": "qualification/t1_reference/qwen38_max/MANIFEST.json",
       "sha256": "6a3cf881f72669ce96a25a64eae3749fd1ffefb962329be74173efdd9bfaeaa4",
       "size_bytes": 820
@@ -9440,6 +9470,11 @@
       "path": "tests/test_t1_reference_hy4.py",
       "sha256": "26b17fed66e09877856f88ff723b6acd11d2c5adbb46be3cf7eda79c16bd216a",
       "size_bytes": 19599
+    },
+    {
+      "path": "tests/test_t1_reference_muse.py",
+      "sha256": "109dd5fe5b4558b32eac574198f16ae08c092a588342dc953f138393c5357e4a",
+      "size_bytes": 12136
     },
     {
       "path": "tests/test_template_adoption.py",
@@ -12107,6 +12142,11 @@
       "size_bytes": 15636
     },
     {
+      "path": "tools/t1_reference_muse.py",
+      "sha256": "9ad05796849a79aec86ea3af2c047f6953e21351c06502feccb8c31a6add9533",
+      "size_bytes": 14543
+    },
+    {
       "path": "tools/t1_reference_qwen38_max.py",
       "sha256": "73cce934d9355c099d5efa9e5bf054f31e8666e9dfba8aca95d979cd2b622eeb",
       "size_bytes": 14075
@@ -13455,6 +13495,11 @@
       "path": "tools_local/mtp_strip_wave2.sh",
       "sha256": "8a2341dbfcde7eecf23fa6b5dc9120bd3ffd99c89c064cc28d6cddaec9e03af1",
       "size_bytes": 788
+    },
+    {
+      "path": "tools_local/muse_layer_reference.py",
+      "sha256": "cc7fcafc2e7b2b21ddc20244876e8155542ffaff6919e089b9456a7f89574261",
+      "size_bytes": 13423
     },
     {
       "path": "tools_local/nvfp4_tp8_audit.sh",
@@ -15415,5 +15460,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 63202797
+  "total_bytes": 64115969
 }
