@@ -138,7 +138,7 @@ class Qwen38_27bEngine:
     def has(self, name):
         try:
             self.st.entry(name)
-        except KeyError:
+        except (KeyError, FileNotFoundError):
             return False
         return True
 
