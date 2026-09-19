@@ -1,5 +1,5 @@
 {
-  "file_count": 3120,
+  "file_count": 3121,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -4168,8 +4168,8 @@
     },
     {
       "path": "model-families/glm52/include/sparkpipe/llm_defines.h",
-      "sha256": "212e4f82b5d1e47d486785f874c748bfbd8cc5f175ede8ebd164e6f8469a48b1",
-      "size_bytes": 7525
+      "sha256": "565cfd952236d2aec59d6dafb7d1599752bceab8d052bd1a1fb7a23ab250969e",
+      "size_bytes": 7592
     },
     {
       "path": "model-families/glm52/include/sparkpipe/spark_glm52_chat_template.h",
@@ -4367,6 +4367,11 @@
       "size_bytes": 4764
     },
     {
+      "path": "model-families/qwen38_27b/include/sparkpipe/llm_defines.h",
+      "sha256": "bddedc4f634c8a30640fc1982085883a5e9548fc528a22646102211bb283fdfb",
+      "size_bytes": 4917
+    },
+    {
       "path": "model-families/qwen38_27b/include/sparkpipe/spark_qwen38_27b_model.h",
       "sha256": "bb295e5ab6497dc60d4dfb936f07241a9313bc5129159d70beb6867321030f91",
       "size_bytes": 3107
@@ -4393,8 +4398,8 @@
     },
     {
       "path": "model-families/qwen38_max/include/sparkpipe/llm_defines.h",
-      "sha256": "eb13789201bae3cb1d7d4d538e3d356df2ee041f0d9c8c302c75e9240a92c5ae",
-      "size_bytes": 7301
+      "sha256": "472b9ffaa80c841cfbd8a0b3849c3f580a39602fb3a4fa0761a5044409962c49",
+      "size_bytes": 7368
     },
     {
       "path": "model-families/qwen38_max/include/sparkpipe/spark_qwen38_max_model.h",
@@ -15605,5 +15610,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 64994415
+  "total_bytes": 64999466
 }
