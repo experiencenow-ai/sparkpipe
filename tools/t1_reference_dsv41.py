@@ -9,6 +9,9 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 
 _DEBUG = bool(os.environ.get("T1_REF_DSV41_DEBUG"))
+_NO_ENGRAM = bool(os.environ.get("T1_REF_DSV41_NO_ENGRAM"))
+_NO_COMPRESS = bool(os.environ.get("T1_REF_DSV41_NO_COMPRESS"))
+_NIBBLE_HIGH = bool(os.environ.get("T1_REF_DSV41_NIBBLE_HIGH"))
 
 from t1_reference_common import (Safetensors, bf16_round_f32, bf16_to_f32,
                                  define_float, define_uint, f32_to_bf16_u16,
@@ -578,6 +581,9 @@ class Dsv41FlashEngine:
         if cached is not None:
             return cached
         raw = self.st.raw(name)
+        if raw.dtype == np.uint16:
+            self.dequant_cache[name] = raw
+            return raw
         if raw.dtype != np.uint8:
             raise Dsv41ConfigError(
                 f"unsupported weight dtype for {name}: {raw.dtype}")
@@ -643,6 +649,12 @@ class Dsv41FlashEngine:
             self.expert_cache.pop(name)
             self.expert_cache[name] = cached
             return cached
+        if self.st.entry(name + "w1.weight")["dtype"] == "BF16":
+            weights = (bf16_to_f32(self.st.read(name + "w1.weight")),
+                       bf16_to_f32(self.st.read(name + "w2.weight")),
+                       bf16_to_f32(self.st.read(name + "w3.weight")))
+            self.expert_cache[name] = weights
+            return weights
         if pool is not None:
             specs = [(name + "w1.weight", name + "w1.scale"),
                      (name + "w2.weight", name + "w2.scale"),
@@ -840,6 +852,8 @@ class Dsv41FlashEngine:
         offset = window_rows.shape[0]
         parts_rows = [window_rows]
         parts_idx = [window_idx]
+        if ratio > 0 and _NO_COMPRESS:
+            ratio = 0
         if ratio > 0:
             compress_len = (position + 1) // ratio
             latent = None
@@ -895,9 +909,6 @@ class Dsv41FlashEngine:
             o[:, -self.rope_dim:].copy(), table, position, inverse=True))
         o = bf16_round_f32(o)
         grouped = o.reshape(self.o_groups, -1)
-        wo_a_raw = self.st.raw(p + "wo_a.weight")
-        if wo_a_raw.dtype != np.uint8:
-            raise Dsv41ConfigError(f"{p}wo_a.weight must be an fp8 payload")
         w = bf16_to_f32(self._dequant_weight_u16(p + "wo_a.weight"))
         w = w.reshape(self.o_groups, self.o_lora,
                       self.heads_per_group * self.head_dim)
@@ -1045,7 +1056,7 @@ class Dsv41FlashEngine:
         shared = caches["shared"]
         for layer in range(self.layers):
             mark = time.perf_counter() if _DEBUG else None
-            if self.engram and layer in self.engram_layers:
+            if self.engram and layer in self.engram_layers and not _NO_ENGRAM:
                 hash_index = self.engram_layers.index(layer)
                 streams = self._engram_apply(layer, streams,
                                              hashes[hash_index])
