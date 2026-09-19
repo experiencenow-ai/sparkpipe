@@ -20,6 +20,8 @@ from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 HEADER = REPOSITORY / "model-families/ling/include/sparkpipe/spark_ling_model.h"
+DEFINES_HEADER = REPOSITORY / "model-families/ling/include/sparkpipe/llm_defines.h"
+DRIVER_DEFINES_HEADER = REPOSITORY / "model-families/common/include/sparkpipe/spark_driver_defines.h"
 CONTRACT = REPOSITORY / "model_contracts/ling_authoritative.json"
 
 BINDINGS = {
@@ -137,7 +139,11 @@ class MacroTable:
 
 
 def main() -> int:
-    table = MacroTable(HEADER.read_text(encoding="utf-8"))
+    table = MacroTable(DRIVER_DEFINES_HEADER.read_text(encoding="utf-8")
+                       + "\n"
+                       + DEFINES_HEADER.read_text(encoding="utf-8")
+                       + "\n"
+                       + HEADER.read_text(encoding="utf-8"))
     contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
     failures = 0
     for (section, key), name in BINDINGS.items():

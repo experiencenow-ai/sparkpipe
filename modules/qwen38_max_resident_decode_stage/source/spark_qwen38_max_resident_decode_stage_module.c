@@ -681,8 +681,9 @@ static uint32_t SparkQwen38MaxModuleExpectedGlobalBits(const SparkQwen38MaxModul
 	return(bits);
 }
 
-static uint32_t SparkQwen38MaxModuleExpectedMtpBits(void)
+static uint32_t SparkQwen38MaxModuleExpectedMtpBits(const SparkQwen38MaxModuleState *state)
 {
+	(void)state;
 #if SPARK_QWEN38_MAX_MODEL_MTP_LAYER_COUNT == 0u
 	return(0u);
 #else
