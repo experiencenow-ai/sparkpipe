@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "sparkpipe/spark_k3_bind.h"
+#include "sparkpipe/spark_k3_llm_defines.h"
 #include "sparkpipe/spark_k3_pack_load.h"
 #include "sparkpipe/spark_k3_pool_sizing.h"
 #include "sparkpipe/spark_status.h"
@@ -11,7 +12,7 @@
 extern "C" {
 #endif
 
-#define SPARK_K3_MODULE_TOTAL_LAYERS 93u
+#define SPARK_K3_MODULE_TOTAL_LAYERS SPARK_K3_MODEL_LAYER_COUNT
 #define SPARK_K3_MODULE_MAX_BOUND_LAYERS SPARK_K3_MODULE_TOTAL_LAYERS
 #define SPARK_K3_MODULE_DERIVE_SLICE UINT32_MAX
 

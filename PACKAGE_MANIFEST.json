@@ -1,5 +1,5 @@
 {
-  "file_count": 3102,
+  "file_count": 3104,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "0f4e1273203218bdc294333e5b7225803c7e7d8de446fc139e658bfc6a082086",
-      "size_bytes": 114974
+      "sha256": "8fdd5c9e83fbfcc11d6e1e46a0c3f46578516e8ca8cf4ca88d7b7848f34e144f",
+      "size_bytes": 115283
     },
     {
       "path": "NCCL_16WIDE_RECEIPTS.md",
@@ -4198,13 +4198,18 @@
     },
     {
       "path": "model-families/k3/include/sparkpipe/spark_k3_kv_geometry.h",
-      "sha256": "7736bbaab567234cc4559fdd35dccdc9fdb248af3711f591b640a49141e07aa0",
-      "size_bytes": 1847
+      "sha256": "665429ab9c15ba57713e321c26035ec24cfba76816f2c5e393756b9022e338f0",
+      "size_bytes": 1979
+    },
+    {
+      "path": "model-families/k3/include/sparkpipe/spark_k3_llm_defines.h",
+      "sha256": "24c1a86fef79669514a0666324ab8d89ce8e4e58c0c7aab3c91084960ff0b2cc",
+      "size_bytes": 7498
     },
     {
       "path": "model-families/k3/include/sparkpipe/spark_k3_model.h",
-      "sha256": "8bd9982c5983dcb4ac3fb2139a2fa569853980250407815efdedf6f93aa23894",
-      "size_bytes": 6197
+      "sha256": "b01cdd3cd6d6a98dd076efd9c8737792c7778181a72fd5b04881ef7752a722b5",
+      "size_bytes": 1069
     },
     {
       "path": "model-families/k3/include/sparkpipe/spark_k3_runtime_contract.h",
@@ -5158,8 +5163,8 @@
     },
     {
       "path": "modules/k3_resident_decode_stage/include/sparkpipe/spark_k3_pool_sizing.h",
-      "sha256": "efe65ac731552ce2ebfeaa8ab45ab732d44632f73e0a3953c1cde20127628ac2",
-      "size_bytes": 1466
+      "sha256": "38e4f251107b87dc0a1bc493653536888a1b4790ef11078c3c2a89c02af296da",
+      "size_bytes": 1508
     },
     {
       "path": "modules/k3_resident_decode_stage/include/sparkpipe/spark_k3_resident_decode_stage_cuda.h",
@@ -5168,8 +5173,8 @@
     },
     {
       "path": "modules/k3_resident_decode_stage/include/sparkpipe/spark_k3_resident_decode_stage_module.h",
-      "sha256": "1776d75bfd8db7c50bba90063675cc58cb6e690bd2cd4c8b4b50c85084e418bb",
-      "size_bytes": 844
+      "sha256": "5807bbdb99da482f449c190234bdbdc790ad46565bfe98c77e25985165625570",
+      "size_bytes": 911
     },
     {
       "path": "modules/k3_resident_decode_stage/include/sparkpipe/spark_k3_resident_decode_stage_runner.h",
@@ -5213,13 +5218,13 @@
     },
     {
       "path": "modules/k3_resident_decode_stage/source/spark_k3_resident_decode_stage_runner.cu",
-      "sha256": "95fbedf21ec5f30e6ba9cc926753b171f2cc67d04734a6869d6d3cadc43ccba0",
-      "size_bytes": 53359
+      "sha256": "18d2186509968c7b171065015970584ce60aa906e36a5962307ab5d0457b28c4",
+      "size_bytes": 53355
     },
     {
       "path": "modules/k3_resident_decode_stage/source/spark_k3_serving_adapter.c",
-      "sha256": "ce978c88ecec32f6831553718f389b5c0d08037185975713d5aeb0b0cb480a90",
-      "size_bytes": 28071
+      "sha256": "7a2f42d489a6c819ac71d22fffaa1744b9a229d9b92da087b2a11762bc9b08df",
+      "size_bytes": 28612
     },
     {
       "path": "modules/kv_mooncake/Makefile",
@@ -8843,13 +8848,13 @@
     },
     {
       "path": "tests/test_k3_kv_cache.c",
-      "sha256": "14774f67d6dd46cd32dc1f7a5b0df794d558d45df482a4416bb07a4cd5864386",
-      "size_bytes": 4473
+      "sha256": "ece5affbac3f970e72f1d4c563cfff2da1e4e9e8a827afc8e056c593fed37cdc",
+      "size_bytes": 6504
     },
     {
       "path": "tests/test_k3_kv_geometry.py",
-      "sha256": "3234606909813ea177a712b799ace9e7b2a4cc4003d488a54f0a496e04f18d6a",
-      "size_bytes": 3357
+      "sha256": "6adb6133f6834607ae9646e08cc9be4698b1cd2403ea0dd59ace7b05a44a5061",
+      "size_bytes": 7072
     },
     {
       "path": "tests/test_k3_layer_host.py",
@@ -8860,6 +8865,11 @@
       "path": "tests/test_k3_layer_probe.cu",
       "sha256": "ad40ba49519f3ebf0bead9a27ac8b2bf2334e1fb3bc74b08f661a65e85b10218",
       "size_bytes": 4951
+    },
+    {
+      "path": "tests/test_k3_llm_defines.c",
+      "sha256": "0d8d365664a3de3348e2b1b50090825f649fcbbc34957e7ef106e9b09fe909d2",
+      "size_bytes": 4967
     },
     {
       "path": "tests/test_k3_module_init.c",
@@ -9113,8 +9123,8 @@
     },
     {
       "path": "tests/test_model_families.py",
-      "sha256": "e0d3dbb04e6d8a24ec3b6d1db7f5b003713689616854927b9e29214b5ddda3cf",
-      "size_bytes": 5733
+      "sha256": "4249316fb8cca3a582a46b7a57ec5ae5ab54e633c56d32479a0aadeb44fee180",
+      "size_bytes": 5739
     },
     {
       "path": "tests/test_model_pipeline_client.c",
@@ -15515,5 +15525,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 64180233
+  "total_bytes": 64194409
 }
