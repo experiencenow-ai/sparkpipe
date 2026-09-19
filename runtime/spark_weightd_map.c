@@ -96,9 +96,32 @@ static SparkStatus map_free_initial(SparkWeightdMap *map)
 		map->epoch_handle = 0;
 	}
 	if ( map->base != 0u )
+	{
+		/* chunk and pool mappings persist across lease release by design;
+		 * teardown must unmap the whole span before freeing the VA. */
+		(void)cuMemUnmap(map->base,
+		    (size_t)(map->span_bytes + map->chunk_bytes));
 		status = cuMemAddressFree(map->base,
 		    (size_t)(map->span_bytes + map->chunk_bytes)) == CUDA_SUCCESS
 		    ? SPARK_STATUS_OK : SPARK_STATUS_IO_ERROR;
+	}
+	/* imported chunk handles are phys references; release each distinct
+	 * one exactly once (the pool bulk-map points every chunk at the same
+	 * handle) */
+	for (i=0u; map->handles != 0 && i<map->chunk_count; i++)
+	{
+		uint32_t j,seen = 0u;
+		if ( map->handles[i] == 0 )
+			continue;
+		for (j=0u; j<i; j++)
+			if ( map->handles[j] == map->handles[i] )
+			{
+				seen = 1u;
+				break;
+			}
+		if ( seen == 0u )
+			(void)cuMemRelease((CUmemGenericAllocationHandle)map->handles[i]);
+	}
 	for (i=0u; i<SPARK_WEIGHTD_LEASE_COUNT_MAX; i++)
 		if ( map->slots[i].event != 0 )
 			(void)cudaEventDestroy(map->slots[i].event);
