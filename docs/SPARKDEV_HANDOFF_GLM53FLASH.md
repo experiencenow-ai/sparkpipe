@@ -82,9 +82,30 @@ Detokenize with `/home/spec/sparkpipe-build/qualification/ds4_eval/tokenizer/glm
 - **Engines exit on INTERNAL_ERROR by design** (failed latch) — a route-level error kills the rank; agent restarts. If you see `progress stage=... internal_error`, the fix belongs in the route path, not the loop.
 - **api single-session queue**: zombie requests block new sessions behind `queued_behind`; restart g53-api to clear.
 
+## 6.5 Live-fire addendum (2026-09-18, overnight session)
+
+**Merged this session:** #1032 (TAP inert defaults — my #1027 merge-resolution bug), #1031 (handoff doc). **Main moved again**: #1028 (the other dev's graph-path six-layer stack) and #1034 (weightd lease fix) landed; #1028's mesh rework **regressed eager serving on main** (chains die at the first round: `chainfail stage=0 status=4 cuda=an illegal memory access was encountered`; the wait kernel never sees peers publish — same relay-layer wound as the graph replay hang). The fleet currently runs the proven 763ae038 (#1027 merge) build — publishable by SHA: `git fetch origin 763ae038c94880ab9ac3c3fa153daa1f7e54de7b && git reset --hard 763ae038`.
+
+**New infrastructure failures found and fixed today (fleet-resilience branch, PR #1036):** agent node-doctor flaps dead RoCE ports (sparke/spark7 died silently for an hour); the janitor reaps wedged/zombie engines+weightds (GPU-coredump-wedged engines held 150GB of mappings and livelocked the memory gate); CUDA_ENABLE_COREDUMP_ON_EXCEPTION=0 in serving (the 17GB in-process GPU dump is what wedged engines past TERM); api restores no longer count against the retry cap while any rank is disconnected. **rtx5090 disk**: inode exhaustion from `~/.cloudfiles/locks` (flychess training leaks ~820 lock files/sec — 14M inodes); freed 9.35M by clearing stale locks; the leak is live and will refill — the flychess owners must fix the leak or the hub dies again. **memlock**: 16GB cap on some nodes killed the mesh MR (errno 12); `/etc/security/limits.d/99-sparkpipe-memlock.conf` installed fleet-wide + `LimitMEMLOCK=infinity` in the agent unit; user-manager restart required to take effect.
+
+**Open regression being chased at cutoff:** on the proven 763ae038 build, COLD fleets (all weightds freshly restarted) reject first prefills BUSY from the KV lane predicate and chains die at stage 0 with IO_ERROR/illegal-memory-access. Warm fleets serve (the fixture passed on long-lived engines). The cold-start path is the active bug; suspects: lane reset on fresh engines, or the mesh buffer mapping on fresh weightd generations. Diag builds on lane/stage0-diag name the CUDA error at chainfail.
+
 ## 7. What remains (priority order)
 
 ### 7.1 The allreduce: 1.3ms/round → 50-100µs target
+
+**PR #1030 state (lane/glm53-graph-replay) — as of 2026-09-17:** the graph path
+captures and replay #1 runs; replay hangs with ALL peers' slot tails reading 0
+while doorbells land (relay/copy layer, not the sequence protocol — per-slot
+generation counters are in, ruling out cross-rank counter skew). The fleet run
+also exposed: `apply_manifest` scope-arg crash-loop (`set -u`), the env-word
+bash trap in the agent launch, and an eager-admission regression on the branch
+(KV_CAPACITY rejects on fresh engines — from the -614-line module surgery).
+Do NOT merge until: (a) the admission regression is found, (b) a replay #N≥3
+completes repeatedly on the live fleet, (c) CHAIN-TIME shows replay beating
+1.3ms/round warm eager. Graph stays opt-in (`G5_GRAPH_PATH=1` drop-in per node;
+agent passes it as SPARK_GLM5_NEXT_GRAPH_PATH).
+
 `CHAIN-TIME` shows 91 rounds/chain ≈ 130ms of ~500ms. Pure host spin is already at its floor (peer-skew + 5 stream-ordered memcpys + RDMA/doorbell propagation per round). **The real lever is the GPU-side mesh path** (`capture_armed`: `SparkGlm5NextLaunchMeshPublish/Wait` run publish+wait on-GPU, no host round-trips). It's wired but disabled: `SPARK_GLM5_NEXT_GRAPH_PATH=1` opts in (default off since merge). Main's compile-time default is ON — re-validate before flipping the default. Steps: (1) enable env on ONE node config, probe; (2) watch for the historical graph-path issues (chainfail poisoning, EPOCH-MOVE lease drops); (3) measure CHAIN-TIME allreduce_ms. The characterize bench `tools/hardware/spark_tp_device_collective_characterize.cu` doesn't link (needs `SparkGlm5NextLaunchMesh*` from the module + `-lcuda`) — fix its Makefile rule when a low-level A/B is needed.
 
 ### 7.2 Host overhead: ~370ms/chunk (~7.5ms/layer)
@@ -106,3 +127,4 @@ Diag prints to strip when green: `ADMIT9-*`, `KV-TAKEOVER`, `KV-RECOVER`, `CHAIN
 3. Fuzz harness per §7.3 — the operator explicitly asked for "random kills, measure time-to-serve, never wedge."
 
 The fleet is yours. It serves. Don't let it regress: every change through PR, every publish through the loop in §5, every claim measured with CHAIN-TIME or the fixture.
+

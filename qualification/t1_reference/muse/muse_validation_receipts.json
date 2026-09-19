@@ -1,0 +1,111 @@
+{
+  "accumulation_experiment": {
+    "divergent_elements": 0,
+    "divergent_of": 6656,
+    "experiment": "oracle layer 0 with full-tensor matmul vs engine 4096-row slab streaming; zero divergence proves slab streaming is accumulation-identical to full matmul",
+    "max_abs_delta_f32": 0.0
+  },
+  "closure": {
+    "census": {
+      "dense_mlp": true,
+      "full_attention_layers": [
+        3,
+        7,
+        11,
+        15,
+        19,
+        23,
+        27,
+        31,
+        35,
+        39,
+        43,
+        47,
+        51
+      ],
+      "layer_tensors": 1424,
+      "layers": 52,
+      "moe_expert_tensors": 0,
+      "text_tensors": 627,
+      "total_tensors": 1436,
+      "vision_tensors": 809
+    },
+    "checked_defines": [
+      "ATTENTION_HEAD_COUNT",
+      "END_OF_TEXT_TOKEN_ID",
+      "FINAL_LOGIT_SOFTCAP",
+      "HEAD_DIMENSION",
+      "HIDDEN_DIMENSION",
+      "INTERMEDIATE_DIMENSION",
+      "KV_HEAD_COUNT",
+      "LAYER_COUNT",
+      "OUTPUT_MULTIPLIER",
+      "OUTPUT_VOCAB_COUNT",
+      "POST_NORM_EPSILON",
+      "QK_SCALE_FACTOR",
+      "RMS_NORM_EPSILON",
+      "SLIDING_WINDOW"
+    ],
+    "config_sha256": "5a9df2d8a385b3d361ab6ae68d73586f4e775033933bd0cd863fb7f3820e6a14",
+    "defines_config_mismatches": [],
+    "index_sha256": "7d817b4dccb1b123fc6c1939356c65cee3a0ad462a5b821ac88280990a27d1ba",
+    "llm_defines_sha256": "ec7be20ee8cda01edf60658ff46e9b9432575df9974a0d3425880198901c93f9",
+    "recorded_only_defines": [
+      "BOS_TOKEN_ID",
+      "MAXIMUM_CONTEXT_TOKENS"
+    ]
+  },
+  "family": "muse",
+  "generated_utc": "2026-09-19T07:11:40Z",
+  "hand_check_layer0": {
+    "bitwise_stage_checks": {
+      "centered_norm_bitwise": true,
+      "embed_norm_bitwise": true,
+      "rope_bitwise": true
+    },
+    "composite_bitwise_equal": true,
+    "divergent_elements": 0,
+    "divergent_indices": [],
+    "divergent_of": 6656,
+    "engine_norm": 96.20313262939453,
+    "max_abs_delta_f32": 0.0,
+    "oracle_norm": 96.20313262939453,
+    "scope": "layer 0 (sliding_attention, rope, position 0), independent orchestration vs engine.forward_layer; both sides share the engine blocked-linear accumulation primitive, so any composite divergence is a math defect",
+    "token": 954
+  },
+  "host": "spark5",
+  "layer_probes_position0": {
+    "layer0": {
+      "finite": true,
+      "kind": "sliding_attention",
+      "norm": 96.20313262939453
+    },
+    "layer3": {
+      "finite": true,
+      "kind": "full_attention",
+      "norm": 165.5586395263672
+    },
+    "layer49": {
+      "finite": true,
+      "kind": "sliding_attention",
+      "norm": 938.027587890625
+    },
+    "layer51": {
+      "finite": true,
+      "kind": "full_attention",
+      "norm": 704.69873046875
+    }
+  },
+  "negative_control": {
+    "define": "SPARK_LLM_QK_SCALE_FACTOR",
+    "error": "SPARK_LLM_QK_SCALE_FACTOR=3.88 disagrees with qk_scale_factor=3.87",
+    "raised": true
+  },
+  "numpy_version": "2.5.3",
+  "position0_top1": {
+    "softcapped_score": 14.5,
+    "token": 2160
+  },
+  "python_version": "3.12.3",
+  "wall_seconds": 78.2
+}

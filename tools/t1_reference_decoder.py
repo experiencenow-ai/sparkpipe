@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import importlib
+import inspect
 import json
 import os
 import platform
@@ -38,14 +39,26 @@ def run_prompt(engine, spec):
     tokens = list(prompt_ids)
     generated = []
     total = len(prompt_ids) + budget
+    snap_params = "capture_streams" in inspect.signature(engine.decode_step).parameters
     for position in range(total):
-        streams = engine.decode_step(tokens[position], position, states, caches,
-                                     capture)
+        anchor_set = set(anchors)
+
+        def snap(layer_index, layer_streams):
+            if layer_index in anchor_set:
+                arrays[f"pos{position:04d}_layer{layer_index:04d}_streams"] = \
+                    f32_to_bf16_u16(layer_streams.reshape(-1))
+
+        if snap_params:
+            streams = engine.decode_step(tokens[position], position, states,
+                                         caches, capture, snap)
+        else:
+            streams = engine.decode_step(tokens[position], position, states,
+                                         caches, capture)
+            for layer in anchors:
+                arrays[f"pos{position:04d}_layer{layer:04d}_streams"] = \
+                    f32_to_bf16_u16(streams.reshape(-1))
         print(json.dumps({"prompt": spec["name"], "position": position,
                           "done": True}), flush=True)
-        for layer in anchors:
-            arrays[f"pos{position:04d}_layer{layer:04d}_streams"] = \
-                f32_to_bf16_u16(streams.reshape(-1))
         token, score = engine.logits(streams)
         if position >= len(prompt_ids) - 1:
             arrays[f"pos{position:04d}_head_top1_score"] = \
@@ -53,11 +66,13 @@ def run_prompt(engine, spec):
             arrays[f"pos{position:04d}_head_top1_token"] = \
                 np.array([token], dtype=np.int32)
         if position + 1 < total:
-            if token == engine.eot:
-                raise ValueError(f"prompt {spec['name']}: eot at position {position}; "
-                                 "the prompt set contract must avoid eot")
-            tokens.append(token)
-            if position + 1 >= len(prompt_ids):
+            if position + 1 < len(prompt_ids):
+                tokens.append(prompt_ids[position + 1])
+            else:
+                if token == engine.eot:
+                    raise ValueError(f"prompt {spec['name']}: eot at position {position}; "
+                                     "the prompt set contract must avoid eot")
+                tokens.append(token)
                 generated.append(token)
     arrays["prompt_token_ids"] = np.array(prompt_ids, dtype=np.int32)
     arrays["generated_token_ids"] = np.array(generated, dtype=np.int32)

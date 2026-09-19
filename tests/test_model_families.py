@@ -9,14 +9,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 FAMILIES = {
 	"glm52": {
-		"config": "modules/glm52_resident_decode_stage/source/cuda/config.h",
+		"config": "common/common_glm_cuda_tree/spark_glm_cuda_config.h",
 		"host": "model-families/glm52/include/sparkpipe/spark_glm52_model.h",
 		"module": "modules/glm52_resident_decode_stage/source/spark_glm52_resident_decode_stage_module.c",
 		"pairs": [],
 	},
 	"k3": {
 		"config": "inference/llms/kimi_k3/config.h",
-		"host": "model-families/k3/include/sparkpipe/spark_k3_model.h",
+		"host": "model-families/k3/include/sparkpipe/spark_k3_llm_defines.h",
 		"module": None,
 		"pairs": [
 			("K3_HIDDEN", "SPARK_K3_MODEL_HIDDEN_DIMENSION"),

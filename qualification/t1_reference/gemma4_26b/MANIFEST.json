@@ -1,0 +1,31 @@
+{
+  "checkpoint": {
+    "config_sha256": "ed0c1eb3633de771906e9ba004a44cc5635bcc06ee2062077c3d2e88a50707d3",
+    "index_sha256": "907826a6e46ff454272bd6db1fee629d5531a2303be22986d825a0871d7dc7a7",
+    "path": "/mnt/model-warm/gemma-4-26b-a4b-it"
+  },
+  "defines_config_mismatches": [],
+  "family": "gemma4",
+  "fixtures": {
+    "capital_of_france.t1r": {
+      "bytes": 173183,
+      "sha256": "a93861d5a1d68d256df8d1a50e2c639aed8d76170835ec639d257bc76b4e7ac9"
+    },
+    "count_up.t1r": {
+      "bytes": 210894,
+      "sha256": "d342792639fd8d05dfc16f5cdc3eec87ed3af938fbbccbdf754bc90750266263"
+    }
+  },
+  "generated_utc": "2026-09-19T03:46:20Z",
+  "generator": "t1_reference_decoder.py",
+  "host": "spark9",
+  "llm_defines_sha256": "6918cb3f5d55ba0f184fce403998b1297e1627da36be7df4a550590afb9b1ece",
+  "numpy_version": "1.26.4",
+  "prompts_sha256": "5e5b6ed014bcc8329f48779877b64ae5527decd75267c544c5c6746964eddd7a",
+  "python_version": "3.12.3",
+  "threading_env": {
+    "MKL_NUM_THREADS": "8",
+    "OMP_NUM_THREADS": "8",
+    "OPENBLAS_NUM_THREADS": "8"
+  }
+}

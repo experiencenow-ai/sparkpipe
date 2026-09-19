@@ -23,6 +23,7 @@
 #include "sparkpipe/spark_weightd_attach.h"
 #include "sparkpipe/spark_weightd_lazy_pack.h"
 #include "sparkpipe/spark_weightd_lease.h"
+#include "sparkpipe/spark_tp_mesh_register.h"
 #include "spark_laguna_resident_decode_stage_internal.h"
 #include "spark_laguna_stagepack_format.h"
 
@@ -105,8 +106,15 @@ struct SparkLagunaModuleState
 	float *yarn_inv_freq;
 	char model_revision[SPARK_LAGUNA_STAGEPACK_MODEL_REVISION_BYTES];
 	SparkLagunaLayerWeights layers[SPARK_LAGUNA_RESIDENT_DECODE_STAGE_LAYERS_PER_STAGE];
-	uint64_t layer_seen[SPARK_LAGUNA_RESIDENT_DECODE_STAGE_LAYERS_PER_STAGE];
-	uint64_t global_seen;
+	uint64_t layer_seen_bits[SPARK_LAGUNA_RESIDENT_DECODE_STAGE_LAYER_COUNT];
+	uint64_t global_seen_bits;
+	uint64_t mtp_seen_bits;
+	uint32_t pack_flags;
+	uint64_t pack_file_bytes;
+	uint64_t pack_directory_offset;
+	uint64_t pack_directory_bytes;
+	uint32_t pack_tensor_count;
+	const char *pack_path;
 	uint32_t dflash_sections;
 	uint64_t dflash_bytes;
 	const void *embedding_bf16;
@@ -203,86 +211,6 @@ static uint32_t SparkLagunaPackRangesOverlap(const SparkLagunaPackRange *left,co
 	return(left->bytes != 0u && right->bytes != 0u && left->offset < right->offset + right->bytes && right->offset < left->offset + left->bytes ? 1u : 0u);
 }
 
-static SparkStatus SparkLagunaPackValidateHeader(
-	const SparkLagunaModuleState *state,
-	const SparkLagunaStagePackHeader *header,
-	uint64_t file_bytes)
-{
-	uint64_t directory_bytes,directory_end;
-	if ( state == 0 || header == 0 )
-		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
-	if ( header->magic != SPARK_LAGUNA_STAGEPACK_MAGIC || header->format_version != SPARK_LAGUNA_STAGEPACK_FORMAT_VERSION || header->header_bytes != SPARK_LAGUNA_STAGEPACK_HEADER_BYTES || header->directory_entry_bytes != SPARK_LAGUNA_STAGEPACK_ENTRY_BYTES || header->codec_abi_version != SPARK_WEIGHT_CODEC_ABI_VERSION )
-		SPARK_FAIL(SPARK_STATUS_ABI_MISMATCH);
-	if ( (header->flags & ~SPARK_LAGUNA_STAGEPACK_KNOWN_FLAGS) != 0u )
-		SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
-	if ( SparkLagunaStagePackHeaderTpDegree(header) == 0u || SparkLagunaStagePackHeaderTpDegree(header) != state->tp_degree || SparkLagunaStagePackHeaderTpRank(header) != state->tp_rank )
-		SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	if ( header->tensor_count == 0u || header->tensor_count > SPARK_LAGUNA_STAGEPACK_MAX_TENSOR_COUNT || header->stage_count != state->stage_count || header->stage_index != state->stage_index || header->first_layer_index != state->first_layer_index || header->layer_count != state->layer_count || header->total_layer_count != SPARK_LAGUNA_MODEL_LAYER_COUNT || header->hidden_dimension != SPARK_LAGUNA_MODEL_HIDDEN_DIMENSION || header->vocab_count != SPARK_LAGUNA_MODEL_OUTPUT_VOCAB_COUNT || header->routed_expert_count != SPARK_LAGUNA_MODEL_MOE_EXPERT_COUNT )
-		SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	if ( header->linear_weight_codec != SPARK_WEIGHT_CODEC_BF16 || header->expert_weight_codec != state->expert_weight_codec || header->kv_cache_codec != SPARK_WEIGHT_CODEC_BF16 )
-		SPARK_FAIL(SPARK_STATUS_TARGET_MISMATCH);
-	if ( header->file_bytes != file_bytes || header->directory_offset < header->header_bytes || header->directory_offset % SPARK_LAGUNA_STAGEPACK_ALIGNMENT_BYTES != 0u || header->tensor_count > UINT64_MAX / header->directory_entry_bytes )
-		SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	directory_bytes = (uint64_t)header->tensor_count * header->directory_entry_bytes;
-	directory_end = header->directory_offset + directory_bytes;
-	if ( directory_end < header->directory_offset || directory_end > file_bytes )
-		SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	return(SPARK_STATUS_OK);
-}
-
-static SparkStatus SparkLagunaPackValidateEntryGeometry(
-	SparkLagunaModuleState *state,
-	const SparkLagunaStagePackHeader *header,
-	const SparkLagunaStagePackEntry *entry,
-	SparkLagunaStagePackTensorShape *shape)
-{
-	uint64_t payload_bytes,scale_bytes,directory_end;
-	uint32_t local_layer;
-	if ( entry->tensor_kind >= SPARK_LAGUNA_STAGEPACK_TENSOR_KIND_COUNT )
-	{
-		if ( (header->flags & SPARK_LAGUNA_STAGEPACK_FLAG_DFLASH) == 0u || entry->layer_index >= SPARK_LAGUNA_MODEL_LAYER_COUNT )
-			SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-		if ( entry->payload_offset % SPARK_LAGUNA_STAGEPACK_ALIGNMENT_BYTES != 0u || entry->payload_offset > header->file_bytes || entry->payload_bytes > header->file_bytes - entry->payload_offset )
-			SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-		state->dflash_sections += 1u;
-		state->dflash_bytes += entry->payload_bytes + entry->scale_bytes;
-		return(SPARK_STATUS_OK);
-	}
-	if ( SparkLagunaStagePackExpectedShape(entry->tensor_kind,entry->layer_index,state->expert_weight_codec,state->tp_degree,shape) < 0 )
-		SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	if ( entry->layer_index != SPARK_LAGUNA_STAGEPACK_GLOBAL_LAYER )
-	{
-		if ( entry->layer_index < state->first_layer_index || entry->layer_index >= state->first_layer_index + state->layer_count )
-			SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-		local_layer = entry->layer_index - state->first_layer_index;
-		if ( (state->layer_seen[local_layer] & (UINT64_C(1) << entry->tensor_kind)) != 0u )
-			SPARK_FAIL(SPARK_STATUS_DUPLICATE);
-	}
-	else if ( (state->global_seen & (UINT64_C(1) << entry->tensor_kind)) != 0u )
-		SPARK_FAIL(SPARK_STATUS_DUPLICATE);
-	if ( entry->payload_type != shape->payload_type || entry->weight_codec != shape->weight_codec || entry->scale_encoding != shape->scale_encoding || entry->group_count != shape->group_count || entry->rows != shape->rows || entry->columns != shape->columns )
-		SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	payload_bytes = SparkLagunaStagePackExpectedPayloadBytes(shape);
-	scale_bytes = SparkLagunaStagePackExpectedScaleBytes(shape);
-	if ( payload_bytes == 0u || entry->payload_bytes != payload_bytes || entry->scale_bytes != scale_bytes )
-		SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	directory_end = header->directory_offset + ((uint64_t)header->tensor_count * header->directory_entry_bytes);
-	if ( entry->payload_offset % SPARK_LAGUNA_STAGEPACK_ALIGNMENT_BYTES != 0u || entry->payload_offset > header->file_bytes || entry->payload_bytes > header->file_bytes - entry->payload_offset )
-		SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	if ( entry->payload_offset < directory_end && header->directory_offset < entry->payload_offset + entry->payload_bytes )
-		SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	if ( scale_bytes == 0u )
-	{
-		if ( entry->scale_offset != 0u )
-			SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	}
-	else if ( entry->scale_offset % SPARK_LAGUNA_STAGEPACK_ALIGNMENT_BYTES != 0u || entry->scale_offset > header->file_bytes || entry->scale_bytes > header->file_bytes - entry->scale_offset )
-		SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	else if ( entry->scale_offset < directory_end && header->directory_offset < entry->scale_offset + entry->scale_bytes )
-		SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	return(SPARK_STATUS_OK);
-}
-
 static SparkStatus SparkLagunaPackValidateRanges(
 	const SparkLagunaStagePackEntry *entries,
 	uint32_t entry_count)
@@ -312,19 +240,7 @@ static SparkStatus SparkLagunaPackValidateRanges(
 	return(SPARK_STATUS_OK);
 }
 
-static void SparkLagunaPackMarkSeen(
-	SparkLagunaModuleState *state,
-	const SparkLagunaStagePackEntry *entry)
-{
-	if ( entry->tensor_kind >= SPARK_LAGUNA_STAGEPACK_TENSOR_KIND_COUNT )
-		return;
-	if ( entry->layer_index == SPARK_LAGUNA_STAGEPACK_GLOBAL_LAYER )
-		state->global_seen |= UINT64_C(1) << entry->tensor_kind;
-	else
-		state->layer_seen[entry->layer_index - state->first_layer_index] |= UINT64_C(1) << entry->tensor_kind;
-}
-
-static SparkStatus SparkLagunaPackAssignLayer(
+static SparkStatus SparkLagunaModuleBindLayerWeights(
 	SparkLagunaLayerWeights *weights,
 	const SparkLagunaStagePackEntry *entry,
 	const void *payload,
@@ -350,23 +266,6 @@ static SparkStatus SparkLagunaPackAssignLayer(
 	default: SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
 	}
 	return(SPARK_STATUS_OK);
-}
-
-static SparkStatus SparkLagunaPackAssign(
-	SparkLagunaModuleState *state,
-	const SparkLagunaStagePackEntry *entry,
-	const void *payload,
-	const void *scale)
-{
-	if ( entry->layer_index != SPARK_LAGUNA_STAGEPACK_GLOBAL_LAYER )
-		return(SparkLagunaPackAssignLayer(&state->layers[entry->layer_index - state->first_layer_index],entry,payload,scale));
-	switch ( entry->tensor_kind )
-	{
-	case SPARK_LAGUNA_STAGEPACK_TENSOR_EMBEDDING: state->embedding_bf16 = payload; return(SPARK_STATUS_OK);
-	case SPARK_LAGUNA_STAGEPACK_TENSOR_FINAL_NORM: state->final_norm_bf16 = payload; return(SPARK_STATUS_OK);
-	case SPARK_LAGUNA_STAGEPACK_TENSOR_LM_HEAD: state->lm_head_bf16 = payload; return(SPARK_STATUS_OK);
-	default: SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	}
 }
 
 typedef struct SparkLagunaManifestContext
@@ -460,112 +359,272 @@ static SparkStatus SparkLagunaLazyOpen(SparkLagunaModuleState *state,const char 
 	return(status);
 }
 
-static SparkStatus SparkLagunaPackLoadEntry(
+static void SparkLagunaModulePackExpectGeometry(
+	const SparkLagunaModuleState *state,
+	SparkLagunaStagePackHeader *expected)
+{
+	(void)state;
+	memset(expected,0,sizeof(*expected));
+	expected->magic = SPARK_LAGUNA_STAGEPACK_MAGIC;
+	expected->format_version = SPARK_LAGUNA_STAGEPACK_FORMAT_VERSION;
+	expected->header_bytes = SPARK_LAGUNA_STAGEPACK_HEADER_BYTES;
+	expected->directory_entry_bytes = SPARK_LAGUNA_STAGEPACK_ENTRY_BYTES;
+	expected->codec_abi_version = SPARK_WEIGHT_CODEC_ABI_VERSION;
+	expected->linear_weight_codec = SPARK_WEIGHT_CODEC_BF16;
+	expected->kv_cache_codec = SPARK_WEIGHT_CODEC_BF16;
+	expected->total_layer_count = SPARK_LAGUNA_MODEL_LAYER_COUNT;
+	expected->hidden_dimension = SPARK_LAGUNA_MODEL_HIDDEN_DIMENSION;
+	expected->vocab_count = SPARK_LAGUNA_MODEL_OUTPUT_VOCAB_COUNT;
+	expected->routed_expert_count = SPARK_LAGUNA_MODEL_MOE_EXPERT_COUNT;
+	expected->directory_offset = SPARK_LAGUNA_STAGEPACK_HEADER_BYTES;
+}
+
+static uint32_t SparkLagunaModulePackGeometryMismatch(
+	const SparkLagunaModuleState *state,
+	const SparkLagunaStagePackHeader *header,
+	const SparkLagunaStagePackHeader *expected)
+{
+	uint32_t tp_degree,tp_rank;
+	tp_degree = SparkLagunaStagePackHeaderTpDegree(header);
+	tp_rank = SparkLagunaStagePackHeaderTpRank(header);
+	if ( header->magic != expected->magic || header->format_version != expected->format_version || header->header_bytes != expected->header_bytes || header->directory_entry_bytes != expected->directory_entry_bytes || header->codec_abi_version != expected->codec_abi_version )
+		return(1u);
+	if ( (header->flags & ~SPARK_LAGUNA_STAGEPACK_KNOWN_FLAGS) != 0u )
+		return(2u);
+	if ( tp_degree == 0u || tp_degree != state->tp_degree || tp_rank != state->tp_rank )
+		return(3u);
+	if ( header->tensor_count == 0u || header->tensor_count > SPARK_LAGUNA_STAGEPACK_MAX_TENSOR_COUNT || header->stage_count != state->stage_count || header->stage_index != state->stage_index || header->first_layer_index != state->first_layer_index || header->layer_count != state->layer_count )
+		return(4u);
+	if ( header->total_layer_count != expected->total_layer_count || header->hidden_dimension != expected->hidden_dimension || header->vocab_count != expected->vocab_count || header->routed_expert_count != expected->routed_expert_count )
+		return(5u);
+	if ( header->linear_weight_codec != expected->linear_weight_codec || header->expert_weight_codec != state->expert_weight_codec || header->kv_cache_codec != expected->kv_cache_codec )
+		return(6u);
+	if ( header->directory_offset < header->header_bytes || header->directory_offset % SPARK_LAGUNA_STAGEPACK_ALIGNMENT_BYTES != 0u || header->tensor_count > UINT64_MAX / header->directory_entry_bytes )
+		return(7u);
+	return(0u);
+}
+
+static void SparkLagunaModulePackLogGeometryMismatch(
+	const SparkLagunaModuleState *state,
+	const SparkLagunaStagePackHeader *header,
+	const SparkLagunaStagePackHeader *expected)
+{
+	fprintf(stderr,"%s pack_geometry_mismatch code=%u slice=%u+%u stage=%u/%u index=%u/%u first=%u/%u layers=%u/%u tensor_count=%u max=%u total=%u/%u hidden=%u/%u vocab=%u/%u experts=%u/%u dir=%llu\n",
+		SPARK_LAGUNA_MODULE_TAG,
+		SparkLagunaModulePackGeometryMismatch(state,header,expected),
+		state->first_layer_index,state->layer_count,
+		header->stage_count,state->stage_count,
+		header->stage_index,state->stage_index,
+		header->first_layer_index,state->first_layer_index,
+		header->layer_count,state->layer_count,
+		header->tensor_count,SPARK_LAGUNA_STAGEPACK_MAX_TENSOR_COUNT,
+		header->total_layer_count,expected->total_layer_count,
+		header->hidden_dimension,expected->hidden_dimension,
+		header->vocab_count,expected->vocab_count,
+		header->routed_expert_count,expected->routed_expert_count,
+		(unsigned long long)header->directory_offset);
+}
+
+static SparkStatus SparkLagunaModulePackPreflight(
 	SparkLagunaModuleState *state,
 	FILE *file,
-	const SparkLagunaStagePackEntry *entry)
+	const SparkLagunaStagePackHeader *header,
+	SparkStatus status)
 {
-	void *payload,*scale;
-	SparkStatus status;
-	payload = 0;
-	scale = 0;
-	if ( state->lazy_pack != 0 )
-	{
-		if ( entry->tensor_kind == SPARK_LAGUNA_STAGEPACK_TENSOR_EXPERT_GATE_UP || entry->tensor_kind == SPARK_LAGUNA_STAGEPACK_TENSOR_EXPERT_DOWN )
-			return(SparkLagunaPackAssign(state,entry,0,0));
-		status = SparkWeightdLazyPackSlice(state->lazy_pack,entry->payload_offset,entry->payload_bytes,(const void **)&payload);
-		if ( status == SPARK_STATUS_OK && entry->scale_bytes != 0u )
-			status = SparkWeightdLazyPackSlice(state->lazy_pack,entry->scale_offset,entry->scale_bytes,(const void **)&scale);
-		if ( status == SPARK_STATUS_OK )
-			status = SparkLagunaPackAssign(state,entry,payload,scale);
+	uint64_t file_bytes,directory_end;
+	if ( status != SPARK_STATUS_OK )
 		return(status);
-	}
-	status = SparkStageModuleLoadDeviceRegion(&state->ledger,file,entry->payload_offset,entry->payload_bytes,&payload);
-	if ( status == SPARK_STATUS_OK && entry->scale_bytes != 0u )
-		status = SparkStageModuleLoadDeviceRegion(&state->ledger,file,entry->scale_offset,entry->scale_bytes,&scale);
-	if ( status == SPARK_STATUS_OK )
-		status = SparkLagunaPackAssign(state,entry,payload,scale);
+	status = SparkStageModulePackFileSize(file,&file_bytes);
+	if ( status == SPARK_STATUS_OK && file_bytes != header->file_bytes )
+		status = SPARK_STATUS_SCHEMA_ERROR;
+	directory_end = header->directory_offset + ((uint64_t)header->tensor_count * header->directory_entry_bytes);
+	if ( status == SPARK_STATUS_OK && (directory_end < header->directory_offset || directory_end > file_bytes) )
+		status = SPARK_STATUS_SCHEMA_ERROR;
+	state->pack_flags = header->flags;
+	state->pack_file_bytes = file_bytes;
+	state->pack_directory_offset = header->directory_offset;
+	state->pack_directory_bytes = (uint64_t)header->tensor_count * header->directory_entry_bytes;
+	state->pack_tensor_count = header->tensor_count;
 	return(status);
 }
 
-static uint64_t SparkLagunaExpectedLayerMask(
+static SparkStatus SparkLagunaModulePackRangesAndAttach(
+	SparkLagunaModuleState *state,
+	const SparkLagunaStagePackEntry *entries,
+	uint32_t entry_count)
+{
+	SparkStatus status;
+	status = SparkLagunaPackValidateRanges(entries,entry_count);
+	if ( status == SPARK_STATUS_OK )
+		status = SparkLagunaLazyOpen(state,state->pack_path,state->pack_file_bytes,entries,entry_count);
+	return(status);
+}
+
+static int SparkLagunaModuleRegionHook(
+	SparkLagunaModuleState *state,
+	const SparkLagunaStagePackEntry *entry,
+	FILE *file,
+	void **payload,
+	void **scale)
+{
+	SparkStatus status;
+	(void)file;
+	if ( state->lazy_pack == 0 )
+		return(0);
+	if ( entry->tensor_kind == SPARK_LAGUNA_STAGEPACK_TENSOR_EXPERT_GATE_UP || entry->tensor_kind == SPARK_LAGUNA_STAGEPACK_TENSOR_EXPERT_DOWN )
+		return(1);
+	status = SparkWeightdLazyPackSlice(state->lazy_pack,entry->payload_offset,entry->payload_bytes,(const void **)payload);
+	if ( status == SPARK_STATUS_OK && entry->scale_bytes != 0u )
+		status = SparkWeightdLazyPackSlice(state->lazy_pack,entry->scale_offset,entry->scale_bytes,(const void **)scale);
+	return(status == SPARK_STATUS_OK ? 1 : 0);
+}
+
+static SparkStatus SparkLagunaModuleBindMtp(
+	SparkLagunaModuleState *state,
+	const SparkLagunaStagePackEntry *entry,
+	void *payload,
+	void *scale)
+{
+	(void)state;
+	(void)entry;
+	(void)payload;
+	(void)scale;
+	SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
+}
+
+static SparkStatus SparkLagunaModuleBindGlobal(
+	SparkLagunaModuleState *state,
+	const SparkLagunaStagePackEntry *entry,
+	void *payload)
+{
+	switch ( entry->tensor_kind )
+	{
+	case SPARK_LAGUNA_STAGEPACK_TENSOR_EMBEDDING: state->embedding_bf16 = payload; return(SPARK_STATUS_OK);
+	case SPARK_LAGUNA_STAGEPACK_TENSOR_FINAL_NORM: state->final_norm_bf16 = payload; return(SPARK_STATUS_OK);
+	case SPARK_LAGUNA_STAGEPACK_TENSOR_LM_HEAD: state->lm_head_bf16 = payload; return(SPARK_STATUS_OK);
+	default: SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
+	}
+}
+
+static SparkStatus SparkLagunaModuleBindLayer(
+	SparkLagunaModuleState *state,
+	const SparkLagunaStagePackEntry *entry,
+	void *payload,
+	void *scale)
+{
+	if ( entry->tensor_kind >= SPARK_LAGUNA_STAGEPACK_TENSOR_KIND_COUNT )
+		return(SPARK_STATUS_OK);
+	return(SparkLagunaModuleBindLayerWeights(&state->layers[entry->layer_index - state->first_layer_index],entry,payload,scale));
+}
+
+static uint64_t SparkLagunaModuleExpectedGlobalBits(const SparkLagunaModuleState *state)
+{
+	uint64_t bits;
+	bits = 0u;
+	if ( state->owns_embedding != 0u )
+		bits |= UINT64_C(1) << SPARK_LAGUNA_STAGEPACK_TENSOR_EMBEDDING;
+	if ( state->owns_final_head != 0u )
+		bits |= (UINT64_C(1) << SPARK_LAGUNA_STAGEPACK_TENSOR_FINAL_NORM) | (UINT64_C(1) << SPARK_LAGUNA_STAGEPACK_TENSOR_LM_HEAD);
+	return(bits);
+}
+
+static uint64_t SparkLagunaModuleExpectedMtpBits(const SparkLagunaModuleState *state)
+{
+	(void)state;
+	return(0u);
+}
+
+static uint64_t SparkLagunaModuleExpectedLayerBits(
 	const SparkLagunaModuleState *state,
-	uint32_t layer_index)
+	uint32_t layer)
 {
 	SparkLagunaStagePackTensorShape shape;
-	uint64_t mask;
+	uint64_t bits;
 	uint32_t kind;
-	mask = 0u;
+	bits = 0u;
 	for (kind=SPARK_LAGUNA_STAGEPACK_TENSOR_ATTN_INPUT_NORM; kind<SPARK_LAGUNA_STAGEPACK_TENSOR_KIND_COUNT; kind++)
-		if ( SparkLagunaStagePackExpectedShape(kind,layer_index,state->expert_weight_codec,state->tp_degree,&shape) == 0 )
-			mask |= UINT64_C(1) << kind;
-	return(mask);
+		if ( SparkLagunaStagePackExpectedShape(kind,layer,state->expert_weight_codec,state->tp_degree,&shape) == 0 )
+			bits |= UINT64_C(1) << kind;
+	if ( (state->pack_flags & SPARK_LAGUNA_STAGEPACK_FLAG_DFLASH) != 0u )
+		bits |= UINT64_C(1) << (SPARK_LAGUNA_STAGEPACK_TENSOR_KIND_COUNT + 1u);
+	return(bits);
 }
 
-static uint64_t SparkLagunaExpectedGlobalMask(const SparkLagunaModuleState *state)
-{
-	uint64_t mask;
-	mask = 0u;
-	if ( state->owns_embedding != 0u )
-		mask |= UINT64_C(1) << SPARK_LAGUNA_STAGEPACK_TENSOR_EMBEDDING;
-	if ( state->owns_final_head != 0u )
-		mask |= (UINT64_C(1) << SPARK_LAGUNA_STAGEPACK_TENSOR_FINAL_NORM) | (UINT64_C(1) << SPARK_LAGUNA_STAGEPACK_TENSOR_LM_HEAD);
-	return(mask);
-}
+#define SPARK_PACK_LOAD_FN(name) SparkLagunaModule##name
+#define SPARK_PACK_LOAD_TYPE(name) SparkLaguna##name
+#define SPARK_PACK_LOAD_CONST(name) SPARK_LAGUNA_##name
+#define SPARK_PACK_LOAD_NO_BUILD_ORDINALS
+#define SPARK_PACK_LOAD_NO_LINEAR_VIEW
+#define SPARK_PACK_LOAD_LAYER_IS_GDN(layer) (SPARK_LAGUNA_MODEL_LAYER_IS_SLIDING(layer))
+#define SPARK_PACK_LOAD_SEEN_TYPE uint64_t
+#define SPARK_PACK_LOAD_SEEN_ONE UINT64_C(1)
+#define SPARK_PACK_LOAD_SEEN_FORMAT "%016llx"
+#define SPARK_PACK_LOAD_SEEN_ARG(value) ((unsigned long long)(value))
+#define SPARK_PACK_LOAD_BYTES_MATCH(entry) ((entry)->payload_bytes != 0u)
+#define SPARK_PACK_LOAD_ENTRY_IS_VALIDATE_ONLY(entry) ((entry)->tensor_kind >= SPARK_LAGUNA_STAGEPACK_TENSOR_KIND_COUNT)
+#define SPARK_PACK_LOAD_EXPECT_GEOMETRY(state,expected) SparkLagunaModulePackExpectGeometry((state),(expected))
+#define SPARK_PACK_LOAD_GEOMETRY_MISMATCH(state,header,expected) (SparkLagunaModulePackGeometryMismatch((state),(header),(expected)) != 0u)
+#define SPARK_PACK_LOAD_LOG_GEOMETRY_MISMATCH(state,header,expected) SparkLagunaModulePackLogGeometryMismatch((state),(header),(expected))
+#define SPARK_PACK_LOAD_PREFLIGHT(state,file,header,status) do { (status) = SparkLagunaModulePackPreflight((state),(file),(header),(status)); } while (0)
+#define SPARK_PACK_LOAD_VALIDATE_RANGES(directory,count) SparkLagunaModulePackRangesAndAttach((state),(directory),(count))
+#define SPARK_PACK_LOAD_REGION_HOOK SparkLagunaModuleRegionHook
 
-static SparkStatus SparkLagunaPackValidateInventory(const SparkLagunaModuleState *state)
+#include "sparkpipe/spark_pack_load_common.h"
+
+static SparkStatus SparkLagunaModuleValidateEntry(
+	SparkLagunaModuleState *state,
+	const SparkLagunaStagePackEntry *entry,
+	uint64_t file_bytes,
+	uint32_t *is_global)
 {
-	uint32_t local;
-	if ( state->global_seen != SparkLagunaExpectedGlobalMask(state) )
-		SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	for (local=0u; local<state->layer_count; local++)
-		if ( state->layer_seen[local] != SparkLagunaExpectedLayerMask(state,state->first_layer_index + local) )
+	SparkLagunaStagePackTensorShape shape;
+	uint64_t expected_payload,expected_scale;
+	if ( entry->tensor_kind < SPARK_LAGUNA_STAGEPACK_TENSOR_KIND_COUNT )
+	{
+		if ( SparkLagunaStagePackExpectedShape(entry->tensor_kind,entry->layer_index,state->expert_weight_codec,state->tp_degree,&shape) < 0 )
 			SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
-	return(SPARK_STATUS_OK);
+		if ( entry->payload_type != shape.payload_type || entry->weight_codec != shape.weight_codec || entry->scale_encoding != shape.scale_encoding || entry->group_count != shape.group_count || entry->rows != shape.rows || entry->columns != shape.columns )
+			SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
+		expected_payload = SparkLagunaStagePackExpectedPayloadBytes(&shape);
+		expected_scale = SparkLagunaStagePackExpectedScaleBytes(&shape);
+		if ( entry->payload_bytes != expected_payload || entry->scale_bytes != expected_scale )
+			SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
+		if ( entry->payload_offset % SPARK_LAGUNA_STAGEPACK_ALIGNMENT_BYTES != 0u )
+			SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
+		if ( entry->payload_offset < state->pack_directory_offset && state->pack_directory_offset < entry->payload_offset + entry->payload_bytes )
+			SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
+		if ( expected_scale == 0u )
+		{
+			if ( entry->scale_offset != 0u )
+				SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
+		}
+		else if ( entry->scale_offset % SPARK_LAGUNA_STAGEPACK_ALIGNMENT_BYTES != 0u || (entry->scale_offset < state->pack_directory_offset && state->pack_directory_offset < entry->scale_offset + entry->scale_bytes) )
+			SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
+	}
+	else
+	{
+		if ( (state->pack_flags & SPARK_LAGUNA_STAGEPACK_FLAG_DFLASH) == 0u || entry->layer_index >= SPARK_LAGUNA_MODEL_LAYER_COUNT )
+			SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
+		if ( entry->payload_offset % SPARK_LAGUNA_STAGEPACK_ALIGNMENT_BYTES != 0u )
+			SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
+		state->dflash_sections += 1u;
+		state->dflash_bytes += entry->payload_bytes + entry->scale_bytes;
+		*is_global = 0u;
+		return(SPARK_STATUS_OK);
+	}
+	return(SparkLagunaModuleValidateEntryPlacement(state,entry,file_bytes,is_global));
 }
 
 static SparkStatus SparkLagunaPackLoad(
 	SparkLagunaModuleState *state,
 	const char *path)
 {
-	SparkLagunaStagePackHeader header;
-	SparkLagunaStagePackEntry entries[SPARK_LAGUNA_STAGEPACK_MAX_TENSOR_COUNT];
-	SparkLagunaStagePackTensorShape shape;
-	FILE *file;
-	uint64_t file_bytes;
-	uint32_t index;
 	SparkStatus status;
-	file = fopen(path,"rb");
-	if ( file == 0 )
-		SPARK_FAIL(SPARK_STATUS_NOT_FOUND);
-	memset(&header,0,sizeof(header));
-	memset(entries,0,sizeof(entries));
-	status = SparkStageModulePackFileSize(file,&file_bytes);
-	if ( status == SPARK_STATUS_OK )
-		status = SparkStageModulePackRead(SPARK_LAGUNA_MODULE_TAG,file,0u,&header,sizeof(header));
-	if ( status == SPARK_STATUS_OK )
-		status = SparkLagunaPackValidateHeader(state,&header,file_bytes);
-	if ( status == SPARK_STATUS_OK )
-		status = SparkStageModulePackRead(SPARK_LAGUNA_MODULE_TAG,file,header.directory_offset,entries,(uint64_t)header.tensor_count * sizeof(entries[0]));
-	for (index=0u; status==SPARK_STATUS_OK && index<header.tensor_count; index++)
-	{
-		status = SparkLagunaPackValidateEntryGeometry(state,&header,&entries[index],&shape);
-		if ( status == SPARK_STATUS_OK )
-			SparkLagunaPackMarkSeen(state,&entries[index]);
-	}
+	state->pack_path = path;
+	status = SparkLagunaModuleLoadPack(state,path);
 	if ( status == SPARK_STATUS_OK && state->dflash_sections != 0u )
 		fprintf(stderr,"laguna pack carries %u DFlash payload sections (%llu bytes); recorded and skipped\n",
 			state->dflash_sections,(unsigned long long)state->dflash_bytes);
-	if ( status == SPARK_STATUS_OK )
-		status = SparkLagunaPackValidateRanges(entries,header.tensor_count);
-	if ( status == SPARK_STATUS_OK )
-		status = SparkLagunaPackValidateInventory(state);
-	if ( status == SPARK_STATUS_OK )
-		status = SparkLagunaLazyOpen(state,path,file_bytes,entries,header.tensor_count);
-	for (index=0u; status==SPARK_STATUS_OK && index<header.tensor_count; index++)
-		status = SparkLagunaPackLoadEntry(state,file,&entries[index]);
-	if ( fclose(file) != 0 && status == SPARK_STATUS_OK )
-		status = SPARK_STATUS_IO_ERROR;
 	return(status);
 }
 
@@ -1185,6 +1244,127 @@ typedef struct SparkLagunaTpChain
 	SparkStatus retained_status;
 } SparkLagunaTpChain;
 
+static int SparkLagunaT1Enabled(void)
+{
+	static int t1_enabled;
+	static uint32_t t1_probed;
+	if ( t1_probed == 0u )
+	{
+		t1_enabled = getenv("SPARK_LAGUNA_T1") != 0 ? 1 : 0;
+		t1_probed = 1u;
+	}
+	return(t1_enabled);
+}
+static void SparkLagunaT1Wave(const SparkLagunaCudaWave *wave)
+{
+	uint32_t i;
+	if ( SparkLagunaT1Enabled() == 0 || wave == 0 || wave->tp_rank != 0u ||
+	    wave->host_resident_slots == 0 || wave->host_token_ids == 0 ||
+	    wave->host_positions == 0 )
+		return;
+	fprintf(stderr,"LAG-T1 wave seq%u rows=%u",wave->host_resident_slots[0],wave->row_count);
+	for ( i = 0u; i < wave->row_count; i++ )
+		fprintf(stderr," pos%u=%u",wave->host_positions[i],wave->host_token_ids[i]);
+	fputc('\n',stderr);
+}
+static void SparkLagunaT1Streams(const SparkLagunaTpChain *chain,uint32_t layer,uint32_t from_head)
+{
+	static uint16_t *rows_host;
+	static uint32_t rows_host_capacity;
+	uint32_t final_local = chain->wave.layer_count - 1u;
+	uint32_t is_final_layer = (layer == chain->wave.first_layer_index + final_local);
+	uint32_t row;
+	uint32_t i;
+	uint64_t bytes;
+	if ( SparkLagunaT1Enabled() == 0 || chain->wave.tp_rank != 0u )
+		return;
+	if ( is_final_layer != 0u &&
+	    (from_head != 0u) == (chain->state->owns_final_head == 0u) )
+		return;
+	if ( cudaStreamSynchronize((cudaStream_t)chain->slot->stream) != cudaSuccess )
+		return;
+	bytes = (uint64_t)chain->wave_rows * SPARK_LAGUNA_MODEL_HIDDEN_DIMENSION * sizeof(uint16_t);
+	if ( rows_host_capacity < chain->wave_rows )
+	{
+		free(rows_host);
+		rows_host = (uint16_t *)malloc(bytes);
+		rows_host_capacity = rows_host != 0 ? chain->wave_rows : 0u;
+	}
+	if ( rows_host == 0 ||
+	    cudaMemcpy(rows_host,chain->slot->residual_bf16,bytes,cudaMemcpyDeviceToHost) != cudaSuccess )
+		return;
+	for ( row = 0u; row < chain->wave_rows; row++ )
+	{
+		uint16_t *values = rows_host + (uint64_t)row * SPARK_LAGUNA_MODEL_HIDDEN_DIMENSION;
+		fprintf(stderr,"LAG-T1 stream L%u pos%u",layer,chain->wave.host_positions[row]);
+		for ( i = 0u; i < SPARK_LAGUNA_MODEL_HIDDEN_DIMENSION; i++ )
+			fprintf(stderr," %04x",values[i]);
+		fputc('\n',stderr);
+	}
+}
+static void SparkLagunaT1Route(const SparkLagunaTpChain *chain,uint32_t layer)
+{
+	static uint32_t *ids_host;
+	static float *weights_host;
+	static uint32_t route_capacity;
+	uint32_t row;
+	uint32_t k;
+	if ( SparkLagunaT1Enabled() == 0 || chain->wave.tp_rank != 0u ||
+	    layer < SPARK_LAGUNA_MODEL_FIRST_ROUTED_LAYER )
+		return;
+	if ( route_capacity < chain->wave_rows )
+	{
+		free(ids_host);
+		free(weights_host);
+		ids_host = (uint32_t *)malloc((uint64_t)chain->wave_rows * SPARK_LAGUNA_MODEL_MOE_TOP_K * sizeof(uint32_t));
+		weights_host = (float *)malloc((uint64_t)chain->wave_rows * SPARK_LAGUNA_MODEL_MOE_TOP_K * sizeof(float));
+		route_capacity = ids_host != 0 && weights_host != 0 ? chain->wave_rows : 0u;
+	}
+	if ( ids_host == 0 || weights_host == 0 ||
+	    cudaMemcpy(ids_host,chain->slot->route_expert,(uint64_t)chain->wave_rows * SPARK_LAGUNA_MODEL_MOE_TOP_K * sizeof(uint32_t),cudaMemcpyDeviceToHost) != cudaSuccess ||
+	    cudaMemcpy(weights_host,chain->slot->route_weight,(uint64_t)chain->wave_rows * SPARK_LAGUNA_MODEL_MOE_TOP_K * sizeof(float),cudaMemcpyDeviceToHost) != cudaSuccess )
+		return;
+	for ( row = 0u; row < chain->wave_rows; row++ )
+	{
+		fprintf(stderr,"LAG-T1 route L%u pos%u ids",layer,chain->wave.host_positions[row]);
+		for ( k = 0u; k < SPARK_LAGUNA_MODEL_MOE_TOP_K; k++ )
+			fprintf(stderr," %u",ids_host[row * SPARK_LAGUNA_MODEL_MOE_TOP_K + k]);
+		fprintf(stderr," weights");
+		for ( k = 0u; k < SPARK_LAGUNA_MODEL_MOE_TOP_K; k++ )
+			fprintf(stderr," %08x",((const uint32_t *)weights_host)[row * SPARK_LAGUNA_MODEL_MOE_TOP_K + k]);
+		fputc('\n',stderr);
+	}
+}
+static void SparkLagunaT1Head(const SparkLagunaTpChain *chain)
+{
+	static uint32_t *tokens_host;
+	static float *scores_host;
+	static uint32_t head_capacity;
+	uint32_t i;
+	if ( SparkLagunaT1Enabled() == 0 || chain->wave.tp_rank != 0u ||
+	    chain->state->owns_final_head == 0u )
+		return;
+	if ( cudaStreamSynchronize((cudaStream_t)chain->slot->stream) != cudaSuccess )
+		return;
+	if ( head_capacity < chain->wave_rows )
+	{
+		free(tokens_host);
+		free(scores_host);
+		tokens_host = (uint32_t *)malloc((uint64_t)chain->wave_rows * sizeof(uint32_t));
+		scores_host = (float *)malloc((uint64_t)chain->wave_rows * sizeof(float));
+		head_capacity = tokens_host != 0 && scores_host != 0 ? chain->wave_rows : 0u;
+	}
+	if ( tokens_host == 0 || scores_host == 0 ||
+	    cudaMemcpy(tokens_host,chain->slot->output_token,(uint64_t)chain->wave_rows * sizeof(uint32_t),cudaMemcpyDeviceToHost) != cudaSuccess ||
+	    cudaMemcpy(scores_host,chain->slot->output_score,(uint64_t)chain->wave_rows * sizeof(float),cudaMemcpyDeviceToHost) != cudaSuccess )
+		return;
+	SparkLagunaT1Streams(chain,chain->wave.first_layer_index + chain->wave.layer_count - 1u,1u);
+	for ( i = 0u; i < chain->wave_rows; i++ )
+		fprintf(stderr,"LAG-T1 head pos%u token %u score_bits %08x\n",
+		    chain->wave.host_positions[i],tokens_host[i],
+		    ((const uint32_t *)scores_host)[i]);
+}
+
 static void SparkLagunaTpChainAdvance(void *chain_context,SparkStatus status);
 static void CUDART_CB SparkLagunaCompleteAsync(void *context);
 static SparkStatus SparkLagunaEnqueueAsyncCompletion(
@@ -1243,20 +1423,6 @@ static void SparkLagunaBuildWave(SparkLagunaTpChain *chain)
 	wave->decode_split_context_threshold = state->decode_split_context_threshold;
 }
 
-static SparkStatus SparkLagunaModuleCombineBf16(
-	void *combine_context,
-	void *destination_device,
-	const void *source_device,
-	uint32_t active_sequence_count,
-	uint32_t hidden_dimension,
-	void *cuda_stream)
-{
-	cudaError_t error;
-	(void)combine_context;
-	error = SparkLagunaLaunchAccumAdd((cudaStream_t)cuda_stream,destination_device,source_device,active_sequence_count,hidden_dimension);
-	return(SparkStageModuleCudaStatus(SPARK_LAGUNA_MODULE_TAG,error,"tp_all_reduce_sum"));
-}
-
 static SparkStatus SparkLagunaModuleCombineDirectBf16(
 	void *combine_context,
 	void *destination_device,
@@ -1271,19 +1437,6 @@ static SparkStatus SparkLagunaModuleCombineDirectBf16(
 	(void)combine_context;
 	error = SparkLagunaLaunchDirectSum((cudaStream_t)cuda_stream,destination_device,rank_devices,tp_rank,active_sequence_count,hidden_dimension);
 	return(SparkStageModuleCudaStatus(SPARK_LAGUNA_MODULE_TAG,error,"tp_d2d_all_reduce_sum"));
-}
-
-static SparkStatus SparkLagunaModuleCombineU64Max(
-	void *combine_context,
-	uint64_t *destination_device,
-	const uint64_t *source_device,
-	uint32_t element_count,
-	void *cuda_stream)
-{
-	cudaError_t error;
-	(void)combine_context;
-	error = SparkLagunaLaunchAccumU64Max((cudaStream_t)cuda_stream,destination_device,source_device,element_count);
-	return(SparkStageModuleCudaStatus(SPARK_LAGUNA_MODULE_TAG,error,"tp_all_reduce_max_u64"));
 }
 
 static SparkStatus SparkLagunaModuleInitializeTpCollective(
@@ -1325,8 +1478,7 @@ static SparkStatus SparkLagunaModuleInitializeTpCollective(
 	}
 	if ( configuration.backend_kind == SPARK_TP_DEVICE_COLLECTIVE_BACKEND_HIDDEN_TRANSPORT )
 	{
-		configuration.combine_bf16_function = SparkLagunaModuleCombineBf16;
-		configuration.combine_u64_max_function = SparkLagunaModuleCombineU64Max;
+		SparkTpMeshRegisterCommonCombines(&configuration);
 		configuration.combine_tp4_bf16_function = SparkLagunaModuleCombineDirectBf16;
 		configuration.combine_context = state;
 	}
@@ -1602,6 +1754,7 @@ static void SparkLagunaTpChainAdvance(void *chain_context,SparkStatus status)
 	{
 	case SPARK_LAGUNA_CHAIN_STAGE_BEGIN:
 		SparkLagunaBuildWave(chain);
+		SparkLagunaT1Wave(&chain->wave);
 		if ( SparkLagunaLaunchCudaWaveBegin(&chain->wave) != 0 )
 		{
 			SparkLagunaTpChainFail(chain,SPARK_STATUS_INTERNAL_ERROR);
@@ -1659,6 +1812,8 @@ static void SparkLagunaTpChainAdvance(void *chain_context,SparkStatus status)
 			SparkLagunaTpChainFail(chain,SPARK_STATUS_INTERNAL_ERROR);
 			return;
 		}
+		SparkLagunaT1Streams(chain,chain->wave.first_layer_index + chain->next_layer,0u);
+		SparkLagunaT1Route(chain,chain->wave.first_layer_index + chain->next_layer);
 		chain->next_layer++;
 		if ( chain->next_layer < chain->wave.layer_count )
 		{
@@ -1692,6 +1847,7 @@ static void SparkLagunaTpChainAdvance(void *chain_context,SparkStatus status)
 			SparkLagunaTpChainFail(chain,launch_status);
 			return;
 		}
+		SparkLagunaT1Head(chain);
 		if ( chain->next_wave_row < chain->batch->row_count )
 		{
 			uint32_t next_wave;

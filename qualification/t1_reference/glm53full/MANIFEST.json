@@ -1,0 +1,31 @@
+{
+  "checkpoint": {
+    "config_sha256": "3ac72612095574542f7fff847ada8e59d9199dd8af44bdf625d7e02615572e69",
+    "index_sha256": "e0fe7f28c1f853d4824e4d796374e3dacf1fe470988773952c79b063768134bf",
+    "path": "/mnt/model-warm/glm-5.3-fp8"
+  },
+  "defines_config_mismatches": [],
+  "family": "glm53full",
+  "fixtures": {
+    "capital_of_france.t1r": {
+      "bytes": 661585,
+      "sha256": "d17944c4a74e58d8868c03cc82747e3c649f21a8ce9729e08d11f48ff0e5978c"
+    },
+    "count_up.t1r": {
+      "bytes": 881376,
+      "sha256": "7169286e21d4f92f3ba6120e31d78bfb7224999fe2a5721941615ad3789e8fa4"
+    }
+  },
+  "generated_utc": "2026-09-17T19:05:07Z",
+  "generator": "t1_reference_decoder.py",
+  "host": "spark7",
+  "llm_defines_sha256": "853130ec51984d810f7d9e66a82f54edccc1b48b296f244962523307ddde9de0",
+  "numpy_version": "2.5.3",
+  "prompts_sha256": "f209905ddd2e19e63974e9c9fb9da71994badbe515bee843ae275ab9352d4b0d",
+  "python_version": "3.12.3",
+  "threading_env": {
+    "MKL_NUM_THREADS": null,
+    "OMP_NUM_THREADS": null,
+    "OPENBLAS_NUM_THREADS": null
+  }
+}

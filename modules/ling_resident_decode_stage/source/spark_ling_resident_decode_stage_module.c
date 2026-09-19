@@ -18,8 +18,12 @@
 #include "sparkpipe/spark_ling_kv_geometry.h"
 #include "sparkpipe/spark_stage_module_common.h"
 #include "sparkpipe/spark_head_screen.h"
+#include "sparkpipe/spark_tp_mesh_register.h"
 #include "spark_ling_resident_decode_stage_internal.h"
 #include "spark_ling_stagepack_format.h"
+#include "sparkpipe/spark_weightd.h"
+#include "sparkpipe/spark_weightd_attach.h"
+#include "sparkpipe/spark_weightd_lazy_pack.h"
 
 #ifndef LING_EXPERT_WEIGHT_CODEC
 #error "LING_EXPERT_WEIGHT_CODEC must name the exact package expert codec"
@@ -41,12 +45,6 @@
 	  SPARK_LING_KV_BYTES_PER_SCALAR )
 #error "ling KV slot bytes and arena block geometry disagree"
 #endif
-
-typedef struct SparkLingPackRange
-{
-	uint64_t offset;
-	uint64_t bytes;
-} SparkLingPackRange;
 
 typedef struct SparkLingModuleState SparkLingModuleState;
 
@@ -94,6 +92,8 @@ struct SparkLingModuleState
 	uint32_t kda_ordinal_by_local_layer[SPARK_LING_RESIDENT_DECODE_STAGE_LAYERS_PER_STAGE];
 	uint32_t kv_layer_count;
 	uint32_t kda_layer_count;
+	uint64_t pack_directory_offset_bytes;
+	uint64_t pack_directory_end_bytes;
 	uint8_t *kda_state_pools;
 	uint64_t kda_state_layer_stride_bytes;
 	uint8_t *kda_window_pools;
@@ -145,51 +145,10 @@ struct SparkLingModuleState
 	atomic_ullong host_callback_completion_count;
 	SparkTpDeviceCollective tp_device_collective;
 	uint32_t tp_device_collective_initialized;
+	SparkWeightdLazyPack *lazy_pack;
 	atomic_ullong tp_next_ordinal;
 };
 
-
-static SparkStatus SparkLingModuleConfigure(
-	SparkLingModuleState *state,
-	const SparkFirmwareModuleConfiguration *configuration,
-	const SparkFirmwareModuleHostServices *host_services,
-	const char **pack_path)
-{
-	const SparkLingResidentDecodeStageNodeContext *context;
-	if ( state == 0 || configuration == 0 || host_services == 0 || pack_path == 0 || host_services->node_context == 0 || host_services->execution_stream == 0 )
-		return(SPARK_STATUS_INVALID_ARGUMENT);
-	context = (const SparkLingResidentDecodeStageNodeContext *)host_services->node_context;
-	if ( context->abi_version != SPARK_LING_RESIDENT_DECODE_STAGE_NODE_CONTEXT_ABI_VERSION || context->descriptor_bytes != SPARK_LING_RESIDENT_DECODE_STAGE_NODE_CONTEXT_BYTES )
-		return(SPARK_STATUS_ABI_MISMATCH);
-	if ( context->stage_count != SPARK_LING_RESIDENT_DECODE_STAGE_STAGE_COUNT || context->stage_index >= context->stage_count || context->first_layer_index != SparkLingResidentDecodeStageFirstLayer(context->stage_index) || context->layer_count != SPARK_LING_RESIDENT_DECODE_STAGE_LAYERS_PER_STAGE || context->expert_weight_codec != LING_EXPERT_WEIGHT_CODEC || context->resident_sequence_capacity == 0u || context->resident_sequence_capacity > SPARK_LING_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT || context->pipeline_slot_count == 0u || context->pipeline_slot_count > SPARK_LING_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT || context->max_sequence_positions == 0u || context->max_sequence_positions > SPARK_LING_MODEL_MAXIMUM_CONTEXT_TOKENS || context->execution_row_capacity == 0u || context->execution_row_capacity > SPARK_LING_RESIDENT_DECODE_STAGE_MAX_INPUT_ROW_COUNT || context->decode_split_context_threshold > context->max_sequence_positions || context->tp_degree == 0u || context->tp_rank >= context->tp_degree || context->stage_pack_path == 0 || context->stage_pack_path[0] == '\0' || context->model_revision == 0 || context->model_revision[0] == '\0' || strlen(context->model_revision) >= sizeof(state->model_revision) )
-		return(SPARK_STATUS_INVALID_ARGUMENT);
-	if ( SparkWeightCodecIsKnown(context->expert_weight_codec) == 0u || context->expert_weight_codec == SPARK_WEIGHT_CODEC_BF16 )
-		return(SPARK_STATUS_UNSUPPORTED);
-	if ( context->tp_degree != 1u && (SPARK_LING_MODEL_HEAD_COUNT % context->tp_degree != 0u || SPARK_LING_MODEL_OUTPUT_VOCAB_COUNT % context->tp_degree != 0u || SPARK_LING_MODEL_DENSE_INTERMEDIATE_DIMENSION % context->tp_degree != 0u || SPARK_LING_MODEL_MOE_INTERMEDIATE_DIMENSION % context->tp_degree != 0u) )
-		return(SPARK_STATUS_INVALID_ARGUMENT);
-	if ( configuration->model_revision == 0 || strcmp(configuration->model_revision,context->model_revision) != 0 )
-		return(SPARK_STATUS_SCHEMA_ERROR);
-	state->stage_index = context->stage_index;
-	state->first_layer_index = context->first_layer_index;
-	state->layer_count = context->layer_count;
-	state->expert_weight_codec = context->expert_weight_codec;
-	state->tp_degree = context->tp_degree;
-	state->tp_rank = context->tp_rank;
-	state->kv_backing_directory = context->kv_backing_directory;
-	state->kv_backing_maximum_bytes = context->kv_backing_maximum_bytes;
-	state->tp_collective_disabled = context->tp_collective_identifier == 0u ? 1u : 0u;
-	state->resident_sequence_capacity = context->resident_sequence_capacity;
-	state->pipeline_slot_count = context->pipeline_slot_count;
-	state->max_sequence_positions = context->max_sequence_positions;
-	state->decode_split_context_threshold = context->decode_split_context_threshold;
-	state->execution_row_capacity = context->execution_row_capacity;
-	state->owns_embedding = context->stage_index == 0u ? 1u : 0u;
-	state->owns_final_head = context->stage_index + 1u == context->stage_count ? 1u : 0u;
-	state->execution_stream = host_services->execution_stream;
-	(void)snprintf(state->model_revision,sizeof(state->model_revision),"%s",context->model_revision);
-	*pack_path = context->stage_pack_path;
-	return(SPARK_STATUS_OK);
-}
 
 static SparkStatus SparkLingPackFileSize(FILE *file,uint64_t *bytes)
 {
@@ -201,11 +160,6 @@ static SparkStatus SparkLingPackFileSize(FILE *file,uint64_t *bytes)
 		return(SPARK_STATUS_IO_ERROR);
 	*bytes = (uint64_t)end;
 	return(SPARK_STATUS_OK);
-}
-
-static uint32_t SparkLingPackRangesOverlap(const SparkLingPackRange *left,const SparkLingPackRange *right)
-{
-	return(left->bytes != 0u && right->bytes != 0u && left->offset < right->offset + right->bytes && right->offset < left->offset + left->bytes ? 1u : 0u);
 }
 
 static SparkStatus SparkLingPackValidateHeader(
@@ -235,55 +189,38 @@ static SparkStatus SparkLingPackValidateHeader(
 	return(SPARK_STATUS_OK);
 }
 
-static SparkStatus SparkLingPackValidateEntryGeometry(
+static SparkStatus SparkLingPackValidateHeaderFromFile(
 	const SparkLingModuleState *state,
-	const SparkLingStagePackHeader *header,
-	const SparkLingStagePackEntry *entry,
-	SparkLingStagePackTensorShape *shape)
+	FILE *file,
+	const SparkLingStagePackHeader *header)
 {
-	uint64_t payload_bytes,scale_bytes,directory_end;
-	uint32_t local_layer;
-	if ( SparkLingStagePackExpectedShape(entry->tensor_kind,entry->layer_index,state->expert_weight_codec,state->tp_degree,shape) < 0 )
-		return(SPARK_STATUS_SCHEMA_ERROR);
-	if ( entry->layer_index != SPARK_LING_STAGEPACK_GLOBAL_LAYER )
+	uint64_t file_bytes;
+	SparkStatus status;
+	status = SparkLingPackFileSize(file,&file_bytes);
+	if ( status != SPARK_STATUS_OK )
+		return(status);
+	status = SparkLingPackValidateHeader(state,header,file_bytes);
+	if ( status == SPARK_STATUS_OK )
 	{
-		if ( entry->layer_index == SPARK_LING_MODEL_MTP_LAYER_INDEX )
-		{
-			if ( (state->mtp_seen & (UINT64_C(1) << entry->tensor_kind)) != 0u )
-				return(SPARK_STATUS_DUPLICATE);
-		}
-		else
-		{
-			if ( entry->layer_index < state->first_layer_index || entry->layer_index >= state->first_layer_index + state->layer_count )
-				return(SPARK_STATUS_SCHEMA_ERROR);
-			local_layer = entry->layer_index - state->first_layer_index;
-			if ( (state->layer_seen[local_layer] & (UINT64_C(1) << entry->tensor_kind)) != 0u )
-				return(SPARK_STATUS_DUPLICATE);
-		}
+		((SparkLingModuleState *)state)->pack_directory_offset_bytes =
+			header->directory_offset;
+		((SparkLingModuleState *)state)->pack_directory_end_bytes =
+			header->directory_offset +
+			((uint64_t)header->tensor_count *
+			 header->directory_entry_bytes);
 	}
-	else if ( (state->global_seen & (UINT64_C(1) << entry->tensor_kind)) != 0u )
-		return(SPARK_STATUS_DUPLICATE);
-	if ( entry->payload_type != shape->payload_type || entry->weight_codec != shape->weight_codec || entry->scale_encoding != shape->scale_encoding || entry->group_count != shape->group_count || entry->rows != shape->rows || entry->columns != shape->columns )
-		return(SPARK_STATUS_SCHEMA_ERROR);
-	payload_bytes = SparkLingStagePackExpectedPayloadBytes(shape);
-	scale_bytes = SparkLingStagePackExpectedScaleBytes(shape);
-	if ( payload_bytes == 0u || entry->payload_bytes != payload_bytes || entry->scale_bytes != scale_bytes )
-		return(SPARK_STATUS_SCHEMA_ERROR);
-	directory_end = header->directory_offset + ((uint64_t)header->tensor_count * header->directory_entry_bytes);
-	if ( entry->payload_offset % SPARK_LING_STAGEPACK_ALIGNMENT_BYTES != 0u || entry->payload_offset > header->file_bytes || entry->payload_bytes > header->file_bytes - entry->payload_offset )
-		return(SPARK_STATUS_SCHEMA_ERROR);
-	if ( entry->payload_offset < directory_end && header->directory_offset < entry->payload_offset + entry->payload_bytes )
-		return(SPARK_STATUS_SCHEMA_ERROR);
-	if ( scale_bytes == 0u )
-	{
-		if ( entry->scale_offset != 0u )
-			return(SPARK_STATUS_SCHEMA_ERROR);
-	}
-	else if ( entry->scale_offset % SPARK_LING_STAGEPACK_ALIGNMENT_BYTES != 0u || entry->scale_offset > header->file_bytes || entry->scale_bytes > header->file_bytes - entry->scale_offset )
-		return(SPARK_STATUS_SCHEMA_ERROR);
-	else if ( entry->scale_offset < directory_end && header->directory_offset < entry->scale_offset + entry->scale_bytes )
-		return(SPARK_STATUS_SCHEMA_ERROR);
-	return(SPARK_STATUS_OK);
+	return(status);
+}
+
+typedef struct SparkLingPackRange
+{
+	uint64_t offset;
+	uint64_t bytes;
+} SparkLingPackRange;
+
+static uint32_t SparkLingPackRangesOverlap(const SparkLingPackRange *left,const SparkLingPackRange *right)
+{
+	return(left->bytes != 0u && right->bytes != 0u && left->offset < right->offset + right->bytes && right->offset < left->offset + left->bytes ? 1u : 0u);
 }
 
 static SparkStatus SparkLingPackValidateRanges(
@@ -315,24 +252,88 @@ static SparkStatus SparkLingPackValidateRanges(
 	return(SPARK_STATUS_OK);
 }
 
-static void SparkLingPackMarkSeen(
+#define SPARK_LING_RESIDENT_DECODE_STAGE_LAYER_COUNT SPARK_LING_MODEL_LAYER_COUNT
+#define SPARK_LING_STAGEPACK_MTP_LAYER SPARK_LING_MODEL_MTP_LAYER_INDEX
+#define SPARK_LING_STAGEPACK_TENSOR_MTP_FC \
+	SPARK_LING_STAGEPACK_TENSOR_MTP_EH_PROJ
+#define SPARK_LING_STAGEPACK_TENSOR_MTP_FINAL_NORM \
+	SPARK_LING_STAGEPACK_TENSOR_MTP_SHARED_NORM
+
+#define SPARK_PACK_LOAD_FN(name) SparkLingModule##name
+#define SPARK_PACK_LOAD_TYPE(name) SparkLing##name
+#define SPARK_PACK_LOAD_CONST(name) SPARK_LING_##name
+#define SPARK_PACK_LOAD_LAYER_IS_GDN(layer) \
+	(SPARK_LING_MODEL_LAYER_IS_KDA(layer))
+#define SPARK_PACK_LOAD_SEEN_TYPE uint64_t
+#define SPARK_PACK_LOAD_SEEN_ONE UINT64_C(1)
+#define SPARK_PACK_LOAD_SEEN_FORMAT "%016llx"
+#define SPARK_PACK_LOAD_SEEN_ARG(value) ((unsigned long long)(value))
+#define SPARK_PACK_LOAD_BYTES_MATCH(entry) (1u)
+#define SPARK_PACK_LOAD_EXPECT_GEOMETRY(state,expected) \
+	do { (void)(state); (void)(expected); } while (0)
+#define SPARK_PACK_LOAD_GEOMETRY_MISMATCH(state,header,expected) (0)
+#define SPARK_PACK_LOAD_LOG_GEOMETRY_MISMATCH(state,header,expected) \
+	do { } while (0)
+#define SPARK_PACK_LOAD_PREFLIGHT(state,file,header,status) \
+	do { (state)->pack_has_mtp = ((status) == SPARK_STATUS_OK && \
+		((header)->flags & SPARK_LING_STAGEPACK_FLAG_MTP) != 0u) ? 1u : 0u; } \
+		while (0)
+#define SPARK_PACK_LOAD_VALIDATE_HEADER(state,file,header) \
+	SparkLingPackValidateHeaderFromFile(state,file,header)
+#define SPARK_PACK_LOAD_VALIDATE_RANGES(entries,count) \
+	SparkLingPackValidateRanges(entries,count)
+#define SPARK_PACK_LOAD_ENTRY_IS_VALIDATE_ONLY(entry) \
+	((entry)->layer_index == SPARK_LING_MODEL_MTP_LAYER_INDEX ? 1u : 0u)
+#define SPARK_PACK_LOAD_SEEN_MTP_FIELD mtp_seen
+#define SPARK_PACK_LOAD_SEEN_GLOBAL_FIELD global_seen
+#define SPARK_PACK_LOAD_SEEN_LAYER_FIELD layer_seen
+#define SPARK_PACK_LOAD_NO_BUILD_ORDINALS
+#define SPARK_PACK_LOAD_NO_LINEAR_VIEW
+
+#include "sparkpipe/spark_pack_load_common.h"
+
+static SparkStatus SparkLingModuleValidateEntry(
 	SparkLingModuleState *state,
-	const SparkLingStagePackEntry *entry)
+	const SparkLingStagePackEntry *entry,
+	uint64_t file_bytes,
+	uint32_t *is_global)
 {
-	if ( entry->layer_index == SPARK_LING_STAGEPACK_GLOBAL_LAYER )
-		state->global_seen |= UINT64_C(1) << entry->tensor_kind;
-	else if ( entry->layer_index == SPARK_LING_MODEL_MTP_LAYER_INDEX )
-		state->mtp_seen |= UINT64_C(1) << entry->tensor_kind;
-	else
-		state->layer_seen[entry->layer_index - state->first_layer_index] |= UINT64_C(1) << entry->tensor_kind;
+	SparkLingStagePackTensorShape shape;
+	uint64_t payload_bytes,scale_bytes;
+	if ( SparkLingStagePackExpectedShape(entry->tensor_kind,entry->layer_index,state->expert_weight_codec,state->tp_degree,&shape) < 0 )
+		return(SPARK_STATUS_SCHEMA_ERROR);
+	if ( entry->payload_type != shape.payload_type || entry->weight_codec != shape.weight_codec || entry->scale_encoding != shape.scale_encoding || entry->group_count != shape.group_count || entry->rows != shape.rows || entry->columns != shape.columns )
+		return(SPARK_STATUS_SCHEMA_ERROR);
+	payload_bytes = SparkLingStagePackExpectedPayloadBytes(&shape);
+	scale_bytes = SparkLingStagePackExpectedScaleBytes(&shape);
+	if ( payload_bytes == 0u || entry->payload_bytes != payload_bytes || entry->scale_bytes != scale_bytes )
+		return(SPARK_STATUS_SCHEMA_ERROR);
+	if ( entry->payload_offset % SPARK_LING_STAGEPACK_ALIGNMENT_BYTES != 0u || entry->payload_offset > file_bytes || entry->payload_bytes > file_bytes - entry->payload_offset )
+		return(SPARK_STATUS_SCHEMA_ERROR);
+	if ( entry->payload_offset < state->pack_directory_end_bytes && state->pack_directory_offset_bytes < entry->payload_offset + entry->payload_bytes )
+		return(SPARK_STATUS_SCHEMA_ERROR);
+	if ( scale_bytes == 0u )
+	{
+		if ( entry->scale_offset != 0u )
+			return(SPARK_STATUS_SCHEMA_ERROR);
+	}
+	else if ( entry->scale_offset % SPARK_LING_STAGEPACK_ALIGNMENT_BYTES != 0u || entry->scale_offset > file_bytes || entry->scale_bytes > file_bytes - entry->scale_offset )
+		return(SPARK_STATUS_SCHEMA_ERROR);
+	else if ( entry->scale_offset < state->pack_directory_end_bytes && state->pack_directory_offset_bytes < entry->scale_offset + entry->scale_bytes )
+		return(SPARK_STATUS_SCHEMA_ERROR);
+	return(SparkLingModuleValidateEntryPlacement(state,entry,file_bytes,is_global));
 }
 
-static SparkStatus SparkLingPackAssignLayer(
-	SparkLingLayerWeights *weights,
-	uint32_t tensor_kind,
-	const void *payload,
-	const void *scale)
+static SparkStatus SparkLingModuleBindLayer(
+	SparkLingModuleState *state,
+	const SparkLingStagePackEntry *entry,
+	void *payload,
+	void *scale)
 {
+	SparkLingLayerWeights *weights;
+	uint32_t tensor_kind;
+	weights = &state->layers[entry->layer_index - state->first_layer_index];
+	tensor_kind = entry->tensor_kind;
 	switch ( tensor_kind )
 	{
 	case SPARK_LING_STAGEPACK_TENSOR_ATTN_NORM: weights->attn_norm_bf16 = payload; break;
@@ -372,14 +373,11 @@ static SparkStatus SparkLingPackAssignLayer(
 	return(SPARK_STATUS_OK);
 }
 
-static SparkStatus SparkLingPackAssign(
+static SparkStatus SparkLingModuleBindGlobal(
 	SparkLingModuleState *state,
 	const SparkLingStagePackEntry *entry,
-	const void *payload,
-	const void *scale)
+	void *payload)
 {
-	if ( entry->layer_index != SPARK_LING_STAGEPACK_GLOBAL_LAYER )
-		return(SparkLingPackAssignLayer(&state->layers[entry->layer_index - state->first_layer_index],entry->tensor_kind,payload,scale));
 	switch ( entry->tensor_kind )
 	{
 	case SPARK_LING_STAGEPACK_TENSOR_EMBEDDING: state->embedding_bf16 = payload; return(SPARK_STATUS_OK);
@@ -389,24 +387,20 @@ static SparkStatus SparkLingPackAssign(
 	}
 }
 
-static SparkStatus SparkLingPackLoadEntry(
+static SparkStatus SparkLingModuleBindMtp(
 	SparkLingModuleState *state,
-	FILE *file,
-	const SparkLingStagePackEntry *entry)
+	const SparkLingStagePackEntry *entry,
+	void *payload,
+	void *scale)
 {
-	void *payload,*scale;
-	SparkStatus status;
-	payload = 0;
-	scale = 0;
-	status = SparkStageModuleLoadDeviceRegion(&state->ledger,file,entry->payload_offset,entry->payload_bytes,&payload);
-	if ( status == SPARK_STATUS_OK && entry->scale_bytes != 0u )
-		status = SparkStageModuleLoadDeviceRegion(&state->ledger,file,entry->scale_offset,entry->scale_bytes,&scale);
-	if ( status == SPARK_STATUS_OK )
-		status = SparkLingPackAssign(state,entry,payload,scale);
-	return(status);
+	(void)state;
+	(void)entry;
+	(void)payload;
+	(void)scale;
+	return(SPARK_STATUS_SCHEMA_ERROR);
 }
 
-static uint64_t SparkLingExpectedLayerMask(
+static uint64_t SparkLingModuleExpectedLayerBits(
 	const SparkLingModuleState *state,
 	uint32_t layer_index)
 {
@@ -420,7 +414,7 @@ static uint64_t SparkLingExpectedLayerMask(
 	return(mask);
 }
 
-static uint64_t SparkLingExpectedGlobalMask(const SparkLingModuleState *state)
+static uint64_t SparkLingModuleExpectedGlobalBits(const SparkLingModuleState *state)
 {
 	uint64_t mask;
 	mask = 0u;
@@ -431,63 +425,53 @@ static uint64_t SparkLingExpectedGlobalMask(const SparkLingModuleState *state)
 	return(mask);
 }
 
-static SparkStatus SparkLingPackValidateInventory(const SparkLingModuleState *state)
+static uint64_t SparkLingModuleExpectedMtpBits(const SparkLingModuleState *state)
 {
-	uint64_t expected_mtp;
-	uint32_t local;
-	if ( state->global_seen != SparkLingExpectedGlobalMask(state) )
-		return(SPARK_STATUS_SCHEMA_ERROR);
-	expected_mtp = state->pack_has_mtp != 0u ?
-		SparkLingExpectedLayerMask(state,SPARK_LING_MODEL_MTP_LAYER_INDEX) : 0u;
-	if ( state->mtp_seen != expected_mtp )
-		return(SPARK_STATUS_SCHEMA_ERROR);
-	for (local=0u; local<state->layer_count; local++)
-		if ( state->layer_seen[local] != SparkLingExpectedLayerMask(state,state->first_layer_index + local) )
-			return(SPARK_STATUS_SCHEMA_ERROR);
-	return(SPARK_STATUS_OK);
+	return(state->pack_has_mtp != 0u ?
+		SparkLingModuleExpectedLayerBits(state,SPARK_LING_MODEL_MTP_LAYER_INDEX) :
+		0u);
 }
 
-static SparkStatus SparkLingPackLoad(
+static SparkStatus SparkLingModuleConfigure(
 	SparkLingModuleState *state,
-	const char *path)
+	const SparkFirmwareModuleConfiguration *configuration,
+	const SparkFirmwareModuleHostServices *host_services,
+	const char **pack_path)
 {
-	SparkLingStagePackHeader header;
-	SparkLingStagePackEntry entries[SPARK_LING_STAGEPACK_MAX_TENSOR_COUNT];
-	SparkLingStagePackTensorShape shape;
-	FILE *file;
-	uint64_t file_bytes;
-	uint32_t index;
-	SparkStatus status;
-	file = fopen(path,"rb");
-	if ( file == 0 )
-		return(SPARK_STATUS_NOT_FOUND);
-	memset(&header,0,sizeof(header));
-	memset(entries,0,sizeof(entries));
-	status = SparkLingPackFileSize(file,&file_bytes);
-	if ( status == SPARK_STATUS_OK )
-		status = SparkStageModulePackRead(SPARK_LING_MODULE_TAG,file,0u,&header,sizeof(header));
-	if ( status == SPARK_STATUS_OK )
-		status = SparkLingPackValidateHeader(state,&header,file_bytes);
-	if ( status == SPARK_STATUS_OK )
-		state->pack_has_mtp = (header.flags & SPARK_LING_STAGEPACK_FLAG_MTP) != 0u ? 1u : 0u;
-	if ( status == SPARK_STATUS_OK )
-		status = SparkStageModulePackRead(SPARK_LING_MODULE_TAG,file,header.directory_offset,entries,(uint64_t)header.tensor_count * sizeof(entries[0]));
-	for (index=0u; status==SPARK_STATUS_OK && index<header.tensor_count; index++)
-	{
-		status = SparkLingPackValidateEntryGeometry(state,&header,&entries[index],&shape);
-		if ( status == SPARK_STATUS_OK )
-			SparkLingPackMarkSeen(state,&entries[index]);
-	}
-	if ( status == SPARK_STATUS_OK )
-		status = SparkLingPackValidateRanges(entries,header.tensor_count);
-	if ( status == SPARK_STATUS_OK )
-		status = SparkLingPackValidateInventory(state);
-	for (index=0u; status==SPARK_STATUS_OK && index<header.tensor_count; index++)
-		if ( entries[index].layer_index != SPARK_LING_MODEL_MTP_LAYER_INDEX )
-			status = SparkLingPackLoadEntry(state,file,&entries[index]);
-	if ( fclose(file) != 0 && status == SPARK_STATUS_OK )
-		status = SPARK_STATUS_IO_ERROR;
-	return(status);
+	const SparkLingResidentDecodeStageNodeContext *context;
+	if ( state == 0 || configuration == 0 || host_services == 0 || pack_path == 0 || host_services->node_context == 0 || host_services->execution_stream == 0 )
+		return(SPARK_STATUS_INVALID_ARGUMENT);
+	context = (const SparkLingResidentDecodeStageNodeContext *)host_services->node_context;
+	if ( context->abi_version != SPARK_LING_RESIDENT_DECODE_STAGE_NODE_CONTEXT_ABI_VERSION || context->descriptor_bytes != SPARK_LING_RESIDENT_DECODE_STAGE_NODE_CONTEXT_BYTES )
+		return(SPARK_STATUS_ABI_MISMATCH);
+	if ( context->stage_count != SPARK_LING_RESIDENT_DECODE_STAGE_STAGE_COUNT || context->stage_index >= context->stage_count || context->first_layer_index != SparkLingResidentDecodeStageFirstLayer(context->stage_index) || context->layer_count != SPARK_LING_RESIDENT_DECODE_STAGE_LAYERS_PER_STAGE || context->expert_weight_codec != LING_EXPERT_WEIGHT_CODEC || context->resident_sequence_capacity == 0u || context->resident_sequence_capacity > SPARK_LING_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT || context->pipeline_slot_count == 0u || context->pipeline_slot_count > SPARK_LING_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT || context->max_sequence_positions == 0u || context->max_sequence_positions > SPARK_LING_MODEL_MAXIMUM_CONTEXT_TOKENS || context->execution_row_capacity == 0u || context->execution_row_capacity > SPARK_LING_RESIDENT_DECODE_STAGE_MAX_INPUT_ROW_COUNT || context->decode_split_context_threshold > context->max_sequence_positions || context->tp_degree == 0u || context->tp_rank >= context->tp_degree || context->stage_pack_path == 0 || context->stage_pack_path[0] == '\0' || context->model_revision == 0 || context->model_revision[0] == '\0' || strlen(context->model_revision) >= sizeof(state->model_revision) )
+		return(SPARK_STATUS_INVALID_ARGUMENT);
+	if ( SparkWeightCodecIsKnown(context->expert_weight_codec) == 0u )
+		return(SPARK_STATUS_UNSUPPORTED);
+	if ( context->tp_degree != 1u && (SPARK_LING_MODEL_HEAD_COUNT % context->tp_degree != 0u || SPARK_LING_MODEL_OUTPUT_VOCAB_COUNT % context->tp_degree != 0u || SPARK_LING_MODEL_DENSE_INTERMEDIATE_DIMENSION % context->tp_degree != 0u || SPARK_LING_MODEL_MOE_INTERMEDIATE_DIMENSION % context->tp_degree != 0u) )
+		return(SPARK_STATUS_INVALID_ARGUMENT);
+	if ( configuration->model_revision == 0 || strcmp(configuration->model_revision,context->model_revision) != 0 )
+		return(SPARK_STATUS_SCHEMA_ERROR);
+	state->stage_index = context->stage_index;
+	state->first_layer_index = context->first_layer_index;
+	state->layer_count = context->layer_count;
+	state->expert_weight_codec = context->expert_weight_codec;
+	state->tp_degree = context->tp_degree;
+	state->tp_rank = context->tp_rank;
+	state->kv_backing_directory = context->kv_backing_directory;
+	state->kv_backing_maximum_bytes = context->kv_backing_maximum_bytes;
+	state->tp_collective_disabled = context->tp_collective_identifier == 0u ? 1u : 0u;
+	state->resident_sequence_capacity = context->resident_sequence_capacity;
+	state->pipeline_slot_count = context->pipeline_slot_count;
+	state->max_sequence_positions = context->max_sequence_positions;
+	state->decode_split_context_threshold = context->decode_split_context_threshold;
+	state->execution_row_capacity = context->execution_row_capacity;
+	state->owns_embedding = context->stage_index == 0u ? 1u : 0u;
+	state->owns_final_head = context->stage_index + 1u == context->stage_count ? 1u : 0u;
+	state->execution_stream = host_services->execution_stream;
+	(void)snprintf(state->model_revision,sizeof(state->model_revision),"%s",context->model_revision);
+	*pack_path = context->stage_pack_path;
+	return(SPARK_STATUS_OK);
 }
 
 static SparkStatus SparkLingAllocateBytes(
@@ -1233,18 +1217,139 @@ static void SparkLingBuildWave(SparkLingTpChain *chain)
 		state->execution_row_capacity,SPARK_LING_MODEL_HEAD_COUNT / state->tp_degree);
 }
 
-static SparkStatus SparkLingModuleCombineBf16(
-	void *combine_context,
-	void *destination_device,
-	const void *source_device,
-	uint32_t active_sequence_count,
-	uint32_t hidden_dimension,
-	void *cuda_stream)
+static int SparkLingT1Enabled(void)
 {
-	cudaError_t error;
-	(void)combine_context;
-	error = SparkLingLaunchAccumAdd((cudaStream_t)cuda_stream,destination_device,source_device,active_sequence_count,hidden_dimension);
-	return(SparkStageModuleCudaStatus(SPARK_LING_MODULE_TAG,error,"tp_all_reduce_sum"));
+	static int t1_enabled = -1;
+	if ( t1_enabled < 0 )
+		t1_enabled = getenv("SPARK_LING_T1") != 0 ? 1 : 0;
+	return(t1_enabled);
+}
+
+static float SparkLingT1Bf16Float(uint16_t word)
+{
+	uint32_t bits = (uint32_t)word << 16;
+	float value;
+	memcpy(&value,&bits,sizeof(value));
+	return(value);
+}
+
+static uint16_t SparkLingT1Bf16Round(float value)
+{
+	uint32_t bits;
+	memcpy(&bits,&value,sizeof(bits));
+	return((uint16_t)((bits + 0x7fffu + ((bits >> 16) & 1u)) >> 16));
+}
+
+static void SparkLingT1Wave(const SparkLingCudaWave *wave)
+{
+	uint32_t i;
+	if ( SparkLingT1Enabled() == 0 || wave == 0 || wave->tp_rank != 0u ||
+	    wave->row_count == 0u || wave->host_resident_slots == 0 ||
+	    wave->host_token_ids == 0 || wave->host_positions == 0 )
+		return;
+	fprintf(stderr,"LNG-T1 wave seq%u rows=%u",wave->host_resident_slots[0],wave->row_count);
+	for ( i = 0u; i < wave->row_count; i++ )
+		fprintf(stderr," pos%u=%u",wave->host_positions[i],wave->host_token_ids[i]);
+	fputc('\n',stderr);
+}
+
+static void SparkLingT1Stream(SparkLingTpChain *chain,uint32_t layer)
+{
+	static uint16_t *rows_host = 0;
+	static uint32_t rows_host_capacity = 0;
+	uint32_t row;
+	uint32_t i;
+	uint64_t row_bytes;
+	if ( SparkLingT1Enabled() == 0 || chain->wave.tp_rank != 0u )
+		return;
+	if ( cudaStreamSynchronize((cudaStream_t)chain->slot->stream) != cudaSuccess )
+		return;
+	row_bytes = (uint64_t)chain->wave_rows * SPARK_LING_MODEL_HIDDEN_DIMENSION * sizeof(uint16_t);
+	if ( rows_host_capacity < chain->wave_rows )
+	{
+		free(rows_host);
+		rows_host = (uint16_t *)malloc(row_bytes * 2u);
+		rows_host_capacity = rows_host != 0 ? chain->wave_rows : 0u;
+	}
+	if ( rows_host == 0 ||
+	    cudaMemcpy(rows_host,chain->slot->hidden_bf16,row_bytes,cudaMemcpyDeviceToHost) != cudaSuccess ||
+	    cudaMemcpy(rows_host + (uint64_t)chain->wave_rows * SPARK_LING_MODEL_HIDDEN_DIMENSION,chain->slot->attention_out_bf16,row_bytes,cudaMemcpyDeviceToHost) != cudaSuccess )
+		return;
+	for ( row = 0u; row < chain->wave_rows; row++ )
+	{
+		uint16_t *hidden = rows_host + (uint64_t)row * SPARK_LING_MODEL_HIDDEN_DIMENSION;
+		uint16_t *delta = rows_host + ((uint64_t)chain->wave_rows + row) * SPARK_LING_MODEL_HIDDEN_DIMENSION;
+		fprintf(stderr,"LNG-T1 stream L%u pos%u",layer,chain->wave.host_positions[row]);
+		for ( i = 0u; i < SPARK_LING_MODEL_HIDDEN_DIMENSION; i++ )
+			fprintf(stderr," %04x",SparkLingT1Bf16Round(SparkLingT1Bf16Float(hidden[i]) +
+			    SparkLingT1Bf16Float(delta[i])));
+		fputc('\n',stderr);
+	}
+}
+
+static void SparkLingT1Route(SparkLingTpChain *chain,uint32_t layer)
+{
+	static uint32_t *ids_host = 0;
+	static float *weights_host = 0;
+	static uint32_t route_capacity = 0;
+	uint32_t row;
+	uint32_t k;
+	uint64_t bytes;
+	if ( SparkLingT1Enabled() == 0 || chain->wave.tp_rank != 0u ||
+	    layer < SPARK_LING_MODEL_FIRST_ROUTED_LAYER )
+		return;
+	bytes = (uint64_t)chain->wave_rows * SPARK_LING_MODEL_MOE_TOP_K * sizeof(uint32_t);
+	if ( route_capacity < chain->wave_rows )
+	{
+		free(ids_host);
+		free(weights_host);
+		ids_host = (uint32_t *)malloc(bytes);
+		weights_host = (float *)malloc(bytes);
+		route_capacity = ids_host != 0 && weights_host != 0 ? chain->wave_rows : 0u;
+	}
+	if ( ids_host == 0 || weights_host == 0 ||
+	    cudaMemcpy(ids_host,chain->slot->route_expert,bytes,cudaMemcpyDeviceToHost) != cudaSuccess ||
+	    cudaMemcpy(weights_host,chain->slot->route_weight,(uint64_t)chain->wave_rows * SPARK_LING_MODEL_MOE_TOP_K * sizeof(float),cudaMemcpyDeviceToHost) != cudaSuccess )
+		return;
+	for ( row = 0u; row < chain->wave_rows; row++ )
+	{
+		fprintf(stderr,"LNG-T1 route L%u pos%u ids",layer,chain->wave.host_positions[row]);
+		for ( k = 0u; k < SPARK_LING_MODEL_MOE_TOP_K; k++ )
+			fprintf(stderr," %u",ids_host[row * SPARK_LING_MODEL_MOE_TOP_K + k]);
+		fprintf(stderr," weights");
+		for ( k = 0u; k < SPARK_LING_MODEL_MOE_TOP_K; k++ )
+			fprintf(stderr," %08x",
+			    ((const uint32_t *)weights_host)[row * SPARK_LING_MODEL_MOE_TOP_K + k]);
+		fputc('\n',stderr);
+	}
+}
+
+static void SparkLingT1Head(SparkLingTpChain *chain)
+{
+	static uint32_t *tokens_host = 0;
+	static float *scores_host = 0;
+	static uint32_t head_capacity = 0;
+	uint32_t i;
+	if ( SparkLingT1Enabled() == 0 || chain->wave.tp_rank != 0u )
+		return;
+	if ( cudaStreamSynchronize((cudaStream_t)chain->slot->stream) != cudaSuccess )
+		return;
+	if ( head_capacity < chain->wave_rows )
+	{
+		free(tokens_host);
+		free(scores_host);
+		tokens_host = (uint32_t *)malloc((uint64_t)chain->wave_rows * sizeof(uint32_t));
+		scores_host = (float *)malloc((uint64_t)chain->wave_rows * sizeof(float));
+		head_capacity = tokens_host != 0 && scores_host != 0 ? chain->wave_rows : 0u;
+	}
+	if ( tokens_host == 0 || scores_host == 0 ||
+	    cudaMemcpy(tokens_host,chain->slot->output_token,(uint64_t)chain->wave_rows * sizeof(uint32_t),cudaMemcpyDeviceToHost) != cudaSuccess ||
+	    cudaMemcpy(scores_host,chain->slot->output_score,(uint64_t)chain->wave_rows * sizeof(float),cudaMemcpyDeviceToHost) != cudaSuccess )
+		return;
+	for ( i = 0u; i < chain->wave_rows; i++ )
+		fprintf(stderr,"LNG-T1 head pos%u token %u score_bits %08x\n",
+		    chain->wave.host_positions[i],tokens_host[i],
+		    ((const uint32_t *)scores_host)[i]);
 }
 
 static SparkStatus SparkLingModuleCombineDirectBf16(
@@ -1266,7 +1371,7 @@ static SparkStatus SparkLingModuleCombineDirectBf16(
 	{
 		if (rank_devices[index] == 0 || index == tp_rank)
 			continue;
-		error = SparkLingLaunchAccumAdd((cudaStream_t)cuda_stream,
+		error = SparkGlm5NextLaunchAccumAdd((cudaStream_t)cuda_stream,
 			destination_device,rank_devices[index],
 			active_sequence_count,hidden_dimension);
 		if (error != cudaSuccess)
@@ -1276,17 +1381,38 @@ static SparkStatus SparkLingModuleCombineDirectBf16(
 	return(SPARK_STATUS_OK);
 }
 
-static SparkStatus SparkLingModuleCombineU64Max(
-	void *combine_context,
-	uint64_t *destination_device,
-	const uint64_t *source_device,
-	uint32_t element_count,
-	void *cuda_stream)
+static SparkStatus SparkLingModuleMeshAttach(
+	SparkLingModuleState *state,
+	const SparkLingResidentDecodeStageNodeContext *context)
 {
-	cudaError_t error;
-	(void)combine_context;
-	error = SparkLingLaunchAccumU64Max((cudaStream_t)cuda_stream,destination_device,source_device,element_count);
-	return(SparkStageModuleCudaStatus(SPARK_LING_MODULE_TAG,error,"tp_all_reduce_max_u64"));
+	SparkWeightdLazyAttachRequest request;
+	struct stat info;
+	const char *digest;
+	uint64_t spine_budget;
+	SparkStatus status;
+	status = SparkWeightdAttachRequested();
+	if ( status != SPARK_STATUS_OK )
+		return(status == SPARK_STATUS_BUSY ? SPARK_STATUS_UNSUPPORTED : status);
+	memset(&request,0,sizeof(request));
+	digest = getenv(SPARK_WEIGHTD_ATTACH_ENV_SHA256);
+	if ( digest == 0 || strlen(digest) != 64u || strlen(context->stage_pack_path) >= sizeof(request.pack_path) )
+		return(SPARK_STATUS_INVALID_ARGUMENT);
+	memcpy(request.identity.pack_sha256,digest,strlen(digest) + 1u);
+	(void)snprintf(request.identity.model,sizeof(request.identity.model),"%s",SPARK_LING_MODULE_TAG);
+	(void)snprintf(request.identity.revision,sizeof(request.identity.revision),"%s",state->model_revision);
+	request.identity.abi_version = SPARK_WEIGHTD_IPC_ABI_VERSION;
+	if ( stat(context->stage_pack_path,&info) != 0 || info.st_size <= 0 )
+		return(SPARK_STATUS_IO_ERROR);
+	request.identity.arena_bytes = (uint64_t)info.st_size;
+	request.identity.topology = state->tp_degree;
+	memcpy(request.pack_path,context->stage_pack_path,strlen(context->stage_pack_path) + 1u);
+	status = SparkStageModuleEnvironmentUnsigned64OrDefault(SPARK_LING_MODULE_TAG,"SPARK_WEIGHTD_EXPERT_POOL_BYTES",1u,UINT64_MAX,UINT64_C(4294967296),&request.expert_pool_bytes);
+	if ( status != SPARK_STATUS_OK )
+		return(status);
+	status = SparkStageModuleEnvironmentUnsigned64OrDefault(SPARK_LING_MODULE_TAG,"SPARK_WEIGHTD_SPINE_BUDGET_BYTES",1u,UINT64_MAX,UINT64_C(8589934592),&spine_budget);
+	if ( status != SPARK_STATUS_OK )
+		return(status);
+	return(SparkWeightdLazyPackCreate(getenv(SPARK_WEIGHTD_ATTACH_ENV_SOCKET),&request,spine_budget,SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS,&state->lazy_pack));
 }
 
 static SparkStatus SparkLingModuleInitializeTpCollective(
@@ -1317,10 +1443,9 @@ static SparkStatus SparkLingModuleInitializeTpCollective(
 	status = SparkTpDeviceCollectiveApplyTopology(&context->tp_collective_topology,&configuration);
 	if ( status != SPARK_STATUS_OK )
 		return(status);
+	SparkTpMeshRegisterCommonCombines(&configuration);
 	if ( configuration.backend_kind == SPARK_TP_DEVICE_COLLECTIVE_BACKEND_HIDDEN_TRANSPORT )
 	{
-		configuration.combine_bf16_function = SparkLingModuleCombineBf16;
-		configuration.combine_u64_max_function = SparkLingModuleCombineU64Max;
 		configuration.combine_tp4_bf16_function = SparkLingModuleCombineDirectBf16;
 		configuration.combine_context = state;
 	}
@@ -1330,6 +1455,19 @@ static SparkStatus SparkLingModuleInitializeTpCollective(
 	if ( status != SPARK_STATUS_OK )
 		return(status);
 	state->tp_device_collective_initialized = 1u;
+	status = SparkLingModuleMeshAttach(state,context);
+	if ( status != SPARK_STATUS_OK )
+		return(status);
+	if ( state->lazy_pack != 0 &&
+	    state->lazy_pack->attached.mesh_send_buffer_addr != 0 )
+	{
+		status = SparkTpDeviceCollectivePrepareReceiveBf16(
+		    &state->tp_device_collective,
+		    (void *)(uintptr_t)state->lazy_pack->attached.mesh_send_buffer_addr,
+		    0u,0u,0u,0u);
+		if ( status != SPARK_STATUS_OK )
+			return(status);
+	}
 	return(SPARK_STATUS_OK);
 }
 
@@ -1435,6 +1573,7 @@ static SparkStatus SparkLingTpChainLaunchLayerStage(SparkLingTpChain *chain,uint
 static void SparkLingTpChainStageBegin(SparkLingTpChain *chain)
 {
 	SparkLingBuildWave(chain);
+	SparkLingT1Wave(&chain->wave);
 	if ( SparkLingLaunchCudaWaveBegin(&chain->wave) != 0 )
 	{
 		SparkLingTpChainFail(chain,SPARK_STATUS_INTERNAL_ERROR);
@@ -1475,6 +1614,7 @@ static void SparkLingTpChainStageReduceHead(SparkLingTpChain *chain)
 		SparkLingTpChainFail(chain,launch_status);
 		return;
 	}
+	SparkLingT1Head(chain);
 	if ( chain->next_wave_row < chain->batch->row_count )
 	{
 		next_wave = SparkLingRoundMajorWaveRows(chain->batch,chain->next_wave_row);
@@ -1539,6 +1679,8 @@ static void SparkLingTpChainAdvance(void *chain_context,SparkStatus status)
 		SparkLingTpChainRunLayerStage(chain,SPARK_LING_CHAIN_STAGE_REDUCE_MLP);
 		return;
 	case SPARK_LING_CHAIN_STAGE_REDUCE_MLP:
+		SparkLingT1Route(chain,chain->wave.first_layer_index + chain->next_layer);
+		SparkLingT1Stream(chain,chain->wave.first_layer_index + chain->next_layer);
 		chain->next_layer++;
 		SparkLingTpChainTransition(chain,chain->next_layer < chain->wave.layer_count
 			? SPARK_LING_CHAIN_STAGE_ATTENTION : SPARK_LING_CHAIN_STAGE_HEAD);
@@ -1871,6 +2013,12 @@ void SparkLingResidentDecodeStageDestroy(void *module_state)
 	(void)cudaStreamSynchronize((cudaStream_t)state->execution_stream);
 	if ( state->tp_device_collective_initialized != 0u )
 		SparkTpDeviceCollectiveDestroy(&state->tp_device_collective);
+	if ( state->lazy_pack != 0 )
+	{
+		if ( SparkWeightdLazyPackDestroy(state->lazy_pack) != SPARK_STATUS_OK )
+			return;
+		state->lazy_pack = 0;
+	}
 	if ( state->kv_page_store.abi_version == SPARK_KV_PAGE_STORE_ABI_VERSION )
 		SparkKvPageStoreDestroy(&state->kv_page_store);
 	SparkLingReleaseSlotHost(state);
@@ -1908,7 +2056,7 @@ static SparkStatus SparkLingInitializeState(
 	if ( status == SPARK_STATUS_OK && SparkLingConfigureCudaModule(&state->multiprocessor_count) != 0 )
 		status = SPARK_STATUS_TARGET_MISMATCH;
 	if ( status == SPARK_STATUS_OK )
-		status = SparkLingPackLoad(state,pack_path);
+		status = SparkLingModuleLoadPack(state,pack_path);
 	if ( status == SPARK_STATUS_OK )
 		status = SparkLingAllocateCaches(state);
 	if ( status == SPARK_STATUS_OK )

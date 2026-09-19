@@ -1,9 +1,10 @@
 #!/bin/sh
 set -eu
 rank=$1
-pack="$HOME/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank$rank.sp"
+rank_hex=$(printf '%x' "$rank")
+pack="$HOME/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank$rank_hex.sp"
 sha=$(python3 -c "import json;print(json.load(open('$pack.receipt.json'))['output_sha256'])")
-. "/tmp/t1qmax_stage/tools/rank$rank.env"
+. "/tmp/t1qmax/rank$rank.env"
 rc=0
 sudo -n /usr/local/sbin/sparkcap env \
 	SPARK_QWEN38_MAX_ALLOW_UNQUALIFIED_EXECUTION=1 \
