@@ -22,6 +22,8 @@ struct SparkModelResidentClient
 	uint32_t commit_calls;
 	uint32_t abort_calls;
 	uint64_t last_submission_id;
+	uint32_t is_final_rank;
+	SparkModelServingSubmission last_submission;
 	SparkStatus scripted_submit_status;
 };
 
@@ -156,6 +158,7 @@ SparkStatus SparkModelResidentClientPrepare(
 		return(SPARK_STATUS_INVALID_ARGUMENT);
 	client->prepare_calls++;
 	client->last_submission_id = submission->submission_id;
+	client->last_submission = *submission;
 	return(client->scripted_submit_status);
 }
 
@@ -176,6 +179,7 @@ SparkStatus SparkModelResidentClientContinue(
 		return(SPARK_STATUS_INVALID_ARGUMENT);
 	client->continue_calls++;
 	client->last_submission_id = submission->submission_id;
+	client->last_submission = *submission;
 	return(client->scripted_submit_status);
 }
 
@@ -244,4 +248,64 @@ SparkStatus SparkModelResidentClientGetView(
 	view->max_input_row_count = 8u;
 	view->resident_sequence_capacity = 4u;
 	return(SPARK_STATUS_OK);
+}
+
+static uint32_t mock_auto_tokens;
+
+void MockResidentClientSetAutoTokens(uint32_t count)
+{
+	mock_auto_tokens = count;
+}
+
+void MockResidentClientSetFinalRank(uint32_t stage_index, uint32_t is_final)
+{
+	SparkModelResidentClient *c = MockResidentClientByRank(stage_index);
+	if ( c != 0 )
+		c->is_final_rank = is_final;
+}
+
+uint32_t MockResidentClientDriveAll(void)
+{
+	uint32_t i,drove = 0u;
+	for (i=0u; i<mock_registry_count; i++)
+	{
+		SparkModelResidentClient *c = mock_registry[i];
+		if ( c == 0 || c->last_submission_id == 0u || c->connected == 0u )
+			continue;
+		if ( c->submit_result_function != 0 )
+			c->submit_result_function(c->submit_result_context,c->last_submission_id,SPARK_STATUS_OK);
+		if ( c->decision_result_function != 0 )
+			c->decision_result_function(c->decision_result_context,c->last_submission_id,1u,SPARK_STATUS_OK);
+		if ( c->completion_function != 0 )
+		{
+			SparkModelServingCompletion completion;
+			memset(&completion,0,sizeof(completion));
+			completion.abi_version = 1u;
+			completion.descriptor_bytes = SPARK_MODEL_SERVING_COMPLETION_BYTES;
+			completion.status = SPARK_STATUS_OK;
+			completion.submission_id = c->last_submission_id;
+			completion.request_id = c->last_submission.request_id;
+			completion.sequence_id = c->last_submission.sequence_id;
+			completion.sequence_position = c->last_submission.sequence_position;
+			completion.control_generation = c->last_submission.control_generation;
+			completion.transaction_id = c->last_submission.transaction_id;
+			completion.dispatch_generation = c->last_submission.dispatch_generation;
+			completion.request_generation = c->last_submission.request_generation;
+			completion.step_generation = c->last_submission.step_generation;
+			completion.residency = c->last_submission.residency;
+			if ( c->is_final_rank != 0u && mock_auto_tokens != 0u )
+			{
+				uint32_t t;
+				completion.token_count = c->last_submission.active_sequence_count * mock_auto_tokens;
+				completion.tokens_per_sequence = mock_auto_tokens;
+				completion.completion_flags = SPARK_MODEL_SERVING_COMPLETION_FLAG_TOKEN_IDS;
+				completion.accepted_token_count = completion.token_count;
+				for (t=0u; t<completion.token_count && t<(uint32_t)(sizeof(completion.token_ids)/sizeof(completion.token_ids[0])); t++)
+					completion.token_ids[t] = 11u + t;
+			}
+			c->completion_function(c->completion_context,&completion);
+		}
+		drove++;
+	}
+	return(drove);
 }

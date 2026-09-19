@@ -21,6 +21,9 @@ void MockResidentClientFireResult(uint32_t stage_index, uint64_t submission_id, 
 void MockResidentClientFireDecision(uint32_t stage_index, uint64_t submission_id, uint32_t decision_kind, SparkStatus status);
 void MockResidentClientFireCompletion(uint32_t stage_index, const SparkModelServingCompletion *completion);
 void MockResidentClientDisconnect(uint32_t stage_index);
+void MockResidentClientSetAutoTokens(uint32_t count);
+void MockResidentClientSetFinalRank(uint32_t stage_index, uint32_t is_final);
+uint32_t MockResidentClientDriveAll(void);
 void MockResidentClientReset(void);
 
 #endif
