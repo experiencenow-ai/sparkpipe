@@ -1297,10 +1297,25 @@ static SparkStatus SparkWeightdArenaChunkEnsure(
 static SparkStatus SparkWeightdPremapPool(SparkWeightdServer *server,
     SparkWeightdArena *arena)
 {
-	(void)server;
-	(void)arena;
-	fprintf(stderr,"WD-POOL-PREMAP-SKIP (pool pre-map disabled: overwrites spine mapping — needs separate VA ranges)\n");
-	return(SPARK_STATUS_OK);
+    uint32_t chunk;
+    if ( arena->lazy == 0u || arena->staging == 0 )
+        SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+    for ( chunk = 0u; chunk < arena->chunk_count; chunk++ )
+    {
+        if ( arena->chunk_handles[chunk] == 0 )
+        {
+            SparkStatus status;
+            status = SparkWeightdArenaChunkEnsure(server,arena,chunk,chunk);
+            if ( status != SPARK_STATUS_OK )
+                SPARK_RETURN(status);
+        }
+    }
+    printf("weightd pool pre-mapped chunks=%u bytes=%llu\n",
+        arena->chunk_count,
+        (unsigned long long)((uint64_t)arena->chunk_count *
+            arena->chunk_bytes));
+    fflush(stdout);
+    return(SPARK_STATUS_OK);
 }
 
 static SparkStatus SparkWeightdPreloadSpine(SparkWeightdServer *server,
@@ -1451,16 +1466,14 @@ static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
         int32_t pack_fd = open(request->pack_path,O_RDONLY);
         if ( pack_fd >= 0 )
         {
-            status = SparkWeightdPremapPool(server,arena);
-            if ( status != SPARK_STATUS_OK )
-                fprintf(stderr,"WD-POOL-PREMAP-FAIL status=%s\n",
-                    SparkStatusToString(status));
             status = SparkWeightdPreloadSpine(server,arena,pack_fd);
-            (void)close(pack_fd);
+            if ( status == SPARK_STATUS_OK )
+                status = SparkWeightdPremapPool(server,arena);
             if ( status != SPARK_STATUS_OK )
-                fprintf(stderr,"WD-SPINE-PRELOAD-FAIL status=%s\n",
+                fprintf(stderr,"WD-SPINE/PREMAP-FAIL status=%s\n",
                     SparkStatusToString(status));
-            else
+            (void)close(pack_fd);
+            if ( status == SPARK_STATUS_OK )
                 printf("weightd spine preloaded spans=%u bytes=%llu\n",
                     arena->manifest.spine_count,
                     (unsigned long long)arena->manifest.spine_bytes);
