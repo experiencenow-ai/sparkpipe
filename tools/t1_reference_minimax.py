@@ -123,10 +123,36 @@ class MiniMaxEngine:
             -(2.0 * np.arange(self._half, dtype=np.float64)
               / self.head_dim) * np.log2(self.rope_theta)).astype(np.float32)
         self._lm_head_u16 = None
+        self._scratch_u32 = {}
 
     def _entry_shape(self, name):
         entry = self.st.entry(name)
         return tuple(entry["shape"]), entry["dtype"]
+
+    def _expand_into(self, raw_u16):
+        count, cols = raw_u16.shape
+        scratch = self._scratch_u32.get(cols)
+        if scratch is None:
+            rows = max(1, (32 << 20) // (4 * cols))
+            scratch = np.zeros((rows, cols), dtype=np.uint32)
+            self._scratch_u32[cols] = scratch
+        if count > scratch.shape[0]:
+            raise ValueError(
+                f"chunk {count} rows exceeds scratch {scratch.shape[0]} "
+                f"for width {cols}")
+        view = scratch.view(np.uint16).reshape(scratch.shape[0], cols * 2)
+        view[:count, 1::2] = raw_u16
+        return scratch.view(np.float32)[:count]
+
+    def _matvec_rows(self, name, x):
+        rows, cols = self.st.entry(name)["shape"]
+        chunk = max(1, (32 << 20) // (4 * cols))
+        out = np.empty(rows, dtype=np.float32)
+        for first in range(0, rows, chunk):
+            count = min(chunk, rows - first)
+            raw = self.st.raw_rows(name, first, count)
+            out[first:first + count] = self._expand_into(raw) @ x
+        return out
 
     def _check_shapes(self, layer):
         p = PREFIX + str(layer) + "."
@@ -180,7 +206,7 @@ class MiniMaxEngine:
         return raw.astype(np.float32)
 
     def linear(self, x, name):
-        return bf16_round(self.tensor(name + ".weight") @ x)
+        return bf16_round(self._matvec_rows(name + ".weight", x))
 
     def embed(self, token_id):
         if token_id < 0 or token_id >= self.vocab:
@@ -206,20 +232,17 @@ class MiniMaxEngine:
         return rows / np.sqrt(variance + self.eps)[:, None] * gain[None, :]
 
     def attention(self, prefix, x, cache, position):
-        q = bf16_round(self.tensor(
-            prefix + "self_attn.q_proj.weight") @ x).reshape(
+        q = self.linear(x, prefix + "self_attn.q_proj").reshape(
             self.heads, self.head_dim)
         q = self.head_rmsnorm(q, self.tensor(
             prefix + "self_attn.q_norm.weight").reshape(-1))
         q = self.rope(q, position)
-        k = bf16_round(self.tensor(
-            prefix + "self_attn.k_proj.weight") @ x).reshape(
+        k = self.linear(x, prefix + "self_attn.k_proj").reshape(
             self.kv_heads, self.head_dim)
         k = self.head_rmsnorm(k, self.tensor(
             prefix + "self_attn.k_norm.weight").reshape(-1))
         k = self.rope(k, position)
-        v = bf16_round(self.tensor(
-            prefix + "self_attn.v_proj.weight") @ x).reshape(
+        v = self.linear(x, prefix + "self_attn.v_proj").reshape(
             self.kv_heads, self.head_dim)
         cache.append((bf16_round_u16(k.reshape(-1)),
                       bf16_round_u16(v.reshape(-1))))
@@ -272,7 +295,7 @@ class MiniMaxEngine:
                 raise ValueError(f"nonfinite reference state at layer {i}")
         return streams
 
-    def logits(self, streams, chunk=4096):
+    def logits(self, streams):
         norm = bf16_round(rmsnorm(
             streams, self.tensor(FINAL_NORM_NAME), self.eps))
         if self._lm_head_u16 is None:
@@ -280,10 +303,13 @@ class MiniMaxEngine:
             if self._lm_head_u16.dtype != np.uint16:
                 raise MiniMaxConfigError("reference lm_head must be BF16")
         lm = self._lm_head_u16
+        cols = lm.shape[1]
+        chunk = max(1, (32 << 20) // (4 * cols))
         best = -np.inf
         best_token = -1
         for start in range(0, lm.shape[0], chunk):
-            scores = bf16_expand(lm[start:start + chunk]) @ norm
+            count = min(chunk, lm.shape[0] - start)
+            scores = self._expand_into(lm[start:start + count]) @ norm
             i = int(np.argmax(scores))
             if float(scores[i]) > best:
                 best = float(scores[i])
