@@ -24,6 +24,9 @@ void MockResidentClientDisconnect(uint32_t stage_index);
 void MockResidentClientSetAutoTokens(uint32_t count);
 void MockResidentClientSetFinalRank(uint32_t stage_index, uint32_t is_final);
 uint32_t MockResidentClientDriveAll(void);
+uint32_t MockResidentClientDriveResults(void);
+uint32_t MockResidentClientDriveCompletions(void);
+uint32_t MockResidentClientDriveDecisions(void);
 void MockResidentClientReset(void);
 
 #endif

@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 struct SparkModelResidentClient
 {
@@ -22,6 +23,11 @@ struct SparkModelResidentClient
 	uint32_t commit_calls;
 	uint32_t abort_calls;
 	uint64_t last_submission_id;
+	uint64_t last_results_driven_id;
+	uint64_t last_decision_driven_id;
+	uint64_t last_completion_driven_id;
+	uint32_t pending_decision_kind;
+	uint64_t pending_decision_id;
 	uint32_t is_final_rank;
 	SparkModelServingSubmission last_submission;
 	SparkStatus scripted_submit_status;
@@ -124,6 +130,9 @@ SparkStatus SparkModelResidentClientConnect(
 	c->completion_context = configuration->completion_context;
 	c->scripted_submit_status = SPARK_STATUS_OK;
 	mock_registry[mock_registry_count++] = c;
+	if ( getenv("MOCK_TRACE") != 0 )
+		fprintf(stderr,"MOCK connect stage=%u registry=%u\n",
+			(unsigned)configuration->stage_index,(unsigned)mock_registry_count);
 	*client_out = c;
 	return(SPARK_STATUS_OK);
 }
@@ -147,6 +156,11 @@ SparkStatus SparkModelResidentClientSubmit(
 		return(SPARK_STATUS_INVALID_ARGUMENT);
 	client->submit_calls++;
 	client->last_submission_id = submission->submission_id;
+	if ( getenv("MOCK_TRACE") != 0 )
+		fprintf(stderr,"MOCK rank=%u submit id=%llu kind=%u seq=%llu\n",
+			client->stage_index,(unsigned long long)submission->submission_id,
+			(unsigned)submission->work_kind,
+			(unsigned long long)submission->sequence_id);
 	return(client->scripted_submit_status);
 }
 
@@ -159,6 +173,11 @@ SparkStatus SparkModelResidentClientPrepare(
 	client->prepare_calls++;
 	client->last_submission_id = submission->submission_id;
 	client->last_submission = *submission;
+	if ( getenv("MOCK_TRACE") != 0 )
+		fprintf(stderr,"MOCK rank=%u prepare id=%llu kind=%u rows=%u seq=%llu\n",
+			client->stage_index,(unsigned long long)submission->submission_id,
+			(unsigned)submission->work_kind,(unsigned)submission->row_count,
+			(unsigned long long)submission->sequence_id);
 	return(client->scripted_submit_status);
 }
 
@@ -180,6 +199,11 @@ SparkStatus SparkModelResidentClientContinue(
 	client->continue_calls++;
 	client->last_submission_id = submission->submission_id;
 	client->last_submission = *submission;
+	if ( getenv("MOCK_TRACE") != 0 )
+		fprintf(stderr,"MOCK rank=%u continue id=%llu kind=%u seq=%llu\n",
+			client->stage_index,(unsigned long long)submission->submission_id,
+			(unsigned)submission->work_kind,
+			(unsigned long long)submission->sequence_id);
 	return(client->scripted_submit_status);
 }
 
@@ -202,6 +226,8 @@ SparkStatus SparkModelResidentClientCommit(
 		return(SPARK_STATUS_INVALID_ARGUMENT);
 	client->commit_calls++;
 	client->last_submission_id = submission_id;
+	client->pending_decision_kind = SPARK_MODEL_RESIDENT_IPC_DECISION_COMMIT;
+	client->pending_decision_id = submission_id;
 	return(client->scripted_submit_status);
 }
 
@@ -213,6 +239,8 @@ SparkStatus SparkModelResidentClientAbort(
 		return(SPARK_STATUS_INVALID_ARGUMENT);
 	client->abort_calls++;
 	client->last_submission_id = submission_id;
+	client->pending_decision_kind = SPARK_MODEL_RESIDENT_IPC_DECISION_ABORT;
+	client->pending_decision_id = submission_id;
 	return(SPARK_STATUS_OK);
 }
 
@@ -264,7 +292,7 @@ void MockResidentClientSetFinalRank(uint32_t stage_index, uint32_t is_final)
 		c->is_final_rank = is_final;
 }
 
-uint32_t MockResidentClientDriveAll(void)
+uint32_t MockResidentClientDriveResults(void)
 {
 	uint32_t i,drove = 0u;
 	for (i=0u; i<mock_registry_count; i++)
@@ -272,15 +300,34 @@ uint32_t MockResidentClientDriveAll(void)
 		SparkModelResidentClient *c = mock_registry[i];
 		if ( c == 0 || c->last_submission_id == 0u || c->connected == 0u )
 			continue;
+		if ( c->last_results_driven_id == c->last_submission_id )
+			continue;
+		c->last_results_driven_id = c->last_submission_id;
 		if ( c->submit_result_function != 0 )
 			c->submit_result_function(c->submit_result_context,c->last_submission_id,SPARK_STATUS_OK);
-		if ( c->decision_result_function != 0 )
-			c->decision_result_function(c->decision_result_context,c->last_submission_id,1u,SPARK_STATUS_OK);
+		drove++;
+	}
+	return(drove);
+}
+
+uint32_t MockResidentClientDriveCompletions(void)
+{
+	uint32_t i,drove = 0u;
+	for (i=0u; i<mock_registry_count; i++)
+	{
+		SparkModelResidentClient *c = mock_registry[i];
+		if ( c == 0 || c->last_submission_id == 0u || c->connected == 0u )
+			continue;
+		if ( c->last_results_driven_id != c->last_submission_id )
+			continue;
+		if ( c->last_completion_driven_id == c->last_submission_id )
+			continue;
+		c->last_completion_driven_id = c->last_submission_id;
 		if ( c->completion_function != 0 )
 		{
 			SparkModelServingCompletion completion;
 			memset(&completion,0,sizeof(completion));
-			completion.abi_version = 1u;
+			completion.abi_version = SPARK_MODEL_SERVING_ADAPTER_ABI_VERSION;
 			completion.descriptor_bytes = SPARK_MODEL_SERVING_COMPLETION_BYTES;
 			completion.status = SPARK_STATUS_OK;
 			completion.submission_id = c->last_submission_id;
@@ -293,7 +340,8 @@ uint32_t MockResidentClientDriveAll(void)
 			completion.request_generation = c->last_submission.request_generation;
 			completion.step_generation = c->last_submission.step_generation;
 			completion.residency = c->last_submission.residency;
-			if ( c->is_final_rank != 0u && mock_auto_tokens != 0u )
+			if ( c->is_final_rank != 0u && mock_auto_tokens != 0u &&
+			     c->last_submission.work_kind != SPARK_MODEL_SERVING_WORK_KIND_RELEASE )
 			{
 				uint32_t t;
 				completion.token_count = c->last_submission.active_sequence_count * mock_auto_tokens;
@@ -308,4 +356,29 @@ uint32_t MockResidentClientDriveAll(void)
 		drove++;
 	}
 	return(drove);
+}
+
+uint32_t MockResidentClientDriveDecisions(void)
+{
+	uint32_t i,drove = 0u;
+	for (i=0u; i<mock_registry_count; i++)
+	{
+		SparkModelResidentClient *c = mock_registry[i];
+		if ( c == 0 || c->pending_decision_kind == 0u || c->connected == 0u )
+			continue;
+		if ( c->decision_result_function != 0 )
+			c->decision_result_function(c->decision_result_context,c->pending_decision_id,c->pending_decision_kind,SPARK_STATUS_OK);
+		c->pending_decision_kind = 0u;
+		drove++;
+	}
+	return(drove);
+}
+
+uint32_t MockResidentClientDriveAll(void)
+{
+	uint32_t a,b,c;
+	a = MockResidentClientDriveResults();
+	b = MockResidentClientDriveDecisions();
+	c = MockResidentClientDriveCompletions();
+	return(a + b + c);
 }
