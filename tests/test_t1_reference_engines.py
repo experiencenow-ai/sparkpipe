@@ -111,6 +111,11 @@ GEMMA4_DEFINES = """#pragma once
 #define SPARK_LLM_DENSE_INTERMEDIATE_DIMENSION  8u
 """
 
+GEMMA4_MOE_DEFINES = GEMMA4_DEFINES + """#define SPARK_LLM_ROUTED_EXPERT_COUNT           4u
+#define SPARK_LLM_EXPERTS_PER_TOKEN             2u
+#define SPARK_LLM_EXPERT_INTERMEDIATE_DIMENSION 4u
+"""
+
 LAGUNA_DEFINES = """#pragma once
 
 #define SPARK_LLM_FAMILY_TAG                    laguna
@@ -240,6 +245,32 @@ def gemma4_config():
     }
 
 
+def gemma4_moe_config():
+    config = gemma4_config()
+    config.update({
+        "enable_moe_block": True, "num_experts": 4, "top_k_experts": 2,
+        "moe_intermediate_size": 4,
+    })
+    return config
+
+
+def gemma4_moe_tensors():
+    rng = np.random.default_rng(23)
+    t = gemma4_tensors()
+    fresh = np.random.default_rng(29)
+    for layer in range(6):
+        p = f"model.language_model.layers.{layer}."
+        t[p + "experts.gate_up_proj"] = bf16("egu", (4, 8, 16), fresh)
+        t[p + "experts.down_proj"] = bf16("edn", (4, 16, 4), fresh)
+        t[p + "router.proj.weight"] = bf16("rp", (4, 16), fresh)
+        t[p + "router.scale"] = bf16("rs", (16,), fresh)
+        t[p + "router.per_expert_scale"] = bf16("pes", (4,), fresh)
+        t[p + "post_feedforward_layernorm_1.weight"] = bf16("df1", (16,), fresh)
+        t[p + "pre_feedforward_layernorm_2.weight"] = bf16("pf2", (16,), fresh)
+        t[p + "post_feedforward_layernorm_2.weight"] = bf16("df2", (16,), fresh)
+    return t
+
+
 def laguna_tensors():
     rng = np.random.default_rng(17)
     t = {}
@@ -296,13 +327,15 @@ def laguna_config():
 
 
 FAMILIES = [
-    ("ling", ling_tensors, ling_config(), LING_DEFINES),
-    ("gemma4", gemma4_tensors, gemma4_config(), GEMMA4_DEFINES),
-    ("laguna", laguna_tensors, laguna_config(), LAGUNA_DEFINES),
+    ("ling", ling_tensors, ling_config(), LING_DEFINES, "ling"),
+    ("gemma4", gemma4_tensors, gemma4_config(), GEMMA4_DEFINES, "gemma4"),
+    ("gemma4_moe", gemma4_moe_tensors, gemma4_moe_config(), GEMMA4_MOE_DEFINES,
+     "gemma4"),
+    ("laguna", laguna_tensors, laguna_config(), LAGUNA_DEFINES, "laguna"),
 ]
 
 
-def check_family(workspace, family, tensors, config, defines):
+def check_family(workspace, family, tensors, config, defines, engine):
     checkpoint = os.path.join(workspace, f"{family}_checkpoint")
     os.makedirs(checkpoint, exist_ok=True)
     write_safetensors(os.path.join(checkpoint, "model.safetensors"), tensors)
@@ -314,24 +347,25 @@ def check_family(workspace, family, tensors, config, defines):
         "name": "synth",
         "prompt_token_ids": {"ling": [3, 7, 11],
                              "gemma4": [5, 9, 13],
+                             "gemma4_moe": [5, 9, 13],
                              "laguna": [5, 9, 13]}[family],
         "new_tokens": 2,
         "capture_layers": [0, config["num_hidden_layers"] - 1],
     }]})
     out_a = os.path.join(workspace, f"{family}_a")
     out_b = os.path.join(workspace, f"{family}_b")
-    run_generator(family, checkpoint, header, prompts, out_a)
-    run_generator(family, checkpoint, header, prompts, out_b)
-    fixture_a = os.path.join(out_a, family, "synth.t1r")
-    fixture_b = os.path.join(out_b, family, "synth.t1r")
+    run_generator(engine, checkpoint, header, prompts, out_a)
+    run_generator(engine, checkpoint, header, prompts, out_b)
+    fixture_a = os.path.join(out_a, engine, "synth.t1r")
+    fixture_b = os.path.join(out_b, engine, "synth.t1r")
     expect(os.path.exists(fixture_a), f"{family}: fixture missing")
     _, arrays = read_fixture(fixture_a)
     expect("pos0000_layer0000_streams" in arrays, f"{family}: anchor missing")
     expect(any(name.endswith("_route_ids") for name in arrays) or
-           family == "gemma4", f"{family}: route capture missing")
+           family in ("gemma4", "gemma4_moe"), f"{family}: route capture missing")
     expect(open(fixture_a, "rb").read() == open(fixture_b, "rb").read(),
            f"{family}: generator is not byte-deterministic")
-    manifest = json.load(open(os.path.join(out_a, family, "MANIFEST.json")))
+    manifest = json.load(open(os.path.join(out_a, engine, "MANIFEST.json")))
     digest = hashlib.sha256(open(fixture_a, "rb").read()).hexdigest()
     expect(manifest["fixtures"]["synth.t1r"]["sha256"] == digest,
            f"{family}: manifest sha mismatch")
@@ -358,20 +392,42 @@ def check_family(workspace, family, tensors, config, defines):
     write_header(bad, broken)
     mismatch = subprocess.run(
         [sys.executable, os.path.join(ROOT, "tools", "t1_reference_decoder.py"),
-         "--family", family, "--checkpoint", checkpoint, "--header", bad,
+         "--family", engine, "--checkpoint", checkpoint, "--header", bad,
          "--prompts", prompts, "--output", os.path.join(workspace, f"{family}_c")],
         capture_output=True, text=True)
     expect(mismatch.returncode != 0,
            f"{family}: defines/config disagreement must fail loud")
     expect("HIDDEN_DIMENSION" in mismatch.stderr,
            f"{family}: failure must name the mismatched define")
+    if family == "gemma4_moe":
+        with open(header) as fh:
+            moe_text = fh.read()
+        bad_moe = os.path.join(workspace, f"{family}_bad_moe.h")
+        broken_moe = moe_text.replace(
+            "SPARK_LLM_ROUTED_EXPERT_COUNT           4u",
+            "SPARK_LLM_ROUTED_EXPERT_COUNT           5u")
+        expect(broken_moe != moe_text,
+               f"{family}: routed expert define not found in header")
+        write_header(bad_moe, broken_moe)
+        moe_mismatch = subprocess.run(
+            [sys.executable,
+             os.path.join(ROOT, "tools", "t1_reference_decoder.py"),
+             "--family", engine, "--checkpoint", checkpoint,
+             "--header", bad_moe, "--prompts", prompts,
+             "--output", os.path.join(workspace, f"{family}_d")],
+            capture_output=True, text=True)
+        expect(moe_mismatch.returncode != 0,
+               f"{family}: MoE defines/config disagreement must fail loud")
+        expect("ROUTED_EXPERT_COUNT" in moe_mismatch.stderr,
+               f"{family}: failure must name the mismatched MoE define")
 
 
 def main():
     workspace = tempfile.mkdtemp(prefix="t1ref-engines-")
     try:
-        for family, tensor_fn, config, defines in FAMILIES:
-            check_family(workspace, family, tensor_fn(), config, defines)
+        for family, tensor_fn, config, defines, engine in FAMILIES:
+            check_family(workspace, family, tensor_fn(), config, defines,
+                         engine)
             print(f"PASS {family}: determinism, manifest sha, negative control, "
                   "defines/config fail-closed")
         shutil.rmtree(workspace, ignore_errors=True)

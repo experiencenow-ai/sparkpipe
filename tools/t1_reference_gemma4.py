@@ -16,12 +16,20 @@ DEFINES_VS_CONFIG = [
     ("SLIDING_HEAD_DIMENSION", "head_dim", "uint"),
     ("DENSE_INTERMEDIATE_DIMENSION", "intermediate_size", "uint"),
 ]
+MOE_DEFINES_VS_CONFIG = [
+    ("ROUTED_EXPERT_COUNT", "num_experts", "uint"),
+    ("EXPERTS_PER_TOKEN", "top_k_experts", "uint"),
+    ("EXPERT_INTERMEDIATE_DIMENSION", "moe_intermediate_size", "uint"),
+]
 class Gemma4ConfigError(ValueError):
     pass
 
 
 def cross_check(defines, config):
-    for dname, cname, kind in DEFINES_VS_CONFIG:
+    checks = list(DEFINES_VS_CONFIG)
+    if config.get("enable_moe_block"):
+        checks += MOE_DEFINES_VS_CONFIG
+    for dname, cname, kind in checks:
         if cname not in config:
             raise Gemma4ConfigError(f"config key {cname} missing for SPARK_LLM_{dname}")
         want = define_uint(defines, dname) if kind == "uint" \
@@ -67,6 +75,11 @@ class Gemma4Engine:
         self.embed_scale = np.float32(define_float(defines, "EMBED_SCALE"))
         self.inter = define_uint(defines, "DENSE_INTERMEDIATE_DIMENSION")
         self.eot = define_uint(defines, "END_OF_TEXT_TOKEN_ID")
+        self.moe = bool(config.get("enable_moe_block"))
+        self.expert_count = 0
+        self.top_k = 0
+        self.expert_inter = 0
+        self.router = {}
         self.tables = {}
         self.caches = {}
         self.layer_trace = {}
@@ -94,6 +107,57 @@ class Gemma4Engine:
         scalar = self.st.entry(f"{PREFIX}0.layer_scalar")
         if len(scalar["shape"]) != 1 or scalar["shape"][0] != 1:
             raise Gemma4ConfigError("layer_scalar must be a single element")
+        if self.moe:
+            self.expert_count = define_uint(defines, "ROUTED_EXPERT_COUNT")
+            self.top_k = define_uint(defines, "EXPERTS_PER_TOKEN")
+            self.expert_inter = define_uint(
+                defines, "EXPERT_INTERMEDIATE_DIMENSION")
+            for i in range(self.layers):
+                base = f"{PREFIX}{i}."
+                gate_up = self.st.entry(base + "experts.gate_up_proj")
+                if gate_up["shape"] != [self.expert_count,
+                                        2 * self.expert_inter, self.hidden]:
+                    raise Gemma4ConfigError(
+                        f"layer {i} experts.gate_up_proj shape "
+                        f"{gate_up['shape']} disagrees with routed_experts x "
+                        f"2 x expert_inter x hidden")
+                down = self.st.entry(base + "experts.down_proj")
+                if down["shape"] != [self.expert_count, self.hidden,
+                                     self.expert_inter]:
+                    raise Gemma4ConfigError(
+                        f"layer {i} experts.down_proj shape "
+                        f"{down['shape']} disagrees with routed_experts x "
+                        f"hidden x expert_inter")
+                proj = self.st.entry(base + "router.proj.weight")
+                if proj["shape"] != [self.expert_count, self.hidden]:
+                    raise Gemma4ConfigError(
+                        f"layer {i} router.proj.weight shape "
+                        f"{proj['shape']} disagrees with routed_experts x "
+                        f"hidden")
+                for norm in ("post_feedforward_layernorm_1.weight",
+                             "pre_feedforward_layernorm_2.weight",
+                             "post_feedforward_layernorm_2.weight"):
+                    entry = self.st.entry(base + norm)
+                    if entry["shape"] != [self.hidden]:
+                        raise Gemma4ConfigError(
+                            f"layer {i} {norm} shape {entry['shape']} "
+                            f"disagrees with hidden")
+                scale = self.st.raw(base + "router.scale")
+                if scale.dtype != np.uint16 or scale.shape != (self.hidden,):
+                    raise Gemma4ConfigError(
+                        f"layer {i} router.scale must be BF16 hidden vector")
+                per_expert = self.st.raw(base + "router.per_expert_scale")
+                if per_expert.dtype != np.uint16 \
+                        or per_expert.shape != (self.expert_count,):
+                    raise Gemma4ConfigError(
+                        f"layer {i} router.per_expert_scale must be BF16 "
+                        f"routed_experts vector")
+                self.router[i] = (
+                    bf16_to_f32(self.st.raw(base + "router.proj.weight"))
+                    .astype(np.float32),
+                    bf16_to_f32(scale).astype(np.float32)
+                    * np.float32(self.hidden) ** np.float32(-0.5),
+                    bf16_to_f32(per_expert).astype(np.float32))
 
     def tensor(self, name):
         raw = self.st.raw(name)
@@ -107,6 +171,27 @@ class Gemma4Engine:
 
     def linear(self, x, name):
         return bf16_round_f32(self.tensor(name + ".weight") @ x)
+
+    def gelu_mul(self, gate, up):
+        cube = gate * gate * gate
+        return bf16_round_f32((0.5 * gate
+                               * (1.0 + np.tanh(0.7978845608028654
+                                                * (gate + 0.044715 * cube))))
+                              * up)
+
+    def expert_gate_up(self, index, expert):
+        raw = self.st.raw_slab(f"{PREFIX}{index}.experts.gate_up_proj",
+                               expert, 1)
+        if raw.dtype != np.uint16:
+            raise ValueError("reference expert gate_up must be BF16")
+        return bf16_to_f32(raw[0])
+
+    def expert_down(self, index, expert):
+        raw = self.st.raw_slab(f"{PREFIX}{index}.experts.down_proj",
+                               expert, 1)
+        if raw.dtype != np.uint16:
+            raise ValueError("reference expert down must be BF16")
+        return bf16_to_f32(raw[0])
 
     def embed(self, token_id):
         raw = self.st.raw_rows("model.language_model.embed_tokens.weight",
@@ -182,12 +267,29 @@ class Gemma4Engine:
         p = f"{PREFIX}{index}.mlp."
         gate = self.linear(x, p + "gate_proj")
         up = self.linear(x, p + "up_proj")
-        cube = gate * gate * gate
-        activated = bf16_round_f32((0.5 * gate
-                                    * (1.0 + np.tanh(0.7978845608028654
-                                                     * (gate + 0.044715 * cube))))
-                                   * up)
-        return self.linear(activated, p + "down_proj")
+        return self.linear(self.gelu_mul(gate, up), p + "down_proj")
+
+    def moe_branch(self, index, streams, routed_input):
+        proj, gain, per_expert_scale = self.router[index]
+        probe = self.head_rms(streams, None, 1, self.hidden, scaled=False)
+        scores = proj @ bf16_round_f32(probe * gain)
+        probs = np.exp(scores - scores.max())
+        probs = probs / probs.sum()
+        top = np.argsort(-probs, kind="stable")[:self.top_k]
+        weights = probs[top]
+        weights = weights / weights.sum()
+        weights = weights * per_expert_scale[top]
+        pairs = sorted(zip((int(e) for e in top),
+                           (float(w) for w in weights)))
+        branch = np.zeros(self.hidden, dtype=np.float32)
+        for expert, weight in pairs:
+            gate_up = self.expert_gate_up(index, expert) @ routed_input
+            half = self.expert_inter
+            activated = self.gelu_mul(gate_up[:half], gate_up[half:])
+            out = self.expert_down(index, expert) @ activated
+            branch = bf16_round_f32(branch + bf16_round_f32(
+                np.float32(weight) * out))
+        return branch
 
     def forward_layer(self, index, streams, position):
         p = f"{PREFIX}{index}."
@@ -202,7 +304,21 @@ class Gemma4Engine:
         x = bf16_round_f32(rmsnorm(streams,
                                    self.tensor(p + "pre_feedforward_layernorm.weight"),
                                    self.eps))
-        mlp = self.mlp(index, x)
+        if self.moe:
+            dense = self.mlp(index, x)
+            dense = bf16_round_f32(rmsnorm(
+                dense, self.tensor(p + "post_feedforward_layernorm_1.weight"),
+                self.eps))
+            routed = bf16_round_f32(rmsnorm(
+                streams, self.tensor(p + "pre_feedforward_layernorm_2.weight"),
+                self.eps))
+            branch = self.moe_branch(index, streams, routed)
+            branch = bf16_round_f32(rmsnorm(
+                branch, self.tensor(p + "post_feedforward_layernorm_2.weight"),
+                self.eps))
+            mlp = bf16_round_f32(dense + branch)
+        else:
+            mlp = self.mlp(index, x)
         delta = bf16_round_f32(rmsnorm(
             mlp, self.tensor(p + "post_feedforward_layernorm.weight"), self.eps))
         streams = bf16_round_f32(streams + delta)

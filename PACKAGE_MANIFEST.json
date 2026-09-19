@@ -1,5 +1,5 @@
 {
-  "file_count": 3077,
+  "file_count": 3080,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -7082,6 +7082,21 @@
       "size_bytes": 452
     },
     {
+      "path": "qualification/t1_reference/gemma4_26b/MANIFEST.json",
+      "sha256": "17e7f906a34cc4ec96d4052e77f2bdbb71afe8d75cb809921e7df456806786e4",
+      "size_bytes": 1066
+    },
+    {
+      "path": "qualification/t1_reference/gemma4_26b/capital_of_france.t1r",
+      "sha256": "a93861d5a1d68d256df8d1a50e2c639aed8d76170835ec639d257bc76b4e7ac9",
+      "size_bytes": 173183
+    },
+    {
+      "path": "qualification/t1_reference/gemma4_26b/count_up.t1r",
+      "sha256": "d342792639fd8d05dfc16f5cdc3eec87ed3af938fbbccbdf754bc90750266263",
+      "size_bytes": 210894
+    },
+    {
       "path": "qualification/t1_reference/gemma4_26b/llm_defines_26b.h",
       "sha256": "6918cb3f5d55ba0f184fce403998b1297e1627da36be7df4a550590afb9b1ece",
       "size_bytes": 1611
@@ -9408,8 +9423,8 @@
     },
     {
       "path": "tests/test_t1_reference_engines.py",
-      "sha256": "b6c3cabb8df35a9914938c360562abdd71cd6bb4bb136f7399d2dd1b7fcad137",
-      "size_bytes": 17668
+      "sha256": "3e67c9e2f03aca57fab0a4b40c0edbf53eafa47a570074ef70a8b4349b725c39",
+      "size_bytes": 20197
     },
     {
       "path": "tests/test_t1_reference_hy4.py",
@@ -12053,8 +12068,8 @@
     },
     {
       "path": "tools/t1_reference_gemma4.py",
-      "sha256": "e891fa03217d1863b0ade7c42380298ae5c38f219b35a891fb06f4c338c34e73",
-      "size_bytes": 11376
+      "sha256": "3d587a79e5764ae8216e806638adfdb771f154fde30afff8fe266a23fb0c6679",
+      "size_bytes": 17216
     },
     {
       "path": "tools/t1_reference_glm53full.py",
@@ -15390,5 +15405,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 62788738
+  "total_bytes": 63182250
 }
