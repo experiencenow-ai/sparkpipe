@@ -35,7 +35,10 @@ typedef struct TestMeshRecord
     uint64_t boot_ns;
 } TestMeshRecord;
 
-SparkStatus SparkWeightdMeshInit(void);
+#define TEST_MESH_INTERFACE "rocep1s0f1"
+
+SparkStatus SparkWeightdMeshInit(uint32_t rank, const char *interface_name,
+    uint32_t sgid_index);
 uint32_t SparkWeightdMeshReady(void);
 void SparkWeightdMeshPoll(void);
 uint32_t SparkWeightdMeshBroadcast(uint32_t peer_rank_mask,
@@ -67,20 +70,6 @@ static uint32_t test_failures;
             fprintf(stderr,"FAIL %s:%d %s\n",__FILE__,__LINE__,name); \
         } \
     } while (0)
-
-static uint32_t test_rank_from_host(void)
-{
-    char hostname[64];
-    char tail;
-    if (gethostname(hostname,sizeof(hostname)) != 0)
-        return 0;
-    tail = hostname[strlen(hostname) - 1];
-    if (tail >= '0' && tail <= '9')
-        return (uint32_t)(tail - '0');
-    if (tail >= 'a' && tail <= 'f')
-        return (uint32_t)(tail - 'a' + 10);
-    return 0;
-}
 
 static uint32_t test_peer_rank(uint32_t peer, uint32_t local_rank)
 {
@@ -312,7 +301,7 @@ int main(void)
             SPARK_WEIGHTD_MESH_DIR);
         return 0;
     }
-    local_rank = test_rank_from_host();
+    local_rank = 7u; /* explicit: the rank now comes from --mesh-rank */
     test_clean_dir();
     if (mkdir(SPARK_WEIGHTD_MESH_DIR,0755) != 0 && errno != EEXIST)
     {
@@ -327,7 +316,7 @@ int main(void)
             continue;
         CHECK(test_write_record(rank,1u) == 0,"case1 write peer record");
     }
-    status = SparkWeightdMeshInit();
+    status = SparkWeightdMeshInit(local_rank,TEST_MESH_INTERFACE,3u);
     CHECK(status == SPARK_STATUS_BUSY,"case1 init publishes and defers");
     CHECK(test_read_record(local_rank,&own_record) == 0,
         "case1 own record published");
@@ -361,7 +350,7 @@ int main(void)
         "case3 unchanged records are a wiring no-op");
     CHECK(SparkWeightdMeshReady() == 1u,"case3 stays ready");
 
-    status = SparkWeightdMeshInit();
+    status = SparkWeightdMeshInit(local_rank,TEST_MESH_INTERFACE,3u);
     CHECK(status == SPARK_STATUS_BUSY,"case4 init republishes");
     CHECK(test_read_record(local_rank,&own_record) == 0,
         "case4 own record republished");
