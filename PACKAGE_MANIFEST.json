@@ -1373,8 +1373,8 @@
     },
     {
       "path": "docs/K3_PERF.md",
-      "sha256": "0fd8145540fa98fc128c69ea4d774aef92a9d2400d727ffb5c7c23358847df26",
-      "size_bytes": 10643
+      "sha256": "452e022058e55fbab3c9727c2e1e9275c641d464116df31ce42a6b915d9a19f7",
+      "size_bytes": 11177
     },
     {
       "path": "docs/KERNEL_CONTRACT_CARDS.md",
@@ -1448,8 +1448,8 @@
     },
     {
       "path": "docs/PERFORMANCE_LEDGER.md",
-      "sha256": "09ace5c80866eac7d9f6508d80c55a628f7e5ddbc4aa8d0497accd0e5a83d34b",
-      "size_bytes": 9609
+      "sha256": "72375a4de932d062ea4844734a48f95ae3562c6540e5d283bcfd1c94d8283d8b",
+      "size_bytes": 9561
     },
     {
       "path": "docs/PERF_PROGRAM2.md",
@@ -15875,5 +15875,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 72815834
+  "total_bytes": 72816320
 }

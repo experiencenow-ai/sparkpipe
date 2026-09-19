@@ -1,5 +1,15 @@
 # K3 serving-path performance audit and improvement plan
 
+## 2026-09-19: 29 tok/s on 16x sparks (announced perf point)
+
+@ciprianveg announced 29 tok/sec for kimi K3 decode on the 16-spark fleet
+(TP16, 2026-09-19). Recorded in the PERFORMANCE_LEDGER scoreboard as the
+current best-known K3 decode point, superseding the 18.0 anchor. Graded
+ANNOUNCED-MEASURED (attributed to its author): batch scope, precision,
+prompt length, and the code hash are not yet in a receipt — the k3 lane
+should append them here when the run artifacts are available so the point
+moves to full MEASURED standing.
+
 ## 2026-08-17: the tail nondeterminism root cause (FIXED)
 
 The fresh-run gate's known tail variance (hidden[6144..7167], ~14 ULP,
