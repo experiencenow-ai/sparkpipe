@@ -240,3 +240,36 @@ the pipeline collect it?).
 Also fixed tonight: batch-engine lane release now queues on ERROR
 terminals too (5a8855a) — the 16-lane permanent-leak wall. Warmup hook
 with single-flight + retry (f94d4e3, lane/fleet-resilience).
+
+
+## Addendum 4 — the API-seam cascade (tonight's last blockers)
+
+Fixed and deployed:
+- model_api idle-progress park: the batch engine Progress loop only ran
+  while the local HTTP queue was non-empty; a submitted request with an
+  empty queue never dispatched. Every quiet-window request parked until
+  the client gave up. (5e7543f)
+- pipeline late/duplicate responses now dropped loudly, not fatal
+  (bf7129e) — kills the invalidation cascade: SetFailure -> FailStop all
+  16 connections -> engine-side EOF -> generation bump -> invalidate all
+  bindings -> next submission fails -> repeat forever.
+- lane release on error terminals (5a8855a): error/expired requests
+  leaked resident KV lanes permanently (16-lane wall = all-BUSY fleet).
+- residentd: undeliverable completions drop the route instead of
+  killing the process (d691b48).
+- engine-side: per-connection session generation bumped per accept —
+  every TCP flap invalidated everything. Left as-is (flap = state loss
+  is real); the flaps themselves are the enemy — see below.
+
+REMAINING (the last mile to the 176-token fixture):
+1. Warmup is single-flight + retrying (agent), but the warm path was
+   PROVEN: chains complete in ~350ms when the pool is hot, and one
+   warmup request DID return tokens. After any engine/weightd restart
+   the pool is cold again (~450s first chain) — the warmup must finish
+   one full cold pass per generation before probes.
+2. The pool never warms persistently (pool premap disabled over the
+   spine-VA conflict; per-chain LAZYWORK re-pays loads). The correct
+   fix: premap the pool in a VA range DISJOINT from the spine (my
+   reorder-only attempt failed the spine preload; reverted at 5d8dc98).
+3. probe discipline: exactly one request in flight at a time until the
+   fixture passes.
