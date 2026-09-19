@@ -763,10 +763,16 @@ CUresult cuMemExportToShareableHandle(void *shareable_handle,
 
 static uint32_t cuda_stub_import_count,cuda_stub_import_fail_at,cuda_stub_unmap_fail;
 static uint32_t cuda_stub_import_delay_us;
+static uint32_t cuda_stub_create_delay_us;
 
 void spark_stub_cuda_set_import_delay(uint32_t delay)
 {
     cuda_stub_import_delay_us = delay;
+}
+
+void spark_stub_cuda_set_create_delay(uint32_t delay)
+{
+    cuda_stub_create_delay_us = delay;
 }
 
 void spark_stub_cuda_fail_import_after(uint32_t calls)
@@ -881,6 +887,8 @@ CUresult cuMemCreate(CUmemGenericAllocationHandle *handle,
     unsigned long long flags)
 {
     cuda_stub_vmm_phys *phys;
+    if (cuda_stub_create_delay_us != 0u)
+        usleep(cuda_stub_create_delay_us);
     if (handle == 0 || prop == 0 ||
         prop->type != CU_MEM_ALLOCATION_TYPE_PINNED ||
         prop->location.type != CU_MEM_LOCATION_TYPE_DEVICE ||
