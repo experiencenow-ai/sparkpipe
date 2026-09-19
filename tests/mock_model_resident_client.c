@@ -100,6 +100,12 @@ uint32_t MockResidentClientCalls(uint32_t stage_index, uint32_t kind)
 	return(0u);
 }
 
+uint64_t MockResidentClientGeneration(uint32_t stage_index)
+{
+	SparkModelResidentClient *c = MockResidentClientByRank(stage_index);
+	return( c != 0 ? c->client_generation : 0u );
+}
+
 void MockResidentClientScriptSubmitStatus(uint32_t stage_index, SparkStatus status)
 {
 	SparkModelResidentClient *c = MockResidentClientByRank(stage_index);
@@ -329,6 +335,18 @@ static SparkStatus MockResidentClientQueueDecision(
 	uint32_t decision_kind)
 {
 	MockPendingDecision *slot;
+	uint32_t k;
+	/* an abort settles the submission on the server: the rank's prepared
+	 * work is freed and no completion will follow. A COMMIT is different —
+	 * the work runs after the commit and the completion still arrives. */
+	if ( decision_kind == SPARK_MODEL_RESIDENT_IPC_DECISION_ABORT )
+		for (k=0u; k<client->inflight_count; k++)
+			if ( client->inflight[k].submission_id == submission_id )
+			{
+				client->inflight[k] = client->inflight[client->inflight_count - 1u];
+				client->inflight_count--;
+				break;
+			}
 	if ( client->pending_decision_count >= MOCK_INFLIGHT_CAPACITY )
 		return(SPARK_STATUS_BUSY);
 	slot = &client->pending_decisions[client->pending_decision_count++];
