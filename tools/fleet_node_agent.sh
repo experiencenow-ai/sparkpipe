@@ -191,10 +191,14 @@ start_root() {
     fi
     cd "$rr" || return 1
     ln -sf "stage_$(printf %02d "$RANK").json" config/stage.json
+    sha16 "$rr/stages/stage_000/model_driver.so" > "$rr/.driver_sha_at_boot" 2>/dev/null
     [ -s residentd.log ] && mv residentd.log "residentd-$(date +%Y%m%d-%H%M%S).log" 2>/dev/null
-    env SPARK_WEIGHTD_EXPERT_POOL_BYTES="${G5_EXPERT_POOL_BYTES:-34359738368}" \
+    env CUDA_ENABLE_COREDUMP_ON_EXCEPTION=0 \
+        ${G5_LAUNCH_BLOCKING:+CUDA_LAUNCH_BLOCKING=$G5_LAUNCH_BLOCKING} \
+        SPARK_WEIGHTD_EXPERT_POOL_BYTES="${G5_EXPERT_POOL_BYTES:-34359738368}" \
+        ${G5_PIN_EXPERTS:+SPARK_GLM5_NEXT_PIN_EXPERTS=$G5_PIN_EXPERTS} \
     ${G5_GRAPH_PATH:+SPARK_GLM5_NEXT_GRAPH_PATH=$G5_GRAPH_PATH} \
-    LD_LIBRARY_PATH="$rr/lib" nohup ./bin/sparkpipe_model_residentd \
+    LD_LIBRARY_PATH="$rr/lib" nohup stdbuf -o0 -e0 ./bin/sparkpipe_model_residentd \
         --deployment model_resident.json --rank-index "$RANK" \
         > residentd.log 2>&1 < /dev/null &
     report
@@ -239,7 +243,7 @@ ensure_api() {
     [ -s api.log ] && mv api.log "api-$(date +%Y%m%d-%H%M%S).log" 2>/dev/null
     ${G5_MAX_PREFILL_ROWS:+SPARK_MODEL_API_MAX_PREFILL_ROWS="$G5_MAX_PREFILL_ROWS"} \
     ${G5_INFLIGHT_BUDGET_NS:+SPARK_BATCH_INFLIGHT_BUDGET_NS="$G5_INFLIGHT_BUDGET_NS"} \
-    LD_LIBRARY_PATH="$rr/lib" setsid nohup ./bin/sparkpipe_model_api \
+    LD_LIBRARY_PATH="$rr/lib" setsid nohup stdbuf -o0 -e0 ./bin/sparkpipe_model_api \
         --deployment model_resident.json --runtime-root "$rr" --port "${G5_API_PORT:-8433}" \
         > api.log 2>&1 < /dev/null &
 }
@@ -419,23 +423,90 @@ self_update() {
     exec bash "$new" "$ROOTS" "$HUB"
 }
 
+node_doctor() {
+    local state netdev
+    state=$(ibv_devinfo "$MESH_INTERFACE" 2>/dev/null | awk '/^[[:space:]]*state:/ {print $2; exit}')
+    case "$state" in
+        PORT_ACTIVE) ;;
+        *)
+            netdev=$(ibdev2netdev 2>/dev/null | awk -v d="$MESH_INTERFACE" '$1==d {print $NF; exit}')
+            [ -n "$netdev" ] || return 0
+            echo "$(date +%T) doctor: $MESH_INTERFACE state=${state:-missing}; flapping $netdev" >&2
+            sudo -n ip link set "$netdev" down 2>/dev/null
+            sleep 2
+            sudo -n ip link set "$netdev" up 2>/dev/null
+            ;;
+    esac
+}
+
+janitor() {
+    local q youngest a holder_exe
+    for name in ${ROOTS//,/ }; do
+        local rr="$HOME/sparkdata/$name" youngest=0
+        for q in $(pgrep -f "bin/sparkpipe_model_residentd"); do
+            [ "$(readlink /proc/$q/cwd 2>/dev/null)" = "$rr" ] || continue
+            a=$(ps -o etimes= -p "$q" 2>/dev/null | tr -d ' ')
+            [ -n "$a" ] && [ "$a" -gt "$youngest" ] && youngest=$a
+        done
+        for q in $(pgrep -f "bin/sparkpipe_model_residentd"); do
+            [ "$(readlink /proc/$q/cwd 2>/dev/null)" = "$rr" ] || continue
+            a=$(ps -o etimes= -p "$q" 2>/dev/null | tr -d ' ')
+            [ -n "$a" ] && [ "$a" -lt "$youngest" ] && [ "$a" -gt 1800 ] && {
+                echo "$(date +%T) janitor: killing stale residentd pid=$q age=${a}s (current is younger)" >&2
+                kill -9 "$q" 2>/dev/null
+            }
+        done
+    done
+    for q in $(pgrep -f "sparkpipe_weightd"); do
+        a=$(ps -o etimes= -p "$q" 2>/dev/null | tr -d ' ')
+        [ -n "$a" ] && [ "$a" -gt 1800 ] || continue
+        case "$(readlink /proc/$q/exe 2>/dev/null)" in
+            "$HOME/sparkdata/weightd/"*) ;;
+            *) continue ;;
+        esac
+        holder_exe=$(sudo -n fuser /tmp/spark_weightd.singleton 2>/dev/null | tr -s ' ' | cut -d: -f2 | tr -d ' ')
+        [ "$q" = "$holder_exe" ] && continue
+        echo "$(date +%T) janitor: killing stale weightd pid=$q age=${a}s (not the singleton holder)" >&2
+        kill -9 "$q" 2>/dev/null
+    done
+}
+
 ensure_weightd() {
     if pgrep -f "sparkpipe_weightd" >/dev/null; then
+        local wdd="$HOME/sparkdata/weightd" q exe_sha disk_sha
+        for q in $(pgrep -f "sparkdata/weightd/sparkpipe_weightd"); do
+            exe_sha=$(sha16 "$(readlink /proc/$q/exe 2>/dev/null)")
+            disk_sha=$(sha16 "$wdd/sparkpipe_weightd")
+            if [ -n "$exe_sha" ] && [ "$exe_sha" != "$disk_sha" ]; then
+                echo "$(date +%T) weightd: running $exe_sha != installed $disk_sha; recycling"
+                kill -TERM "$q" 2>/dev/null
+                sleep 3
+                kill -9 "$q" 2>/dev/null
+            fi
+        done
         local youngest=0 p start_s up_s
         for p in $(pgrep -f "sparkpipe_weightd"); do
             start_s=$(awk '{print $22}' "/proc/$p/stat" 2>/dev/null)
             [ -n "$start_s" ] && [ "$start_s" -gt "$youngest" ] && youngest=$start_s
         done
         up_s=$(awk '{printf "%d", $1}' /proc/uptime)
-        if [ "$youngest" -gt 0 ] && [ $(( up_s - youngest / 100 )) -lt 30 ]; then
+        if [ "$youngest" -gt 0 ] && [ $(( up_s - youngest / 100 )) -lt 120 ]; then
             return 0
         fi
-        if [ -S /tmp/spark_weightd.sock ] && python3 -c "import socket,sys; s=socket.socket(socket.AF_UNIX); s.settimeout(2); s.connect(\"/tmp/spark_weightd.sock\"); s.close()" 2>/dev/null; then
-            return 0
-        fi
-        echo "$(date +%T) weightd: stale or unresponsive instance(s); clearing"
+        local probe_ok=0 probe_i
+        for probe_i in 1 2 3; do
+            if [ -S /tmp/spark_weightd.sock ] && python3 -c "import socket,sys; s=socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect(\"/tmp/spark_weightd.sock\"); s.close()" 2>/dev/null; then
+                probe_ok=1
+                break
+            fi
+            sleep 2
+        done
+        [ "$probe_ok" = 1 ] && return 0
+        echo "$(date +%T) weightd: stale or unresponsive instance(s); clearing (production channel only)"
         for p in $(ls -l /proc/[0-9]*/exe 2>/dev/null | grep sparkpipe_weightd | sed "s|.*/proc/\([0-9]*\)/exe.*|\1|"); do
-            kill -9 "$p" 2>/dev/null
+            case "$(readlink /proc/$p/exe 2>/dev/null)" in
+                "$HOME/sparkdata/weightd/"*) kill -9 "$p" 2>/dev/null ;;
+            esac
         done
         sleep 2
         rm -f /tmp/spark_weightd.sock
@@ -466,13 +537,17 @@ ensure_root() {
     local name="$1"
     local st; st=$(root_state "$name")
     [ "$st" = "down" ] || {
-        local rr="$HOME/sparkdata/$name" p exe_sha disk_sha
+        local rr="$HOME/sparkdata/$name" p exe_sha disk_sha drv_sha
+        drv_sha=$(sha16 "$rr/stages/stage_000/model_driver.so")
         for p in $(pgrep -f "bin/sparkpipe_model_residentd"); do
             [ "$(readlink /proc/$p/cwd 2>/dev/null)" = "$rr" ] || continue
             exe_sha=$(sha16 "$(readlink /proc/$p/exe)")
             disk_sha=$(sha16 "$rr/bin/sparkpipe_model_residentd")
             if [ "$exe_sha" != "$disk_sha" ]; then
                 echo "$(date +%T) $name: running residentd $exe_sha != disk $disk_sha; recycling"
+                st="down"
+            elif [ -f "$rr/.driver_sha_at_boot" ] && [ "$drv_sha" != "$(cat "$rr/.driver_sha_at_boot")" ]; then
+                echo "$(date +%T) $name: driver changed since engine boot; recycling"
                 st="down"
             fi
             break
@@ -501,10 +576,46 @@ ensure_root() {
     restart_root "$name"
 }
 
+LAST_WARM_GEN=""
+LAST_WARM_TS=0
+warmup_hook() {
+    [ "${RANK:-1}" = "0" ] || return 0
+    [ "${G5_WARMUP:-1}" = "1" ] || return 0
+    local gen now
+    [ "$(root_state glm53flash.fp8.tp16 2>/dev/null)" = "ready" ] || return 0
+    gen=$(root_pid glm53flash.fp8.tp16 2>/dev/null)
+    [ -n "$gen" ] || return 0
+    now=$(date +%s)
+    if [ -s /tmp/fleet-warmup.pid ]; then
+        local wpid; wpid=$(cat /tmp/fleet-warmup.pid 2>/dev/null)
+        if [ -n "$wpid" ] && grep -q "v1/completions" /proc/$wpid/cmdline 2>/dev/null; then
+            return 0
+        fi
+        rm -f /tmp/fleet-warmup.pid
+    fi
+    if [ "$gen" = "$LAST_WARM_GEN" ]; then
+        grep -q '"tokens"' /tmp/fleet-warmup.out 2>/dev/null && return 0
+        [ $(( now - LAST_WARM_TS )) -lt 240 ] && return 0
+    fi
+    LAST_WARM_GEN=$gen
+    LAST_WARM_TS=$now
+    (
+      sleep 45
+      curl -sf --max-time 900 -X POST "http://${G5_API_HOST:-100.123.97.61}:${G5_API_PORT:-8433}/v1/completions" \
+        -H 'Content-Type: application/json' \
+        -d '{"prompt_token_ids":[1,2,3,4,5,6,7,8],"max_tokens":4,"temperature":0}' \
+        > /tmp/fleet-warmup.out 2>&1
+    ) &
+    echo $! > /tmp/fleet-warmup.pid
+    echo "$(date +%T) warmup: fired for engine pid $gen (one cold pass, 900s budget)"
+}
+
 while true; do
     sync_core
     install_core
     self_update
+    node_doctor
+    janitor
     ensure_weightd
     IFS=, read -ra RA <<< "$ROOTS"
     for r in "${RA[@]}"; do sync_root "$r"; done
@@ -512,6 +623,7 @@ while true; do
     for r in "${RA[@]}"; do ensure_root "$r"; done
     for r in "${RA[@]}"; do prune_logs "$HOME/sparkdata/$r"; done
     ensure_api
+    warmup_hook
     report_if_changed
     sleep 1
 done

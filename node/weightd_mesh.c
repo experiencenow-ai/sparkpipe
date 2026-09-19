@@ -83,12 +83,21 @@ typedef struct SparkWeightdMesh
 
 static SparkWeightdMesh weightd_mesh;
 
+
 static uint64_t SparkWeightdMeshRealtimeNs(void)
 {
     struct timespec now;
     if (clock_gettime(CLOCK_REALTIME,&now) != 0)
         return 0ull;
     return (uint64_t)now.tv_sec * 1000000000ull + (uint64_t)now.tv_nsec;
+}
+
+static uint64_t weightd_mesh_boot_phase_ns;
+static void SparkWeightdMeshPhase(const char *name)
+{
+    uint64_t now = SparkWeightdMeshRealtimeNs();
+    fprintf(stderr,"weightd-mesh phase %s at +%llu ms\n",name,
+        (unsigned long long)((now - weightd_mesh_boot_phase_ns) / 1000000ull));
 }
 
 static uint32_t SparkWeightdMeshRankFromHost(void)
@@ -324,6 +333,7 @@ static void SparkWeightdMeshTryWireLocked(void)
         if (marker != 0)
             (void)fclose(marker);
     }
+    SparkWeightdMeshPhase("wired");
     weightd_mesh.mesh_ready = 1u;
     weightd_mesh.send_err_window = 0ull;
     weightd_mesh.degraded_logged = 0u;
@@ -353,6 +363,8 @@ SparkStatus SparkWeightdMeshInit(void)
     memset(&weightd_mesh,0,sizeof(weightd_mesh));
     weightd_mesh.local_rank = SparkWeightdMeshRankFromHost();
     weightd_mesh.boot_ns = SparkWeightdMeshRealtimeNs();
+    weightd_mesh_boot_phase_ns = weightd_mesh.boot_ns;
+    SparkWeightdMeshPhase("init-begin");
     (void)unlink(SPARK_WEIGHTD_MESH_DIR "/.ready");
 
     devices = ibv_get_device_list(&device_count);
@@ -451,6 +463,7 @@ SparkStatus SparkWeightdMeshInit(void)
         fprintf(stderr,"weightd-mesh: mr failed errno=%d\n",errno);
         return SPARK_STATUS_DRIVER_LOAD_ERROR;
     }
+    SparkWeightdMeshPhase("recv-mr-registered");
     weightd_mesh.seq_mr = ibv_reg_mr(weightd_mesh.protection_domain,
         &weightd_mesh.seq_storage,sizeof(weightd_mesh.seq_storage),
         IBV_ACCESS_LOCAL_WRITE);
@@ -511,6 +524,7 @@ SparkStatus SparkWeightdMeshInit(void)
         return SPARK_STATUS_IO_ERROR;
     printf("weightd-mesh: published; wiring continues as peers appear\n");
     fflush(stdout);
+    SparkWeightdMeshPhase("published");
     weightd_mesh.mesh_active = 1u;
     return SPARK_STATUS_BUSY;
 }
@@ -703,6 +717,15 @@ void SparkWeightdMeshDoorbellLoop(void)
                 }
                 if ( seq == 0ull || bytes == 0ull )
                     continue;
+                if ( seq != weightd_mesh.doorbell_posted[index] &&
+                     (weightd_mesh.doorbell_stuck[index] % 200u) == 0u )
+                    fprintf(stderr,
+                        "WD-SEEN idx=%llu seq=%llu posted=%llu bytes=%llu slot=%llu\n",
+                        (unsigned long long)index,
+                        (unsigned long long)seq,
+                        (unsigned long long)weightd_mesh.doorbell_posted[index],
+                        (unsigned long long)bytes,
+                        (unsigned long long)slot);
                 if ( seq == weightd_mesh.doorbell_posted[index])
                 {
                     weightd_mesh.doorbell_stuck[index] = 0u;
