@@ -772,10 +772,16 @@ CUresult cuMemExportToShareableHandle(void *shareable_handle,
 
 static uint32_t cuda_stub_import_count,cuda_stub_import_fail_at,cuda_stub_unmap_fail;
 static uint32_t cuda_stub_import_delay_us;
+static uint32_t cuda_stub_create_delay_us;
 
 void spark_stub_cuda_set_import_delay(uint32_t delay)
 {
     cuda_stub_import_delay_us = delay;
+}
+
+void spark_stub_cuda_set_create_delay(uint32_t delay)
+{
+    cuda_stub_create_delay_us = delay;
 }
 
 void spark_stub_cuda_fail_import_after(uint32_t calls)
@@ -890,6 +896,8 @@ CUresult cuMemCreate(CUmemGenericAllocationHandle *handle,
     unsigned long long flags)
 {
     cuda_stub_vmm_phys *phys;
+    if (cuda_stub_create_delay_us != 0u)
+        usleep(cuda_stub_create_delay_us);
     if (handle == 0 || prop == 0 ||
         prop->type != CU_MEM_ALLOCATION_TYPE_PINNED ||
         prop->location.type != CU_MEM_LOCATION_TYPE_DEVICE ||
@@ -1106,13 +1114,33 @@ CUresult cuMemAddressFree(CUdeviceptr pointer, size_t bytes)
     return cuda_stub_free(reservation);
 }
 
+uint32_t cuda_stub_mesh_publish_calls = 0u;
+uint32_t cuda_stub_mesh_publish_null_seq_cell = 0u;
+uint32_t cuda_stub_mesh_publish_null_epoch_cell = 0u;
+
 cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
-    volatile void *entry,void *seq_cell,void *round_seq,uint64_t bytes,
+    volatile void *entry,void *seq_cell,const void *epoch_cell,
+    void *round_seq,uint64_t bytes,
     uint64_t slot_index,volatile void *slot_tail)
 {
-    (void)stream;(void)entry;
-    (void)seq_cell;(void)round_seq;(void)bytes;(void)slot_index;
-    (void)slot_tail;
+    (void)stream;(void)round_seq;(void)bytes;
+    (void)slot_index;(void)slot_tail;
+    cuda_stub_mesh_publish_calls++;
+    if ( seq_cell == NULL )
+        cuda_stub_mesh_publish_null_seq_cell++;
+    if ( epoch_cell == NULL )
+        cuda_stub_mesh_publish_null_epoch_cell++;
+    if ( entry != NULL && seq_cell != NULL && epoch_cell != NULL && slot_tail != NULL )
+    {
+        uint64_t tag = (*(uint64_t *)epoch_cell << 32) | ((*(uint64_t *)seq_cell + 1u) & 0xffffffffu);
+        volatile uint64_t *ent = (volatile uint64_t *)entry;
+        ent[2] = slot_index;
+        ent[1] = bytes;
+        *(volatile uint64_t *)slot_tail = tag;
+        *(uint64_t *)round_seq = tag;
+        *(uint64_t *)seq_cell = *(uint64_t *)seq_cell + 1u;
+        ent[0] = tag;
+    }
     return cudaSuccess;
 }
 

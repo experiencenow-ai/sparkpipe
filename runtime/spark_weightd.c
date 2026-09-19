@@ -51,6 +51,10 @@
 #define MSG_NOSIGNAL 0
 #endif
 
+#ifndef POLLRDHUP
+#define POLLRDHUP 0
+#endif
+
 extern uint32_t SparkWeightdMeshReady(void);
 extern uint64_t SparkWeightdMeshBufferAddress(void);
 extern uint32_t SparkWeightdMeshBufferLkey(void);
