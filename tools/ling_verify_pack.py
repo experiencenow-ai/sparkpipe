@@ -9,6 +9,11 @@ ranks 0 and 15 present) additionally proves the head-row, vocab and
 expert row/col splits cover the full dimensions exactly. Re-running over
 an already-verified set is the two-pass placement proof: every check
 re-executes and the placement verdict is "already placed".
+
+Receipts are per rank: the packer writes receipts/rankN.json next to the
+rankN pack, and placement ships each node only its own rank's receipt.
+The arm name is read from whichever verified rank's receipt exists
+locally, or from the placed pack filename when no receipt is present.
 """
 from __future__ import annotations
 
@@ -229,6 +234,18 @@ def verify_receipt(path: Path, summary: Dict[str, Any]) -> None:
         fail("receipt", f"{path.name}: census does not close: {census}")
 
 
+def resolve_arm(pack_dir: Path, ranks: List[int]) -> str:
+    for rank in ranks:
+        receipt = pack_dir / "receipts" / f"rank{rank}.json"
+        if receipt.is_file():
+            return json.loads(receipt.read_text())["arm"]
+    for rank in ranks:
+        placed = sorted(pack_dir.glob(f"*rank{rank:x}.sp"))
+        if placed:
+            return placed[0].name.rsplit(f".rank{rank:x}.sp", 1)[0]
+    fail("arm", f"{pack_dir}: no rank receipt or placed pack names the arm")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pack-dir", required=True)
@@ -239,26 +256,28 @@ def main() -> int:
     pack_dir = Path(args.pack_dir)
     ranks = (sorted(int(r) for r in args.ranks.split(",") if r != "")
              if args.ranks else list(range(args.tp_degree)))
+    arm = resolve_arm(pack_dir, ranks)
     summaries = []
-    receipt0 = pack_dir / "receipts" / "rank0.json"
-    if not receipt0.is_file():
-        fail("receipt", f"{receipt0}: the packer writes it per rank")
-    arm = json.loads(receipt0.read_text())["arm"]
     for rank in ranks:
         path = pack_dir / f"{arm}.rank{rank:x}.sp"
         summary = verify_pack(path, args.tp_degree)
         receipt = pack_dir / "receipts" / f"rank{rank}.json"
-        if receipt.is_file():
-            verify_receipt(receipt, summary)
+        if not receipt.is_file():
+            fail("receipt", f"{receipt}: the packer writes it per rank")
+        verify_receipt(receipt, summary)
         summaries.append(summary)
         print(f"PASS {path.name}: {summary['tensors']} tensors, "
-              f"{summary['file_bytes']} bytes, sha256 {summary['sha256'][:16]}...")
-    if 0 in ranks and args.tp_degree - 1 in ranks and args.tp_degree > 1:
-        first, last = summaries[ranks.index(0)], summaries[ranks.index(args.tp_degree - 1)]
-        if first["tensors"] != last["tensors"]:
+              f"{summary['file_bytes']} bytes, sha256 {summary['sha256'][:16]}..., "
+              f"receipt {receipt.name}")
+    last = args.tp_degree - 1
+    if 0 in ranks and last in ranks and args.tp_degree > 1 and \
+            (pack_dir / "receipts" / "rank0.json").is_file() and \
+            (pack_dir / "receipts" / f"rank{last}.json").is_file():
+        first, final = summaries[ranks.index(0)], summaries[ranks.index(last)]
+        if first["tensors"] != final["tensors"]:
             fail("boundary", f"rank 0 has {first['tensors']} tensors, "
-                             f"rank {args.tp_degree - 1} has {last['tensors']}")
-        print(f"PASS boundary ranks 0 and {args.tp_degree - 1}: identical "
+                             f"rank {last} has {final['tensors']}")
+        print(f"PASS boundary ranks 0 and {last}: identical "
               f"tensor counts, complementary head/vocab/expert shards")
     total = sum(summary["tensors"] for summary in summaries)
     print(f"verified {len(summaries)} rank packs, {total} pack tensors total; "
