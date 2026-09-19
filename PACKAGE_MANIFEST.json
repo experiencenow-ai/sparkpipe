@@ -1373,8 +1373,8 @@
     },
     {
       "path": "docs/SPARKDEV_HANDOFF_GLM53FLASH.md",
-      "sha256": "b54fae36a775d88cf157fd50a8a1a0c4fadfe2e29ce3c21809772473d2ef8603",
-      "size_bytes": 16958
+      "sha256": "7fe1f0d3c677a2fed16faa52109165ea03c1a0e036f4ef437085c9b8c7ba1e78",
+      "size_bytes": 16959
     },
     {
       "path": "docs/SPARKPIPE_SERVING_CHARTER.md",
@@ -15390,5 +15390,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 62788737
+  "total_bytes": 62788738
 }

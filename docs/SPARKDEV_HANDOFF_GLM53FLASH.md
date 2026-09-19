@@ -127,3 +127,4 @@ Diag prints to strip when green: `ADMIT9-*`, `KV-TAKEOVER`, `KV-RECOVER`, `CHAIN
 3. Fuzz harness per §7.3 — the operator explicitly asked for "random kills, measure time-to-serve, never wedge."
 
 The fleet is yours. It serves. Don't let it regress: every change through PR, every publish through the loop in §5, every claim measured with CHAIN-TIME or the fixture.
+
