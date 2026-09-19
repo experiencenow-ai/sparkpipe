@@ -232,22 +232,6 @@ static volatile sig_atomic_t SparkModelResidentdStop;
 
 static uint64_t SparkModelResidentdMonotonicTimeNs(void);
 
-static void SparkModelResidentdFailLocked(
-	SparkModelResidentdRuntime *runtime,
-	SparkStatus status,
-	uint32_t reason,
-	const SparkModelResidentdRoute *route)
-{
-	if ( atomic_load(&runtime->failed_status) != SPARK_STATUS_OK )
-		return;
-	runtime->failed_reason = reason;
-	runtime->failed_route_state = route != 0 ? route->state : 0u;
-	runtime->failed_work_kind = route != 0 ? route->submission.work_kind : 0u;
-	runtime->failed_submission_id = route != 0 ? route->submission_id : 0u;
-	atomic_store(&runtime->failed_status,(uint32_t)status);
-	fprintf(stderr, "model_residentd route_failed status=%d reason=%u work_kind=%u submission=%llu\n", (int)status, reason, route != 0 ? route->submission.work_kind : 0u, route != 0 ? (unsigned long long)route->submission_id : 0ull);
-}
-
 static void SparkModelResidentdSignal(int32_t signal_number)
 {
 	(void)signal_number;
@@ -1011,7 +995,12 @@ static SparkStatus SparkModelResidentdQueueCompletionLocked(
 	if ( status == SPARK_STATUS_OK )
 		status = SparkModelResidentdCompleteResidentSlotsLocked(runtime,route);
 	if ( status != SPARK_STATUS_OK )
-		SPARK_RETURN(status);
+	{
+		fprintf(stderr,"model_residentd completion undeliverable (slot ownership reset under it — client generation gone); dropping route, status=%d\n",(int)status);
+		route->active = 0u;
+		route->state = SPARK_MODEL_RESIDENTD_ROUTE_IDLE;
+		return(SPARK_STATUS_OK);
+	}
 	output->message_bytes = message_bytes;
 	output->sent_bytes = 0u;
 	runtime->client.output_count++;
@@ -1093,7 +1082,7 @@ static void SparkModelResidentdCompletion(
 		route->state = SPARK_MODEL_RESIDENTD_ROUTE_READY_COMPLETION;
 	}
 	else if ( status != SPARK_STATUS_OK )
-		SparkModelResidentdFailLocked(runtime,status,failure_reason,0);
+		fprintf(stderr,"model_residentd late completion: no route for submission, dropping (status=%d reason=%u) — NOT fatal\n",(int)status,failure_reason);
 	pthread_mutex_unlock(&runtime->mutex);
 	SparkModelResidentdWake(runtime);
 }

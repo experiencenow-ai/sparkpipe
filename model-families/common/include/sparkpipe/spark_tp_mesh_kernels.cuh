@@ -24,22 +24,25 @@ static __device__ __forceinline__ unsigned long long SparkGlm5NextGlobalTimerNs(
 __global__ void SparkGlm5NextMeshPublishKernel(
 	volatile uint64_t *entry,
 	unsigned long long *seq_cell,
+	const unsigned long long *epoch_cell,
 	unsigned long long *round_seq,
 	uint64_t bytes,
 	uint64_t slot_index,
 	volatile uint64_t *slot_tail)
 {
 	unsigned long long sequence;
+	unsigned long long tag;
 	if ( threadIdx.x != 0u || blockIdx.x != 0u )
 		return;
 	sequence = 1ull + atomicAdd((unsigned long long *)seq_cell,1ull);
-	round_seq[0] = sequence;
+	tag = (epoch_cell[0] << 32ull) | (sequence & 0xffffffffull);
+	round_seq[0] = tag;
 	entry[2] = slot_index;
 	entry[1] = bytes;
 	__threadfence_system();
-	*slot_tail = sequence;
+	*slot_tail = tag;
 	__threadfence_system();
-	entry[0] = sequence;
+	entry[0] = tag;
 }
 
 __global__ void SparkGlm5NextMeshGuardKernel(
@@ -155,7 +158,7 @@ static __global__ void SparkGlm5NextSumRanksF32Kernel(
 {
 	uint32_t pair;
 	float2 acc,v;
-	for (pair=threadIdx.x; pair<pair_count; pair+=blockDim.x)
+	for (pair=blockIdx.x*blockDim.x+threadIdx.x; pair<pair_count; pair+=blockDim.x*gridDim.x)
 	{
 		uint32_t source;
 		acc.x = 0.0f;
@@ -342,11 +345,13 @@ extern "C" cudaError_t SparkGlm5NextLaunchMeshCopyDown(
 }
 
 extern "C" cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
-	volatile void *entry,void *seq_cell,void *round_seq,uint64_t bytes,
+	volatile void *entry,void *seq_cell,const void *epoch_cell,
+	void *round_seq,uint64_t bytes,
 	uint64_t slot_index,volatile void *slot_tail)
 {
 	SparkGlm5NextMeshPublishKernel<<<1,32,0u,stream>>>(
 		(volatile uint64_t *)entry,(unsigned long long *)seq_cell,
+		(const unsigned long long *)epoch_cell,
 		(unsigned long long *)round_seq,bytes,slot_index,
 		(volatile uint64_t *)slot_tail);
 	return(cudaPeekAtLastError());

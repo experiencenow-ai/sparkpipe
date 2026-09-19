@@ -166,6 +166,8 @@ struct SparkGlm5NextModuleState
 	uint8_t *head_certified_fp8_payload;
 	float *head_certified_fp8_scale_f32;
 	float *head_certified_fp8_norm_f32;
+	uint64_t expert_pin_leases[32];
+	uint32_t expert_pin_lease_count;
 	uint8_t *kv_cache;
 	uint64_t kv_layer_stride_bytes;
 	uint8_t *index_cache;
@@ -575,6 +577,8 @@ static SparkStatus SparkGlm5NextManifestCheck(const SparkWeightdManifest *manife
 	return(expected == manifest->range_count ? SPARK_STATUS_OK : SPARK_STATUS_SCHEMA_ERROR);
 }
 
+static SparkStatus SparkGlm5NextPinAllExperts(SparkGlm5NextModuleState *state);
+
 static SparkStatus SparkGlm5NextLazyOpen(SparkGlm5NextModuleState *state,const char *path,uint64_t bytes,const SparkGlm5NextStagePackEntry *entries,uint32_t count)
 {
 	SparkWeightdLazyAttachRequest request;
@@ -625,6 +629,21 @@ static SparkStatus SparkGlm5NextLazyOpen(SparkGlm5NextModuleState *state,const c
 		state->epoch_device = SparkWeightdMapEpochDevice(
 			state->lazy_pack->map);
 		state->epoch_validated = 0ull;
+	}
+	if ( status == SPARK_STATUS_OK )
+	{
+		const char *pin_env = getenv("SPARK_GLM5_NEXT_PIN_EXPERTS");
+		if ( pin_env != 0 && pin_env[0] == '1' && state->lazy_pack != 0 &&
+		     state->lazy_pack->map != 0 )
+		{
+			SparkStatus pin_status = SparkGlm5NextPinAllExperts(state);
+			if ( pin_status != SPARK_STATUS_OK )
+			{
+				fprintf(stderr,"EXPERT-PIN-FAILED status=%d — continuing unpinned\n",
+					(int)pin_status);
+				state->expert_pin_lease_count = 0u;
+			}
+		}
 	}
 	SPARK_RETURN(status);
 }
@@ -2332,8 +2351,9 @@ static void SparkGlm5NextTpChainFail(SparkGlm5NextTpChain *chain,SparkStatus sta
 	chain->active = 0u;
 	state = chain->state;
 	chain->slot->route_recorded = 0u;
-	fprintf(stderr,"G5N-DBG chainfail: stage %u next_layer %u rows %u status %d\n",
-		(unsigned)chain->stage,(unsigned)chain->next_layer,(unsigned)chain->wave_rows,(int)status);
+	fprintf(stderr,"G5N-DBG chainfail: stage %u next_layer %u rows %u status %d cuda=%s\n",
+		(unsigned)chain->stage,(unsigned)chain->next_layer,(unsigned)chain->wave_rows,(int)status,
+		cudaGetErrorString(cudaGetLastError()));
 	if ( state->tp_device_collective_initialized != 0u )
 	{
 		SparkTpDeviceCollectiveBroadcastCancel(&state->tp_device_collective);
@@ -2434,6 +2454,45 @@ static void SparkGlm5NextTpChainReduceMlp(SparkGlm5NextTpChain *chain)
 	status = SparkGlm5NextModuleReduceAttentionOut(chain,chain->slot->attention_out_bf16);
 	if ( status != SPARK_STATUS_OK )
 		SparkGlm5NextTpChainFail(chain,status);
+}
+
+static SparkStatus SparkGlm5NextPinAllExperts(SparkGlm5NextModuleState *state)
+{
+	SparkWeightdExpertKey keys[SPARK_WEIGHTD_LEASE_GROUPS_MAX];
+	uint32_t count = 0u;
+	uint32_t layer,expert;
+	SparkStatus status = SPARK_STATUS_OK;
+	for ( layer = state->first_layer_index + SPARK_GLM5_NEXT_MODEL_FIRST_ROUTED_LAYER;
+	      layer < state->first_layer_index + state->layer_count &&
+	          status == SPARK_STATUS_OK; layer++ )
+		for ( expert = 0u;
+		      expert < SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT &&
+		          status == SPARK_STATUS_OK; expert++ )
+		{
+			keys[count].layer = layer;
+			keys[count].expert = expert;
+			count++;
+			if ( count == SPARK_WEIGHTD_LEASE_GROUPS_MAX ||
+			     ( layer + 1u == state->first_layer_index + state->layer_count &&
+			       expert + 1u == SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT ) )
+			{
+				uint64_t lease = 0u;
+				status = SparkWeightdMapAcquire(state->lazy_pack->map,keys,
+				    count,&lease,SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
+				if ( status == SPARK_STATUS_OK )
+				{
+					if ( state->expert_pin_lease_count <
+					        (uint32_t)(sizeof(state->expert_pin_leases)/
+					            sizeof(state->expert_pin_leases[0])) )
+						state->expert_pin_leases[state->expert_pin_lease_count++] = lease;
+					fprintf(stderr,"EXPERT-PIN lease=%llu keys=%u total_leases=%u\n",
+						(unsigned long long)lease,(unsigned)count,
+						(unsigned)state->expert_pin_lease_count);
+				}
+				count = 0u;
+			}
+		}
+	SPARK_RETURN(status);
 }
 
 static SparkStatus SparkGlm5NextLazyExperts(SparkGlm5NextTpChain *chain)
@@ -2756,13 +2815,17 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 	if ( status == SPARK_STATUS_OK )
 	{
 		exec = chain->slot->graph_exec_a;
-		if ( cudaGraphLaunch(exec,chain->slot->stream) != cudaSuccess )
 		{
-			fprintf(stderr,"GRAPH-LAUNCH-ERR slot=%u cuda=%s\n",
-				chain->slot_index,
-				cudaGetErrorString(cudaGetLastError()));
-			status = SPARK_STATUS_IO_ERROR;
-		}
+			cudaError_t pre_err = cudaGetLastError();
+			cudaError_t launch_rc = cudaGraphLaunch(exec,chain->slot->stream);
+			if ( launch_rc != cudaSuccess )
+			{
+				fprintf(stderr,"GRAPH-LAUNCH-ERR slot=%u rc=%s pre=%s\n",
+					chain->slot_index,
+					cudaGetErrorString(launch_rc),
+					cudaGetErrorString(pre_err));
+				status = SPARK_STATUS_IO_ERROR;
+			}
 		else
 		{
 			struct timespec replay_t0,replay_t1;
@@ -2842,6 +2905,7 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 					    &state->tp_device_collective_hc);
 			}
 		}
+	}
 	}
 	if ( status == SPARK_STATUS_OK )
 	{
@@ -3800,7 +3864,10 @@ static SparkStatus SparkGlm5NextExecuteBatch(SparkGlm5NextModuleState *state,Spa
 	SparkStatus status;
 	status = SparkTpChainOrdinal(frame->request_id,state->pipeline_slot_count,SPARK_GLM5_NEXT_TP_COLLECTIVE_CREDITS_PER_SLOT,SPARK_GLM5_NEXT_TP_CHAIN_OPERATIONS,SPARK_GLM5_NEXT_TP_CHAIN_OPERATIONS - 1u,&last_ordinal);
 	if ( status != SPARK_STATUS_OK )
+	{
+		fprintf(stderr,"G5N-DBG submit-fail site=ordinal status=%d req=%llu\n",(int)status,(unsigned long long)frame->request_id);
 		SPARK_RETURN(status);
+	}
 	continuity.state = state;
 	continuity.batch = batch;
 	continuity.bound = simulated_bound;
@@ -3808,9 +3875,14 @@ static SparkStatus SparkGlm5NextExecuteBatch(SparkGlm5NextModuleState *state,Spa
 	continuity.next_positions = simulated_next;
 	status = SparkStageModuleIndexSetClaimAndPrepare(state->lane_states,state->resident_sequence_capacity,batch->row_resident_slots,batch->active_sequence_count,SparkGlm5NextPrepareClaimedContinuity,&continuity);
 	if ( status != SPARK_STATUS_OK )
+	{
+		fprintf(stderr,"G5N-DBG submit-fail site=lane-claim status=%d req=%llu rows=%u\n",(int)status,(unsigned long long)frame->request_id,(unsigned)batch->active_sequence_count);
 		SPARK_RETURN(status);
+	}
 	slot_index = (uint32_t)(frame->request_id % state->pipeline_slot_count);
 	status = SparkStageModuleIndexSetClaim(state->slot_states,state->pipeline_slot_count,&slot_index,1u);
+	if ( status != SPARK_STATUS_OK )
+		fprintf(stderr,"G5N-DBG submit-fail site=slot-claim status=%d req=%llu slot=%u\n",(int)status,(unsigned long long)frame->request_id,(unsigned)slot_index);
 	if ( status == SPARK_STATUS_OK )
 	{
 		slot = &state->slots[slot_index];
