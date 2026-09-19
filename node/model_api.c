@@ -368,7 +368,10 @@ static void *api_worker(void *arg)
 			}
 		}
 		else
+		{
+			(void)SparkModelBatchEngineProgress(S.engine, 4u);
 			usleep(5000);
+		}
 	}
 	return 0;
 }
