@@ -38,7 +38,7 @@ typedef struct TestMeshRecord
 #define TEST_MESH_INTERFACE "rocep1s0f1"
 
 SparkStatus SparkWeightdMeshInit(uint32_t rank, const char *interface_name,
-    uint32_t sgid_index);
+    uint32_t sgid_index, const char *mesh_dir);
 uint32_t SparkWeightdMeshReady(void);
 void SparkWeightdMeshPoll(void);
 uint32_t SparkWeightdMeshBroadcast(uint32_t peer_rank_mask,
@@ -316,7 +316,7 @@ int main(void)
             continue;
         CHECK(test_write_record(rank,1u) == 0,"case1 write peer record");
     }
-    status = SparkWeightdMeshInit(local_rank,TEST_MESH_INTERFACE,3u);
+    status = SparkWeightdMeshInit(local_rank,TEST_MESH_INTERFACE,3u,SPARK_WEIGHTD_MESH_DIR);
     CHECK(status == SPARK_STATUS_BUSY,"case1 init publishes and defers");
     CHECK(test_read_record(local_rank,&own_record) == 0,
         "case1 own record published");
@@ -350,7 +350,7 @@ int main(void)
         "case3 unchanged records are a wiring no-op");
     CHECK(SparkWeightdMeshReady() == 1u,"case3 stays ready");
 
-    status = SparkWeightdMeshInit(local_rank,TEST_MESH_INTERFACE,3u);
+    status = SparkWeightdMeshInit(local_rank,TEST_MESH_INTERFACE,3u,SPARK_WEIGHTD_MESH_DIR);
     CHECK(status == SPARK_STATUS_BUSY,"case4 init republishes");
     CHECK(test_read_record(local_rank,&own_record) == 0,
         "case4 own record republished");
@@ -417,6 +417,35 @@ int main(void)
     spark_stub_ibv_poll_cq_inject(IBV_WC_SUCCESS,1u);
     SparkWeightdMeshPoll();
     CHECK(SparkWeightdMeshReady() == 1u,"case5 clean poll after recovery");
+
+    /* case 6: a second daemon instance with its own record dir must not
+     * touch ours — the two-daemons-one-host separation (the fleet's
+     * weightd vs the driver developers' standalone weightsd). */
+    {
+        char dir2[256];
+        uint64_t dir1_boot = own_record.boot_ns;
+        (void)snprintf(dir2,sizeof(dir2),"%s-second",SPARK_WEIGHTD_MESH_DIR);
+        (void)mkdir(dir2,0755);
+        status = SparkWeightdMeshInit(local_rank,TEST_MESH_INTERFACE,3u,dir2);
+        CHECK(status == SPARK_STATUS_BUSY,"case6 second init publishes");
+        {
+            (void)snprintf(path,sizeof(path),"%s/mesh-%x.rec",dir2,local_rank);
+            CHECK(stat(path,&st) == 0,"case6 record lands in the second dir");
+        }
+        /* our original record is untouched */
+        {
+            TestMeshRecord first_again;
+            CHECK(test_read_record(local_rank,&first_again) == 0,
+                "case6 original record still readable");
+            CHECK(first_again.boot_ns == dir1_boot,
+                "case6 original record not clobbered by the second instance");
+        }
+        {
+            char cmd[512];
+            (void)snprintf(cmd,sizeof(cmd),"rm -rf %s",dir2);
+            (void)system(cmd);
+        }
+    }
 
     test_clean_dir();
     (void)snprintf(path,sizeof(path),"%s/capture-wire-fail.log",

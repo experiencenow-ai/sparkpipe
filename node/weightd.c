@@ -14,7 +14,7 @@
 #include "sparkpipe/spark_weightd.h"
 
 SparkStatus SparkWeightdMeshInit(uint32_t rank, const char *interface_name,
-    uint32_t sgid_index);
+    uint32_t sgid_index, const char *mesh_dir);
 uint32_t SparkWeightdMeshReady(void);
 void SparkWeightdMeshDoorbellLoop(void);
 
@@ -23,6 +23,7 @@ typedef struct SparkWeightdMeshLaunch
     uint32_t rank;
     const char *interface_name;
     uint32_t sgid_index;
+    const char *mesh_dir;
 } SparkWeightdMeshLaunch;
 
 static SparkWeightdMeshLaunch weightd_mesh_launch;
@@ -32,7 +33,7 @@ static void *SparkWeightdMeshThread(void *argument)
     SparkWeightdMeshLaunch *launch = (SparkWeightdMeshLaunch *)argument;
     SparkStatus status;
     status = SparkWeightdMeshInit(launch->rank,launch->interface_name,
-        launch->sgid_index);
+        launch->sgid_index,launch->mesh_dir);
     if (status == SPARK_STATUS_BUSY)
         SparkWeightdMeshDoorbellLoop();
     else if (status != SPARK_STATUS_OK)
@@ -63,7 +64,8 @@ static void SparkWeightdUsage(const char *program)
             "--mesh-interface and --mesh-sgid-index, state all three "
             "or none\n"
         "  --mesh-interface <name>  verbs device name to bind\n"
-        "  --mesh-sgid-index <n>    source GID index 0..255\n",
+        "  --mesh-sgid-index <n>    source GID index 0..255\n"
+        "  --mesh-dir <path>        record exchange dir (env SPARK_WEIGHTD_MESH_DIR, default /tmp/weightd-mesh; use a per-deployment dir when two weightd-line daemons share the host)\n",
         program,
         (unsigned long long)SPARK_WEIGHTD_DEVICE_BYTES_MAX_DEFAULT,
         (unsigned)SPARK_WEIGHTD_MESH_RANKS - 1u);
@@ -171,6 +173,17 @@ int main(int argument_count, char **arguments)
             mesh_fields++;
             index++;
         }
+        else if (strcmp(arguments[index], "--mesh-dir") == 0 &&
+            index + 1 < argument_count)
+        {
+            weightd_mesh_launch.mesh_dir = arguments[++index];
+            if (weightd_mesh_launch.mesh_dir[0] == '\0')
+            {
+                fprintf(stderr, "weightd: bad --mesh-dir ''\n");
+                SparkWeightdUsage(arguments[0]);
+                return 2;
+            }
+        }
         else if (strcmp(arguments[index], "--help") == 0)
         {
             SparkWeightdUsage(arguments[0]);
@@ -195,6 +208,10 @@ int main(int argument_count, char **arguments)
         const char *env_socket = getenv("SPARK_WEIGHTD_SOCKET");
         const char *env_ceiling = getenv("SPARK_WEIGHTD_DEVICE_BYTES_MAX");
         const char *env_reserve = getenv("SPARK_WEIGHTD_KV_RESERVE_BYTES");
+        const char *env_mesh_dir = getenv("SPARK_WEIGHTD_MESH_DIR");
+        if (weightd_mesh_launch.mesh_dir == 0 && env_mesh_dir != 0 &&
+            env_mesh_dir[0] != '\0')
+            weightd_mesh_launch.mesh_dir = env_mesh_dir;
         if (env_socket != 0 && env_socket[0] != '\0')
         {
             socket_path = env_socket;
