@@ -273,3 +273,29 @@ REMAINING (the last mile to the 176-token fixture):
    reorder-only attempt failed the spine preload; reverted at 5d8dc98).
 3. probe discipline: exactly one request in flight at a time until the
    fixture passes.
+
+
+## Addendum 5 — session flapping (the live blocker)
+
+The API<->engine connections flap ~1/second: engine reads EOF or a
+message it rejects, closes; API reconnects; the engine's per-accept
+generation bumps; the batch engine's fingerprint changes; ALL resident
+bindings and in-flight transactions invalidate; the next submission
+fails; another flap. The fleet generates (chains complete warm at
+~350ms) but no request survives the flapping seam.
+
+Unknown, the next instrument to answer: WHICH side closes first and why.
+The engine closes on read EOF (peer), schema error (bad message_bytes),
+or close_after_output after a failed hello/queue. No "hello rejected"
+prints on engines, so not the hello. Next: a print in the engine's
+close path naming the reason (eof vs schema vs close_after_output), or
+snoop one connection's bytes both directions. Note the engines run the
+aarch64 build, the API the x86 build of the same commit — if the IPC
+framing differs across architectures (struct packing), the engine reads
+garbage message_bytes and schema-closes: CHECK THAT FIRST (compare
+SPARK_MODEL_RESIDENT_IPC header/struct sizes across the two builds —
+one static print at each boot would have saved hours).
+
+Pool: premap restore attempt broke the spine preload (io_error) and was
+reverted (5d8dc98). Cold chains ~450s remain the cost until the pool
+premap is redone with disjoint VA ranges.
