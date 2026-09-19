@@ -18,6 +18,7 @@
 #endif
 
 #define TEST_RANKS 3u
+#define TEST_MAX_REQUESTS 8u
 
 static uint32_t test_failures;
 static uint32_t test_checks;
@@ -32,27 +33,30 @@ static uint32_t test_checks;
 
 typedef struct TestBatchState
 {
-	uint32_t token_events;
-	uint32_t terminal_events;
-	uint32_t terminal_status;
-	uint32_t tokens[64];
+	uint32_t token_events[TEST_MAX_REQUESTS + 1u];
+	uint32_t completed_events[TEST_MAX_REQUESTS + 1u];
+	uint32_t error_events[TEST_MAX_REQUESTS + 1u];
+	uint32_t total_terminals;
 } TestBatchState;
 
 static void TestBatchEvent(void *context, const SparkModelBatchEvent *event)
 {
 	TestBatchState *s = (TestBatchState *)context;
+	uint64_t id = event->request_id;
+	if ( id > TEST_MAX_REQUESTS )
+		return;
 	if ( event->kind == SPARK_MODEL_BATCH_EVENT_TOKEN )
+		s->token_events[id]++;
+	if ( event->kind == SPARK_MODEL_BATCH_EVENT_REQUEST_COMPLETED )
 	{
-		if ( s->token_events < 64u )
-			s->tokens[s->token_events] = event->token_id;
-		s->token_events++;
+		s->completed_events[id]++;
+		s->total_terminals++;
 	}
-	if ( event->kind == SPARK_MODEL_BATCH_EVENT_REQUEST_COMPLETED ||
-	     event->kind == SPARK_MODEL_BATCH_EVENT_REQUEST_CANCELLED ||
+	if ( event->kind == SPARK_MODEL_BATCH_EVENT_REQUEST_CANCELLED ||
 	     event->kind == SPARK_MODEL_BATCH_EVENT_ERROR )
 	{
-		s->terminal_events++;
-		s->terminal_status = event->status;
+		s->error_events[id]++;
+		s->total_terminals++;
 	}
 }
 
@@ -128,70 +132,202 @@ static SparkModelBatchEngine *TestConnect(const SparkModelResidentDeployment *de
 	return(engine);
 }
 
+static void TestSubmit(SparkModelBatchEngine *engine, uint64_t request_id, uint64_t sequence_id, uint32_t budget)
+{
+	static const uint32_t prompt[4] = { 11u, 12u, 13u, 14u };
+	SparkModelBatchSubmitRequest request;
+	SparkModelBatchRequestHandle handle;
+	SparkStatus status;
+	memset(&request,0,sizeof(request));
+	request.abi_version = SPARK_MODEL_BATCH_ENGINE_ABI_VERSION;
+	request.descriptor_bytes = sizeof(request);
+	request.request_id = request_id;
+	request.sequence_id = sequence_id;
+	request.prompt_token_ids = prompt;
+	request.prompt_token_count = 4u;
+	request.output_token_budget = budget;
+	handle = 0;
+	status = SparkModelBatchEngineSubmit(engine,&request,&handle);
+	CHECK(status == SPARK_STATUS_OK, "submit request");
+}
+
+/* One drive step: engine progress (which pumps the pipeline and the mock
+ * residents' reconnect logic), then the mock answers everything in flight.
+ * The 1ms pause lets the engine's busy-retry backoff elapse on failure
+ * scenarios without making the happy path slow. */
+static void TestDrive(SparkModelBatchEngine *engine, uint32_t steps)
+{
+	uint32_t step;
+	for (step=0u; step<steps; step++)
+	{
+		(void)SparkModelBatchEngineProgress(engine, 8u);
+		(void)MockResidentClientDriveAll();
+		usleep(1000);
+	}
+}
+
+static void TestDriveUntilTerminal(SparkModelBatchEngine *engine, TestBatchState *state, uint32_t terminals, uint32_t max_steps)
+{
+	uint32_t step;
+	for (step=0u; step<max_steps && state->total_terminals < terminals; step++)
+	{
+		(void)SparkModelBatchEngineProgress(engine, 8u);
+		(void)MockResidentClientDriveAll();
+		usleep(1000);
+	}
+}
+
+static void TestScenarioHappyPath(const SparkModelResidentDeployment *deployment, const char *runtime_root)
+{
+	TestBatchState state;
+	SparkModelBatchEngine *engine;
+	MockResidentClientReset();
+	memset(&state,0,sizeof(state));
+	engine = TestConnect(deployment,&state,runtime_root);
+	if ( engine == 0 )
+		return;
+	TestSubmit(engine,1u,500u,2u);
+	MockResidentClientSetAutoTokens(1u);
+	MockResidentClientSetFinalRank(TEST_RANKS - 1u,1u);
+	TestDriveUntilTerminal(engine,&state,1u,400u);
+	CHECK( state.token_events[1] != 0u,
+		"happy: the request produced tokens through the full stack");
+	CHECK( state.completed_events[1] == 1u && state.error_events[1] == 0u,
+		"happy: the request completed cleanly");
+	SparkModelBatchEngineDestroy(engine);
+}
+
+static void TestScenarioRankDiesMidDecode(const SparkModelResidentDeployment *deployment, const char *runtime_root)
+{
+	TestBatchState state;
+	SparkModelBatchEngine *engine;
+	uint32_t step;
+	MockResidentClientReset();
+	memset(&state,0,sizeof(state));
+	engine = TestConnect(deployment,&state,runtime_root);
+	if ( engine == 0 )
+		return;
+	TestSubmit(engine,1u,500u,4u);
+	MockResidentClientSetAutoTokens(1u);
+	MockResidentClientSetFinalRank(TEST_RANKS - 1u,1u);
+	for (step=0u; step<400u && state.token_events[1] == 0u; step++)
+	{
+		(void)SparkModelBatchEngineProgress(engine, 8u);
+		(void)MockResidentClientDriveAll();
+		usleep(1000);
+	}
+	CHECK( state.token_events[1] != 0u, "chaos: prefill produced a token before the kill");
+	/* The resident dies with a decode in flight. The pipeline must detect
+	 * the dead socket, fail the in-flight transaction loudly, reconnect,
+	 * and the engine must retry the request to completion — no restart. */
+	MockResidentClientDisconnect(1u);
+	TestDriveUntilTerminal(engine,&state,1u,2000u);
+	CHECK( state.completed_events[1] == 1u && state.error_events[1] == 0u,
+		"chaos: request completed after a mid-decode rank death");
+	CHECK( state.token_events[1] >= 4u,
+		"chaos: the full token budget was produced across the failure");
+	/* The pipeline must be healthy for the NEXT request, not just this one. */
+	TestSubmit(engine,2u,501u,2u);
+	TestDriveUntilTerminal(engine,&state,2u,400u);
+	CHECK( state.completed_events[2] == 1u && state.error_events[2] == 0u,
+		"chaos: a fresh request completes after the recovery");
+	SparkModelBatchEngineDestroy(engine);
+}
+
+static void TestScenarioRankKilledAndRevived(const SparkModelResidentDeployment *deployment, const char *runtime_root)
+{
+	TestBatchState state;
+	SparkModelBatchEngine *engine;
+	MockResidentClientReset();
+	memset(&state,0,sizeof(state));
+	engine = TestConnect(deployment,&state,runtime_root);
+	if ( engine == 0 )
+		return;
+	TestSubmit(engine,1u,500u,3u);
+	MockResidentClientSetAutoTokens(1u);
+	MockResidentClientSetFinalRank(TEST_RANKS - 1u,1u);
+	/* The rank is dead from the start (residentd down, agent respawning). */
+	MockResidentClientKill(1u);
+	TestDrive(engine,50u);
+	CHECK( state.total_terminals == 0u,
+		"chaos: a dead rank holds the request without failing it");
+	MockResidentClientRevive(1u);
+	TestDriveUntilTerminal(engine,&state,1u,2000u);
+	CHECK( state.completed_events[1] == 1u && state.error_events[1] == 0u,
+		"chaos: request completed once the killed rank revived");
+	SparkModelBatchEngineDestroy(engine);
+}
+
+static void TestScenarioEosEarlyStop(const SparkModelResidentDeployment *deployment, const char *runtime_root)
+{
+	TestBatchState state;
+	SparkModelBatchEngine *engine;
+	MockResidentClientReset();
+	memset(&state,0,sizeof(state));
+	engine = TestConnect(deployment,&state,runtime_root);
+	if ( engine == 0 )
+		return;
+	TestSubmit(engine,1u,500u,8u);
+	MockResidentClientSetAutoTokens(1u);
+	MockResidentClientSetTokenStart(154820u);
+	MockResidentClientSetFinalRank(TEST_RANKS - 1u,1u);
+	TestDriveUntilTerminal(engine,&state,1u,400u);
+	CHECK( state.token_events[1] == 1u,
+		"eos: generation stopped at the EOS token instead of the budget");
+	CHECK( state.completed_events[1] == 1u && state.error_events[1] == 0u,
+		"eos: the request completed cleanly on EOS");
+	SparkModelBatchEngineDestroy(engine);
+}
+
+static void TestScenarioTwoRequestsRankDies(const SparkModelResidentDeployment *deployment, const char *runtime_root)
+{
+	TestBatchState state;
+	SparkModelBatchEngine *engine;
+	MockResidentClientReset();
+	memset(&state,0,sizeof(state));
+	engine = TestConnect(deployment,&state,runtime_root);
+	if ( engine == 0 )
+		return;
+	TestSubmit(engine,1u,500u,3u);
+	TestSubmit(engine,2u,501u,3u);
+	MockResidentClientSetAutoTokens(1u);
+	MockResidentClientSetFinalRank(TEST_RANKS - 1u,1u);
+	TestDrive(engine,20u);
+	MockResidentClientKill(0u);
+	TestDrive(engine,30u);
+	MockResidentClientRevive(0u);
+	TestDriveUntilTerminal(engine,&state,2u,2000u);
+	CHECK( state.completed_events[1] == 1u && state.error_events[1] == 0u,
+		"chaos: first concurrent request completed across the rank death");
+	CHECK( state.completed_events[2] == 1u && state.error_events[2] == 0u,
+		"chaos: second concurrent request completed across the rank death");
+	SparkModelBatchEngineDestroy(engine);
+}
+
 int main(void)
 {
 	SparkModelResidentDeployment deployment;
-	SparkModelBatchEngine *engine;
-	SparkModelBatchSubmitRequest request;
-	SparkModelBatchRequestHandle handle;
-	TestBatchState state;
-	SparkStatus status;
 	char path[512];
 	char runtime_root[256];
-	uint32_t prompt[4] = { 11u, 12u, 13u, 14u };
-	uint32_t step;
 
-	MockResidentClientReset();
 	assert(getcwd(runtime_root,sizeof(runtime_root)) != 0);
 	(void)snprintf(path,sizeof(path),"%s/mock-batch-deployment.json",runtime_root);
 	TestWriteDeployment(path,runtime_root);
 	assert(SparkModelResidentDeploymentLoad(path,&deployment) == SPARK_STATUS_OK);
-
 	deployment.eos_token_count = 1u;
 	deployment.eos_token_ids[0] = 154820u;
-	memset(&state,0,sizeof(state));
-	engine = TestConnect(&deployment,&state,runtime_root);
-	if ( engine == 0 )
-		return(1);
 
-	memset(&request,0,sizeof(request));
-	request.abi_version = SPARK_MODEL_BATCH_ENGINE_ABI_VERSION;
-	request.descriptor_bytes = sizeof(request);
-	request.request_id = 1u;
-	request.sequence_id = 500u;
-	request.prompt_token_ids = prompt;
-	request.prompt_token_count = 4u;
-	request.output_token_budget = 2u;
-	handle = 0;
-	status = SparkModelBatchEngineSubmit(engine,&request,&handle);
-	CHECK(status == SPARK_STATUS_OK, "submit request");
+	TestScenarioHappyPath(&deployment,runtime_root);
+	TestScenarioRankDiesMidDecode(&deployment,runtime_root);
+	TestScenarioRankKilledAndRevived(&deployment,runtime_root);
+	TestScenarioEosEarlyStop(&deployment,runtime_root);
+	TestScenarioTwoRequestsRankDies(&deployment,runtime_root);
 
-	MockResidentClientSetAutoTokens(1u);
-	MockResidentClientSetFinalRank(TEST_RANKS - 1u, 1u);
-	for (step=0u; step<400u && state.terminal_events == 0u; step++)
-	{
-		SparkModelBatchEngineView view;
-		(void)SparkModelBatchEngineProgress(engine, 8u);
-		(void)MockResidentClientDriveAll();
-		if ( step == 20u || step == 100u )
-			if ( SparkModelBatchEngineGetView(engine,&view) == SPARK_STATUS_OK )
-				fprintf(stderr,"DBG step=%u active=%u queued_prefill=%u ready_decode=%u\n",
-					step,(unsigned)view.live_request_count,
-					(unsigned)view.queued_prefill_count,(unsigned)view.ready_decode_count);
-	}
-
-	CHECK( state.token_events != 0u,
-		"the request produced tokens through the full stack");
-	CHECK( state.terminal_events != 0u,
-		"the request reached a terminal event");
-
-	SparkModelBatchEngineDestroy(engine);
 	SparkModelResidentDeploymentReset(&deployment);
 	MockResidentClientReset();
 	(void)unlink(path);
 
-	fprintf(stderr,"%s: %u checks, %u failures (tokens=%u terminals=%u)\n",
-		"test_model_batch_engine_mock", test_checks, test_failures,
-		state.token_events, state.terminal_events);
+	fprintf(stderr,"%s: %u checks, %u failures\n",
+		"test_model_batch_engine_mock", test_checks, test_failures);
 	return( test_failures != 0u ? 1 : 0 );
 }
