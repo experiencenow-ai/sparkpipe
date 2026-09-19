@@ -269,12 +269,12 @@ static_assert(K3_LAYERS == SPARK_K3_MODULE_TOTAL_LAYERS,
 	"k3 kernel layer count must equal the module layer total");
 static uint32_t K3RunnerFirstLayer(uint32_t stage_index)
 {
-	return(K3_RUNNER_PP_STAGE_FIRST(stage_index % K3_RUNNER_PP_STAGE_COUNT));
+	return(SPARK_K3_PP_STAGE_FIRST(stage_index % SPARK_K3_PP_STAGE_COUNT));
 }
 
 static uint32_t K3RunnerLayerCount(uint32_t stage_index)
 {
-	return(K3_RUNNER_PP_STAGE_LAYERS(stage_index % K3_RUNNER_PP_STAGE_COUNT));
+	return(SPARK_K3_PP_STAGE_LAYERS(stage_index % SPARK_K3_PP_STAGE_COUNT));
 }
 
 static void K3RunnerEmbedCompletion(void *context,
