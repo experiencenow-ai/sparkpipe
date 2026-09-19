@@ -7243,18 +7243,18 @@
     },
     {
       "path": "qualification/t1_reference/gemma4/MANIFEST.json",
-      "sha256": "d1f49028d0320635231b822bd90a8f3be2ea2b2a952959aaf593988b55bbf88e",
-      "size_bytes": 1073
+      "sha256": "3b32c671bf422a5a0702a20a8faa76b592deff21979a143fd270e64ea64bebc1",
+      "size_bytes": 1070
     },
     {
       "path": "qualification/t1_reference/gemma4/capital_of_france.t1r",
-      "sha256": "cb80dfaa259e15e01a342728e074099ccc2b81d628cba2f7e1d1d1d51ac12876",
-      "size_bytes": 314783
+      "sha256": "b36e129d2bc8ce211848acbddbf74752bf4a746150a3f133f926cc9607d6b2bf",
+      "size_bytes": 315193
     },
     {
       "path": "qualification/t1_reference/gemma4/count_up.t1r",
-      "sha256": "831d02527129831d8352404e8bdbbbf5680107d52841bccf531d5601ea39a65d",
-      "size_bytes": 384056
+      "sha256": "da7e57bf423496aebe11465cfbc7f50b9bf762ac850a23d7451cc3f89f7f042c",
+      "size_bytes": 384358
     },
     {
       "path": "qualification/t1_reference/gemma4/prompts.json",
@@ -7263,18 +7263,18 @@
     },
     {
       "path": "qualification/t1_reference/gemma4_26b/MANIFEST.json",
-      "sha256": "17e7f906a34cc4ec96d4052e77f2bdbb71afe8d75cb809921e7df456806786e4",
+      "sha256": "1a226283a3150a7e2bf212517b53f456d1b3e79e0fdf78e34562c80295b8d8c4",
       "size_bytes": 1066
     },
     {
       "path": "qualification/t1_reference/gemma4_26b/capital_of_france.t1r",
-      "sha256": "a93861d5a1d68d256df8d1a50e2c639aed8d76170835ec639d257bc76b4e7ac9",
-      "size_bytes": 173183
+      "sha256": "c743bb6b1305fbb78a3536e40a055329117e78653e6c545cfe995a6c3ca11ab1",
+      "size_bytes": 173050
     },
     {
       "path": "qualification/t1_reference/gemma4_26b/count_up.t1r",
-      "sha256": "d342792639fd8d05dfc16f5cdc3eec87ed3af938fbbccbdf754bc90750266263",
-      "size_bytes": 210894
+      "sha256": "5f13330627abad2b7982a704d723abcf048f2f98ef302a92588094b76f9a2d15",
+      "size_bytes": 210879
     },
     {
       "path": "qualification/t1_reference/gemma4_26b/llm_defines_26b.h",
@@ -7353,18 +7353,18 @@
     },
     {
       "path": "qualification/t1_reference/ling/MANIFEST.json",
-      "sha256": "f3839d45da329e2f6794e8fab1ca8cb042e26fa6e94e225ec84b323b32a8dd32",
-      "size_bytes": 1071
+      "sha256": "cb5c949d1ff6b96a3c220714aadd3e8237f8c7173c2603ca9938a8a75b3a743d",
+      "size_bytes": 1060
     },
     {
       "path": "qualification/t1_reference/ling/capital_of_france.t1r",
-      "sha256": "394b74a575c810c08132adece3079393f93436454ca0a396a6b6c1b87b2fb6ff",
-      "size_bytes": 320018
+      "sha256": "993471215b2f8bc6cca71869ae58fd41edeb9f2ca1f9ca26821ac77931e5e2bd",
+      "size_bytes": 319969
     },
     {
       "path": "qualification/t1_reference/ling/count_up.t1r",
-      "sha256": "5fdb371f767a25dfaeb86ca272ffbe8c85673cf1545e56e7816551a3d8eccbff",
-      "size_bytes": 425851
+      "sha256": "fcc84a411d97e02759fb867e9165aab49ec95197b0cb74a79848c7b5390bc158",
+      "size_bytes": 426009
     },
     {
       "path": "qualification/t1_reference/ling/prompts.json",
@@ -7373,18 +7373,18 @@
     },
     {
       "path": "qualification/t1_reference/minimax/MANIFEST.json",
-      "sha256": "c2d8eb7888825904017aad5d11da1a7844160104bd65eff4bc58e22a73f571cc",
+      "sha256": "8ae1bf10a4e95cee058f5de0fe6c0d5d37db61569009ec70022b4ae4faabaa50",
       "size_bytes": 1066
     },
     {
       "path": "qualification/t1_reference/minimax/capital_of_france.t1r",
-      "sha256": "f6c97578b1ea21d8513917e4c03e362b4483b97519c2d0071a335a1b3205fd6e",
-      "size_bytes": 304551
+      "sha256": "931d0b5d421eb85ef731ff2c6d5e9c451ef395afbcca642b8892cf3f9d96908f",
+      "size_bytes": 304691
     },
     {
       "path": "qualification/t1_reference/minimax/count_up.t1r",
-      "sha256": "61905cc1bbc3c578cbebad7bc397ee15e7e8bb015ec015f76d639b5d63c7305c",
-      "size_bytes": 405046
+      "sha256": "d80fc476295311c39872c33af57ad65b716a60047f75f01710b8f18d983cf3eb",
+      "size_bytes": 405311
     },
     {
       "path": "qualification/t1_reference/minimax/prompts.json",
@@ -7393,18 +7393,18 @@
     },
     {
       "path": "qualification/t1_reference/muse/MANIFEST.json",
-      "sha256": "47529172d57d1d95020e88a3540ec973354748fe35ba27e5882b684496ab9180",
+      "sha256": "5faecd5acb135426fd1bdf9b59d83c14ce52891b43e6efe36ab739994241fa11",
       "size_bytes": 1063
     },
     {
       "path": "qualification/t1_reference/muse/capital_of_france.t1r",
-      "sha256": "40bbb6f3faac28ecf88cf59c8bfbca433c4f6c0440af0104e55c51c3983a7895",
-      "size_bytes": 389575
+      "sha256": "8bd1120f00d95328f952139b0cd86b6d57910db2d5fd434801a12e07d97c4e7f",
+      "size_bytes": 389521
     },
     {
       "path": "qualification/t1_reference/muse/count_up.t1r",
-      "sha256": "ba97812d5c05168ced8b934421d1423ba62f3bca70c95c4a09d26f80cf67dbf7",
-      "size_bytes": 475727
+      "sha256": "e9772a9188cb05ffdba744cdcae49a5b0931025d9ced679611624e59c5c4dd93",
+      "size_bytes": 475873
     },
     {
       "path": "qualification/t1_reference/muse/muse_validation_receipts.json",
@@ -7418,18 +7418,18 @@
     },
     {
       "path": "qualification/t1_reference/qwen38_27b/MANIFEST.json",
-      "sha256": "1358e876d3f6cf2bb9112787241ebc0c59fe202f6a157c4bd5c2bba0a128416c",
+      "sha256": "f5a375f789ee965573c7706aa9adefa360a6be038214aa5f7d3a8e8e25306558",
       "size_bytes": 1079
     },
     {
       "path": "qualification/t1_reference/qwen38_27b/capital_of_france.t1r",
-      "sha256": "27f35d84cefc57c3be8e7bbb5bf8b8eb3739a56a46f9ca6b6164c7e4aea0ef03",
-      "size_bytes": 305318
+      "sha256": "54e8dbddbe04f190ad47b4ce4fdbe981f50110c4f1464ff9e6decc414866c6a7",
+      "size_bytes": 305202
     },
     {
       "path": "qualification/t1_reference/qwen38_27b/count_up.t1r",
-      "sha256": "ce1929c1858ce0f1bcfb87862c4cc5e2a574f25959fc4262d07c24e4540dbc50",
-      "size_bytes": 406182
+      "sha256": "5ce6f076900aae8a1056095247c0132a85c5afdf20d60b0a1a3cbeb6291a6f99",
+      "size_bytes": 406241
     },
     {
       "path": "qualification/t1_reference/qwen38_27b/llm_defines_27b.h",
@@ -7438,18 +7438,18 @@
     },
     {
       "path": "qualification/t1_reference/qwen38_27b/nvfp4a16/MANIFEST.json",
-      "sha256": "88ea2b7d969079eed29d605d456357c1ab8975b940c2ad070594e06826732298",
+      "sha256": "c37c367ab4335c5793f9827108f2151c18b363df63c20b96bca36e60f00f69fc",
       "size_bytes": 1084
     },
     {
       "path": "qualification/t1_reference/qwen38_27b/nvfp4a16/capital_of_france.t1r",
-      "sha256": "c4228225994cd98b8c9a8188f6b3941522b84827069d33a9ad7d624e396af9b0",
-      "size_bytes": 305186
+      "sha256": "a5f9128685f158c23a1b900c2101a35eb8b3641a4cdc6bc32f625e2220517694",
+      "size_bytes": 305133
     },
     {
       "path": "qualification/t1_reference/qwen38_27b/nvfp4a16/count_up.t1r",
-      "sha256": "cfd06522928acc1f6eda3903aa074d61857c7ad97b9448a27c85d2b0ac3dfa56",
-      "size_bytes": 406058
+      "sha256": "5683ae3bc6cecd4ef9cca4e96235f3bcd70271e364783281b48f7dcbcbf77cea",
+      "size_bytes": 406253
     },
     {
       "path": "qualification/t1_reference/qwen38_27b/prompts.json",
@@ -12473,8 +12473,8 @@
     },
     {
       "path": "tools/t1_reference_common.py",
-      "sha256": "56ee6a9d12dc7bf1d4d9e60b871e5298d0edc5d64d3b70be689b2c97ff845e55",
-      "size_bytes": 11256
+      "sha256": "04feab90e20b105f69a30d26e12c68366689bf40285ee4f1f6ebcd3b0dc48640",
+      "size_bytes": 11499
     },
     {
       "path": "tools/t1_reference_compare.py",
@@ -12488,18 +12488,18 @@
     },
     {
       "path": "tools/t1_reference_dsv41.py",
-      "sha256": "1f13619bb9ac13657ff40452fd691f04c50464ff012a59835d4a7f65f618f5a6",
-      "size_bytes": 47418
+      "sha256": "54fd504cef6756870945766c11969e301c8d8a463514986290d1053e1d31ed99",
+      "size_bytes": 48497
     },
     {
       "path": "tools/t1_reference_gemma4.py",
-      "sha256": "3d587a79e5764ae8216e806638adfdb771f154fde30afff8fe266a23fb0c6679",
-      "size_bytes": 17216
+      "sha256": "8300740f79858aa501d2585af53356ad199a8bbab2ef5fdebc58a1100324b996",
+      "size_bytes": 17394
     },
     {
       "path": "tools/t1_reference_glm53full.py",
-      "sha256": "cee1570a606e1815358ee44b523b704a47c5bba1609ce1d5d50c24c29c107ce2",
-      "size_bytes": 18977
+      "sha256": "70ab7245be154e1ccf3641e25e457033885bae573bb3e65a362c50726808752a",
+      "size_bytes": 18997
     },
     {
       "path": "tools/t1_reference_glm5_next.py",
@@ -12513,13 +12513,13 @@
     },
     {
       "path": "tools/t1_reference_laguna.py",
-      "sha256": "2e20c16a5a88df63f218f1e0777ca3aa5ba126bc747be79bf8659da67c441459",
-      "size_bytes": 14169
+      "sha256": "c69d402da13db0633590a8cedee35378baca8803f21d0643a646775ac900aeca",
+      "size_bytes": 14317
     },
     {
       "path": "tools/t1_reference_ling.py",
-      "sha256": "638a97fb74b4b9b2508e2a80563aff23c6f121ec4d68be648bc9232e59ac334b",
-      "size_bytes": 15636
+      "sha256": "bf5d60f477106abc0accf8b2aa19543bff3e7d835bca2a15604a051e9945371c",
+      "size_bytes": 15790
     },
     {
       "path": "tools/t1_reference_minimax.py",
@@ -12533,8 +12533,8 @@
     },
     {
       "path": "tools/t1_reference_qwen38_27b.py",
-      "sha256": "d818956ec1e1a5cad7953b0862571af628a33d2b71c8e73a6dc0690e2bf8efbe",
-      "size_bytes": 17479
+      "sha256": "b139dd0ecad56690a92fbc24aaab50fa1117d89e45f17367180372063eace2aa",
+      "size_bytes": 18074
     },
     {
       "path": "tools/t1_reference_qwen38_max.py",
@@ -15850,5 +15850,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 72746465
+  "total_bytes": 72750123
 }

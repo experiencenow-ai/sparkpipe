@@ -142,29 +142,29 @@ class Gemma4Engine:
                         raise Gemma4ConfigError(
                             f"layer {i} {norm} shape {entry['shape']} "
                             f"disagrees with hidden")
-                scale = self.st.raw(base + "router.scale")
+                scale = self.st.pread(base + "router.scale")
                 if scale.dtype != np.uint16 or scale.shape != (self.hidden,):
                     raise Gemma4ConfigError(
                         f"layer {i} router.scale must be BF16 hidden vector")
-                per_expert = self.st.raw(base + "router.per_expert_scale")
+                per_expert = self.st.pread(base + "router.per_expert_scale")
                 if per_expert.dtype != np.uint16 \
                         or per_expert.shape != (self.expert_count,):
                     raise Gemma4ConfigError(
                         f"layer {i} router.per_expert_scale must be BF16 "
                         f"routed_experts vector")
                 self.router[i] = (
-                    bf16_to_f32(self.st.raw(base + "router.proj.weight"))
+                    bf16_to_f32(self.st.pread(base + "router.proj.weight"))
                     .astype(np.float32),
                     bf16_to_f32(scale).astype(np.float32)
                     * np.float32(self.hidden) ** np.float32(-0.5),
                     bf16_to_f32(per_expert).astype(np.float32))
 
     def tensor(self, name):
-        raw = self.st.raw(name)
+        raw = self.st.pread(name)
         if raw.dtype == np.uint16:
             return bf16_to_f32(raw)
         if raw.dtype == np.uint8:
-            scale = self.st.raw(name + "_scale_inv").astype(np.float32)
+            scale = self.st.pread(name + "_scale_inv").astype(np.float32)
             rows, cols = raw.shape
             return bf16_to_f32(fp8_block_to_bf16(raw, scale, rows, cols))
         return raw.astype(np.float32)
@@ -344,13 +344,16 @@ class Gemma4Engine:
     def logits(self, streams, chunk=4096):
         norm = bf16_round_f32(rmsnorm(
             streams, self.tensor("model.language_model.norm.weight"), self.eps))
-        lm = self.st.raw("model.language_model.embed_tokens.weight")
-        if lm.dtype != np.uint16:
+        entry = self.st.entry("model.language_model.embed_tokens.weight")
+        if entry["dtype"] != "BF16":
             raise ValueError("reference embedding must be BF16")
+        rows_total = entry["shape"][0]
         best = -np.inf
         best_token = -1
-        for start in range(0, lm.shape[0], chunk):
-            scores = bf16_to_f32(lm[start:start + chunk]) @ norm
+        for start in range(0, rows_total, chunk):
+            count = min(chunk, rows_total - start)
+            lm = self.st.raw_rows("model.language_model.embed_tokens.weight", start, count)
+            scores = bf16_to_f32(lm) @ norm
             i = int(np.argmax(scores))
             if float(scores[i]) > best:
                 best = float(scores[i])

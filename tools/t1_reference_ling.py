@@ -123,11 +123,11 @@ class LingEngine:
             raise LingConfigError("MLA g_proj rows disagree with head count")
 
     def tensor(self, name):
-        raw = self.st.raw(name)
+        raw = self.st.pread(name)
         if raw.dtype == np.uint16:
             return bf16_to_f32(raw)
         if raw.dtype == np.uint8:
-            scale = self.st.raw(name + "_scale_inv").astype(np.float32)
+            scale = self.st.pread(name + "_scale_inv").astype(np.float32)
             rows, cols = raw.shape
             return bf16_to_f32(fp8_block_to_bf16(raw, scale, rows, cols))
         return raw.astype(np.float32)
@@ -171,8 +171,8 @@ class LingEngine:
         v = self.short_conv(index, "v", self.linear(x, p + "v_proj"))
         beta = sigmoid(self.linear(x, p + "b_proj"))
         retention = bf16_round_f32(self.linear(x, p + "f_proj"))
-        a_log = self.st.raw(p + "A_log").astype(np.float32)
-        dt_bias = self.st.raw(p + "dt_bias").astype(np.float32)
+        a_log = self.st.pread(p + "A_log").astype(np.float32)
+        dt_bias = self.st.pread(p + "dt_bias").astype(np.float32)
         scaled = np.exp(a_log).reshape(heads, 1) \
             * (retention.reshape(heads, kd) + dt_bias.reshape(heads, kd))
         retention = np.exp(np.float32(self.lower) * sigmoid(scaled))
@@ -193,7 +193,7 @@ class LingEngine:
             delta = beta[h] * (v[h] - predicted)
             state[h] = retention[h][:, None] * state[h] + delta * k[h][:, None]
             out[h] = bf16_round_f32((state[h] * q[h][:, None]).sum(axis=0))
-        norm_w = bf16_to_f32(self.st.raw(p + "o_norm.weight").reshape(-1))
+        norm_w = bf16_to_f32(self.st.pread(p + "o_norm.weight").reshape(-1))
         rms = np.sqrt((out * out).sum(axis=1) / kd + self.eps)
         core = bf16_round_f32(out / rms[:, None] * norm_w[None, :])
         core = bf16_round_f32(core * sigmoid(gate.reshape(heads, kd)))
@@ -214,7 +214,7 @@ class LingEngine:
         cache = self.caches[index]
         cache.append(slot)
         slots = bf16_to_f32(np.stack(cache))
-        kvb = bf16_to_f32(self.st.raw(p + "kv_b_proj.weight")) \
+        kvb = bf16_to_f32(self.st.pread(p + "kv_b_proj.weight")) \
             .reshape(heads, nope + vdim, latent)
         gates = sigmoid(self.tensor(p + "g_proj.weight") @ x).reshape(heads, 1)
         attn = np.empty((heads, vdim), dtype=np.float32)
@@ -311,13 +311,16 @@ class LingEngine:
     def logits(self, streams, chunk=4096):
         norm = bf16_round_f32(rmsnorm(streams,
                                       self.tensor("model.norm.weight"), self.eps))
-        lm = self.st.raw("lm_head.weight")
-        if lm.dtype != np.uint16:
+        entry = self.st.entry("lm_head.weight")
+        if entry["dtype"] != "BF16":
             raise ValueError("reference lm_head must be BF16")
+        rows_total = entry["shape"][0]
         best = -np.inf
         best_token = -1
-        for start in range(0, lm.shape[0], chunk):
-            scores = bf16_to_f32(lm[start:start + chunk]) @ norm
+        for start in range(0, rows_total, chunk):
+            count = min(chunk, rows_total - start)
+            lm = self.st.raw_rows("lm_head.weight", start, count)
+            scores = bf16_to_f32(lm) @ norm
             i = int(np.argmax(scores))
             if float(scores[i]) > best:
                 best = float(scores[i])

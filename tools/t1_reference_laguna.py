@@ -129,11 +129,11 @@ class LagunaEngine:
                 f"scalar gating {layer0_heads}")
 
     def tensor(self, name):
-        raw = self.st.raw(name)
+        raw = self.st.pread(name)
         if raw.dtype == np.uint16:
             return bf16_to_f32(raw)
         if raw.dtype == np.uint8:
-            scale = self.st.raw(name + "_scale_inv").astype(np.float32)
+            scale = self.st.pread(name + "_scale_inv").astype(np.float32)
             rows, cols = raw.shape
             return bf16_to_f32(fp8_block_to_bf16(raw, scale, rows, cols))
         return raw.astype(np.float32)
@@ -233,7 +233,7 @@ class LagunaEngine:
         scores = sigmoid(self.tensor(p + "gate.weight") @ x)
         bias_name = f"{PREFIX}{index}.mlp.gate.e_score_correction_bias"
         if bias_name in self.st.map:
-            bias = self.st.raw(bias_name).astype(np.float32).reshape(-1)
+            bias = self.st.pread(bias_name).astype(np.float32).reshape(-1)
         else:
             bias = np.zeros(self.experts, dtype=np.float32)
         choice = scores + bias
@@ -286,13 +286,16 @@ class LagunaEngine:
     def logits(self, streams, chunk=4096):
         norm = bf16_round_f32(rmsnorm(streams,
                                       self.tensor("model.norm.weight"), self.eps))
-        lm = self.st.raw("lm_head.weight")
-        if lm.dtype != np.uint16:
+        entry = self.st.entry("lm_head.weight")
+        if entry["dtype"] != "BF16":
             raise ValueError("reference lm_head must be BF16")
+        rows_total = entry["shape"][0]
         best = -np.inf
         best_token = -1
-        for start in range(0, lm.shape[0], chunk):
-            scores = bf16_to_f32(lm[start:start + chunk]) @ norm
+        for start in range(0, rows_total, chunk):
+            count = min(chunk, rows_total - start)
+            lm = self.st.raw_rows("lm_head.weight", start, count)
+            scores = bf16_to_f32(lm) @ norm
             i = int(np.argmax(scores))
             if float(scores[i]) > best:
                 best = float(scores[i])

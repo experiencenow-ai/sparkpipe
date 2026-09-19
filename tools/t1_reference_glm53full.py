@@ -124,34 +124,34 @@ class Glm53FullEngine:
                 f"known release shape ({INTERMEDIATE}, {HIDDEN})")
 
     def tensor(self, name):
-        raw = self.st.raw(name)
+        raw = self.st.pread(name)
         if raw.dtype == np.uint16:
             return bf16_to_f32(raw)
         if raw.dtype == np.uint8:
-            scale = self.st.raw(name + "_scale_inv").astype(np.float32)
+            scale = self.st.pread(name + "_scale_inv").astype(np.float32)
             rows, cols = raw.shape
             return bf16_to_f32(fp8_block_to_bf16(raw, scale, rows, cols))
         return raw.astype(np.float32)
 
     def vector(self, name):
-        raw = self.st.raw(name)
+        raw = self.st.pread(name)
         if raw.dtype == np.uint16:
             return bf16_to_f32(raw.reshape(-1))
         if raw.dtype == np.uint8:
             cols = raw.shape[-1]
-            scale = self.st.raw(name + "_scale_inv").astype(np.float32)
+            scale = self.st.pread(name + "_scale_inv").astype(np.float32)
             return bf16_to_f32(fp8_block_to_bf16(
                 raw.reshape(1, cols), scale.reshape(1, (cols + 127) // 128),
                 1, cols).reshape(-1))
         return raw.astype(np.float32).reshape(-1)
 
     def expert_weight(self, name):
-        raw = self.st.raw(name)
+        raw = self.st.pread(name)
         if raw.dtype == np.uint16:
             return bf16_to_f32(raw.reshape(raw.shape))
         if raw.dtype != np.uint8:
             raise ValueError(f"expert {name} is neither F8_E4M3 nor BF16")
-        scale = self.st.raw(name + "_scale_inv").astype(np.float32)
+        scale = self.st.pread(name + "_scale_inv").astype(np.float32)
         rows, cols = raw.shape
         codes = _E4M3_LUT[raw.reshape(rows, cols)].astype(np.float32)
         tiled = np.repeat(np.repeat(scale, 128, axis=0), 128, axis=1)
@@ -350,12 +350,12 @@ class Glm53FullFastEngine(Glm53FullEngine):
 
     def _expert_dequant(self, name):
         st = self._expert_st()
-        raw = st.raw(name)
+        raw = st.pread(name)
         if raw.dtype == np.uint16:
             return bf16_to_f32(raw.reshape(raw.shape))
         if raw.dtype != np.uint8:
             raise ValueError(f"expert {name} is neither F8_E4M3 nor BF16")
-        scale = st.raw(name + "_scale_inv").astype(np.float32)
+        scale = st.pread(name + "_scale_inv").astype(np.float32)
         rows, cols = raw.shape
         codes = _E4M3_LUT[raw.reshape(rows, cols)].astype(np.float32)
         tiled = np.repeat(np.repeat(scale, 128, axis=0), 128, axis=1)
@@ -385,13 +385,13 @@ class Glm53FullFastEngine(Glm53FullEngine):
         packed = self._dense.get(name)
         if packed is not None:
             return bf16_to_f32(packed) if packed.dtype == np.uint16 else packed
-        raw = self.st.raw(name)
+        raw = self.st.pread(name)
         if raw.dtype == np.uint16:
             value = bf16_to_f32(raw)
             self._dense[name] = value
             return value
         if raw.dtype == np.uint8:
-            scale = self.st.raw(name + "_scale_inv").astype(np.float32)
+            scale = self.st.pread(name + "_scale_inv").astype(np.float32)
             rows, cols = raw.shape
             packed = fp8_block_to_bf16(raw, scale, rows, cols)
             self._dense[name] = packed

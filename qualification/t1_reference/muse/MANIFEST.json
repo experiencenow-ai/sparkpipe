@@ -8,15 +8,15 @@
   "family": "muse",
   "fixtures": {
     "capital_of_france.t1r": {
-      "bytes": 389575,
-      "sha256": "40bbb6f3faac28ecf88cf59c8bfbca433c4f6c0440af0104e55c51c3983a7895"
+      "bytes": 389521,
+      "sha256": "8bd1120f00d95328f952139b0cd86b6d57910db2d5fd434801a12e07d97c4e7f"
     },
     "count_up.t1r": {
-      "bytes": 475727,
-      "sha256": "ba97812d5c05168ced8b934421d1423ba62f3bca70c95c4a09d26f80cf67dbf7"
+      "bytes": 475873,
+      "sha256": "e9772a9188cb05ffdba744cdcae49a5b0931025d9ced679611624e59c5c4dd93"
     }
   },
-  "generated_utc": "2026-09-19T06:40:44Z",
+  "generated_utc": "2026-09-19T13:05:57Z",
   "generator": "t1_reference_decoder.py",
   "host": "spark5",
   "llm_defines_sha256": "ec7be20ee8cda01edf60658ff46e9b9432575df9974a0d3425880198901c93f9",
