@@ -1,0 +1,7 @@
+RUN_A_RC=0
+33a156f0526b2437f5e6416ac80e8d48359d2c882235596a4c8e9b071465e808  /home/spark6/lane-dsv41-rt/fixtures_run_a/dsv41/capital_of_france.t1r
+08516a563fc051ebcdb10cee973a0748efe94ef69b24083ed1f67333d8d0a1ea  /home/spark6/lane-dsv41-rt/fixtures_run_a/dsv41/count_up.t1r
+RUN_B_RC=0
+33a156f0526b2437f5e6416ac80e8d48359d2c882235596a4c8e9b071465e808  /home/spark6/lane-dsv41-rt/fixtures_run_b/dsv41/capital_of_france.t1r
+08516a563fc051ebcdb10cee973a0748efe94ef69b24083ed1f67333d8d0a1ea  /home/spark6/lane-dsv41-rt/fixtures_run_b/dsv41/count_up.t1r
+CHAIN_DONE
