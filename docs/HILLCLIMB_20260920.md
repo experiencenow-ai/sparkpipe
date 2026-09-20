@@ -361,3 +361,26 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   server never accepted or stopped polling.
 - MEASURE: no valid warm numbers this tick (fleet wedged mid-load at probe
   time); last valid warm floor remains 0.68-0.92ms/round (09-21f).
+
+## 2026-09-21j tick — #24 root cause: the stolen acquire reply; #25 opened
+
+- #24 ROOT CAUSE (socket census + paired gdb): all four engine↔weightd
+  connections ESTABLISHED and peer-paired — the wire was never the problem.
+  The blocked worker polled fd36 (the lazy-pack client) with NO pending reply:
+  the reply was CONSUMED by another thread. SparkWeightdMapAcquire ran
+  unlocked on a client connection shared by every pipeline-slot worker — two
+  chains leasing concurrently (exactly the cold-load window, 4 slots) had
+  their request/reply frames interleaved on one socket and each stole the
+  other's reply. Every mid-load wedge tonight fits this mechanism.
+- FIX (5693627): per-map client_lock — acquire holds it across slot-selection
+  + exchange + import (slot selection moved INSIDE the lock: a second race
+  where two threads took the same empty slot); MapRelease wraps a
+  map_release_locked helper; acquire-failure cleanup reuses the helper under
+  the held lock and preserves the original import error (both caught by the
+  regression attempt). Fleet verdict: cold chains now complete through the
+  lease path (status=0, 91 rounds, LAZYWORK cycles without wedging).
+- #25 OPENED (the withheld test's repro): even SERIALIZED acquire/release
+  cycling on a second arena breaks after ~17 iterations — first a release
+  fails the pin-underflow check (lease.c:168, pins[g]==0), then every acquire
+  returns INTERNAL. Plain cycling, no threads. Fix next; the concurrent test
+  returns as its regression once #25 lands.
