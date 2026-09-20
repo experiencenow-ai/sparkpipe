@@ -856,8 +856,30 @@ static void SparkGlm5NextServingDriverCompletion(
 	uint32_t index,matches;
 	pending = (SparkGlm5NextServingPending *)completion_context;
 	state = pending != 0 ? pending->owner : 0;
-	if ( state == 0 || atomic_load_explicit(&pending->active,memory_order_acquire) == 0u || driver_completion == 0 )
+	if ( state == 0 || driver_completion == 0 )
 		return;
+	if ( atomic_load_explicit(&pending->active,memory_order_acquire) == 0u )
+	{
+		SparkModelServingCompletion orphan;
+		memset(&orphan,0,sizeof(orphan));
+		orphan.abi_version = SPARK_MODEL_SERVING_ADAPTER_ABI_VERSION;
+		orphan.descriptor_bytes = SPARK_MODEL_SERVING_COMPLETION_BYTES;
+		orphan.status = SPARK_STATUS_NOT_FOUND;
+		orphan.submission_id = pending->submission_id;
+		orphan.request_id = pending->request_id;
+		orphan.sequence_id = pending->sequence_id;
+		orphan.sequence_position = pending->sequence_position;
+		orphan.control_generation = pending->control_generation;
+		orphan.transaction_id = pending->transaction_id;
+		orphan.dispatch_generation = pending->dispatch_generation;
+		orphan.request_generation = pending->request_generation;
+		orphan.step_generation = pending->step_generation;
+		fprintf(stderr,
+			"PENDING-INACTIVE-COMPLETION id=%llu — pending cleared under the completion; delivering NOT_FOUND so the route releases (wedge #26)\n",
+			(unsigned long long)pending->submission_id);
+		state->completion_function(state->completion_context,&orphan);
+		return;
+	}
 	matches = driver_completion->request_id == pending->request_id && driver_completion->sequence_id == pending->sequence_id && driver_completion->sequence_position == pending->sequence_position && driver_completion->program_id == state->program->program_id;
 	memset(&completion,0,sizeof(completion));
 	completion.abi_version = SPARK_MODEL_SERVING_ADAPTER_ABI_VERSION;
