@@ -557,12 +557,20 @@ static void SparkWeightdVmmRelease(SparkWeightdArena *arena)
      * null were never created. */
     if (base != 0)
     {
-        for (index = 0u; index < arena->chunk_count; index++)
+        if (arena->pool_export_handle != 0)
         {
-            if (arena->chunk_handles != 0 && arena->chunk_handles[index] != 0)
+            (void)cuMemUnmap(base,
+                (size_t)(arena->chunk_bytes * arena->chunk_count));
+        }
+        else
+        {
+            for (index = 0u; index < arena->chunk_count; index++)
             {
-                (void)cuMemUnmap(base + (CUdeviceptr)index * arena->chunk_bytes,
-                    (size_t)arena->chunk_bytes);
+                if (arena->chunk_handles != 0 && arena->chunk_handles[index] != 0)
+                {
+                    (void)cuMemUnmap(base + (CUdeviceptr)index * arena->chunk_bytes,
+                        (size_t)arena->chunk_bytes);
+                }
             }
         }
     }
@@ -578,17 +586,24 @@ static void SparkWeightdVmmRelease(SparkWeightdArena *arena)
             (CUmemGenericAllocationHandle)arena->epoch_handle);
         arena->epoch_handle = 0;
     }
-    if (arena->chunk_handles != 0)
     {
-        for (index = 0u; index < arena->chunk_count; index++)
+        void *pool = arena->pool_export_handle;
+        if (pool != 0)
+            (void)cuMemRelease((CUmemGenericAllocationHandle)pool);
+        arena->pool_export_handle = 0;
+        if (arena->chunk_handles != 0)
         {
-            if (arena->chunk_handles[index] != 0)
+            for (index = 0u; index < arena->chunk_count; index++)
             {
-                (void)cuMemRelease(
-                    (CUmemGenericAllocationHandle)arena->chunk_handles[index]);
+                if (arena->chunk_handles[index] != 0 &&
+                    arena->chunk_handles[index] != pool)
+                {
+                    (void)cuMemRelease(
+                        (CUmemGenericAllocationHandle)arena->chunk_handles[index]);
+                }
             }
+            free(arena->chunk_handles);
         }
-        free(arena->chunk_handles);
     }
     free(arena->chunk_refs);
     free(arena->staging);
@@ -1315,9 +1330,68 @@ static SparkStatus SparkWeightdArenaChunkEnsure(
 static SparkStatus SparkWeightdPremapPool(SparkWeightdServer *server,
     SparkWeightdArena *arena)
 {
-	(void)server;
-	(void)arena;
-	fprintf(stderr,"WD-POOL-PREMAP-SKIP (pool pre-map disabled: overwrites spine mapping — needs separate VA ranges)\n");
+	CUmemAllocationProp prop;
+	CUmemAccessDesc access;
+	CUmemGenericAllocationHandle handle = 0;
+	CUdeviceptr base = (CUdeviceptr)(uintptr_t)arena->device_base;
+	size_t granularity = 0;
+	uint64_t span_bytes,create_bytes;
+	uint32_t index;
+	int device = 0;
+
+	if ( arena->expert_pool_bytes <= arena->identity.arena_bytes )
+	{
+		fprintf(stderr,"pool per-chunk lazy (declared pool=%llu arena=%llu)\n",
+		    (unsigned long long)arena->expert_pool_bytes,
+		    (unsigned long long)arena->identity.arena_bytes);
+		SPARK_RETURN(SPARK_STATUS_OK);
+	}
+	if ( cudaGetDevice(&device) != cudaSuccess )
+		SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
+	memset(&prop,0,sizeof(prop));
+	prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+	prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+	prop.location.id = device;
+	prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+	if ( cuMemGetAllocationGranularity(&granularity,&prop,
+	        CU_MEM_ALLOC_GRANULARITY_MINIMUM) != CUDA_SUCCESS ||
+	     granularity == 0u )
+		SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
+	span_bytes = arena->chunk_bytes * (uint64_t)arena->chunk_count;
+	create_bytes = SparkWeightdVmmRoundUp(span_bytes,(uint64_t)granularity);
+	if ( cuMemCreate(&handle,(size_t)create_bytes,&prop,0ull) != CUDA_SUCCESS )
+	{
+		fprintf(stderr,"WD-POOL-PREMAP-FALLBACK single-alloc create span=%llu failed: expert pool stays per-chunk lazy\n",
+		    (unsigned long long)create_bytes);
+		SPARK_RETURN(SPARK_STATUS_OK);
+	}
+	if ( cuMemMap(base,(size_t)span_bytes,0u,handle,0ull) != CUDA_SUCCESS )
+	{
+		fprintf(stderr,"WD-POOL-PREMAP-FAIL map base=%llu span=%llu\n",
+		    (unsigned long long)base,(unsigned long long)span_bytes);
+		(void)cuMemRelease(handle);
+		SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+	}
+	memset(&access,0,sizeof(access));
+	access.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+	access.location.id = device;
+	access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+	if ( cuMemSetAccess(base,(size_t)span_bytes,&access,1u) != CUDA_SUCCESS )
+	{
+		fprintf(stderr,"WD-POOL-PREMAP-FAIL access span=%llu\n",
+		    (unsigned long long)span_bytes);
+		(void)cuMemUnmap(base,(size_t)span_bytes);
+		(void)cuMemRelease(handle);
+		SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+	}
+	arena->pool_export_handle = (void *)handle;
+	for ( index = 0u; index < arena->chunk_count; index++ )
+		arena->chunk_handles[index] = (void *)handle;
+	arena->pool_committed_bytes += span_bytes;
+	server->resident_bytes += span_bytes;
+	printf("pool single-alloc chunks=%u span=%llu (one allocation for the whole arena; pooled chunks never evicted)\n",
+	    arena->chunk_count,(unsigned long long)span_bytes);
+	fflush(stdout);
 	return(SPARK_STATUS_OK);
 }
 
@@ -1415,6 +1489,20 @@ static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
             result->mesh_send_buffer_addr = SparkWeightdMeshBufferAddress();
             result->mesh_send_buffer_bytes = SPARK_WEIGHTD_MESH_REGION_BYTES;
             SparkWeightdServerStageMeshFd(connection);
+            if ( arena->pool_export_handle != 0 &&
+                 connection->response_fd_count < SPARK_WEIGHTD_EXPORT_BATCH_MAX )
+            {
+                int pool_fd = -1;
+                if ( cuMemExportToShareableHandle(&pool_fd,
+                         (CUmemGenericAllocationHandle)(uintptr_t)arena->pool_export_handle,
+                         CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,0ull) == CUDA_SUCCESS &&
+                     pool_fd >= 0 )
+                {
+                    (void)fcntl(pool_fd,F_SETFD,FD_CLOEXEC);
+                    connection->response_fds[connection->response_fd_count++] = pool_fd;
+                    result->pool_fd_staged = 1u;
+                }
+            }
             (void)SparkWeightdManifestIdentity(&server->arenas[slot].manifest,result->manifest_sha256);
         }
         return;
@@ -1690,6 +1778,8 @@ static SparkStatus SparkWeightdEvictGroup(SparkWeightdServer *server,SparkWeight
 	const SparkWeightdRange *range;
 	uint32_t i,j,first,last;
 	SparkStatus status;
+	if ( arena->pool_export_handle != 0 )
+		return(SPARK_STATUS_BUSY);
 	if ( arena->leases->pins[group_index] != 0u )
 		return(SPARK_STATUS_BUSY);
 	for (i=0u; i<group->range_count; i++)
@@ -1729,9 +1819,12 @@ static uint64_t SparkWeightdAcquisitionBytes(const SparkWeightdArena *arena)
 
 static SparkStatus SparkWeightdAcquireBudget(SparkWeightdServer *server,SparkWeightdArena *arena)
 {
-	uint64_t retained = 0u,other = (server->resident_bytes - arena->pool_committed_bytes),bytes,oldest;
+	uint64_t retained = 0u,other = (server->resident_bytes - arena->pool_committed_bytes),bytes,oldest,budget;
 	uint32_t i,victim;
 	SparkStatus status;
+	budget = arena->pool_export_handle != 0
+	    ? (arena->chunk_bytes * (uint64_t)arena->chunk_count)
+	    : arena->expert_pool_bytes;
 	memset(arena->needed_chunks,0,arena->chunk_count);
 	for (i=0u; i<arena->manifest.group_count; i++)
 		if ( arena->leases->pins[i] != 0u )
@@ -1739,7 +1832,7 @@ static SparkStatus SparkWeightdAcquireBudget(SparkWeightdServer *server,SparkWei
 	for (i=0u; i<arena->chunk_count; i++)
 		if ( arena->needed_chunks[i] != 0u )
 			retained += arena->chunk_bytes;
-	if ( retained > arena->expert_pool_bytes || other > server->config.device_bytes_max || retained > (server->config.device_bytes_max - other) )
+	if ( retained > budget || other > server->config.device_bytes_max || retained > (server->config.device_bytes_max - other) )
 		return(SPARK_STATUS_CAPACITY_EXCEEDED);
 	for (;;)
 	{
@@ -2014,6 +2107,15 @@ static void SparkWeightdServerExportLease(SparkWeightdServer *server,SparkWeight
 	result->base.status = SPARK_STATUS_INVALID_ARGUMENT;
 	if ( request->reserved0 != 0u || arena->failure_status != SPARK_STATUS_OK )
 		return;
+	if ( arena->pool_export_handle != 0 )
+	{
+		result->lease_chunk_count = 0u;
+		result->base.chunk_bytes = arena->chunk_bytes;
+		result->base.chunk_count = arena->chunk_count;
+		result->base.batch_count = 0u;
+		result->base.status = SPARK_STATUS_OK;
+		return;
+	}
 	memset(arena->needed_chunks,0,arena->chunk_count);
 	for (i=0u; i<lease->count; i++)
 		SparkWeightdMarkGroupChunks(arena,lease->groups[i]);
@@ -3215,38 +3317,52 @@ SparkStatus SparkWeightdClientAttachLazy(SparkWeightdClient *client,
                 SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
             }
         }
-        if (fds_received != 0u)
         {
-            /* the GPU-side mesh kernels address the region in 64KB host
-             * pages; mmap only guarantees the system page, so map with
-             * slack and align up — an unaligned base lands every doorbell
-             * and tail in the wrong slot */
-            uint64_t slack = wire_result.mesh_send_buffer_bytes +
-                SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES -
-                wire_result.mesh_send_buffer_bytes %
+            uint32_t expected = (wire_result.mesh_ready != 0u ? 1u : 0u) +
+                (wire_result.pool_fd_staged != 0u ? 1u : 0u);
+            int32_t mesh_fd = -1,pool_fd = -1;
+            if ( fds_received != expected )
+            {
+                uint32_t close_index;
+                for ( close_index = 0u; close_index < fds_received;
+                    close_index++ )
+                    (void)close(fds[close_index]);
+                SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
+            }
+            if ( wire_result.mesh_ready != 0u )
+                mesh_fd = fds[0];
+            if ( wire_result.pool_fd_staged != 0u )
+                pool_fd = fds[wire_result.mesh_ready != 0u ? 1u : 0u];
+            if ( mesh_fd >= 0 )
+            {
+                /* the GPU-side mesh kernels address the region in 64KB host
+                 * pages; mmap only guarantees the system page, so map with
+                 * slack and align up — an unaligned base lands every doorbell
+                 * and tail in the wrong slot */
+                uint64_t slack = wire_result.mesh_send_buffer_bytes +
                     SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES -
-                wire_result.mesh_send_buffer_bytes;
-            uint8_t *raw = mmap(0,
-                wire_result.mesh_send_buffer_bytes + slack,
-                PROT_READ | PROT_WRITE, MAP_SHARED, fds[0], 0);
-            (void)close(fds[0]);
-            if (raw == MAP_FAILED)
-            {
-                if ( fds_received > 1u )
-                    (void)close(fds[1]);
-                SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+                    wire_result.mesh_send_buffer_bytes %
+                        SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES -
+                    wire_result.mesh_send_buffer_bytes;
+                uint8_t *raw = mmap(0,
+                    wire_result.mesh_send_buffer_bytes + slack,
+                    PROT_READ | PROT_WRITE, MAP_SHARED, mesh_fd, 0);
+                (void)close(mesh_fd);
+                if (raw == MAP_FAILED)
+                {
+                    if ( pool_fd >= 0 )
+                        (void)close(pool_fd);
+                    SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+                }
+                {
+                    uintptr_t aligned = ((uintptr_t)raw +
+                        SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES - 1u) &
+                        ~(uintptr_t)(SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES - 1u);
+                    wire_result.mesh_send_buffer_addr = (uint64_t)aligned;
+                    result->mesh_mapping = (void *)aligned;
+                }
             }
-            if ( fds_received > 1u )
-                wire_result.pool_fd = fds[1];
-            else
-                wire_result.pool_fd = -1;
-            {
-                uintptr_t aligned = ((uintptr_t)raw +
-                    SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES - 1u) &
-                    ~(uintptr_t)(SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES - 1u);
-                wire_result.mesh_send_buffer_addr = (uint64_t)aligned;
-                result->mesh_mapping = (void *)aligned;
-            }
+            wire_result.pool_fd = pool_fd;
         }
     }
     if (wire_result.status != (uint32_t)SPARK_STATUS_OK)
@@ -3679,7 +3795,7 @@ static SparkStatus SparkWeightdValidateLeaseExport(const SparkWeightdIpcExportLe
 		return(SPARK_STATUS_SCHEMA_ERROR);
 	if ( base->status != SPARK_STATUS_OK )
 		return(base->batch_count == 0u ? SPARK_STATUS_OK : SPARK_STATUS_SCHEMA_ERROR);
-	if ( base->chunk_bytes == 0u || base->chunk_count == 0u || base->chunk_count > SPARK_WEIGHTD_MAP_CHUNK_COUNT_MAX || base->chunk_bytes > (UINT64_MAX / base->chunk_count) || response->lease_chunk_count > base->chunk_count || base->batch_offset >= response->lease_chunk_count )
+	if ( base->chunk_bytes == 0u || base->chunk_count == 0u || base->chunk_count > SPARK_WEIGHTD_MAP_CHUNK_COUNT_MAX || base->chunk_bytes > (UINT64_MAX / base->chunk_count) || response->lease_chunk_count > base->chunk_count || (response->lease_chunk_count != 0u && base->batch_offset >= response->lease_chunk_count) )
 		return(SPARK_STATUS_SCHEMA_ERROR);
 	count = (response->lease_chunk_count - base->batch_offset);
 	if ( count > SPARK_WEIGHTD_EXPORT_BATCH_MAX )
