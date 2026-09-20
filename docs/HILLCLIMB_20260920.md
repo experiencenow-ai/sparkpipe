@@ -414,3 +414,27 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   construction. Then the spin's actual location falls out of one repro.
 - Fleet: leases 278/278 clean, weightds single+latched, engines up; serving
   blocked by the #26 spin. Warm floor reference stays 0.68-0.92ms/round.
+
+## 2026-09-21m tick — #26 narrowed: not a spin, a lost completion
+
+- The heartbeat instrumentation (d0f6fcc) deployed: ZERO heartbeats across the
+  wedge — the round thread is NOT spinning in ship-ack/peer-wait/stream-sync.
+  Fresh gdb: ALL worker threads idle in futex waits, engine fully idle — yet
+  the route for the last accepted submission holds its resident-slot claims
+  and 29k later submissions BUSY-reject at ClaimResidentSlots. Neither the
+  hello-reset release (0 prints) nor the undeliverable-drop (0 prints) fired.
+- CONCLUSION: the module finished the chain (no round activity, no lease
+  activity — 278/278 leases clean) but the async COMPLETION never reached the
+  residentd's route: the route sits in WAIT_ADAPTER forever = a lost wakeup in
+  the completion-delivery worker (worker asleep in futex while a completed
+  chain's notification was enqueued — enqueue-before-sleep without the
+  condition re-check), or the completion fired and was identity-mismatched
+  silently. NEXT (first move): dump the route state of the stuck submission
+  (one gdb print of runtime->routes[] states) to split "never delivered" vs
+  "delivered and mismatched"; then SparkWeightdWorker's wakeup path audit.
+- The completion identity check includes control_generation — note for the
+  audit: the boot-clock-seeded generations changed its value distribution;
+  if the module stamps a stale control_generation into completions, the
+  mismatch path drops the completion WITHOUT releasing claims (the schema
+  branch routes to READY_COMPLETION, but a mismatched identity on a RELEASED
+  route prints "late completion... NOT fatal" and leaves claims held).
