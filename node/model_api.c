@@ -17,6 +17,7 @@
 #include "spark_filesystem.h"
 #include "sparkpipe/spark_json.h"
 #include "sparkpipe/spark_model_batch_engine.h"
+#include "sparkpipe/spark_tp_chain_ordinal.h"
 #include "sparkpipe/spark_model_resident_deployment.h"
 #include "sparkpipe/spark_sha256.h"
 #include "sparkpipe/spark_tokenizer_sidecar.h"
@@ -1185,18 +1186,44 @@ int main(int argc, char **argv)
 	}
 	{
 		char seq_path[1024];
+		uint64_t session = SparkModelBatchEngineSessionFingerprint(S.engine);
+		uint64_t saved_session = 0u;
+		uint64_t saved_id = 0u;
 		uint64_t seeded = 1000000u;
 		(void)snprintf(seq_path,sizeof(seq_path),"%s/api_submission.seq",root);
+		{
+			FILE *seq_in = fopen(seq_path,"r");
+			if ( seq_in != 0 )
+			{
+				unsigned long long fs = 0ull,fi = 0ull;
+				if ( fscanf(seq_in,"%llu %llu",&fs,&fi) == 2 ||
+				     fscanf(seq_in,"%llu",&fi) == 1 )
+				{
+					saved_session = (uint64_t)fs;
+					saved_id = (uint64_t)fi;
+				}
+				(void)fclose(seq_in);
+			}
+		}
+		if ( saved_session == session && saved_id >= 1000000u &&
+		     saved_id < SparkTpChainIdCapacity(4u,6946816u) - 10001u )
+			seeded = saved_id + 10001u;
 		SparkModelBatchEngineSeedSubmissionId(S.engine,seeded);
 		{
 			FILE *seq_out = fopen(seq_path,"w");
 			if ( seq_out != 0 )
 			{
-				(void)fprintf(seq_out,"%llu\n",(unsigned long long)SparkModelBatchEnginePeekSubmissionId(S.engine));
+				(void)fprintf(seq_out,"%llu %llu\n",
+				    (unsigned long long)session,
+				    (unsigned long long)SparkModelBatchEnginePeekSubmissionId(S.engine));
 				(void)fclose(seq_out);
 			}
 		}
-		api_logf("submission_id_seeded next=%llu (session base; ids unique within one engine session, rebased every boot)",(unsigned long long)SparkModelBatchEnginePeekSubmissionId(S.engine));
+		api_logf("submission_id_seeded next=%llu session=%llu (%s)",
+		    (unsigned long long)SparkModelBatchEnginePeekSubmissionId(S.engine),
+		    (unsigned long long)session,
+		    seeded != 1000000u ? "continued within engine session, crash window skipped" :
+		        "rebased — new engine session");
 	}
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGTERM, api_term_signal);

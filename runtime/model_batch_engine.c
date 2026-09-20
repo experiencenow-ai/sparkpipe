@@ -2282,6 +2282,13 @@ uint64_t SparkModelBatchEnginePeekSubmissionId(
 	return(engine == 0 ? 0u : engine->next_submission_id);
 }
 
+uint64_t SparkModelBatchEngineSessionFingerprint(
+	const SparkModelBatchEngine *engine)
+{
+	return(engine == 0 ? 1u :
+	    SparkModelPipelineClientSessionFingerprint(engine->pipeline));
+}
+
 SparkStatus SparkModelBatchEngineGetView(
 	const SparkModelBatchEngine *engine,
 	SparkModelBatchEngineView *view)

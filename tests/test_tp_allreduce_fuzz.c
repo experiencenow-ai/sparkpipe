@@ -486,8 +486,16 @@ static void FuzzEdgeIdPolicy(void)
 	CHECK( next_id == (1000000ull + accepted),
 	    "failed dispatches do not burn chain ids (retry storms cannot reach the wall)" );
 	CHECK( next_id < capacity, "id consumption stays inside the ordinal space" );
+	{
+		uint64_t same_session = 1000000u + 50000u;
+		uint64_t crash_skip = same_session + 10001u;
+		CHECK( crash_skip < capacity,
+		    "same-session restart skips the crash window and stays under the wall" );
+		CHECK( SparkTpChainOrdinal(crash_skip,4u,2u,6946816u,6946815u,&next_id) ==
+		    SPARK_STATUS_OK, "same-session reseed id still inside the ordinal space" );
+	}
 	CHECK( 1000000ull < capacity,
-	    "per-boot session base rebase always restarts below the wall" );
+	    "cross-session rebase always restarts below the wall" );
 }
 
 static void FuzzEdgeRewirePolicy(void)
