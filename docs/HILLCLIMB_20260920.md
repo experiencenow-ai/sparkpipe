@@ -459,3 +459,24 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   submit swallowed). Then the fix lands at the true site.
 - Fleet this tick: engine alive (LAZYWORK progressing on other slots); the
   stuck route holds its slot; serving degrades but doesn't cascade.
+
+## 2026-09-21o tick — #26 ROOT CAUSE FOUND AND FIXED: the silent completion drop
+
+- Evidence chain closed by the gate instrument: ROUTE-STUCK state=5 (claims
+  held) + CHAIN-TIME printed (the module's CompleteOnWorker ran to its final
+  complete() call) + COMPLETION-NOROUTE absent (the residentd never saw it) —
+  the only code between was the adapter's driver-completion wrapper, and at
+  its head: `if (pending->active == 0) return;` — a SILENT DROP. The adapter
+  reset at API reconnect clears in-flight pendings; the late completion then
+  found active==0 and vanished — no delivery, no log, claims held forever.
+  Every wedge correlated with API reconnects/churn fits this.
+- FIX (7b5f683): an inactive pending still delivers a NOT_FOUND completion
+  for its submission id (loud PENDING-INACTIVE-COMPLETION print) so the
+  residentd transitions the route and releases claims. Duplicates are no-ops
+  at the residentd (COMPLETION-NOROUTE observable). The silent-drop pattern
+  is ledger class P5 (OK-returning/dead-end paths) — this was its worst
+  instance.
+- Deployed fleet-wide; boot-in-progress verdict: chains completing through
+  cold loads (slots 2/3 status=0, allreduce 84ms-1.4s across cold/warm
+  mixes), 8 ROUTE-STUCK entries from the mixed-generation window; the warm
+  verdict + measure lands next tick after warmup completes.
