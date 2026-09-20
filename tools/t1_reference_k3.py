@@ -2,6 +2,7 @@ import mmap
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -275,6 +276,8 @@ class K3Engine:
         self._u8_tile = np.empty(4096 * 7168 * 2, dtype=np.uint8)
         self._scratch_pool = {}
         self._pread_bufs = {}
+        self._route_slots = None
+        self._fetch_pool = ThreadPoolExecutor(max_workers=12)
         self._probe_shapes()
 
     def _shape_of(self, name):
@@ -579,57 +582,47 @@ class K3Engine:
             self._scratch_pool[key] = Mxfp4Scratch(out_dim, in_dim)
         return self._scratch_pool[key]
 
-    def _expert_scratch(self, prefix):
-        if prefix in self._scratch_pool:
-            return self._scratch_pool[prefix]
-        plan = {}
-        for tail, buf_key in (("w1.weight_packed", "p1"),
-                              ("w1.weight_scale", "s1"),
-                              ("w3.weight_packed", "p3"),
-                              ("w3.weight_scale", "s3"),
-                              ("w2.weight_packed", "p2"),
-                              ("w2.weight_scale", "s2")):
-            entry = self.st.entry(
-                prefix + f"block_sparse_moe.experts.0.{tail}")
-            extent = entry["data_offsets"][1] - entry["data_offsets"][0]
-            plan[buf_key] = np.empty(extent, dtype=np.uint8)
-        self._scratch_pool[prefix] = plan
-        return plan
+    def _route_slot_buffers(self, prefix):
+        if self._route_slots is None:
+            sizes = {}
+            for tail in ("w1.weight_packed", "w1.weight_scale",
+                         "w3.weight_packed", "w3.weight_scale",
+                         "w2.weight_packed", "w2.weight_scale"):
+                entry = self.st.entry(
+                    prefix + f"block_sparse_moe.experts.0.{tail}")
+                sizes[tail] = entry["data_offsets"][1] \
+                    - entry["data_offsets"][0]
+            self._route_slots = [{tail: np.empty(sizes[tail], dtype=np.uint8)
+                                  for tail in sizes}
+                                 for _ in range(self.topk)]
+        return self._route_slots
 
-    def routed_expert(self, prefix, expert, x):
-        base = prefix + f"block_sparse_moe.experts.{expert}."
-        plan = self._expert_scratch(prefix)
-        gate = self._scratch((prefix, "gate"), self.inter, self.routed_hidden)
-        up = self._scratch((prefix, "up"), self.inter, self.routed_hidden)
-        self._pread_into(base + "w1.weight_packed",
-                         memoryview(plan["p1"]))
-        self._pread_into(base + "w1.weight_scale",
-                         memoryview(plan["s1"]))
-        w_gate = gate.bind(
-            plan["p1"].reshape(self.inter, self.routed_hidden // 2),
-            plan["s1"].reshape(self.inter, self.routed_hidden // 32),
-            self.inter, self.routed_hidden).dequant(
-            self.inter, self.routed_hidden)
-        self._pread_into(base + "w3.weight_packed",
-                         memoryview(plan["p3"]))
-        self._pread_into(base + "w3.weight_scale",
-                         memoryview(plan["s3"]))
-        w_up = up.bind(
-            plan["p3"].reshape(self.inter, self.routed_hidden // 2),
-            plan["s3"].reshape(self.inter, self.routed_hidden // 32),
+    def _slot_planes(self, slot, x):
+        g = self._scratch(("slotgate",), self.inter, self.routed_hidden)
+        u = self._scratch(("slotup",), self.inter, self.routed_hidden)
+        d = self._scratch(("slotdown",), self.routed_hidden, self.inter)
+        w_gate = g.bind(
+            slot["w1.weight_packed"].reshape(
+                self.inter, self.routed_hidden // 2),
+            slot["w1.weight_scale"].reshape(
+                self.inter, self.routed_hidden // 32),
             self.inter, self.routed_hidden).dequant(
             self.inter, self.routed_hidden)
         gate_rows = bf16_round_f32(w_gate @ x)
+        w_up = u.bind(
+            slot["w3.weight_packed"].reshape(
+                self.inter, self.routed_hidden // 2),
+            slot["w3.weight_scale"].reshape(
+                self.inter, self.routed_hidden // 32),
+            self.inter, self.routed_hidden).dequant(
+            self.inter, self.routed_hidden)
         up_rows = bf16_round_f32(w_up @ x)
         intermediate = situ(gate_rows, up_rows)
-        self._pread_into(base + "w2.weight_packed",
-                         memoryview(plan["p2"]))
-        self._pread_into(base + "w2.weight_scale",
-                         memoryview(plan["s2"]))
-        down = self._scratch((prefix, "down"), self.routed_hidden, self.inter)
-        w2 = down.bind(
-            plan["p2"].reshape(self.routed_hidden, self.inter // 2),
-            plan["s2"].reshape(self.routed_hidden, self.inter // 32),
+        w2 = d.bind(
+            slot["w2.weight_packed"].reshape(
+                self.routed_hidden, self.inter // 2),
+            slot["w2.weight_scale"].reshape(
+                self.routed_hidden, self.inter // 32),
             self.routed_hidden, self.inter).dequant(
             self.routed_hidden, self.inter)
         return bf16_round_f32(w2 @ intermediate)
@@ -652,9 +645,22 @@ class K3Engine:
         weights = picked / (picked.sum() + 1e-20) * np.float32(self.scaling)
         lat_in = self.linear(
             x, prefix + "block_sparse_moe.routed_expert_down_proj")
+        slots = self._route_slot_buffers(prefix)
+        shard_files = {}
+
+        def fetch(slot_index):
+            expert = int(selected[slot_index])
+            base = prefix + f"block_sparse_moe.experts.{expert}."
+            for tail in ("w1.weight_packed", "w1.weight_scale",
+                         "w3.weight_packed", "w3.weight_scale",
+                         "w2.weight_packed", "w2.weight_scale"):
+                self._pread_into(base + tail,
+                                 memoryview(slots[slot_index][tail]))
+
+        list(self._fetch_pool.map(fetch, range(self.topk)))
         routed = np.zeros(self.routed_hidden, dtype=np.float32)
         for i in range(self.topk):
-            output = self.routed_expert(prefix, int(selected[i]), lat_in)
+            output = self._slot_planes(slots[i], lat_in)
             routed += output * weights[i]
         latent = bf16_round_f32(rmsnorm(
             bf16_round_f32(routed),

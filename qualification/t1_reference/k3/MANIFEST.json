@@ -1,0 +1,31 @@
+{
+  "checkpoint": {
+    "config_sha256": "9710e121a58d03ac92c8d6da287a19541994319afbbe6d6202af001ffd379213",
+    "index_sha256": "9878d878d90a7e13b7b41409cd2128d887587ad979dde77debfce10003575db0",
+    "path": "/home/spark7/lane-k3-t1/kimi-k3-local"
+  },
+  "defines_config_mismatches": [],
+  "family": "k3",
+  "fixtures": {
+    "capital_of_france.t1r": {
+      "bytes": 841735,
+      "sha256": "3cad0e67ddabe8e07d947edf71dc0e108c75beb1cc79fe8a27a39ed97bf982ac"
+    },
+    "count_up.t1r": {
+      "bytes": 1121657,
+      "sha256": "a74538ca379e1da237e733f676f6075ade173d624006836cb6d1ec7b18c1039b"
+    }
+  },
+  "generated_utc": "2026-09-20T03:51:18Z",
+  "generator": "t1_reference_decoder.py",
+  "host": "spark7",
+  "llm_defines_sha256": "f98797f3c60b68bd323b47eda53bc549b01986254b86113b742c69c45e291d56",
+  "numpy_version": "2.5.3",
+  "prompts_sha256": "7d2644ce628f720b873c30c3e71fe6d72f527fb692aba90802c9a11b3548ec3a",
+  "python_version": "3.12.3",
+  "threading_env": {
+    "MKL_NUM_THREADS": "8",
+    "OMP_NUM_THREADS": "8",
+    "OPENBLAS_NUM_THREADS": "8"
+  }
+}

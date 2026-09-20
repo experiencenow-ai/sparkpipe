@@ -1,5 +1,5 @@
 {
-  "file_count": 3181,
+  "file_count": 3185,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -7337,6 +7337,26 @@
       "size_bytes": 644
     },
     {
+      "path": "qualification/t1_reference/k3/MANIFEST.json",
+      "sha256": "2e5957a6ca62e05099eac077513cbdcf42a04e5e452c2f2dbf1e4a985fa97689",
+      "size_bytes": 1065
+    },
+    {
+      "path": "qualification/t1_reference/k3/capital_of_france.t1r",
+      "sha256": "3cad0e67ddabe8e07d947edf71dc0e108c75beb1cc79fe8a27a39ed97bf982ac",
+      "size_bytes": 841735
+    },
+    {
+      "path": "qualification/t1_reference/k3/count_up.t1r",
+      "sha256": "a74538ca379e1da237e733f676f6075ade173d624006836cb6d1ec7b18c1039b",
+      "size_bytes": 1121657
+    },
+    {
+      "path": "qualification/t1_reference/k3/prompts.json",
+      "sha256": "7d2644ce628f720b873c30c3e71fe6d72f527fb692aba90802c9a11b3548ec3a",
+      "size_bytes": 647
+    },
+    {
       "path": "qualification/t1_reference/laguna/MANIFEST.json",
       "sha256": "eb708fd87b35053b3b244574f6f3afc33bc2faf5aa70a39d0396722fe292b84a",
       "size_bytes": 1071
@@ -12543,8 +12563,8 @@
     },
     {
       "path": "tools/t1_reference_k3.py",
-      "sha256": "1d9c2eb7fa801bd57d923fc338173ee4f51f1731b4b60f7b142dd42161a02bec",
-      "size_bytes": 37206
+      "sha256": "70eda3155f18fa7c86943c4b168dace93e123b2abdd94d00946fbda1edfccf3a",
+      "size_bytes": 37310
     },
     {
       "path": "tools/t1_reference_laguna.py",
@@ -13753,8 +13773,8 @@
     },
     {
       "path": "tools_local/k3_run_watchdog.sh",
-      "sha256": "f81a321f434819cc7f114795e7da2fdc910a00a830d2b0f365bc3e3c638985a7",
-      "size_bytes": 1147
+      "sha256": "cc4c28605f7f6316c403b08e466a67930a72add5c57b0ea85641547c0af33938",
+      "size_bytes": 1907
     },
     {
       "path": "tools_local/k3_runner_compile_gate.sh",
@@ -15910,5 +15930,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 72903645
+  "total_bytes": 74869613
 }
