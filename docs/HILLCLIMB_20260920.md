@@ -384,3 +384,17 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   fails the pin-underflow check (lease.c:168, pins[g]==0), then every acquire
   returns INTERNAL. Plain cycling, no threads. Fix next; the concurrent test
   returns as its regression once #25 lands.
+
+## 2026-09-21k tick — #25 reclassified: harness artifact, not a fleet bug
+
+- The "~17 iterations then INTERNAL" repro only reproduces in the test
+  harness's DOUBLE-ATTACH shape (two arenas for one pack on one connection —
+  a shape production never creates; the second arena's budget math runs
+  against the first's committed bytes). In the production shape — long
+  acquire/release cycling on ONE pooled arena — the on-fleet evidence is
+  clean: 196 acquires balanced against 196 releases through last tick's cold
+  loads with zero failures. Reclassified: NOT a production bug; the
+  double-attach scenario is rejected at the door. (The weightd could fail
+  closed on a second arena for the same pack+identity — noted as a hygiene
+  item, not a wedge.)
+- The #24 map client-lock stands as the real fix for the stolen-reply class.
