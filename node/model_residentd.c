@@ -1832,6 +1832,9 @@ static SparkStatus SparkModelResidentdProcessSubmission(
 	SparkStatus cleanup_status,queue_status,resolution_status,status;
 	uint32_t cache_committed,cache_prepared;
 	wire = (const SparkModelResidentIpcSubmit *)message;
+	fprintf(stderr,"SUBMIT-ARRIVED id=%llu bytes=%u decision=%u\n",
+		(unsigned long long)(message_bytes >= 24u ? wire->submission_id : 0ull),
+		(unsigned)message_bytes,(unsigned)decision_required);
 	status = SparkModelResidentIpcDecodeSubmission(message,message_bytes,&submission);
 	if ( status == SPARK_STATUS_OK && decision_required == 0u )
 		status = SparkModelResidentIpcValidateDirectSubmitDescriptor(
@@ -2677,18 +2680,42 @@ static void SparkModelResidentdReportStuckRoutes(
 		if ( route->active == 0u || route->active_since_ns == 0u ||
 		     now_ns - route->active_since_ns < UINT64_C(30000000000) )
 			continue;
-		if ( route->state == route->last_reported_state )
-			continue;
-		route->last_reported_state = route->state;
-		fprintf(stderr,
-			"ROUTE-STUCK id=%llu state=%u age_ms=%llu claimed=%u abandoned=%u gen=%llu\n",
-			(unsigned long long)route->submission_id,
-			(unsigned)route->state,
-			(unsigned long long)((now_ns - route->active_since_ns) / 1000000ull),
-			(unsigned)route->resident_slots_claimed,
-			(unsigned)route->abandoned,
-			(unsigned long long)route->client_generation);
-		stuck++;
+		if ( route->state != route->last_reported_state )
+		{
+			route->last_reported_state = route->state;
+			fprintf(stderr,
+				"ROUTE-STUCK id=%llu state=%u age_ms=%llu claimed=%u abandoned=%u gen=%llu\n",
+				(unsigned long long)route->submission_id,
+				(unsigned)route->state,
+				(unsigned long long)((now_ns - route->active_since_ns) / 1000000ull),
+				(unsigned)route->resident_slots_claimed,
+				(unsigned)route->abandoned,
+				(unsigned long long)route->client_generation);
+			stuck++;
+		}
+		if ( now_ns - route->active_since_ns >= UINT64_C(120000000000) &&
+		     route->state == SPARK_MODEL_RESIDENTD_ROUTE_WAIT_ADAPTER )
+		{
+			SparkModelServingCompletion failed;
+			memset(&failed,0,sizeof(failed));
+			failed.abi_version = SPARK_MODEL_SERVING_ADAPTER_ABI_VERSION;
+			failed.descriptor_bytes = SPARK_MODEL_SERVING_COMPLETION_BYTES;
+			failed.status = SPARK_STATUS_NOT_FOUND;
+			failed.submission_id = route->submission_id;
+			failed.request_id = route->request_id;
+			failed.sequence_id = route->sequence_id;
+			failed.sequence_position = route->sequence_position;
+			failed.control_generation = route->submission.control_generation;
+			failed.transaction_id = route->submission.transaction_id;
+			failed.dispatch_generation = route->submission.dispatch_generation;
+			failed.request_generation = route->submission.request_generation;
+			failed.step_generation = route->submission.step_generation;
+			fprintf(stderr,
+				"ROUTE-REAPED id=%llu — WAIT_ADAPTER past 120s; completing NOT_FOUND and releasing claims\n",
+				(unsigned long long)route->submission_id);
+			route->completion = failed;
+			route->state = SPARK_MODEL_RESIDENTD_ROUTE_READY_COMPLETION;
+		}
 	}
 	(void)stuck;
 }
