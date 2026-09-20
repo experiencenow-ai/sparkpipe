@@ -147,6 +147,7 @@ typedef struct SparkModelResidentdClient
 	uint64_t generation;
 	uint64_t pending_client_reset;
 	uint64_t reset_done;
+	uint64_t last_stuck_scan_ns;
 	uint64_t last_message_id;
 	uint64_t last_activity_ns;
 	uint64_t last_submission_id;
@@ -157,6 +158,8 @@ typedef struct SparkModelResidentdClient
 typedef struct SparkModelResidentdRoute
 {
 	uint32_t active;
+	uint64_t active_since_ns;
+	uint32_t last_reported_state;
 	uint32_t result_queued;
 	uint32_t abandoned;
 	uint32_t state;
@@ -1602,6 +1605,8 @@ static SparkModelResidentdRoute *SparkModelResidentdReserveRoute(
 		{
 			memset(route,0,sizeof(*route));
 			route->active = 1u;
+			route->active_since_ns = SparkModelResidentdMonotonicTimeNs();
+			route->last_reported_state = 0u;
 			route->slot_index = index;
 			route->message_id = message_id;
 			route->submission_id = submission->submission_id;
@@ -2651,9 +2656,43 @@ static SparkStatus SparkModelResidentdProgressRoutes(
 	SPARK_RETURN(status);
 }
 
+static void SparkModelResidentdReportStuckRoutes(
+	SparkModelResidentdRuntime *runtime)
+{
+	uint64_t now_ns = SparkModelResidentdMonotonicTimeNs();
+	uint32_t index;
+	uint32_t stuck = 0u;
+	if ( runtime->routes == 0 || runtime->last_stuck_scan_ns != 0u &&
+	     now_ns - runtime->last_stuck_scan_ns < UINT64_C(10000000000) )
+		return;
+	runtime->last_stuck_scan_ns = now_ns;
+	for (index=0u; index<runtime->route_capacity; index++)
+	{
+		SparkModelResidentdRoute *route = &runtime->routes[index];
+		if ( route->active == 0u || route->active_since_ns == 0u ||
+		     now_ns - route->active_since_ns < UINT64_C(30000000000) )
+			continue;
+		if ( route->state == route->last_reported_state )
+			continue;
+		route->last_reported_state = route->state;
+		fprintf(stderr,
+			"ROUTE-STUCK id=%llu state=%u age_ms=%llu claimed=%u abandoned=%u gen=%llu
+",
+			(unsigned long long)route->submission_id,
+			(unsigned)route->state,
+			(unsigned long long)((now_ns - route->active_since_ns) / 1000000ull),
+			(unsigned)route->resident_slots_claimed,
+			(unsigned)route->abandoned,
+			(unsigned long long)route->client_generation);
+		stuck++;
+	}
+	(void)stuck;
+}
+
 static SparkStatus SparkModelResidentdProgress(SparkModelResidentdRuntime *runtime)
 {
 	SparkStatus status;
+	SparkModelResidentdReportStuckRoutes(runtime);
 	if ( runtime->client.pending_client_reset != 0u &&
 		runtime->adapter_library.adapter_interface.reset != 0 )
 	{
