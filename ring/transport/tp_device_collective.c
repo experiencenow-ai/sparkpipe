@@ -73,6 +73,7 @@ typedef struct SparkTpDeviceCollectiveImplementation
     uint64_t consumed_cell;
     uint64_t round_index;
     uint64_t cancel_epoch;
+    uint64_t publish_ack_prev;
     SparkTpDeviceCollectiveStagingSet
         staging[SPARK_TP_DEVICE_COLLECTIVE_STAGING_SETS];
     void *seq_cell;
@@ -702,6 +703,45 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
             (unsigned long long)slot_index);
         return SPARK_STATUS_BUSY;
     }
+    if ( implementation->publish_ack_prev != 0u )
+    {
+        volatile uint32_t *shipped_cell = (volatile uint32_t *)
+            (implementation->mesh_buffer +
+            SPARK_WEIGHTD_MESH_SHIPPED_ENTRY(band_index,
+                implementation->tp_rank));
+        while ( *shipped_cell != (uint32_t)implementation->publish_ack_prev )
+        {
+            volatile uint64_t *cancel_cell = (volatile uint64_t *)
+                (implementation->mesh_buffer +
+                SparkTpDeviceCollectiveCancelCellOffset(band_index));
+            if ( *cancel_cell != implementation->cancel_seen )
+            {
+                implementation->cancel_seen = *cancel_cell;
+                fprintf(stderr,
+                    "MESH-SHIP-CANCEL rank=%u prev=%llu\n",
+                    implementation->tp_rank,
+                    (unsigned long long)implementation->publish_ack_prev);
+                return SPARK_STATUS_BUSY;
+            }
+            if ( SparkWeightdClientAlive(implementation->client) == 0u )
+            {
+                fprintf(stderr,
+                    "WEIGHTD-DEAD rank=%u awaiting ship ack — failing fast\n",
+                    implementation->tp_rank);
+                return SPARK_STATUS_IO_ERROR;
+            }
+            if ( SparkTpDeviceCollectiveTimeNs() >= deadline )
+            {
+                fprintf(stderr,
+                    "MESH-SHIP-TIMEOUT rank=%u prev=%llu cell=%u slot=%llu\n",
+                    implementation->tp_rank,
+                    (unsigned long long)implementation->publish_ack_prev,
+                    (unsigned)*shipped_cell,
+                    (unsigned long long)slot_index);
+                return SPARK_STATUS_BUSY;
+            }
+        }
+    }
     if ( SparkGlm5NextLaunchMeshCopyDown(submission->cuda_stream,
             slot,submission->local_device,bytes) != 0 )
     {
@@ -735,6 +775,7 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
         return SPARK_STATUS_IO_ERROR;
     }
     published = *implementation->published_host_cell;
+    implementation->publish_ack_prev = published;
     {
         uint32_t peers_remaining = implementation->tp_degree - 1u;
         uint32_t peer_passed[SPARK_TP_DEVICE_COLLECTIVE_MAX_DEGREE] = {0u};

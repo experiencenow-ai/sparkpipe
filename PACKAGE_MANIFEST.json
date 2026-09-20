@@ -3743,8 +3743,8 @@
     },
     {
       "path": "include/sparkpipe/spark_weightd.h",
-      "sha256": "7de9abf297ce72fe9224a78252bb563ea919c44b5ae1731a4686c685f4a0a6b4",
-      "size_bytes": 20627
+      "sha256": "457fdffffdfb6c6047839aaf460b5cbee100744c0aba8bcb1d673efb4908b4a2",
+      "size_bytes": 21455
     },
     {
       "path": "include/sparkpipe/spark_weightd_attach.h",
@@ -5823,8 +5823,8 @@
     },
     {
       "path": "node/weightd_mesh.c",
-      "sha256": "0eb6f20b54d25df5fcb55eebf6cb93fd5bd6b79e76e96973188a3e0917e0e3b9",
-      "size_bytes": 41161
+      "sha256": "5ff0107f5db15a6ba0f7ee5323bfb98350478d571640ee73dfb253dace77de4b",
+      "size_bytes": 41439
     },
     {
       "path": "node/weightd_spawn.c",
@@ -7563,8 +7563,8 @@
     },
     {
       "path": "ring/transport/tp_device_collective.c",
-      "sha256": "1341c545912537a25bf5273da71a0e6f84e9dce4fad172006b2a3631e87a2d83",
-      "size_bytes": 59421
+      "sha256": "5a889db2f0d1833a783f834dac36401dd7d3f345f14619b953f642adafa179ef",
+      "size_bytes": 61225
     },
     {
       "path": "ring/transport/tp_device_collective_nccl.h",
@@ -9878,8 +9878,8 @@
     },
     {
       "path": "tests/test_tp_allreduce_fuzz.c",
-      "sha256": "8d0a823b11cc6f8387a84eed2cec8ac3aeb4b90f9e7950794ce000ae3c3fe784",
-      "size_bytes": 19512
+      "sha256": "d11cd834fa60df7433baea9e46a943642087544cfb69039c1e9a706da3a73885",
+      "size_bytes": 25336
     },
     {
       "path": "tests/test_tp_collective.c",
@@ -15875,5 +15875,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 72816320
+  "total_bytes": 72825054
 }

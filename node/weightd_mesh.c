@@ -911,6 +911,11 @@ void SparkWeightdMeshDoorbellLoop(void)
                     if ( posted_failed == 0u )
                     {
                         weightd_mesh.doorbell_posted[index] = seq;
+                        *(volatile uint32_t *)((uint8_t *)
+                            weightd_mesh.recv_buffer +
+                            SPARK_WEIGHTD_MESH_SHIPPED_ENTRY(band,rank)) =
+                            (uint32_t)seq;
+                        __sync_synchronize();
                         weightd_mesh.doorbell_stuck[index] = 0u;
                         weightd_mesh.ship_log_count++;
                         if ( (seq >> 16) != weightd_mesh.ship_log_key )

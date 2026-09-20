@@ -31,6 +31,7 @@ static uint32_t g_rank_count;
 static uint32_t g_connect_rank_hint;
 static volatile uint64_t g_broadcast_count;
 static volatile uint32_t g_shipper_stop;
+static volatile uint32_t g_shipper_hold;
 
 SparkStatus SparkWeightdClientConnect(const char *socket_path, SparkWeightdClient **client, SparkWeightdHelloResult *hello_out)
 {
@@ -149,6 +150,11 @@ static void *FuzzShipperMain(void *argument)
 	while ( __sync_add_and_fetch(&g_shipper_stop, 0u) == 0u )
 	{
 		uint32_t rank;
+		if ( g_shipper_hold != 0u )
+		{
+			usleep(1000);
+			continue;
+		}
 		for ( rank = 0u; rank < g_rank_count; rank++ )
 		{
 			volatile uint64_t *entry = (volatile uint64_t *)
@@ -237,6 +243,10 @@ static void *FuzzShipperMain(void *argument)
 				    g_regions[rank] + slot_base +
 				    SPARK_WEIGHTD_MESH_SLOT_BYTES - 8u, 8u);
 			}
+			__sync_synchronize();
+			*(volatile uint32_t *)(g_regions[rank] +
+			    SPARK_WEIGHTD_MESH_SHIPPED_ENTRY(0u, rank)) =
+			    (uint32_t)tag;
 			__sync_synchronize();
 			seen[rank] = tag;
 		}
@@ -367,6 +377,9 @@ static uint32_t FuzzRunSet(void *(*worker)(void *), uint64_t argument,
 	{
 		FuzzTask *task = &g_tasks[run[i]];
 		memset(task->rank->output, 0xFF, sizeof(task->rank->output));
+		if ( worker == FuzzRoundMain )
+			task->rank->partial[0] = FuzzBf16FromFloat(
+			    (float)((round & 15ull) + 1u));
 		task->argument = argument;
 		task->status = SPARK_STATUS_INTERNAL_ERROR;
 		task->done = 0u;
@@ -407,18 +420,21 @@ static uint32_t FuzzRunSet(void *(*worker)(void *), uint64_t argument,
 	return(ok);
 }
 
-static uint32_t FuzzSumOk(uint32_t rank)
+static uint32_t FuzzSumOk(uint32_t rank, uint64_t round)
 {
 	uint16_t expected = FuzzBf16FromFloat(
 	    (float)(g_rank_count * (g_rank_count + 1u) / 2u));
+	uint16_t expected_zero = FuzzBf16FromFloat(
+	    (float)(g_rank_count * ((uint32_t)(round & 15ull) + 1u)));
 	uint32_t index;
 	for ( index = 0u; index < FUZZ_ELEMENTS; index++ )
 	{
-		if ( g_ranks[rank].output[index] != expected )
+		uint16_t want = index == 0u ? expected_zero : expected;
+		if ( g_ranks[rank].output[index] != want )
 		{
 			fprintf(stderr,"WRONG-SUM rank=%u elem=%u got=%u want=%u\n",
 			    rank, index, (unsigned)g_ranks[rank].output[index],
-			    (unsigned)expected);
+			    (unsigned)want);
 			return(0u);
 		}
 	}
@@ -454,7 +470,7 @@ static void FuzzBasic(void)
 		{
 			CHECK( g_tasks[rank].status == SPARK_STATUS_OK,
 			    "round status ok" );
-			CHECK( FuzzSumOk(rank) != 0u, "round sum correct" );
+			CHECK( FuzzSumOk(rank, i) != 0u, "round sum correct" );
 		}
 	}
 	for ( rank = 0u; rank < run_count; rank++ )
@@ -476,7 +492,7 @@ static void FuzzBasic(void)
 		{
 			CHECK( g_tasks[rank].status == SPARK_STATUS_OK,
 			    "chained round status ok" );
-			CHECK( FuzzSumOk(rank) != 0u, "chained round sum correct" );
+			CHECK( FuzzSumOk(rank, 8u + i) != 0u, "chained round sum correct" );
 		}
 	}
 	{
@@ -493,6 +509,85 @@ static void FuzzBasic(void)
 		for ( rank = 0u; rank < run_count; rank++ )
 			CHECK( g_ranks[rank].completion_count == 12u,
 			    "every round fires its completion" );
+	}
+	{
+		uint64_t hold_tag[FUZZ_MAX_RANKS];
+		uint64_t ack_deadline;
+		uint32_t acked;
+		request++;
+		CHECK( FuzzRunSet(FuzzChainMain, request, run, run_count,
+		    "chain", 12u, -1) != 0u, "hold-case chain key completes" );
+		for ( rank = 0u; rank < run_count; rank++ )
+			CHECK( g_tasks[rank].status == SPARK_STATUS_OK,
+			    "hold-case chain key status ok" );
+		CHECK( FuzzRunSet(FuzzRoundMain, 16ull * 12ull + 1ull, run,
+		    run_count, "round", 12u, -1) != 0u,
+		    "hold-case settle round completes" );
+		for ( rank = 0u; rank < run_count; rank++ )
+		{
+			CHECK( g_tasks[rank].status == SPARK_STATUS_OK,
+			    "hold-case settle round status ok" );
+			CHECK( FuzzSumOk(rank, 12u) != 0u,
+			    "hold-case settle sum correct" );
+		}
+		ack_deadline = FuzzNowNs() + 2ull * 1000000000ull;
+		do {
+			acked = 1u;
+			for ( rank = 0u; rank < run_count; rank++ )
+			{
+				volatile uint64_t *entry = (volatile uint64_t *)
+				    (g_regions[rank] +
+				    SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(0u, rank));
+				volatile uint32_t *shipped = (volatile uint32_t *)
+				    (g_regions[rank] +
+				    SPARK_WEIGHTD_MESH_SHIPPED_ENTRY(0u, rank));
+				if ( *shipped != (uint32_t)*entry )
+					acked = 0u;
+			}
+			if ( acked == 0u )
+				usleep(1000);
+		} while ( acked == 0u && FuzzNowNs() < ack_deadline );
+		CHECK( acked != 0u, "settle round ships are acked" );
+		g_shipper_hold = 1u;
+		__sync_synchronize();
+		CHECK( FuzzRunSet(FuzzRoundMain, 16ull * 13ull + 2ull, run,
+		    run_count, "round", 13u, -1) != 0u,
+		    "held round finishes (as failure)" );
+		for ( rank = 0u; rank < run_count; rank++ )
+		{
+			CHECK( g_tasks[rank].status != SPARK_STATUS_OK,
+			    "held round fails without ships" );
+			hold_tag[rank] = *(volatile uint64_t *)(g_regions[rank] +
+			    SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(0u, rank));
+			CHECK( hold_tag[rank] != 0u, "held round published" );
+		}
+		CHECK( FuzzRunSet(FuzzRoundMain, 16ull * 14ull + 3ull, run,
+		    run_count, "round", 14u, -1) != 0u,
+		    "second held round finishes (as failure)" );
+		for ( rank = 0u; rank < run_count; rank++ )
+		{
+			CHECK( g_tasks[rank].status != SPARK_STATUS_OK,
+			    "second held round fails without ships" );
+			CHECK( *(volatile uint64_t *)(g_regions[rank] +
+			    SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(0u, rank)) ==
+			    hold_tag[rank],
+			    "blocked publish never overwrites the doorbell" );
+		}
+		g_shipper_hold = 0u;
+		__sync_synchronize();
+		request++;
+		CHECK( FuzzRunSet(FuzzChainMain, request, run, run_count,
+		    "chain", 15u, -1) != 0u, "post-hold chain key completes" );
+		CHECK( FuzzRunSet(FuzzRoundMain, 16ull * 15ull + 1ull, run,
+		    run_count, "round", 15u, -1) != 0u,
+		    "post-hold round completes" );
+		for ( rank = 0u; rank < run_count; rank++ )
+		{
+			CHECK( g_tasks[rank].status == SPARK_STATUS_OK,
+			    "post-hold round status ok" );
+			CHECK( FuzzSumOk(rank, 15u) != 0u,
+			    "post-hold sum correct (nothing dropped)" );
+		}
 	}
 }
 
@@ -564,7 +659,7 @@ static uint32_t FuzzRun(uint32_t rounds, uint32_t seed, uint32_t kill_percent)
 			{
 				CHECK( g_tasks[i].status == SPARK_STATUS_OK,
 				    "killed-after-publish round still completes" );
-				CHECK( FuzzSumOk(i) != 0u,
+				CHECK( FuzzSumOk(i, round) != 0u,
 				    "killed-after-publish sum stays correct" );
 			}
 			recovery_pending = 1u;
@@ -582,7 +677,7 @@ static uint32_t FuzzRun(uint32_t rounds, uint32_t seed, uint32_t kill_percent)
 			{
 				CHECK( g_tasks[i].status == SPARK_STATUS_OK,
 				    "fuzz round status ok" );
-				CHECK( FuzzSumOk(i) != 0u, "fuzz round sum correct" );
+				CHECK( FuzzSumOk(i, round) != 0u, "fuzz round sum correct" );
 			}
 			if ( recovery_pending != 0u )
 			{
@@ -596,10 +691,79 @@ static uint32_t FuzzRun(uint32_t rounds, uint32_t seed, uint32_t kill_percent)
 	return( unrecovered != 0u ? 1u : 0u );
 }
 
+static int uint64_cmp(const void *a, const void *b)
+{
+	uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+	return( x < y ? -1 : x > y ? 1 : 0 );
+}
+
+static uint32_t BenchRun(uint32_t rounds)
+{
+	uint32_t run[FUZZ_MAX_RANKS];
+	uint32_t run_count = FuzzAllRanks(run);
+	uint64_t *times;
+	uint64_t start,total_begin,ordinal;
+	uint32_t round,i;
+	uint32_t failures_before = test_failures;
+	times = (uint64_t *)calloc(rounds != 0u ? rounds : 1u,sizeof(uint64_t));
+	if ( times == 0 )
+		return(1u);
+	ordinal = 1ull;
+	uint64_t request = 900000u;
+	/* one chain begin, then N rounds: production keys a chain once and runs
+	 * many rounds on it, so the per-round number is the steady-state
+	 * allreduce cost, not the key setup */
+	request++;
+	if ( FuzzRunSet(FuzzChainMain, request, run, run_count, "bench-chain",
+	        0u, -1) == 0u )
+	{
+		fprintf(stderr,"bench chain key failed\n");
+		free(times);
+		return(1u);
+	}
+	for ( round = 0u; round < rounds; round++ )
+	{
+		ordinal = 16ull * (uint64_t)round + 1ull;
+		start = FuzzNowNs();
+		if ( FuzzRunSet(FuzzRoundMain, ordinal, run, run_count, "bench",
+		        round, -1) == 0u )
+		{
+			fprintf(stderr,"bench round %u failed\n",(unsigned)round);
+			free(times);
+			return(1u);
+		}
+		times[round] = FuzzNowNs() - start;
+		for ( i = 0u; i < run_count; i++ )
+		{
+			CHECK( g_tasks[run[i]].status == SPARK_STATUS_OK,
+			    "bench round status ok" );
+			CHECK( FuzzSumOk(run[i], round) != 0u,
+			    "bench round sum correct" );
+		}
+	}
+	(void)total_begin;
+	qsort(times,rounds,sizeof(uint64_t),uint64_cmp);
+	{
+		double p50 = (double)times[rounds/2u] / 1000.0;
+		double p99 = (double)times[(rounds * 99u) / 100u] / 1000.0;
+		double total_s = 0.0;
+		for ( i = 0u; i < rounds; i++ )
+			total_s += (double)times[i];
+		total_s /= 1000000000.0;
+		fprintf(stderr,"bench: %u rounds, min=%.1fus p50=%.1fus p99=%.1fus max=%.1fus, %.0f rounds/s\n",
+		    rounds,(double)times[0]/1000.0,p50,p99,
+		    (double)times[rounds-1u]/1000.0,
+		    total_s > 0.0 ? (double)rounds/total_s : 0.0);
+	}
+	free(times);
+	return( test_failures != failures_before ? 1u : 0u );
+}
+
 int main(int argc, char **argv)
 {
 	uint32_t ranks = 4u;
 	uint32_t fuzz_rounds = 0u;
+	uint32_t bench_rounds = 0u;
 	uint32_t seed = 12345u;
 	uint32_t kill_percent = 40u;
 	uint32_t rank;
@@ -612,13 +776,15 @@ int main(int argc, char **argv)
 			ranks = (uint32_t)strtoul(argv[++arg], 0, 10);
 		else if ( strcmp(argv[arg], "--fuzz") == 0 && arg + 1 < argc )
 			fuzz_rounds = (uint32_t)strtoul(argv[++arg], 0, 10);
+		else if ( strcmp(argv[arg], "--bench") == 0 && arg + 1 < argc )
+			bench_rounds = (uint32_t)strtoul(argv[++arg], 0, 10);
 		else if ( strcmp(argv[arg], "--seed") == 0 && arg + 1 < argc )
 			seed = (uint32_t)strtoul(argv[++arg], 0, 10);
 		else if ( strcmp(argv[arg], "--kill-percent") == 0 && arg + 1 < argc )
 			kill_percent = (uint32_t)strtoul(argv[++arg], 0, 10);
 		else
 		{
-			fprintf(stderr,"usage: %s [--ranks N] [--fuzz ROUNDS] [--seed S] [--kill-percent K]\n", argv[0]);
+			fprintf(stderr,"usage: %s [--ranks N] [--fuzz ROUNDS] [--bench ROUNDS] [--seed S] [--kill-percent K]\n", argv[0]);
 			return(2);
 		}
 	}
@@ -649,7 +815,9 @@ int main(int argc, char **argv)
 	for ( rank = 0u; rank < ranks; rank++ )
 		g_tasks[rank].rank = &g_ranks[rank];
 	wedge = 0u;
-	if ( fuzz_rounds == 0u )
+	if ( bench_rounds != 0u )
+		wedge = BenchRun(bench_rounds);
+	else if ( fuzz_rounds == 0u )
 		FuzzBasic();
 	else
 		wedge = FuzzRun(fuzz_rounds, seed, kill_percent);
