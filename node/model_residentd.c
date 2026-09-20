@@ -1031,6 +1031,11 @@ static void SparkModelResidentdCompletion(
 	pthread_mutex_lock(&runtime->mutex);
 	route = SparkModelResidentdFindRoute(runtime,completion->submission_id);
 	status = route == 0 ? SPARK_STATUS_NOT_FOUND : SPARK_STATUS_OK;
+	if ( route == 0 )
+		fprintf(stderr,
+			"COMPLETION-NOROUTE id=%llu status=%u — completion arrived, no route\n",
+			(unsigned long long)completion->submission_id,
+			(unsigned)completion->status);
 	failure_reason = route == 0 ? SPARK_MODEL_RESIDENTD_FAILURE_COMPLETION_ROUTE : 0u;
 	if ( status == SPARK_STATUS_OK )
 	{
