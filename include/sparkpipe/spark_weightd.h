@@ -550,6 +550,7 @@ typedef struct SparkWeightdLazyAttachResult
     uint32_t mesh_ready;
     uint64_t mesh_send_buffer_addr;
     uint64_t mesh_send_buffer_bytes;
+    int pool_fd;
     void *mesh_mapping;
     uint64_t chunk_bytes;
     uint32_t chunk_count;

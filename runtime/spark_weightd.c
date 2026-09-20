@@ -3176,7 +3176,7 @@ SparkStatus SparkWeightdClientAttachLazy(SparkWeightdClient *client,
     {
         uint64_t now = SparkWeightdMonotonicTimeNs();
         uint64_t deadline;
-        int fds[1];
+        int fds[2];
         uint32_t fds_received = 0u;
         if (now == 0ull)
         {
@@ -3193,7 +3193,7 @@ SparkStatus SparkWeightdClientAttachLazy(SparkWeightdClient *client,
             status = SparkWeightdClientReadFrameWithFds(client,
                 (uint8_t *)&wire_result,
                 SPARK_WEIGHTD_IPC_ATTACH_LAZY_RESULT_BYTES, deadline,
-                fds, 1u, &fds_received);
+                fds, 2u, &fds_received);
         }
         if (status != SPARK_STATUS_OK)
         {
@@ -3208,10 +3208,10 @@ SparkStatus SparkWeightdClientAttachLazy(SparkWeightdClient *client,
                     SPARK_STATUS_OK ||
                 response_header->request_id != wire.header.request_id)
             {
-                if (fds_received != 0u)
-                {
-                    (void)close(fds[0]);
-                }
+                uint32_t close_index;
+                for ( close_index = 0u; close_index < fds_received;
+                    close_index++ )
+                    (void)close(fds[close_index]);
                 SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
             }
         }
@@ -3232,8 +3232,14 @@ SparkStatus SparkWeightdClientAttachLazy(SparkWeightdClient *client,
             (void)close(fds[0]);
             if (raw == MAP_FAILED)
             {
+                if ( fds_received > 1u )
+                    (void)close(fds[1]);
                 SPARK_FAIL(SPARK_STATUS_IO_ERROR);
             }
+            if ( fds_received > 1u )
+                wire_result.pool_fd = fds[1];
+            else
+                wire_result.pool_fd = -1;
             {
                 uintptr_t aligned = ((uintptr_t)raw +
                     SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES - 1u) &
