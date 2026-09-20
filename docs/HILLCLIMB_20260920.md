@@ -248,3 +248,21 @@ instance. Numbers refer to PRs/commits on #1067 unless noted.
 - The probe binary (r3 + probe, sha 0593151ad47d) is on spark0 only, env-gated
   (SPARK_WEIGHTD_MESH_DEVICE_PROBE=1 in the agent drop-in zzdevprobe.conf);
   harmless without the env (weak no-op).
+
+## 2026-09-21d tick — S2.5 VERDICT: DEAD on this hardware (both RDMA routes)
+
+Probe v2 (same env gate): after VA registration fails (EFAULT), the dmabuf
+route — cuMemGetHandleForAddressRange(DMA_BUF_FD) — is REFUSED for the pool's
+device range (`WD-DEVPROBE DMABUF-HANDLE-FAIL fd=-1`). Both GPUDirect routes
+into cuMemCreate device-typed memory are closed on the GB10 stack (driver
+580.159.03, verbs with dmabuf support). Physics: GB10 is unified-memory —
+there is no discrete HBM behind a GPUDirect pipe; device-typed allocations are
+not NIC-exportable. The "device-resident mesh slots" ladder step (S2.5) is
+therefore DEAD; the mesh flags stay in the host memfd where RDMA lands today
+(cache-coherent reads for the GPU poll loop).
+
+**The 100µs route is now exclusively S3 (the graph path)**: rounds execute
+inside one CUDA graph replay — publish/wait/combine on-device, zero host
+ceremony per round. Current warm eager floor 0.6-1.5ms/round is all host
+ceremony; the graph path removes it. S3 blockers in the ledger: the spark3
+full-replay illegal access (#4) and the graph-env admission rejection (#5).

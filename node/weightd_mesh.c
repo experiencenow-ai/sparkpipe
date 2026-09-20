@@ -3,6 +3,7 @@
 #include "sparkpipe/spark_error_site.h"
 #include "sparkpipe/spark_weightd.h"
 #include <infiniband/verbs.h>
+#include <cuda.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -604,18 +605,45 @@ void SparkWeightdMeshDeviceProbe(const char *tag,void *device_pointer,
         return;
     mr = ibv_reg_mr(weightd_mesh.protection_domain,device_pointer,(size_t)bytes,
         IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
-    if ( mr == 0 )
-        fprintf(stderr,
-            "WD-DEVPROBE FAIL tag=%s ptr=%llx bytes=%llu errno=%d — GPUDirect over VMM device memory NOT registrable; S2.5 (device-resident mesh slots) blocked on this hardware\n",
-            tag,(unsigned long long)(uintptr_t)device_pointer,
-            (unsigned long long)bytes,errno);
-    else
+    if ( mr != 0 )
     {
         fprintf(stderr,
-            "WD-DEVPROBE OK tag=%s ptr=%llx bytes=%llu rkey=%u lkey=%u — GPUDirect over VMM device memory registrable; S2.5 unblocked\n",
+            "WD-DEVPROBE VA-OK tag=%s ptr=%llx bytes=%llu rkey=%u lkey=%u\n",
             tag,(unsigned long long)(uintptr_t)device_pointer,
             (unsigned long long)bytes,mr->rkey,mr->lkey);
         (void)ibv_dereg_mr(mr);
+    }
+    else
+    {
+        int dmabuf_fd = -1;
+        struct ibv_mr *dmabuf_mr;
+        fprintf(stderr,
+            "WD-DEVPROBE VA-FAIL tag=%s errno=%d — trying the dmabuf route\n",
+            tag,errno);
+        if ( cuMemGetHandleForAddressRange((void *)&dmabuf_fd,
+                 (CUdeviceptr)(uintptr_t)device_pointer,(size_t)bytes,
+                 CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,0ull) == CUDA_SUCCESS &&
+             dmabuf_fd >= 0 )
+        {
+            dmabuf_mr = ibv_reg_dmabuf_mr(weightd_mesh.protection_domain,0u,
+                (size_t)bytes,(uint64_t)(uintptr_t)device_pointer,dmabuf_fd,
+                IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+            if ( dmabuf_mr != 0 )
+                fprintf(stderr,
+                    "WD-DEVPROBE DMABUF-OK tag=%s fd=%d rkey=%u lkey=%u — GPUDirect via dmabuf WORKS; S2.5 unblocked\n",
+                    tag,dmabuf_fd,dmabuf_mr->rkey,dmabuf_mr->lkey);
+            else
+                fprintf(stderr,
+                    "WD-DEVPROBE DMABUF-FAIL tag=%s fd=%d errno=%d — S2.5 dead on this hardware; the 100us route is the graph path only\n",
+                    tag,dmabuf_fd,errno);
+            if ( dmabuf_mr != 0 )
+                (void)ibv_dereg_mr(dmabuf_mr);
+            (void)close(dmabuf_fd);
+        }
+        else
+            fprintf(stderr,
+                "WD-DEVPROBE DMABUF-HANDLE-FAIL tag=%s fd=%d — no dmabuf handle for the range; S2.5 dead on this hardware\n",
+                tag,dmabuf_fd);
     }
     fflush(stderr);
 }
