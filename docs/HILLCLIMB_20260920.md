@@ -497,3 +497,28 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   no inactive-pending completions this window — the drop path didn't fire;
   the mesh churn was the killer). Verdict probe after the one recycle-cycle
   warmup.
+
+## 2026-09-21q tick — the churn loop closed: #22 amplifier confirmed as the request killer
+
+- Post-canonical-build state: engines STABLE (860-895s, zero restarts), chains
+  WARM AND GREEN (all 4 slots status=0, 149-167ms per 91-round chain,
+  allreduce 83-113ms = 0.9-1.2ms/round under 4-slot contention) — the serving
+  machinery works. But every request dies status=4: spark0 accepted 749 client
+  resets in 897s = one pipeline reconnect every 1.2s; each reconnect bumps the
+  engine's generation; the sum-based session fingerprint moves; the batch
+  engine invalidates its session mid-request. THE #22 AMPLIFIER, confirmed
+  end-to-end: a reconnect storm against a healthy fleet, self-sustaining
+  because each invalidation kills the request whose retry drives the next
+  reconnect.
+- Zero hello rejections server-side — the connections are closed/driven from
+  the CLIENT side (the pipeline's reconnect machinery). The per-connection
+  backoff fields exist (reconnect_not_before_ns/backoff_ms) — the 1.2s
+  cadence suggests either a tiny effective backoff or the client closing
+  deliberately per request-batch.
+- NEXT (first move): a client-side print at every close/reconnect with the
+  REASON (which path closed: EOF, error, explicit, request-boundary) — one
+  minute of prints names the driver. Then: reconnect backoff with a real cap
+  + per-rank recovery (the recorded #22 fix shape).
+- MEASURE (the valid warm numbers this tick, MEASURED): chains 149-167ms /
+  91 rounds; allreduce 83-113ms / 91 = 0.91-1.25ms/round at 4-slot
+  concurrency (single-slot warm floor previously measured 0.68-0.92ms/round).
