@@ -306,3 +306,19 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   cold loads; probes that time out client-side leave their request queued
   (zombie queue). The readiness gate makes API restarts safe — draining by
   restart is now the clean move (used twice this tick).
+
+## 2026-09-21g tick — ledger #22: the reconnect-storm / mid-reset cascade
+
+- Symptom: engines exiting internal_error (status=17) in a loop (down; starting
+  every ~4 min on spark0). Log: the API-side pipeline reconnected ~180 times
+  during rank-down windows (generation churn on every engine), resets armed
+  mid-generation, then progress stages returned internal_error and the engine
+  exited per the fail-fast law — each exit = 270s cold reload = more down-time
+  = more reconnects. The AMPLIFIER: per-second reconnect attempts against 15
+  healthy ranks while any single rank restarts.
+- Ledger #22 (open): connect/recover must (a) back off with a cap, (b) touch
+  only the failed ranks, (c) an aborted client reset must not poison adapter
+  state (the next hello re-initializes per-client state; the reset path needs
+  an audit for partial-reset poisoning).
+- Fleet bring-up discipline for now: API down → engines settle + warm (one
+  cold pass) → API up through the all-ranks-ready gate → probe.
