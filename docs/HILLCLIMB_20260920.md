@@ -587,3 +587,18 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   print on the pipeline client — splits transport-stall (message never sent/
   delivered) from prepare-stall (the pipeline's prepare handshake not
   completing across ranks). Ledger #28 open.
+
+## 2026-09-21v tick — the ROUTE REAPER (durable fix for the stuck-chain family)
+
+- #28 resolved as downstream: the abort loop (client ABORTs its own
+  prefetch every cycle) is the pipeline's correct reaction to submit-result
+  BUSY — which comes from claims held by never-completing chains (#26
+  variant). The family's durable fix: the ROUTE REAPER (187d7df) — the
+  stuck-route scanner now completes any WAIT_ADAPTER route past 120s as
+  NOT_FOUND via the normal delivery path (claims release, loud ROUTE-REAPED
+  print). Every stuck-chain variant now costs a bounded 2-minute failure
+  instead of a permanent wedge. Also: SUBMIT-ARRIVED entry print confirmed
+  submissions arrive (the DECISION prints ARE inside ProcessSubmission).
+- Verdict with the reaper live: 3 routes reaped, chains completing (warm
+  139.8ms/91r, allreduce 66.8ms = 0.73ms/round MEASURED); the probe's 500
+  raced a 288s cold slot — the last cold-load cycle, verdict next tick.
