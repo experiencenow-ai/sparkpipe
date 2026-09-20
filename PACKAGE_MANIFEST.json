@@ -228,8 +228,8 @@
     },
     {
       "path": "common/common_glm_stage_module/spark_glm_stage_module.h",
-      "sha256": "fec48a114e310a7f540dc1734175128627c8aa5c7be611e37a13f00ca9440bee",
-      "size_bytes": 15908
+      "sha256": "cf9ec1ec1fc277932122a243c7c14ac8e91a85bc465ee8cf6e0113113f5fe50a",
+      "size_bytes": 15956
     },
     {
       "path": "common/common_kv_frame.h",
@@ -3903,8 +3903,8 @@
     },
     {
       "path": "inference/kernels/route.cuh",
-      "sha256": "2f96b09e9bc22b8e85c0b84e51b2c08db3d3d9f420f7c66ed983e5927266f86f",
-      "size_bytes": 4222
+      "sha256": "897ac477a55b68044d5a144ad4b125fba50ed0995ddc8ce7f2d3567e4de487d8",
+      "size_bytes": 4268
     },
     {
       "path": "inference/kernels/scale.cuh",
@@ -4948,8 +4948,8 @@
     },
     {
       "path": "modules/glm52_resident_decode_stage/source/spark_glm52_resident_decode_stage_module.c",
-      "sha256": "846b3159751516f90b68395bda8d5e51519913c5b6acdcbf154c83485cbc68bd",
-      "size_bytes": 96415
+      "sha256": "f7886a4aa3d6f24c2a3b8d2fc1a3f5826c53c9ce0f82cfe3e032b75cc5c89754",
+      "size_bytes": 96464
     },
     {
       "path": "modules/glm52_resident_decode_stage/source/spark_glm52_serving_adapter.c",
@@ -8508,8 +8508,8 @@
     },
     {
       "path": "tests/test_cuda_performance_contracts.py",
-      "sha256": "c77fc22ffeb22017d57f218f04982896d5e41a36417f0a929b691d96638a2995",
-      "size_bytes": 21567
+      "sha256": "a3539a4c252763f9195dbc3d60dbeb0a490db0ee569855c6fab36d9e4a0c0b25",
+      "size_bytes": 22885
     },
     {
       "path": "tests/test_deploy_restart_scope.sh",
@@ -15930,5 +15930,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 74869613
+  "total_bytes": 74871074
 }
