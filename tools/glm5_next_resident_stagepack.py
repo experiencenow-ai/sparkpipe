@@ -256,7 +256,8 @@ class SourceReader:
             vals = np.empty((rows, real_cols), dtype=np.float32)
             vals[:, 0::2] = self._e2m1[packed & np.uint8(0x0F)]
             vals[:, 1::2] = self._e2m1[packed >> np.uint8(4)]
-            vals *= np.repeat(blocks, 16, axis=1)[:, :real_cols] * global_f32
+            vals *= (np.repeat(blocks, 16, axis=1)[:, :real_cols]
+                     * global_f32 * np.float32(0.5))
             matrix = f32_to_bf16_u16(vals)
             del vals, blocks
         else:
@@ -307,13 +308,17 @@ class SourceReader:
     # -- nvfp4 (community redhatai/modelopt release; VERBATIM passthrough) --
 
     def nvfp4_payload(self, name: str, r0: int, r1: int, c0: int, c1: int) -> bytes:
-        """Packed e2m1 bytes for [r0:r1, c0:c1] ELEMENTS from <name>_packed.
-
-        The source stores two 4-bit codes per uint8 ([rows, cols//2], even
-        element in the low nibble); column slices must be nibble aligned,
-        which the expert sharding guarantees (whole 128-col k-tiles)."""
+        """Packed e2m1 bytes for [r0:r1, c0:c1] ELEMENTS. The redhatai
+        layout stores <name>_packed ([rows, cols//2], even element in the
+        low nibble); the nvidia modelopt layout stores <name> itself as U8
+        ([rows, cols//2]). Column slices must be nibble aligned, which the
+        expert sharding guarantees (whole 128-col k-tiles)."""
         packed = name + "_packed"
-        dtype, shape, _ = self.meta(packed)
+        if packed in self.weight_map:
+            dtype, shape, _ = self.meta(packed)
+        else:
+            packed = name
+            dtype, shape, _ = self.meta(packed)
         if dtype != "U8" or len(shape) != 2:
             raise PackFailure(f"{packed}: expected 2-D U8 (packed e2m1), got {dtype} {shape}")
         if c0 % 2 != 0 or c1 % 2 != 0:
@@ -331,12 +336,15 @@ class SourceReader:
         return np.ascontiguousarray(scales[r0:r1, c0 // 16:c1 // 16]).tobytes()
 
     def nvfp4_weight_global(self, name: str) -> bytes:
-        """The per-tensor F32 weight global scale from <name>_global_scale."""
-        global_name = name + "_global_scale"
-        dtype, shape, _ = self.meta(global_name)
-        if dtype != "F32" or tuple(shape) not in ((), (1,)):
-            raise PackFailure(f"{global_name}: expected scalar F32, got {dtype} {shape}")
-        return to_bytes(self.raw(global_name).view(np.float32))
+        """The per-tensor F32 weight global scale: <name>_global_scale
+        (redhatai) or <name>_scale_2 (nvidia modelopt)."""
+        for global_name in (name + "_global_scale", name + "_scale_2"):
+            if global_name in self.weight_map:
+                dtype, shape, _ = self.meta(global_name)
+                if dtype != "F32" or tuple(shape) not in ((), (1,)):
+                    raise PackFailure(f"{global_name}: expected scalar F32, got {dtype} {shape}")
+                return to_bytes(self.raw(global_name).view(np.float32))
+        raise PackFailure(f"{name}: no nvfp4 weight global scale in the source")
 
     def close(self) -> None:
         self._mmaps.clear()
@@ -402,6 +410,8 @@ class Packer:
         rows, cols = shape if len(shape) == 2 else (1, shape[0])
         if dtype not in ("BF16", "F8_E4M3", "U8"):
             raise PackFailure(f"{name}: spine dtype {dtype}")
+        if dtype == "U8":
+            cols *= 2
         s0 = s1 = 0
         if shard == "rows" and self.tp_degree > 1:
             s0, s1 = self._rows_slice(rows)
@@ -598,9 +608,17 @@ class Packer:
     def add_up_gate_fused(self, kind: int, layer: int, up_name: str, gate_name: str,
                           shard: str = ""):
         """up rows then gate rows (glm52's stacked order) from two checkpoint
-        tensors; FP8 sources dequantize to bf16."""
-        up_rows, cols = self.s.meta(up_name)[1]
-        gate_rows = self.s.meta(gate_name)[1][0]
+        tensors; FP8 sources dequantize to bf16; modelopt nvfp4 sources
+        store U8 packed columns ([rows, real/2]) and dequantize to the
+        bf16 wire at REAL width."""
+        up_dtype, (up_rows, up_stored_cols), _ = self.s.meta(up_name)
+        gate_dtype, (gate_rows, gate_stored_cols), _ = self.s.meta(gate_name)
+        cols = up_stored_cols * 2 if up_dtype == "U8" else up_stored_cols
+        if up_dtype != gate_dtype or \
+                (gate_stored_cols * 2 if gate_dtype == "U8"
+                 else gate_stored_cols) != cols:
+            raise PackFailure(f"{up_name}|{gate_name}: fused section "
+                              f"geometry mismatch")
         total = up_rows + gate_rows
         rows_out = total
         up_slice = (0, up_rows)
@@ -654,8 +672,9 @@ class Packer:
         probe_packed = next(
             (n for n in self.s.weight_map
              if ".mlp.experts.0.up_proj.weight_packed" in n), None)
-        experts_nvfp4 = (probe_packed is not None
-                         and self.s.meta(probe_packed)[0] == "U8")
+        experts_nvfp4 = (
+            (probe_packed is not None and self.s.meta(probe_packed)[0] == "U8")
+            or (probe_name is not None and self.s.meta(probe_name)[0] == "U8"))
         source = self.s
         if experts_nvfp4:
             w1 = Entry(K_EXPERT_UP_GATE, layer, PAYLOAD_PACKED_WEIGHT,
