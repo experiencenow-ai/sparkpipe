@@ -1,5 +1,5 @@
 {
-  "file_count": 3192,
+  "file_count": 3193,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -7040,6 +7040,11 @@
       "path": "qualification/pack_sweep/2026-09-19/matrix.md",
       "sha256": "4f8cedab3df52a5adea974a3e94984e4aa713c49bbec767dcb6d30ddb5b4fabf",
       "size_bytes": 21223
+    },
+    {
+      "path": "qualification/pack_sweep/2026-09-19/topology-coverage.md",
+      "sha256": "41000ce5b76e9033d9f70f759ac9829be24e32874b97ae0288ea1320ba71bdbb",
+      "size_bytes": 15009
     },
     {
       "path": "qualification/spark/configs/ring_13node_handoff/index.json",
@@ -15965,5 +15970,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 74952116
+  "total_bytes": 74967125
 }
