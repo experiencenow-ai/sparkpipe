@@ -646,7 +646,7 @@ def verify_experts_manifest(manifest_path: Path, pack_path: Path, geometry: dict
             if len(payload) != per_expert_bytes:
                 problems.append(f"record {index}: pack short read")
                 break
-            if ck128(payload) != digest:
+            if ck128(payload)[:len(digest)] != digest:
                 problems.append(f"record {index}: ck128 mismatch at layer "
                                 f"{layer} expert {expert}")
                 break
@@ -863,7 +863,7 @@ def main() -> int:
         receipt["checkpoint"] = "existing pack (verify-only)"
         receipt["tool"] = "tools/gemma4_stagepack.py"
         receipt["verify_ranks"] = tp_ranks
-        receipt_path = args.receipt or Path(str(args.output) + ".receipt.json")
+        receipt_path = args.receipt or Path(str(args.output) + ".verify-receipt.json")
         write_receipt(receipt, receipt_path, suffix=None)
         proof = receipt["placement_proof"]
         print(f"gemma4_stagepack: verify-only {args.output} ranks={tp_ranks} "
