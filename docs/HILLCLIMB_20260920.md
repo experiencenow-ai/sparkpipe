@@ -540,3 +540,20 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   client_connection_lost/churn_guard prints name it on the next read.
 - Canary verdict pending the post-rollout warmup (engines 219s into cold
   loads at close).
+
+## 2026-09-21s tick — #22 FINISHED: the blast-radius bug (rank-scoped now)
+
+- The residual storm's mechanism: ONE rank's transient IO_ERROR called
+  pipeline SetFailure, which FailStopped ALL 16 rank connections per event —
+  lifetime count 1,034,574 set-failures (stage=rank index; stage=10 = rank
+  10). Every event reconnected the whole fleet: 16 helos, 16 generation
+  bumps, fingerprint moved, sessions invalidated. That was the storm's
+  engine, running at 1.8 resets/s on the fresh boot.
+- FIX (596ee82): SetFailure drops ONLY the failing rank's connection
+  (rank-scoped print per event; non-rank stages keep the full teardown).
+  MEASURED after deploy: 1 reset in ~5 minutes (was 239 in 130s) — the
+  reconnect storm class is closed end-to-end (FailStop-on-BUSY + churn guard
+  + rank scoping). The rank-10 underlying IO_ERROR cause remains to be named
+  (now harmless to the fleet; the rank-scoped print counts its frequency).
+- Canary verdict pending the current warmup cycle; chains were green at
+  149-167ms/91r on the last full measurement.
