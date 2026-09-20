@@ -1,5 +1,5 @@
 {
-  "file_count": 3185,
+  "file_count": 3186,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -7483,13 +7483,18 @@
     },
     {
       "path": "qualification/t1_reference/qwen38_max/MANIFEST.json",
-      "sha256": "6a3cf881f72669ce96a25a64eae3749fd1ffefb962329be74173efdd9bfaeaa4",
-      "size_bytes": 820
+      "sha256": "0c827bf10c816e21da3da15617a51eab8380f176ba4970c72f0d5a2ad29a03a1",
+      "size_bytes": 1090
     },
     {
       "path": "qualification/t1_reference/qwen38_max/capital_of_france.t1r",
-      "sha256": "74fc4bed5354b73443921d5be57c9baf463daaa06b624de33dcfafe2661438e0",
-      "size_bytes": 673260
+      "sha256": "7d32ccd0b783dde12bbead84b8ea94a778c3a3ca55ad60c0506e81ca1a4a51fe",
+      "size_bytes": 866396
+    },
+    {
+      "path": "qualification/t1_reference/qwen38_max/count_up.t1r",
+      "sha256": "6ca580b728aea757e86af4740a6396586c3f8d8fac52629f441236573df2becc",
+      "size_bytes": 1154177
     },
     {
       "path": "qualification/t1_reference/qwen38_max/prompts_qwen38max.json",
@@ -9843,8 +9848,8 @@
     },
     {
       "path": "tests/test_t1_reference_engines.py",
-      "sha256": "3e67c9e2f03aca57fab0a4b40c0edbf53eafa47a570074ef70a8b4349b725c39",
-      "size_bytes": 20197
+      "sha256": "ceabbee34718bd52d1d66c53c2fa6ce6644b82d4d8b74845e6358a45ba6ffcd3",
+      "size_bytes": 26000
     },
     {
       "path": "tests/test_t1_reference_hy4.py",
@@ -12593,8 +12598,8 @@
     },
     {
       "path": "tools/t1_reference_qwen38_max.py",
-      "sha256": "73cce934d9355c099d5efa9e5bf054f31e8666e9dfba8aca95d979cd2b622eeb",
-      "size_bytes": 14075
+      "sha256": "1679821fd15e4e6307325b28ddf97bdd7288786d66b3648ffdfcb385b2ff35d1",
+      "size_bytes": 21978
     },
     {
       "path": "tools/t1_reference_qwen4_flash.py",
@@ -15930,5 +15935,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 74869613
+  "total_bytes": 76230902
 }
