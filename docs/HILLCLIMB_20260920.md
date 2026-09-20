@@ -181,3 +181,53 @@ fuzzer pins the wall and both policy branches.
 2. S2.5 device-resident mesh slots (the flags are host memfd; poll cost).
 3. S3 the graph path (spark3 illegal-access bisection) — the 100µs class.
 4. Warm throughput ladder (batch rows > 1: prefill chains at 8 rows/slot).
+
+## 2026-09-21b — the wedge ledger (operator mandate: every wedge = a design flaw signal)
+
+Every wedge event this program has hit, its root cause, and the SYSTEMIC flaw
+it exposes. Pattern classes at the end. "FIXED" = the class is fixed, not the
+instance. Numbers refer to PRs/commits on #1067 unless noted.
+
+| # | Wedge event | Root cause | Systemic flaw | Status |
+|---|---|---|---|---|
+| 1 | engine SIGSEGV crash-loop | host code CPU-derefs a GPU VA (epoch cell) | device pointers treated as host pointers | FIXED (memcpy D2H) |
+| 2 | graph replay deadlock (no tail) | publish kernel never wrote the slot tail; the "fix" commit never contained the edit | claimed-but-absent fixes (evidence law) | FIXED |
+| 3 | graph replay deadlock (seqs eaten) | relay equality-dedup ate replayed sequences | dedup keyed on value, not epoch | FIXED (monotonic seqs) |
+| 4 | spark3 illegal access, full graph | unknown (1-op graph clean) | OPEN bisection | OPEN |
+| 5 | graph-env admission rejection (spark3) | kv PrepareLane INVALID_ARGUMENT before any graph code ran | UNDIAGNOSED — the ladder was interrupted | OPEN |
+| 6 | cold era: 450s chains, BUSY storms | per-chunk export/import ceremony per expert | ceremony scaling with chunks | FIXED (S-bulk pool) |
+| 7 | stale mesh records post-restart | records written only-if-missing | artifacts without ownership validation | FIXED (#1064 self-heal) |
+| 8 | 15/16 weightds missing --mesh-dir | config by repeated argv | flags where defaults belong | FIXED (default) |
+| 9 | janitor killed healthy weightds | identity guessed from a path string | name-based resource identity | FIXED (rule deleted + latch) |
+| 10 | twin weightds | unix socket file deletable | file-based identity | FIXED (TCP latch port) |
+| 11 | missing={4,7,9,11,14} forever | TryWire only re-wired on RECORD change; QPs that left RTS on an unchanged record stayed dead | health keyed on a PROXY (record) not the resource (QP state) | FIXED (state-based repair) |
+| 12 | rank6<->9 REM_ACCESS loop | records/rkeys verified CORRECT; kills recurred through repairs | UNRESOLVED — suspect same class as 11, unproven | OPEN (verify) |
+| 13 | ordinal exhaustion (162M) | id space finite (~162.07M), counter unbounded, burn on failed dispatches | invisible finite-resource consumption | FIXED (rollback + session seed + fuzzer wall) |
+| 14 | id-regression session invalidation | naive per-boot id rebase vs pipeline monotonic gate | session identity vs id-space conflation | FIXED (session-conditional seed) |
+| 15 | engine restart invisible to API | client generation restarted at 1 EVERY boot — fingerprint blind | session identity NOT unique per boot | FIXED (boot-clock seed) |
+| 16 | API submits into half-restarted fleet | no readiness gate; connected==ready assumed | socket-connect as a readiness proxy | FIXED (AllRanksReady gate) |
+| 17 | fresh engines BUSY forever after churn | stale lane reservations (consequence of 15) | reservations without liveness | FIXED (via 15+16) |
+| 18 | manual API-down-first restart ordering | human choreography compensating 15-17 | ordered-restart requirements | FIXED (gate); live-bounce verify pending |
+| 19 | release flow: stale adapter path | publish script path drifted from artifact name | deploy scripts not exercised by CI | OPEN (manual publish workaround) |
+| 20 | 203/EXEC api on rtx | aarch64 binary shipped to an x86 host | no arch assertion in the deploy flow | OPEN (documented) |
+
+### The systemic patterns (what "retarded" actually was)
+
+- **P1 — state without liveness epochs** (7, 11, 13, 15, 17): every stale-state
+  wedge is cached state that outlived its producer. LAW: cross-process state
+  carries an epoch/owner and is validated against the live resource.
+- **P2 — proxy health instead of resource health** (11, 16): record-change as a
+  stand-in for QP state; socket-connect as a stand-in for readiness. LAW: gate
+  on the resource's actual state.
+- **P3 — human restart choreography** (18): any time ordering matters between
+  components, the system is missing a gate. LAW: components gate on dependency
+  readiness; no documented restart order may exist.
+- **P4 — invisible finite resources** (13): id space, slots, lanes consumed
+  with no telemetry and no loud exhaustion. LAW: consumption is visible and
+  exhaustion is loud (fuzzer pins the budget).
+- **P5 — OK-returning stubs** (6, the PremapPool SKIP): a stub that returns OK
+  is a lie with a clean interface. LAW: unimplemented = loud error or a print
+  that says NOT IMPLEMENTED.
+- **P6 — deploy flow without artifact assertions** (19, 20): scripts that move
+  files without verifying what they moved. LAW: the deploy asserts existence,
+  arch, and mode of every artifact it ships.
