@@ -58,6 +58,7 @@ struct SparkModelResidentClient
 	uint32_t rank_index;
 	uint32_t stage_index;
 	uint64_t reconnect_not_before_ns;
+	uint64_t connected_since_ns;
 	uint32_t reconnect_backoff_ms;
 	uint32_t queue_capacity;
 	uint32_t output_head;
@@ -502,8 +503,28 @@ static SparkStatus SparkModelResidentClientEnsureConnected(
 		SPARK_RETURN(status);
 	}
 	client->connected = 1u;
-	client->reconnect_not_before_ns = 0u;
-	client->reconnect_backoff_ms = 0u;
+	{
+		struct timespec up_ts;
+		uint64_t up_ns = clock_gettime(CLOCK_MONOTONIC,&up_ts) == 0 ?
+		    (uint64_t)up_ts.tv_sec * UINT64_C(1000000000) + (uint64_t)up_ts.tv_nsec : 0u;
+		client->connected_since_ns = up_ns;
+		if ( up_ns != 0u && client->reconnect_backoff_ms != 0u &&
+		     (up_ns - client->reconnect_not_before_ns) < UINT64_C(20000000000) )
+		{
+			if ( client->reconnect_backoff_ms < 5000u )
+				client->reconnect_backoff_ms *= 2u;
+			client->reconnect_not_before_ns = up_ns +
+			    (uint64_t)client->reconnect_backoff_ms * UINT64_C(1000000);
+			fprintf(stderr,
+			    "client_churn_guard rank=%u backoff_ms=%u — short-lived connection, backoff carries\n",
+			    (unsigned)client->rank_index,(unsigned)client->reconnect_backoff_ms);
+		}
+		else
+		{
+			client->reconnect_not_before_ns = 0u;
+			client->reconnect_backoff_ms = 0u;
+		}
+	}
 	client->next_message_id = 2u;
 	client->input_target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
 	return(SPARK_STATUS_OK);
@@ -1011,8 +1032,11 @@ SparkStatus SparkModelResidentClientProgress(
 	status = SparkModelResidentClientFlush(client);
 	if ( status == SPARK_STATUS_OK )
 		status = SparkModelResidentClientRead(client,maximum_message_count);
-	if ( status != SPARK_STATUS_OK )
+	if ( status == SPARK_STATUS_IO_ERROR )
 	{
+		fprintf(stderr,
+		    "client_connection_lost rank=%u on progress — reconnecting\n",
+		    (unsigned)client->rank_index);
 		SparkModelResidentClientFailStop(client);
 	}
 	SPARK_RETURN(status);
