@@ -109,3 +109,75 @@ The operator's ruling: files can be deleted out from under a live holder (the ag
 - Engines: whatever the agent runs (the graph env is OFF by default; SPARK_GLM5_NEXT_GRAPH_PATH=1 per-unit enables it — currently check before graph steps).
 - Deploy: build on sparkf ~/sparkpipe-build-main (rsync from the fix/hillclimb worktree, full source set incl. inference/), module publish + model_compile + release rsync + MANIFEST regen; the CORE release flow has a delivery bug (nodes installed a stale binary) — for weightd use direct scp+restart (documented argv), for the DRIVER use the glm53flash release path (that one works).
 - The probe loop: /tmp/canary2.py on rtx5090 (127.0.0.1:8433).
+
+## 2026-09-21 night session — S-bulk LIVE, rulings landed, serving GREEN
+
+### The S-bulk root cause (the missing producer)
+`WD-MAP-POOL-BULK` never printed because `SparkWeightdPremapPool` was a SKIP
+stub — `pool_export_handle` was READ in three places but WRITTEN nowhere in the
+tree. Same class as c152edd: the consumer shipped, the producer never existed.
+d14818f implements the real producer + 5 companion fixes (EvictGroup BUSY on
+pooled arenas so pooled chunks never unmap/epoch-move; whole-span teardown with
+the pool handle released once; pool fd staged on BOTH create and re-attach;
+flag-driven fd interpretation on the client — the positional read mmap'd the
+pool fd as the mesh when mesh wasn't ready, caught by check_pooled_attach;
+lease-export short-circuit to an empty valid batch). Verified 16/16: `pool
+single-alloc chunks=10351 span=21707620352` + `WD-MAP-POOL-BULK` on every node.
+
+### The mesh QP wedge class (fixed + fuzzed)
+Mass weightd recycles strangle QPs: RC-retry exhaustion sends a QP to ERROR,
+and TryWire only re-transitioned peers whose RECORD changed — a QP that died
+after its last rewire stayed dead forever. Measured live: +1368 flush errors
+per +2048 completions, chains wedging missing={4,7,9,11,14} across reporters.
+28b5a59: TryWire queries every send/recv QP state each pass and force-repairs
+anything not in RTS (WD-QP-REPAIR). Deployed: spark9 repaired all 15 peers,
+error counters collapsed to single digits.
+
+### The ordinal wall (the "180 million retries" bug)
+The submission counter crossed the chain-id capacity of the ordinal math
+(TP_CHAIN_OPERATIONS = 106×65536 with the compile-max row count; wall at
+~162.07M ids) → every submit capacity_exceeded forever. THREE consumption
+paths fixed: (1) dispatch failures roll back next_submission_id (retry storms
+burn nothing); (2) the API seed file is session-conditional with a watermark
+(same engine session → continue at watermark+10001, new session → rebase to
+1M; the naive fixed rebase tripped the pipeline's monotonic gate and killed
+in-flight requests status=4 — 3420575); (3) SparkTpChainIdCapacity in the
+fuzzer pins the wall and both policy branches.
+
+### Operator rulings (13c1113)
+- POOL: 8GiB magic default deleted; attach declares the full pack; weightd
+  pools whenever the span fits the device budget (90GB packs pool whole on the
+  110GB budget); oversized packs degrade LOUDLY (WD-POOL-CLAMP) to per-chunk.
+- MESH REGION: 16GiB → 128MB per daemon (SLOTS_PER_RANK 16→2 — the parity/
+  credit contract; SLOT_ROWS=8; geometry printed at MR registration).
+- FUZZER FIRST: the fleet bug classes above are replicated and pinned in
+  test_tp_allreduce_fuzz.c (FuzzEdgeOrdinal / IdPolicy / RewirePolicy /
+  Geometry). 237-check basic + 2328-check 200-round fuzz green.
+
+### Verdict (all MEASURED, r3 generation, 2026-09-21 18:32 UTC)
+- Canary http=200, 8/8 tokens, DETERMINISTIC output ×4 runs
+  ([3764,10,4999,1725,15,98886,18,100461]).
+- Warm steady state: 17.1-17.3s per 8-token request (~2.1s/token wall clock).
+- Warm full chain: status=0, 91 rounds, 120-140ms total, allreduce 51-64ms
+  (0.56-0.70ms/round; the in-chain pure-mesh component measured 136µs/round).
+- Cold chain (first touch, experts loading from pack): 247-277s ONE TIME per
+  engine boot; pooled arenas never evict so warm persists.
+- S1 was 1334µs/round → warm serving now 561-700µs/round with the pure-mesh
+  component at ~136µs. The 100µs goal needs S3 (in-graph path).
+
+### Deploy facts (r3 = 3420575)
+- weightd sha 6f0ea32528dc on 16/16 (mesh 128MB print verified), engines on
+  the r3 driver, API = r3 x86 build on rtx5090 (session-conditional seeding).
+- GOTCHA: publish_local.sh's adapter path is stale
+  (libglm5_next_resident_decode_stage_serving_adapter_fp8.so vs actual
+  libglm5_next_serving_adapter_fp8.so) — publish manually or fix the script.
+- GOTCHA: the release bin/sparkpipe_model_api must be the x86 build (build on
+  the rtx host ~/sparkpipe-build-main); a sparkf aarch64 api binary = 203/EXEC.
+- GOTCHA: engines re-cold after every weightd bounce (pool arena dies with the
+  process); the first canary after any bounce pays 2×~270s (two slots' loads).
+
+### Next
+1. The same-request-twice cache test (KV skip + expert reuse) — now unblocked.
+2. S2.5 device-resident mesh slots (the flags are host memfd; poll cost).
+3. S3 the graph path (spark3 illegal-access bisection) — the 100µs class.
+4. Warm throughput ladder (batch rows > 1: prefill chains at 8 rows/slot).
