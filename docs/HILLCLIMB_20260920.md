@@ -342,3 +342,22 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   engine exits). Fleet left in the safe shape: engines up, weightds single +
   latched, mesh ready, API up with fail-fast BUSY (no zombie cascade — the
   generation + gate fixes held through all of tonight's churn).
+
+## 2026-09-21i tick — #23 fixed; ledger #24: the unanswered acquire
+
+- #23 FIX DEPLOYED (1a91efd): hello-reset now releases orphaned slot claims
+  and abandons stale-generation routes (loud print when it fires). Result:
+  submissions dispatch again — chains START and load experts (leases flow).
+  Verified the class is gone: no more claim-leak BUSY at 1696.
+- NEW, caught live with paired gdb: the chain wedges mid-load — the engine's
+  lease worker blocked in SparkWeightdClientAcquire → ClientExchange → poll
+  on the weightd socket (no reply for minutes), while the weightd itself is
+  HEALTHY (main loop polling 20ms, mesh doorbell thread actively scanning at
+  weightd_mesh.c:847, CUDA threads normal). The acquire request either never
+  reached a reader (un-accepted backlog connection?) or its reply never
+  routed. Ledger #24 (open): socket-level census next — ss -x both ends, the
+  acquire connection's inode state, the weightd's connection table vs the
+  engine's open sockets; suspect the lazy-pack acquire rides a connection the
+  server never accepted or stopped polling.
+- MEASURE: no valid warm numbers this tick (fleet wedged mid-load at probe
+  time); last valid warm floor remains 0.68-0.92ms/round (09-21f).
