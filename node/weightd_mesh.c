@@ -594,6 +594,32 @@ SparkStatus SparkWeightdMeshInit(uint32_t rank, const char *interface_name,
     return SPARK_STATUS_BUSY;
 }
 
+void SparkWeightdMeshDeviceProbe(const char *tag,void *device_pointer,
+    uint64_t bytes)
+{
+    struct ibv_mr *mr;
+    if ( getenv("SPARK_WEIGHTD_MESH_DEVICE_PROBE") == 0 ||
+         weightd_mesh.protection_domain == 0 || device_pointer == 0 ||
+         bytes == 0ull )
+        return;
+    mr = ibv_reg_mr(weightd_mesh.protection_domain,device_pointer,(size_t)bytes,
+        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+    if ( mr == 0 )
+        fprintf(stderr,
+            "WD-DEVPROBE FAIL tag=%s ptr=%llx bytes=%llu errno=%d — GPUDirect over VMM device memory NOT registrable; S2.5 (device-resident mesh slots) blocked on this hardware\n",
+            tag,(unsigned long long)(uintptr_t)device_pointer,
+            (unsigned long long)bytes,errno);
+    else
+    {
+        fprintf(stderr,
+            "WD-DEVPROBE OK tag=%s ptr=%llx bytes=%llu rkey=%u lkey=%u — GPUDirect over VMM device memory registrable; S2.5 unblocked\n",
+            tag,(unsigned long long)(uintptr_t)device_pointer,
+            (unsigned long long)bytes,mr->rkey,mr->lkey);
+        (void)ibv_dereg_mr(mr);
+    }
+    fflush(stderr);
+}
+
 uint32_t SparkWeightdMeshReady(void)
 {
     return weightd_mesh.mesh_ready;

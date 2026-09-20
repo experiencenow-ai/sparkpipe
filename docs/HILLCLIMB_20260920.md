@@ -231,3 +231,20 @@ instance. Numbers refer to PRs/commits on #1067 unless noted.
 - **P6 — deploy flow without artifact assertions** (19, 20): scripts that move
   files without verifying what they moved. LAW: the deploy asserts existence,
   arch, and mode of every artifact it ships.
+
+## 2026-09-21c tick — S2.5 hardware gate probed: VMM-VA registration FAILS
+
+- MEASURE: warm serving 0.6-1.5ms/round (contention-dependent; 66-136ms per
+  91-round chain at 1-4 concurrent), canary green 17.4s deterministic.
+- S2.5 GATE (the make-or-break for device-resident mesh slots): env-gated
+  WD-DEVPROBE in weightd runs ibv_reg_mr over the pool's cuMemMap'd device
+  memory using the mesh PD. VERDICT on spark0: **FAIL errno=14 (EFAULT)** —
+  plain-VA GPUDirect registration over VMM device memory is not registrable on
+  this GB10 stack. The canonical modern path is the DMA-BUF route:
+  cuMemGetHandleForAddressRange(CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF) +
+  ibv_reg_dmabuf (libibverbs dmabuf MR). NEXT: probe v2 = the dmabuf path on
+  the same env gate; if that fails too, device-resident slots are dead on this
+  hardware and the 100µs route is the graph path alone (S3).
+- The probe binary (r3 + probe, sha 0593151ad47d) is on spark0 only, env-gated
+  (SPARK_WEIGHTD_MESH_DEVICE_PROBE=1 in the agent drop-in zzdevprobe.conf);
+  harmless without the env (weak no-op).

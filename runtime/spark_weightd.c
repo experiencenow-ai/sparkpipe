@@ -71,6 +71,14 @@ __attribute__((weak)) uint32_t SparkWeightdMeshReady(void) { return 0u; }
 __attribute__((weak)) uint64_t SparkWeightdMeshBufferAddress(void) { return 0ull; }
 __attribute__((weak)) uint32_t SparkWeightdMeshBufferLkey(void) { return 0u; }
 __attribute__((weak)) int SparkWeightdMeshBufferFd(void) { return -1; }
+
+extern void SparkWeightdMeshDeviceProbe(const char *tag,void *device_pointer,
+    uint64_t bytes);
+__attribute__((weak)) void SparkWeightdMeshDeviceProbe(const char *tag,
+    void *device_pointer,uint64_t bytes)
+{
+    (void)tag; (void)device_pointer; (void)bytes;
+}
 __attribute__((weak)) void SparkWeightdMeshPoll(void) { }
 __attribute__((weak)) SparkStatus SparkWeightdMeshPostWrite(uint32_t peer,
     uint64_t local_addr, uint32_t lkey, uint32_t length,
@@ -1389,6 +1397,7 @@ static SparkStatus SparkWeightdPremapPool(SparkWeightdServer *server,
 		arena->chunk_handles[index] = (void *)handle;
 	arena->pool_committed_bytes += span_bytes;
 	server->resident_bytes += span_bytes;
+	SparkWeightdMeshDeviceProbe("pool",arena->device_base,span_bytes);
 	printf("pool single-alloc chunks=%u span=%llu (one allocation for the whole arena; pooled chunks never evicted)\n",
 	    arena->chunk_count,(unsigned long long)span_bytes);
 	fflush(stdout);
