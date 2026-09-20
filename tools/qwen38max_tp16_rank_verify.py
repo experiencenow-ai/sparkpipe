@@ -240,8 +240,8 @@ def verify(pack: Path, tp_degree: int, tp_rank: int, checkpoint: Path | None,
             fail(f"missing tensor kind={key[0]} layer={hex(key[1])}")
 
         if decoded and len(wire_pairs) == 1 and plan_matches != {True}:
-            last_key = max(planned)
-            last_shape = (planned[last_key][3], planned[last_key][4])
+            last_key = list(planned)[-1]
+            last_shape = (planned[last_key][4], planned[last_key][5])
             wire_pair = next(iter(wire_pairs))
             if wire_pair != last_shape:
                 fail(f"directory carries a uniform non-plan shape "

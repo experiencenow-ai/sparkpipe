@@ -249,21 +249,31 @@ def verify(pack: Path, checkpoint: Path | None, receipt_path: Path | None,
             natural = natural_format(tables, kind)
             if fmt == natural:
                 want_group = 0
+                want_payload = payload_bytes_for(fmt, packed_rows, packed_cols)
+                want_scale = 0
             elif fmt == WEIGHT_FP8_E4M3_F32B128 and natural == WEIGHT_BF16 \
                     and scale_group in (0, FP8_SCALE_GROUP):
                 want_group = scale_group
+                want_payload = payload_bytes_for(fmt, packed_rows, packed_cols)
+                plane = scale_bytes_for(fmt, packed_rows, packed_cols,
+                                        FP8_SCALE_GROUP)
+                if scale_group == FP8_SCALE_GROUP:
+                    want_scale = plane
+                else:
+                    want_scale = s_bytes if s_bytes in (0, plane) else -1
             elif fmt == WEIGHT_NVFP4_PACKED and natural == WEIGHT_BF16:
                 want_group = NVFP4_GROUP
+                want_payload = payload_bytes_for(fmt, packed_rows, packed_cols)
+                want_scale = scale_bytes_for(fmt, packed_rows, packed_cols)
             else:
                 want_group = -1
+                want_payload = want_scale = -1
                 fail(f"{tag}: weight_format={fmt} scale_group={scale_group} "
                      f"outside the packer ladder (natural {natural}, bf16 "
                      f"kinds may ride fp8 f32b128, fp8 compact-strip, or "
                      f"nvfp4)")
             if scale_group != want_group:
                 fail(f"{tag}: scale_group_size={scale_group}, expected {want_group}")
-            want_payload = payload_bytes_for(fmt, packed_rows, packed_cols)
-            want_scale = scale_bytes_for(fmt, packed_rows, packed_cols, scale_group)
             if p_bytes != want_payload:
                 fail(f"{tag}: payload_bytes={p_bytes}, format math says {want_payload}")
             if s_bytes != want_scale:
