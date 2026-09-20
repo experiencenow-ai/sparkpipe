@@ -3272,6 +3272,7 @@ SparkStatus SparkWeightdClientAttachLazy(SparkWeightdClient *client,
     result->mesh_ready = wire_result.mesh_ready;
     result->mesh_send_buffer_addr = wire_result.mesh_send_buffer_addr;
     result->mesh_send_buffer_bytes = wire_result.mesh_send_buffer_bytes;
+    result->pool_fd = wire_result.pool_fd;
     return SPARK_STATUS_OK;
 }
 

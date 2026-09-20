@@ -274,6 +274,7 @@ typedef struct SparkWeightdIpcAttachLazyResult
     uint64_t mesh_send_buffer_addr;
     uint64_t mesh_send_buffer_bytes;
     uint8_t manifest_sha256[32];
+    int pool_fd;
 } SparkWeightdIpcAttachLazyResult;
 
 typedef struct SparkWeightdIpcEpochExport
