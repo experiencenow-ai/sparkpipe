@@ -1750,9 +1750,40 @@ static SparkStatus SparkModelResidentdProcessHello(
 	}
 	if ( status == SPARK_STATUS_OK && queue_status == SPARK_STATUS_OK )
 	{
+		pthread_mutex_lock(&runtime->mutex);
 		runtime->client.hello_complete = 1u;
 		runtime->client.last_submission_id = 0u;
 		runtime->client.pending_client_reset = runtime->client.generation;
+		{
+			uint32_t slot_index;
+			uint32_t released_claims = 0u;
+			if ( runtime->sequence_slots != 0 )
+				for (slot_index=0u;
+					slot_index<runtime->runtime_limits.resident_sequence_capacity;
+					slot_index++)
+					if ( runtime->sequence_slots[slot_index].active_owner != 0u )
+					{
+						runtime->sequence_slots[slot_index].active_owner = 0u;
+						released_claims++;
+					}
+			if ( runtime->routes != 0 )
+				for (slot_index=0u; slot_index<runtime->route_capacity;
+					slot_index++)
+					if ( runtime->routes[slot_index].active != 0u &&
+						runtime->routes[slot_index].client_generation !=
+							runtime->client.generation )
+					{
+						runtime->routes[slot_index].resident_slots_claimed = 0u;
+						if ( runtime->routes[slot_index].state !=
+							SPARK_MODEL_RESIDENTD_ROUTE_RESERVED )
+							runtime->routes[slot_index].abandoned = 1u;
+					}
+			if ( released_claims != 0u )
+				fprintf(stderr,
+					"model_residentd hello-reset released %u orphaned slot claims; stale-generation routes abandoned\n",
+					released_claims);
+		}
+		pthread_mutex_unlock(&runtime->mutex);
 		fprintf(stderr,"model_residentd client reset armed generation=%llu resumed=%u\n",
 			(unsigned long long)runtime->client.generation,
 			(unsigned)runtime->client.reset_done);
