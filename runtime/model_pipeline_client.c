@@ -184,8 +184,16 @@ static void SparkModelPipelineClientSetFailure(
 	pipeline->failed_stage_index = stage_index;
 	fprintf(stderr,"pipeline set-failure status=%u stage=%u\n",
 		(unsigned)status,(unsigned)stage_index);
-	for (rank=0u; rank<pipeline->rank_count; rank++)
-		SparkModelResidentClientFailStop(pipeline->clients[rank]);
+	if ( stage_index < pipeline->rank_count )
+	{
+		SparkModelResidentClientFailStop(pipeline->clients[stage_index]);
+		fprintf(stderr,
+			"pipeline rank-scoped failure: only rank %u connection dropped (16-way teardown was the #22 reconnect storm)\n",
+			(unsigned)stage_index);
+	}
+	else
+		for (rank=0u; rank<pipeline->rank_count; rank++)
+			SparkModelResidentClientFailStop(pipeline->clients[rank]);
 	for (slot=0u; slot<pipeline->runtime_limits.resident_sequence_capacity;
 		slot++)
 	{
