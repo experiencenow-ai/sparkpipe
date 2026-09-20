@@ -267,6 +267,7 @@ static pthread_mutex_t SparkWeightdMeshWireLock = PTHREAD_MUTEX_INITIALIZER;
 static void SparkWeightdMeshTryWireLocked(void)
 {
     SparkWeightdMeshRecord peer_records[SPARK_WEIGHTD_MESH_PEERS];
+    uint32_t force_wire[SPARK_WEIGHTD_MESH_PEERS];
     uint32_t peer;
     uint32_t peer_rank;
     uint32_t my_index_in_peer;
@@ -276,6 +277,9 @@ static void SparkWeightdMeshTryWireLocked(void)
     changed = weightd_mesh.mesh_ready == 0u;
     for (peer = 0u; peer < SPARK_WEIGHTD_MESH_PEERS; peer++)
     {
+        struct ibv_qp_attr attr;
+        struct ibv_qp_init_attr init;
+        force_wire[peer] = 0u;
         peer_rank = peer < weightd_mesh.local_rank ? peer : peer + 1u;
         if (SparkWeightdMeshReadPeerRecord(peer_rank,
                 &peer_records[peer]) != SPARK_STATUS_OK)
@@ -285,14 +289,39 @@ static void SparkWeightdMeshTryWireLocked(void)
             continue;
         }
         if (peer_records[peer].boot_ns != weightd_mesh.wired_boot_ns[peer])
+        {
             changed = 1u;
+            continue;
+        }
+        memset(&attr,0,sizeof(attr));
+        memset(&init,0,sizeof(init));
+        if (weightd_mesh.send_qps[peer] != 0 &&
+            (ibv_query_qp(weightd_mesh.send_qps[peer],&attr,
+                 IBV_QP_STATE,&init) != 0 ||
+             attr.qp_state != IBV_QPS_RTS))
+            force_wire[peer] = 1u;
+        memset(&attr,0,sizeof(attr));
+        memset(&init,0,sizeof(init));
+        if (force_wire[peer] == 0u && weightd_mesh.recv_qps[peer] != 0 &&
+            (ibv_query_qp(weightd_mesh.recv_qps[peer],&attr,
+                 IBV_QP_STATE,&init) != 0 ||
+             attr.qp_state != IBV_QPS_RTS))
+            force_wire[peer] = 1u;
+        if (force_wire[peer] != 0u)
+        {
+            changed = 1u;
+            fprintf(stderr,
+                "WD-QP-REPAIR rank=%u peer=%u — qp left RTS after errors; re-transitioning on the same record\n",
+                weightd_mesh.local_rank,peer);
+        }
     }
     if (changed == 0u)
         return;
     wired = 1u;
     for (peer = 0u; peer < SPARK_WEIGHTD_MESH_PEERS; peer++)
     {
-        if (peer_records[peer].boot_ns == weightd_mesh.wired_boot_ns[peer])
+        if (force_wire[peer] == 0u &&
+            peer_records[peer].boot_ns == weightd_mesh.wired_boot_ns[peer])
             continue;
         peer_rank = peer < weightd_mesh.local_rank ? peer : peer + 1u;
         my_index_in_peer = weightd_mesh.local_rank < peer_rank ?
