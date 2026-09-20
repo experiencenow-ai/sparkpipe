@@ -1,5 +1,6 @@
 #include "sparkpipe/spark_weightd_map.h"
 #include "sparkpipe/spark_error_site.h"
+#include <pthread.h>
 #include <cuda.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +26,8 @@ typedef struct SparkWeightdMapSlot
 struct SparkWeightdMap
 {
 	SparkWeightdClient *client;
+	pthread_mutex_t client_lock;
+	uint32_t client_lock_initialized;
 	CUcontext context;
 	CUdeviceptr base;
 	uint64_t generation,span_bytes,chunk_bytes;
@@ -128,6 +131,8 @@ static SparkStatus map_free_initial(SparkWeightdMap *map)
 	free(map->handles);
 	free(map->owners);
 	free(map->mapped);
+	if ( map->client_lock_initialized != 0u )
+		(void)pthread_mutex_destroy(&map->client_lock);
 	free(map);
 	return(status);
 }
@@ -172,6 +177,9 @@ SparkStatus SparkWeightdMapCreate(SparkWeightdClient *client,const SparkWeightdL
 	map = calloc(1u,sizeof(*map));
 	if ( map == 0 )
 		SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
+	if ( pthread_mutex_init(&map->client_lock,0) != 0 )
+		SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
+	map->client_lock_initialized = 1u;
 	map->client = client;
 	map->generation = attached->arena_generation;
 	map->chunk_bytes = attached->chunk_bytes;
@@ -307,7 +315,7 @@ static SparkStatus map_drop_slot(SparkWeightdMap *map,uint32_t slot)
 	return(SPARK_STATUS_OK);
 }
 
-SparkStatus SparkWeightdMapRelease(SparkWeightdMap *map,uint64_t identifier,uint64_t timeout)
+static SparkStatus map_release_locked(SparkWeightdMap *map,uint64_t identifier,uint64_t timeout)
 {
 	SparkWeightdMapSlot *slot;
 	SparkWeightdWorkingSetResult result;
@@ -339,6 +347,18 @@ SparkStatus SparkWeightdMapRelease(SparkWeightdMap *map,uint64_t identifier,uint
 	slot->identifier = 0u;
 	slot->state = MAP_EMPTY;
 	return(SPARK_STATUS_OK);
+}
+
+SparkStatus SparkWeightdMapRelease(SparkWeightdMap *map,uint64_t identifier,uint64_t timeout)
+{
+	SparkStatus status;
+	if ( map == 0 || map->client_lock_initialized == 0u )
+		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	if ( pthread_mutex_lock(&map->client_lock) != 0 )
+		SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
+	status = map_release_locked(map,identifier,timeout);
+	(void)pthread_mutex_unlock(&map->client_lock);
+	return(status);
 }
 
 static SparkStatus map_import_chunk(SparkWeightdMap *map,uint32_t slot,uint32_t chunk,int32_t fd)
@@ -431,11 +451,6 @@ SparkStatus SparkWeightdMapAcquire(SparkWeightdMap *map,const SparkWeightdExpert
 		SPARK_RETURN(status);
 	if ( map->failure != SPARK_STATUS_OK )
 		return(map->failure);
-	for (slot=0u; slot<SPARK_WEIGHTD_LEASE_COUNT_MAX; slot++)
-		if ( map->slots[slot].state == MAP_EMPTY )
-			break;
-	if ( slot == SPARK_WEIGHTD_LEASE_COUNT_MAX )
-		SPARK_FAIL(SPARK_STATUS_BUSY);
 	now = map_now();
 	if ( now == 0u )
 		SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
@@ -444,9 +459,23 @@ SparkStatus SparkWeightdMapAcquire(SparkWeightdMap *map,const SparkWeightdExpert
 	if ( timeout > (UINT64_MAX - now) )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	deadline = (now + timeout);
+	if ( map->client_lock_initialized == 0u ||
+	     pthread_mutex_lock(&map->client_lock) != 0 )
+		SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
+	for (slot=0u; slot<SPARK_WEIGHTD_LEASE_COUNT_MAX; slot++)
+		if ( map->slots[slot].state == MAP_EMPTY )
+			break;
+	if ( slot == SPARK_WEIGHTD_LEASE_COUNT_MAX )
+	{
+		(void)pthread_mutex_unlock(&map->client_lock);
+		SPARK_FAIL(SPARK_STATUS_BUSY);
+	}
 	status = SparkWeightdClientAcquire(map->client,map->generation,keys,count,&result,timeout);
 	if ( status != SPARK_STATUS_OK )
+	{
+		(void)pthread_mutex_unlock(&map->client_lock);
 		SPARK_RETURN(status);
+	}
 	map->slots[slot].identifier = result.lease_identifier;
 	map->slots[slot].state = MAP_ACQUIRED;
 	*identifier = result.lease_identifier;
@@ -454,9 +483,14 @@ SparkStatus SparkWeightdMapAcquire(SparkWeightdMap *map,const SparkWeightdExpert
 	if ( status != SPARK_STATUS_OK )
 	{
 		map->slots[slot].state = MAP_RETIRING;
-		if ( map_remaining(deadline,&remaining) == SPARK_STATUS_OK && SparkWeightdMapRelease(map,*identifier,remaining) == SPARK_STATUS_OK )
-			*identifier = 0u;
+		if ( map_remaining(deadline,&remaining) == SPARK_STATUS_OK )
+		{
+			SparkStatus release_status = map_release_locked(map,*identifier,remaining);
+			if ( release_status == SPARK_STATUS_OK )
+				*identifier = 0u;
+		}
 	}
+	(void)pthread_mutex_unlock(&map->client_lock);
 	SPARK_RETURN(status);
 }
 

@@ -620,6 +620,7 @@ static void SparkTestDaemonProcessTermPath(void)
     if (daemon_pid == 0)
     {
         char ceiling_text[32];
+        setenv("SPARK_WEIGHTD_LATCH_PORT","0",1);
         snprintf(ceiling_text, sizeof(ceiling_text), "%llu",
             (unsigned long long)(2ull * SPARK_TEST_ARENA_BYTES));
         (void)dup2(stdout_pipe[1], 1);
