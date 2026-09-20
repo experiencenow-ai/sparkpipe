@@ -322,3 +322,23 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   an audit for partial-reset poisoning).
 - Fleet bring-up discipline for now: API down → engines settle + warm (one
   cold pass) → API up through the all-ranks-ready gate → probe.
+
+## 2026-09-21h tick close — ledger #23: orphaned slot claims across client reset
+
+- Evidence: clean bring-up still wedges; gdb thread dump of the "stuck" engine
+  shows ALL 9 THREADS IDLE (main in poll, workers in futex waits, CUDA poll
+  threads) — nothing hangs. The engine accepted one submission (last_id moved,
+  resident slots claimed), then the API's reconnect hello ran a client reset
+  that dropped the in-flight route ("completion undeliverable — slot ownership
+  reset under it" class) WITHOUT releasing the claimed resident slots → every
+  later submission BUSY-rejects at ClaimResidentSlots (1696). Reproduced twice
+  on clean boots; engine idle throughout — this is claim leakage, not a hang.
+- FIX SHAPE (open): the hello/reset path must release resident-sequence slot
+  claims owned by routes of the outgoing client generation (the route-drop
+  path frees routes; it must also free their slot claims). Fuzzer angle: a
+  mock-adapter host test — submit → reset (new generation) → submit → the
+  second submit must NOT see BUSY from stale claims.
+- Also this tick: ledger #22 recorded (reconnect-storm cascade amplifying
+  engine exits). Fleet left in the safe shape: engines up, weightds single +
+  latched, mesh ready, API up with fail-fast BUSY (no zombie cascade — the
+  generation + gate fixes held through all of tonight's churn).
