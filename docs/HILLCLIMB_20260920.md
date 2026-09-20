@@ -557,3 +557,18 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   (now harmless to the fleet; the rank-scoped print counts its frequency).
 - Canary verdict pending the current warmup cycle; chains were green at
   149-167ms/91r on the last full measurement.
+
+## 2026-09-21t tick — steady state reached; the quiet-window verdict pending
+
+- Fleet after all fixes: reconnect storm dead (1/5min), rank-scoped teardown
+  live (0 events — the fix's path never even fires now), chains green at
+  140-154ms/91r (allreduce 0.71-0.93ms/round) whenever slots are warm.
+- Remaining flake: individual ranks wedge with the #26-VARIANT (chain never
+  completes, pending NOT cleared — the PENDING-INACTIVE delivery doesn't
+  apply; workers idle, claims held; ROUTE-STUCK shows state=5). Ranks 8/9
+  needed a recycle this tick. The CHAIN-STUCK instrument (slot/layer/lease/
+  final-event state after 30s) is still the named next build to split
+  "GPU never finished" from "never scheduled".
+- Verdict discipline: every diagnostic cycle recycled engines and reset the
+  warm state — the green canary needs a QUIET window (no probes/recycles,
+  ~10 min) then one probe. Next tick opens with exactly that.
