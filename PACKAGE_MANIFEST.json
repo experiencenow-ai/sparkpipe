@@ -7233,18 +7233,18 @@
     },
     {
       "path": "qualification/t1_reference/dsv41/MANIFEST.json",
-      "sha256": "9f984d536794c7342f3c105dfcbb731b63cf99fda0c15116816e6dc5e7559fb0",
-      "size_bytes": 4083
+      "sha256": "5f6d998b6cd3ebeb1896fb0b40e8f4496b589a4fcf16fc5a68031b3edc1489b3",
+      "size_bytes": 1554
     },
     {
       "path": "qualification/t1_reference/dsv41/capital_of_france.t1r",
-      "sha256": "33a156f0526b2437f5e6416ac80e8d48359d2c882235596a4c8e9b071465e808",
-      "size_bytes": 1341054
+      "sha256": "7c4c6213b60880c355d318687f34b4601c8efa6e6169b1aef83eae2a745cd876",
+      "size_bytes": 1340135
     },
     {
       "path": "qualification/t1_reference/dsv41/count_up.t1r",
-      "sha256": "08516a563fc051ebcdb10cee973a0748efe94ef69b24083ed1f67333d8d0a1ea",
-      "size_bytes": 3572247
+      "sha256": "3dede8533bc25c1d97397be259fd75e1f70429deb499677a96118557691f40d7",
+      "size_bytes": 3572370
     },
     {
       "path": "qualification/t1_reference/dsv41/engram_token_map.npy",
@@ -7303,18 +7303,18 @@
     },
     {
       "path": "qualification/t1_reference/glm53full/MANIFEST.json",
-      "sha256": "6d0a0568f3acf9ecf21587e315b3bd320d05163f5512657903514e2008bee5b4",
-      "size_bytes": 1064
+      "sha256": "6a954d48c5875e984ad3f794ed923423d039b9dfda0486891d0d4b084784cc22",
+      "size_bytes": 1061
     },
     {
       "path": "qualification/t1_reference/glm53full/capital_of_france.t1r",
-      "sha256": "d17944c4a74e58d8868c03cc82747e3c649f21a8ce9729e08d11f48ff0e5978c",
-      "size_bytes": 661585
+      "sha256": "f5b4d7bac99894a125e5c71fc7f8d11f0d36a69dc0658640aa976357c4368a1f",
+      "size_bytes": 661264
     },
     {
       "path": "qualification/t1_reference/glm53full/count_up.t1r",
-      "sha256": "7169286e21d4f92f3ba6120e31d78bfb7224999fe2a5721941615ad3789e8fa4",
-      "size_bytes": 881376
+      "sha256": "25579bac662d2d38dd5597349d1b0edcf8c5c7d2da102f67cd8281656292406e",
+      "size_bytes": 881453
     },
     {
       "path": "qualification/t1_reference/glm53full/prompts.json",
@@ -7368,18 +7368,18 @@
     },
     {
       "path": "qualification/t1_reference/laguna/MANIFEST.json",
-      "sha256": "eb708fd87b35053b3b244574f6f3afc33bc2faf5aa70a39d0396722fe292b84a",
-      "size_bytes": 1071
+      "sha256": "59a257289a4c85d499016d8cdaa222a5d0fc4418268969738c5cdae3fe8a1588",
+      "size_bytes": 1059
     },
     {
       "path": "qualification/t1_reference/laguna/capital_of_france.t1r",
-      "sha256": "df8251cdd09730edf0b84354b3d4c99aa8ae3550636e6257f908e05506dd7b62",
-      "size_bytes": 382607
+      "sha256": "fe207c891e1f303eb24389445f5741bc70bcee7f6427b9a1d4a104632cebd378",
+      "size_bytes": 382714
     },
     {
       "path": "qualification/t1_reference/laguna/count_up.t1r",
-      "sha256": "875c94e1be031e924447457c24e3fc5541ee8af44f9c4832f9f337f32cb3fd50",
-      "size_bytes": 467255
+      "sha256": "28eabd92786ca4f8282662cb5147e23766c13bf0677987a75c8be1d3d166b374",
+      "size_bytes": 467233
     },
     {
       "path": "qualification/t1_reference/laguna/prompts.json",
@@ -12583,8 +12583,8 @@
     },
     {
       "path": "tools/t1_reference_dsv41.py",
-      "sha256": "54fd504cef6756870945766c11969e301c8d8a463514986290d1053e1d31ed99",
-      "size_bytes": 48497
+      "sha256": "b856c54c1678f21fb6d78c6ad13ec53ebac6b7d450ad34c2b74dcc8021942002",
+      "size_bytes": 47897
     },
     {
       "path": "tools/t1_reference_gemma4.py",
@@ -12593,8 +12593,8 @@
     },
     {
       "path": "tools/t1_reference_glm53full.py",
-      "sha256": "70ab7245be154e1ccf3641e25e457033885bae573bb3e65a362c50726808752a",
-      "size_bytes": 18997
+      "sha256": "62186b51206aea61a9319e715e02dd420ddce57b5d7b43d4d4ab7d4657d3bce4",
+      "size_bytes": 16561
     },
     {
       "path": "tools/t1_reference_glm5_next.py",
@@ -12613,8 +12613,8 @@
     },
     {
       "path": "tools/t1_reference_laguna.py",
-      "sha256": "c69d402da13db0633590a8cedee35378baca8803f21d0643a646775ac900aeca",
-      "size_bytes": 14317
+      "sha256": "fd9a3797ad70c179384069389e14832ad66c42b8d8465bda2d0ba7afbdbaf4bc",
+      "size_bytes": 16152
     },
     {
       "path": "tools/t1_reference_ling.py",
@@ -15975,5 +15975,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 74985781
+  "total_bytes": 74981081
 }

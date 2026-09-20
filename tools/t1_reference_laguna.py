@@ -1,12 +1,14 @@
 import numpy as np
 
-from t1_reference_common import (Safetensors, bf16_round_f32, bf16_to_f32,
-                                 define_float, define_uint, f32_to_bf16_u16,
-                                 fp8_block_to_bf16, rmsnorm, sigmoid)
+from t1_reference_common import (_E4M3_LUT, Safetensors, bf16_round_f32,
+                                 bf16_to_f32, define_float, define_uint,
+                                 f32_to_bf16_u16, fp8_block_to_bf16, rmsnorm,
+                                 sigmoid)
 
 PREFIX = "model.layers."
 ATTENTION_SCALE = 0.08838834764831845
 SLIDING_ROPE_THETA = 10000.0
+LINEAR_BLOCK_ROWS = 4096
 DEFINES_VS_CONFIG = [
     ("HIDDEN_DIMENSION", "hidden_size", "uint"),
     ("LAYER_COUNT", "num_hidden_layers", "uint"),
@@ -102,6 +104,7 @@ class LagunaEngine:
         self.eot = int(config["eos_token_id"][0] if isinstance(
             config["eos_token_id"], list) else config["eos_token_id"])
         self.caches = {}
+        self._convert_u32 = np.empty(0, dtype=np.uint32)
         self.rotary = define_uint(defines, "ROPE_FULL_ROTARY_DIMENSION")
         self.yarn_theta = define_float(defines, "ROPE_FULL_THETA")
         self.yarn_factor = define_float(defines, "ROPE_FULL_FACTOR")
@@ -138,8 +141,44 @@ class LagunaEngine:
             return bf16_to_f32(fp8_block_to_bf16(raw, scale, rows, cols))
         return raw.astype(np.float32)
 
+    def _bf16_matvec(self, slab, count, in_dim, x):
+        n = count * in_dim
+        if n > self._convert_u32.size:
+            self._convert_u32 = np.empty(n, dtype=np.uint32)
+        words = self._convert_u32[:n]
+        words[:] = slab.reshape(-1)
+        words <<= 16
+        return words.view(np.float32).reshape(count, in_dim) @ x
+
+    def _fp8_matvec(self, weight, slab, start, count, in_dim, x):
+        scale = self.st.pread(weight + "_scale_inv").astype(np.float32)
+        codes = _E4M3_LUT[slab].astype(np.float32)
+        srows = scale[start // 128:(start + count + 127) // 128]
+        tiled = np.repeat(np.repeat(srows, 128, axis=0), 128, axis=1)
+        block = bf16_to_f32(f32_to_bf16_u16(codes * tiled[:count, :in_dim]))
+        return block @ x
+
     def linear(self, x, name):
-        return bf16_round_f32(self.tensor(name + ".weight") @ x)
+        weight = name + ".weight"
+        entry = self.st.entry(weight)
+        rows, in_dim = entry["shape"]
+        if in_dim != x.shape[0]:
+            raise ValueError(f"weight {weight} shape {entry['shape']} "
+                             f"disagrees with activation width {x.shape[0]}")
+        if entry["dtype"] not in ("BF16", "F8_E4M3"):
+            raise ValueError(f"reference weight {weight} must be BF16 "
+                             f"or F8_E4M3")
+        out = np.empty(rows, dtype=np.float32)
+        for start in range(0, rows, LINEAR_BLOCK_ROWS):
+            count = min(LINEAR_BLOCK_ROWS, rows - start)
+            slab = self.st.raw_rows(weight, start, count)
+            if entry["dtype"] == "BF16":
+                block = self._bf16_matvec(slab, count, in_dim, x)
+            else:
+                block = self._fp8_matvec(weight, slab, start, count,
+                                         in_dim, x)
+            out[start:start + count] = block
+        return bf16_round_f32(out)
 
     def embed(self, token_id):
         raw = self.st.raw_rows("model.embed_tokens.weight", token_id, 1)
