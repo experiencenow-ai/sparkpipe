@@ -125,7 +125,8 @@ def check_stage_header(header, args):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--pack", required=True)
-    ap.add_argument("--source", required=True)
+    ap.add_argument("--source", default=None,
+                    help="checkpoint root; required unless --structure-only")
     ap.add_argument("--tp-rank", type=int, required=True)
     ap.add_argument("--tp-degree", type=int, default=16)
     ap.add_argument("--stage-count", type=int, default=1)
@@ -143,9 +144,16 @@ def main() -> int:
     mode.add_argument("--all-tensors", action="store_true",
                       help="compare every payload and scale region against the checkpoint")
     mode.add_argument("--skip-spot", action="store_true",
-                    help="header/layout/plan-diff only (no checkpoint payload reads)")
+                      help="header/layout/plan-diff only (no checkpoint payload reads)")
+    mode.add_argument("--structure-only", action="store_true",
+                      help="header + directory + layout contract only; no checkpoint "
+                           "and no plan diff (placed-node local verification)")
     args = ap.parse_args()
-    if args.stage_count != 1 and not args.all_tensors:
+    if args.structure_only and not args.source:
+        args.source = "STRUCTURE-ONLY"
+    if not args.structure_only and not args.source:
+        ap.error("--source is required unless --structure-only")
+    if args.stage_count != 1 and not args.all_tensors and not args.structure_only:
         ap.error("pipeline packs require --all-tensors checkpoint verification")
     if args.stage_count != 1 and args.expected_bytes is None:
         ap.error("pipeline packs require their own --expected-bytes receipt")
@@ -250,6 +258,13 @@ def main() -> int:
         mm[h["directory_offset"]:h["directory_offset"] + h["entry_count"] * ENTRY_BYTES]
     ).hexdigest()
     print(f"directory sha256: {dir_sha}")
+
+    if args.structure_only:
+        mm.close()
+        f.close()
+        print(f"VERIFY-PASS (structure-only) rank {args.tp_rank}: {path.name} "
+              f"{size} bytes, {h['entry_count']} tensors, dir_sha {dir_sha[:16]}")
+        return 0
 
     # -- plan diff against the fixed packer (headers-only; no payload reads
     #    except three small f32 vectors the packer reads at plan time) -----

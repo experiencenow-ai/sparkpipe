@@ -1,5 +1,5 @@
 {
-  "file_count": 3194,
+  "file_count": 3201,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -7042,6 +7042,16 @@
       "size_bytes": 18656
     },
     {
+      "path": "qualification/pack_sweep/2026-09-19/glm53flash-validation-raw.jsonl",
+      "sha256": "bdae435ba4ff4544d93668d79b610549e61f92755d01ff59f8d88c2241a2be7b",
+      "size_bytes": 235590
+    },
+    {
+      "path": "qualification/pack_sweep/2026-09-19/glm53flash-validation.md",
+      "sha256": "79b89750b348131d77112f73eb472bef8dbed8efaac0a75d44ad577a0a1a7101",
+      "size_bytes": 19015
+    },
+    {
       "path": "qualification/pack_sweep/2026-09-19/matrix.md",
       "sha256": "4f8cedab3df52a5adea974a3e94984e4aa713c49bbec767dcb6d30ddb5b4fabf",
       "size_bytes": 21223
@@ -7300,6 +7310,11 @@
       "path": "qualification/t1_reference/gemma4_26b/prompts.json",
       "sha256": "5e5b6ed014bcc8329f48779877b64ae5527decd75267c544c5c6746964eddd7a",
       "size_bytes": 452
+    },
+    {
+      "path": "qualification/t1_reference/glm53flash/prompts.json",
+      "sha256": "3d362f5ae3ac4d1d4e1cfed48f443981294d4931dc40f91a0ed092c2fea75e4a",
+      "size_bytes": 642
     },
     {
       "path": "qualification/t1_reference/glm53full/MANIFEST.json",
@@ -9887,6 +9902,11 @@
       "size_bytes": 20197
     },
     {
+      "path": "tests/test_t1_reference_glm53flash.py",
+      "sha256": "18b61d1569ffe2580d86765f25cafe5730cfb3da7e3fb433ea3ec365b1e8daee",
+      "size_bytes": 25314
+    },
+    {
       "path": "tests/test_t1_reference_hy4.py",
       "sha256": "26b17fed66e09877856f88ff723b6acd11d2c5adbb46be3cf7eda79c16bd216a",
       "size_bytes": 19599
@@ -10982,6 +11002,16 @@
       "size_bytes": 26738
     },
     {
+      "path": "tools/glm53flash_nvfp4_emit_place.sh",
+      "sha256": "c57b8ce667e57dfb239bd050954ed845e6e79b578f0b8f49fa0bbc1ebcf34aa2",
+      "size_bytes": 4516
+    },
+    {
+      "path": "tools/glm53flash_stagepack_sweep.py",
+      "sha256": "5151963bfa5a1cead735d2a5820691695dbe532a769ccc3751ef8242c7ed909f",
+      "size_bytes": 10150
+    },
+    {
       "path": "tools/glm53full_bf16_tp16_source_verify.py",
       "sha256": "f83a0320c14d3eb0189c33b52dae2104e4c0fb4c757e45cf592abc2198669994",
       "size_bytes": 13626
@@ -11093,13 +11123,13 @@
     },
     {
       "path": "tools/glm5_next_pack_verify.py",
-      "sha256": "ac14cf8388319e4239a8516fd1b2501c9e7cd15b5e0ac76f114e388cf2ca87cf",
-      "size_bytes": 15705
+      "sha256": "c4929aea72b3272dbb1699c74cfb0b849c84818f688e117aeda583d0c4eaa784",
+      "size_bytes": 16492
     },
     {
       "path": "tools/glm5_next_resident_stagepack.py",
-      "sha256": "530409aadd9e6a79851dbe6fde994457fec867696dcedcf695a82c1a68adff1a",
-      "size_bytes": 48055
+      "sha256": "8d08be408a54aa3cc4a845e409b37c759e383fdd3d35290e80a29c7982864789",
+      "size_bytes": 49162
     },
     {
       "path": "tools/hardware/generate_runner_configs.py",
@@ -12590,6 +12620,11 @@
       "path": "tools/t1_reference_gemma4.py",
       "sha256": "8300740f79858aa501d2585af53356ad199a8bbab2ef5fdebc58a1100324b996",
       "size_bytes": 17394
+    },
+    {
+      "path": "tools/t1_reference_glm53flash.py",
+      "sha256": "ffaafbaf04a5a43275dfe6ddbfdc0c0a36d53ac489fad2eaa586e0ef8de8d989",
+      "size_bytes": 23400
     },
     {
       "path": "tools/t1_reference_glm53full.py",
@@ -15975,5 +16010,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 74981081
+  "total_bytes": 75301602
 }
