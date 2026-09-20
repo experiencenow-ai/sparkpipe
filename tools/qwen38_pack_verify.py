@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
-"""Verify a qwen38 stage pack against the wire format AND the live checkpoint.
+"""Verify a qwen38 27B stage pack against the wire format AND the live checkpoint.
 
-This is the pack gate for the qwen38_max lane (the module ships no pack
+This is the pack gate for the qwen38 27B lane (the module ships no pack
 validation harness of its own; per docs/AGENT_LANE_BRIEFS/pack_agent_rules.md
 "run the pack verifier. Exit must be PASS before deploy").
 
+The layout contract is the v3 120-byte header of tools/qwen38_27b_stagepack.py
+(magic 'Q6SP', format 3, dense-FFN kind table, tp_degree/tp_rank on the wire).
+The tables load from the 27B packer itself so a table drift and a verifier
+drift cannot pass silently.
+
 Three layers of checking, all from raw bytes:
 
-  1. STRUCTURE - header magic/version/geometry vs the constants the module
-     enforces at load (spark_qwen38_max_stagepack_format.h), directory entry
-     count vs the format's computed inventory, per-entry shape/format/scale
-     rules, payload alignment and bounds, no duplicate or missing
-     (kind, layer) pair.
+  1. STRUCTURE - header magic/version/geometry vs the packer's constants,
+     directory entry count vs the format's computed inventory (optionally
+     minus the 11-entry MTP pseudo-layer for the qwen36sp stripped form),
+     per-entry shape/format/scale rules, payload alignment and bounds, no
+     duplicate or missing (kind, layer) pair.
   2. CONTENT - every entry's payload+scale bytes are hashed out of the pack
-     file and compared against the byte stream the source checkpoint must
-     produce (BF16 pass-through, BF16->F32 widening for A_log/dt_bias,
-     per-expert F8_E4M3 stacking + BF16->F32 scale_inv planes for the MoE).
-     This covers every payload byte in the file; only inter-entry alignment
-     padding is not content-checked.
-  3. RECEIPT - tensor/byte counts, slice identity and the packer's
-     hash-while-write output_sha256 are cross-checked. --recompute-file-hash
-     re-reads the whole file to recompute that digest independently (one
-     extra pass over the pack; off by default because warm-storage reads can
-     be orders of magnitude slower than the compare pass).
+     file and compared against the byte stream the packer's own copy path
+     produces from the source checkpoint. Requires --checkpoint.
+  3. RECEIPT - tensor/byte counts, slice identity, the qwen36sp strip fields
+     and the packer's output_sha256 are cross-checked. --recompute-file-hash
+     re-reads the whole file to recompute that digest independently.
 
 Exit 0 only on PASS.
 """
@@ -41,26 +41,12 @@ _TOOLS_DIR = str(Path(__file__).resolve().parent)
 if _TOOLS_DIR not in sys.path:
     sys.path.insert(0, _TOOLS_DIR)
 
-# Both tables load: the 27B packer's own geometry (HIDDEN 5120, GDN 48
-# value heads — the release constants the entries must match) and the
-# shared inventory/layer helpers. The max-family tables alone (HIDDEN
-# 8192) describe a DIFFERENT model and failed every valid 27B entry.
-_spec = importlib.util.spec_from_file_location(
-    "qwen38_stagepack_tables", str(Path(_TOOLS_DIR) / "qwen38_27b_stagepack.py"))
-_tables = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_tables)
-_tables = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_tables)
-
-
 from spark_pack_common import sha256_file  # noqa: E402
+
+DEFAULT_TABLES = "qwen38_27b_stagepack.py"
 
 HASH_CHUNK = 16 * 1024 * 1024
 
-# Wire constants, mirroring spark_qwen38_max_stagepack_format.h (and the
-# packer). Any drift here is exactly what this verifier exists to catch.
-MAGIC = _tables.MAGIC  # each family's packer defines its own
-FORMAT_VERSION = _tables.FORMAT_VERSION
 HEADER_BYTES = 120
 ENTRY_BYTES = 56
 PAYLOAD_ALIGNMENT = 256
@@ -69,103 +55,82 @@ ENTRY_STRUCT = struct.Struct("<6I4Q")
 
 WEIGHT_BF16 = 0
 WEIGHT_F32 = 1
-WEIGHT_FP8_F32B128 = 5  # matches the 27B packer (WEIGHT_FP8_E4M3_F32B128)
+WEIGHT_FP8_E4M3_F32B128 = 5
+WEIGHT_NVFP4_PACKED = 8
 
 GLOBAL_LAYER = 0xFFFFFFFF
 MTP_LAYER = 0xFFFFFFFE
 
 BF16_BYTES = 2
 F32_BYTES = 4
+FP8_SCALE_GROUP = 128
+NVFP4_GROUP = 16
+NVFP4_GLOBAL_TAIL_BYTES = 4
+
+
+def load_tables(path: str | None = None):
+    spec = importlib.util.spec_from_file_location(
+        "qwen38_27b_tables", str(Path(_TOOLS_DIR) / (path or DEFAULT_TABLES)))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def payload_bytes_for(weight_format: int, rows: int, columns: int) -> int:
     elements = rows * columns
-    if weight_format == WEIGHT_FP8_F32B128:
+    if weight_format == WEIGHT_FP8_E4M3_F32B128:
         return elements
+    if weight_format == WEIGHT_NVFP4_PACKED:
+        return rows * (columns // 2)
     return elements * (BF16_BYTES if weight_format == WEIGHT_BF16 else F32_BYTES)
 
 
 def scale_bytes_for(weight_format: int, rows: int, columns: int) -> int:
-    if weight_format == WEIGHT_FP8_F32B128:
-        return (rows // 128) * (columns // 128) * F32_BYTES
+    if weight_format == WEIGHT_FP8_E4M3_F32B128:
+        return (rows // FP8_SCALE_GROUP) * (columns // FP8_SCALE_GROUP) * F32_BYTES
+    if weight_format == WEIGHT_NVFP4_PACKED:
+        return rows * (columns // NVFP4_GROUP) + NVFP4_GLOBAL_TAIL_BYTES
     return 0
 
 
-def natural_format(kind: int) -> int:
-    moe = tuple(getattr(_tables, n) for n in
-                ("KIND_MOE_W1", "KIND_MOE_W3", "KIND_MOE_DOWN")
-                if hasattr(_tables, n))
-    if moe and kind in moe:
-        return WEIGHT_FP8_F32B128
-    if kind in (_tables.KIND_GDN_A_LOG, _tables.KIND_GDN_DT_BIAS):
+def scale_group_for(weight_format: int) -> int:
+    if weight_format == WEIGHT_FP8_E4M3_F32B128:
+        return FP8_SCALE_GROUP
+    if weight_format == WEIGHT_NVFP4_PACKED:
+        return NVFP4_GROUP
+    return 0
+
+
+def natural_format(tables, kind: int) -> int:
+    if kind in (tables.KIND_GDN_A_LOG, tables.KIND_GDN_DT_BIAS):
         return WEIGHT_F32
     return WEIGHT_BF16
 
 
-def hash_source_entry(source, ref) -> str:
-    """sha256 of the byte stream the checkpoint must yield for this tensor.
+class _HashingSink:
+    def __init__(self):
+        self.digest = hashlib.sha256()
 
-    The pack layout is: the full expert-major payload (all 512 experts
-    stacked), THEN the whole F32 scale plane (expert 0's plane .. expert
-    511's). The expected stream must follow that order, not per-expert
-    interleaved payload+scale."""
-    digest = hashlib.sha256()
-    if ref.weight_format == WEIGHT_FP8_F32B128:
-        import numpy as np
-        experts = _tables.EXPERT_COUNT
-        rows_per_expert = ref.rows // experts
-        scale_rows = rows_per_expert // 128
-        scale_cols = ref.columns // 128
-        names = [ref.name.replace("{e}", str(e)) for e in range(experts)]
-        for name in names:
-            shard, _, off = source.resolve(name)
-            with (source.root / shard).open("rb") as f:
-                f.seek(off)
-                remaining = rows_per_expert * ref.columns
-                while remaining > 0:
-                    step = min(remaining, HASH_CHUNK)
-                    chunk = f.read(step)
-                    if len(chunk) != step:
-                        raise RuntimeError(f"short source read on {name}")
-                    digest.update(chunk)
-                    remaining -= step
-        for name in names:
-            scale_name = name + "_scale_inv"
-            s_shard, _, s_off = source.resolve(scale_name)
-            with (source.root / s_shard).open("rb") as f:
-                f.seek(s_off)
-                sraw = f.read(scale_rows * scale_cols * 2)
-            if len(sraw) != scale_rows * scale_cols * 2:
-                raise RuntimeError(f"short source read on {scale_name}")
-            s16 = np.frombuffer(sraw, dtype="<u2").astype(np.uint32)
-            digest.update(((s16 << 16).astype(np.uint32)).view(np.float32)
-                          .astype("<f4").tobytes())
-        return digest.hexdigest()
-    # BF16 pass-through or BF16->F32 widening
-    path = source.root / source.weight_map[ref.name]
-    elements = ref.rows * ref.columns
-    source_bytes = elements * BF16_BYTES
-    with path.open("rb") as file:
-        file.seek(source.resolve(ref.name)[2])
-        remaining = source_bytes
-        while remaining > 0:
-            step = min(remaining, HASH_CHUNK)
-            chunk = file.read(step)
-            if len(chunk) != step:
-                raise RuntimeError(f"short source read on {ref.name}")
-            remaining -= step
-            if ref.weight_format == WEIGHT_BF16:
-                digest.update(chunk)
-            else:
-                widened = bytearray(step * 2)
-                widened[2::4] = chunk[0::2]
-                widened[3::4] = chunk[1::2]
-                digest.update(widened)
-    return digest.hexdigest()
+    def write(self, data) -> int:
+        self.digest.update(data)
+        return len(data)
+
+
+def hash_source_entry(tables, source, ref, plan) -> str:
+    """sha256 of the byte stream the packer's own copy path yields."""
+    sink = _HashingSink()
+    _, _, offset = source.check_shape(ref)
+    tables.copy_tensor(source, ref, offset, plan, sink)
+    if ref.weight_format in (WEIGHT_FP8_E4M3_F32B128, WEIGHT_NVFP4_PACKED):
+        tables.copy_scale(source, ref, plan, sink)
+    return sink.digest.hexdigest()
 
 
 def verify(pack: Path, checkpoint: Path | None, receipt_path: Path | None,
-           recompute_file_hash: bool, tp_degree: int = 1) -> tuple[bool, dict]:
+           recompute_file_hash: bool, tp_degree: int, strip_mtp: bool,
+           ffn_format: str, tp_rank: int | None = None,
+           tables=None) -> tuple[bool, dict]:
+    tables = tables if tables is not None else load_tables()
     findings: list[str] = []
 
     def fail(message: str) -> None:
@@ -184,70 +149,64 @@ def verify(pack: Path, checkpoint: Path | None, receipt_path: Path | None,
             return False, {"verdict": "FAIL", "pack": str(pack),
                            "errors": [f"header truncated: {len(raw_header)} bytes"]}
         header = HEADER_STRUCT.unpack(raw_header)
-        # The max-family header layout (the packer's HEADER_STRUCT.pack
-        # order, mirroring SparkQwen38MaxStagePackHeader): 26 u32 ending at
-        # mtp_layer_count, then directory_offset and file_bytes as u64.
-        # Topology rides the serving configuration, not the wire.
         (magic, version, header_bytes, entry_bytes, tensor_count, hidden,
          layer_count, first_layer, total_layers, period, full_phase,
          gdn_kh, gdn_vh, gdkd, gdvd, conv_k, qh, kvh, hd, rope_d,
-         expert_count, experts_per_token, moe_int, vocab, mxfp4_group,
-         mtp_count, directory_offset, file_bytes) = header
+         ffn_int, vocab, mxfp4_group, mtp_count, header_tp_degree,
+         header_tp_rank, directory_offset, file_bytes) = header
 
         def want(field: str, got, expected) -> None:
             if got != expected:
                 fail(f"header {field}={got}, expected {expected}")
 
-        want("magic", magic, MAGIC)
-        want("format_version", version, FORMAT_VERSION)
+        want("magic", magic, tables.MAGIC)
+        want("format_version", version, tables.FORMAT_VERSION)
         want("header_bytes", header_bytes, HEADER_BYTES)
         want("directory_entry_bytes", entry_bytes, ENTRY_BYTES)
-        want("hidden_dimension", hidden, _tables.HIDDEN)
-        want("total_layer_count", total_layers, _tables.LAYER_COUNT)
-        want("attention_period", period, _tables.ATTENTION_PERIOD)
-        want("full_attention_phase", full_phase, _tables.FULL_PHASE)
-        want("gdn_key_head_count", gdn_kh, _tables.GDN_KEY_HEADS)
-        want("gdn_value_head_count", gdn_vh, _tables.GDN_VALUE_HEADS)
-        want("gdn_head_key_dimension", gdkd, _tables.GDN_HEAD_KEY_DIM)
-        want("gdn_head_value_dimension", gdvd, _tables.GDN_HEAD_VALUE_DIM)
-        want("gdn_conv_kernel", conv_k, _tables.GDN_CONV_KERNEL)
-        want("attn_query_head_count", qh, _tables.ATTN_QUERY_HEADS)
-        want("attn_kv_head_count", kvh, _tables.ATTN_KV_HEADS)
-        want("attn_head_dimension", hd, _tables.ATTN_HEAD_DIM)
-        want("attn_rope_dimension", rope_d, _tables.ATTN_ROPE_DIM)
-        want("routed_expert_count", expert_count, _tables.EXPERT_COUNT)
-        want("experts_per_token", experts_per_token, _tables.EXPERTS_PER_TOKEN)
-        want("expert_intermediate_dimension", moe_int, _tables.EXPERT_INTERMEDIATE)
-        want("output_vocab_count", vocab, _tables.VOCAB)
-        want("mxfp4_group_size", mxfp4_group, _tables.MXFP4_GROUP)
-        want("mtp_layer_count", mtp_count, _tables.MTP_LAYERS)
+        want("hidden_dimension", hidden, tables.HIDDEN)
+        want("total_layer_count", total_layers, tables.LAYER_COUNT)
+        want("attention_period", period, tables.ATTENTION_PERIOD)
+        want("full_attention_phase", full_phase, tables.FULL_PHASE)
+        want("gdn_key_head_count", gdn_kh, tables.GDN_KEY_HEADS)
+        want("gdn_value_head_count", gdn_vh, tables.GDN_VALUE_HEADS)
+        want("gdn_head_key_dimension", gdkd, tables.GDN_HEAD_KEY_DIM)
+        want("gdn_head_value_dimension", gdvd, tables.GDN_HEAD_VALUE_DIM)
+        want("gdn_conv_kernel", conv_k, tables.GDN_CONV_KERNEL)
+        want("attn_query_head_count", qh, tables.ATTN_QUERY_HEADS)
+        want("attn_kv_head_count", kvh, tables.ATTN_KV_HEADS)
+        want("attn_head_dimension", hd, tables.ATTN_HEAD_DIM)
+        want("attn_rope_dimension", rope_d, tables.ATTN_ROPE_DIM)
+        want("ffn_intermediate_dimension", ffn_int, tables.FFN_INTERMEDIATE)
+        want("output_vocab_count", vocab, tables.VOCAB)
+        want("mxfp4_group_size", mxfp4_group, tables.MXFP4_GROUP)
+        want("mtp_layer_count", mtp_count, tables.MTP_LAYERS)
+        want("header tp_degree", header_tp_degree, tp_degree)
         want("directory_offset", directory_offset, HEADER_BYTES)
-        if tp_degree > 1 and hasattr(locals().get("_nothing", None), "x"):
-            pass
-        # tp fields are not on the wire: the rank slice is pack content
-        # (the tp-aware shape table), verified via the invoked geometry.
         want("file_bytes", file_bytes, file_bytes_actual)
-        if layer_count <= 0 or first_layer < 0 or first_layer + layer_count > _tables.LAYER_COUNT:
-            fail(f"invalid slice {first_layer}+{layer_count} of {_tables.LAYER_COUNT}")
-
-        expected_count = _tables.expected_tensor_count(first_layer, layer_count)
-        if tensor_count != expected_count:
-            fail(f"tensor_count={tensor_count}, format inventory expects {expected_count}")
+        plan_rank = header_tp_rank if tp_rank is None else tp_rank
+        if tp_degree > 1 and not 0 <= plan_rank < tp_degree:
+            fail(f"tp rank {plan_rank} outside 0..{tp_degree - 1}")
+        if layer_count <= 0 or first_layer < 0 or first_layer + layer_count > tables.LAYER_COUNT:
+            fail(f"invalid slice {first_layer}+{layer_count} of {tables.LAYER_COUNT}")
 
         expected_refs: dict[tuple[int, int], object] = {}
         try:
-            for ref in _tables.build_inventory(first_layer, layer_count):
+            for ref in tables.build_inventory(first_layer, layer_count):
+                if strip_mtp and ref.layer == MTP_LAYER:
+                    continue
                 if tp_degree > 1:
-                    plan = _tables.build_tp_plan(ref, tp_degree, 0)
-                    if plan is not None:
-                        srows, scols = _tables.packed_shape(ref, plan)
-                        if (srows, scols) != (ref.rows, ref.columns):
-                            # remember both; the entry may carry either the
-                            # shard or the replicated source shape
-                            ref.alt_shape = (srows, scols)
+                    ref.plan = tables.build_tp_plan(ref, tp_degree, plan_rank)
+                    ref.packed = tables.packed_shape(ref, ref.plan)
+                else:
+                    ref.plan = None
+                    ref.packed = (ref.rows, ref.columns)
                 expected_refs[(ref.kind, ref.layer)] = ref
-        except _tables.PackFailure as error:
+        except tables.PackFailure as error:
             fail(f"inventory build failed: {error}")
+        if expected_refs and tensor_count != len(expected_refs):
+            fail(f"tensor_count={tensor_count}, format inventory expects "
+                 f"{len(expected_refs)}"
+                 + (" (MTP pseudo-layer stripped)" if strip_mtp else ""))
 
         raw_dir = f.read(tensor_count * ENTRY_BYTES)
         if len(raw_dir) != tensor_count * ENTRY_BYTES:
@@ -268,25 +227,26 @@ def verify(pack: Path, checkpoint: Path | None, receipt_path: Path | None,
             seen.add(key)
             ref = expected_refs.get(key)
             if ref is None:
-                fail(f"{tag}: not in the format inventory of slice {first_layer}+{layer_count}")
+                fail(f"{tag}: not in the format inventory of slice "
+                     f"{first_layer}+{layer_count}"
+                     + (" (MTP pseudo-layer stripped)" if strip_mtp else ""))
                 continue
-            alt = getattr(ref, "alt_shape", None)
-            shape_ok = (rows == ref.rows and cols == ref.columns) or                        (alt is not None and (rows, cols) == alt)
-            if not shape_ok:
-                fail(f"{tag}: shape {rows}x{cols}, expected {ref.rows}x{ref.columns}")
-            natural = natural_format(kind)
-            allowed = {natural, WEIGHT_FP8_F32B128}  # the -fp8 source
-            # quantizes FFN/GDN tensors (dtype-driven at pack time); the
-            # payload/scale math below proves internal consistency.
+            packed_rows, packed_cols = ref.packed
+            if (rows, cols) != (packed_rows, packed_cols):
+                fail(f"{tag}: shape {rows}x{cols}, expected {packed_rows}x{packed_cols}")
+            natural = natural_format(tables, kind)
+            allowed = {natural, WEIGHT_FP8_E4M3_F32B128, WEIGHT_NVFP4_PACKED}
             if fmt not in allowed:
                 fail(f"{tag}: weight_format={fmt}, allowed {sorted(allowed)}")
-            want_group = 128 if fmt == WEIGHT_FP8_F32B128 else 0
-            if scale_group != want_group:
-                fail(f"{tag}: scale_group_size={scale_group}, expected {want_group}")
-            if p_bytes != payload_bytes_for(fmt, rows, cols):
-                fail(f"{tag}: payload_bytes={p_bytes}, format math says {payload_bytes_for(fmt, rows, cols)}")
-            if s_bytes != scale_bytes_for(fmt, rows, cols):
-                fail(f"{tag}: scale_bytes={s_bytes}, format math says {scale_bytes_for(fmt, rows, cols)}")
+            if scale_group != scale_group_for(fmt):
+                fail(f"{tag}: scale_group_size={scale_group}, expected "
+                     f"{scale_group_for(fmt)}")
+            want_payload = payload_bytes_for(fmt, packed_rows, packed_cols)
+            want_scale = scale_bytes_for(fmt, packed_rows, packed_cols)
+            if p_bytes != want_payload:
+                fail(f"{tag}: payload_bytes={p_bytes}, format math says {want_payload}")
+            if s_bytes != want_scale:
+                fail(f"{tag}: scale_bytes={s_bytes}, format math says {want_scale}")
             if p_off % PAYLOAD_ALIGNMENT != 0:
                 fail(f"{tag}: payload_offset {p_off} not {PAYLOAD_ALIGNMENT}-aligned")
             if s_bytes and s_off % PAYLOAD_ALIGNMENT != 0:
@@ -307,14 +267,16 @@ def verify(pack: Path, checkpoint: Path | None, receipt_path: Path | None,
         "first_layer": first_layer,
         "layer_count": layer_count,
         "tensor_count": tensor_count,
+        "mtp_pseudo_layer_stripped": bool(strip_mtp),
         "errors": findings,
     }
     if findings:
         return False, verdict
 
     if checkpoint is not None:
-        # -- content: source-vs-pack byte equality per entry ------------------
-        source = _tables.SafetensorsSource(checkpoint)
+        source_class = getattr(tables, "Nvfp4A16Source", None) \
+            if ffn_format == "nvfp4a16" else None
+        source = (source_class or tables.SafetensorsSource)(checkpoint)
         source.check_config()
         content_failures = 0
         compared = 0
@@ -343,11 +305,11 @@ def verify(pack: Path, checkpoint: Path | None, receipt_path: Path | None,
                     fail(f"kind={ref.kind} layer={hex(ref.layer)}: pack scale short read")
                     continue
                 try:
-                    source_digest = hash_source_entry(source, ref)
-                except (RuntimeError, _tables.PackFailure) as error:
+                    source_digest = hash_source_entry(tables, source, ref, ref.plan)
+                except (RuntimeError, tables.PackFailure) as error:
                     content_failures += 1
                     fail(f"kind={ref.kind} layer={hex(ref.layer)} name={ref.name}: "
-                         f"source read failed: {error}")
+                         f"source re-emit failed: {error}")
                     continue
                 compared += 1
                 if pack_digest.hexdigest() != source_digest:
@@ -365,22 +327,25 @@ def verify(pack: Path, checkpoint: Path | None, receipt_path: Path | None,
         file_sha = sha256_file(pack)
         verdict["file_sha256_recomputed"] = file_sha
 
-    # -- receipt cross-check ---------------------------------------------------
     if receipt_path is not None and Path(receipt_path).is_file():
         receipt = json.loads(Path(receipt_path).read_text())
         checks = {
             "tensor_count": (receipt.get("tensor_count"), tensor_count),
+            "file_bytes": (receipt.get("file_bytes"), file_bytes_actual),
             "bytes": (receipt.get("bytes"), file_bytes_actual),
             "first_layer_index": (receipt.get("first_layer_index"), first_layer),
             "layer_count": (receipt.get("layer_count"), layer_count),
+            "tp_degree": (receipt.get("tp_degree"), tp_degree),
         }
         if file_sha is not None:
             checks["output_sha256"] = (receipt.get("output_sha256"), file_sha)
-        for name, (recorded, recomputed) in checks.items():
-            if recorded != recomputed:
-                fail(f"receipt {name}={recorded!r}, verifier recomputed {recomputed!r}")
-        if source is not None and receipt.get("source_index_sha256") != source.index_sha256:
+        if strip_mtp and receipt.get("mtp") not in (None, "stripped"):
+            fail(f"receipt mtp={receipt.get('mtp')!r}, expected 'stripped'")
+        if source is not None and receipt.get("source_index_sha256") not in (None, source.index_sha256):
             fail("receipt source_index_sha256 does not match the live checkpoint index")
+        for name, (recorded, recomputed) in checks.items():
+            if recorded is not None and recorded != recomputed:
+                fail(f"receipt {name}={recorded!r}, verifier recomputed {recomputed!r}")
 
     verdict["errors"] = findings
     verdict["verdict"] = "PASS" if not findings else "FAIL"
@@ -391,17 +356,27 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tp-degree", type=int, default=1,
         help="the pack's TP degree; entry shapes are compared per-rank")
+    parser.add_argument("--tp-rank", type=int, default=None,
+        help="this pack's TP rank for the sharded plan (default: the "
+             "header's tp_rank field)")
     parser.add_argument("--pack", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path,
                         help="checkpoint dir; omit for structure-only pass")
+    parser.add_argument("--strip-mtp", action="store_true",
+        help="the pack omits the 11-entry MTP pseudo-layer (the qwen36sp "
+             "stripped form: MTP globals present, mtp_entries_dropped 11)")
+    parser.add_argument("--ffn-format", choices=("bf16", "nvfp4a16"),
+                        default="bf16",
+                        help="checkpoint source class for the content pass")
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--recompute-file-hash", action="store_true",
-                        help="re-read the pack to recompute the whole-file sha256")
+        help="re-read the pack to recompute the whole-file sha256")
     parser.add_argument("--json-out", type=Path, help="verdict JSON path")
     args = parser.parse_args()
 
     ok, verdict = verify(args.pack, args.checkpoint, args.receipt,
-                         args.recompute_file_hash, args.tp_degree)
+                         args.recompute_file_hash, args.tp_degree,
+                         args.strip_mtp, args.ffn_format, args.tp_rank)
     if args.json_out:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)
         args.json_out.write_text(json.dumps(verdict, indent=2, sort_keys=True) + "\n")

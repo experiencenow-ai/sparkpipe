@@ -47,7 +47,7 @@ from qwen4_flash_stagepack import (  # noqa: E402
     WEIGHT_FP8_F32B128, build_inventory, is_gdn_layer, kind_shape,
     layer_tensor_name, shard_ref, SafetensorsSource,
 )
-from spark_pack_common import PackFailure, align_up, sha256_file  # noqa: E402
+from spark_pack_common import PackFailure, align_up, sha256_file, write_receipt  # noqa: E402
 
 WEIGHT_NVFP4_PACKED = 8
 
@@ -543,10 +543,44 @@ def expert_source_matrix(source: SafetensorsSource, ref, kind: int, layer: int):
     return bf16_widen(np.ascontiguousarray(packed).reshape(-1)).reshape(packed.shape)
 
 
+def emit_receipt(pack: Path, header: dict, tp_degree: int, tp_rank: int,
+                 structure_only: bool) -> tuple[Path, Path] | None:
+    """Write the placed-receipt pair for this pack: <pack>.receipt.json (the
+    fleet convention fields the pack sweep matches against) plus the
+    <pack>.sha256 sidecar. A packer-written receipt is never overwritten."""
+    receipt_path = Path(str(pack) + ".receipt.json")
+    if receipt_path.is_file():
+        print(f"receipt {receipt_path.name} already present; left untouched")
+        return None
+    digest = sha256_file(pack)
+    receipt = {
+        "kind": "sparkpipe.qwen4flash.pack-verify-receipt.v1",
+        "tool": "tools/qwen4_flash_pack_verify.py",
+        "pack": pack.name,
+        "verify_mode": ("structure-only (no warm checkpoint)" if structure_only
+                        else "header+directory+byte-trace"),
+        "tp_degree": tp_degree,
+        "tp_rank": tp_rank,
+        "first_layer_index": header["first_layer_index"],
+        "layer_count": header["layer_count"],
+        "tensor_count": header["tensor_count"],
+        "file_bytes": pack.stat().st_size,
+        "sha256": digest,
+        "output_sha256": digest,
+    }
+    write_receipt(receipt, receipt_path, suffix=None)
+    sidecar = Path(str(pack) + ".sha256")
+    sidecar.write_text(f"{digest}  {pack.name}\n")
+    return receipt_path, sidecar
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--pack", type=Path, required=True)
-    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument("--checkpoint", type=Path,
+        help="checkpoint dir; omit for a structure-only pass (header + "
+             "directory + extent, no byte traces) on nodes without the "
+             "warm source")
     parser.add_argument("--tp-degree", type=int, default=1)
     parser.add_argument("--tp-rank", type=int, default=0)
     parser.add_argument("--sample", type=int, default=8)
@@ -558,6 +592,9 @@ def main() -> int:
                              "fp8 entries compare byte-exact instead of dequant-l2")
     parser.add_argument("--no-mtp", action="store_true",
                         help="the pack was built --no-mtp (MTP tail absent)")
+    parser.add_argument("--emit-receipt", action="store_true",
+        help="on PASS write the placed <pack>.receipt.json + <pack>.sha256 "
+             "sidecar (never overwrites a packer-written receipt)")
     args = parser.parse_args()
 
     header = read_pack_header(args.pack)
@@ -579,14 +616,7 @@ def main() -> int:
         for problem in problems:
             print(f"FAIL {problem}", file=sys.stderr)
         return 1
-    source = SafetensorsSource(args.checkpoint)
-    source.check_config()  # the qwen4_flash subclass pins text_config expectations
-    problems = sample_trace(args.pack, entries, source, args.tp_degree, args.tp_rank,
-                            args.sample, args.fp8_relative_l2, args.source_layout)
-    if problems:
-        for problem in problems:
-            print(f"FAIL {problem}", file=sys.stderr)
-        return 1
+    structure_only = args.checkpoint is None
     receipt_path = Path(str(args.pack) + ".receipt.json")
     receipt_note = ""
     if receipt_path.is_file():
@@ -596,8 +626,26 @@ def main() -> int:
             print("FAIL receipt output_sha256 mismatch", file=sys.stderr)
             return 1
         receipt_note = " receipt=verified"
-    print(f"PASS {args.pack.name}: header geometry, {len(entries)} directory entries "
-          f"(tp {args.tp_degree}/{args.tp_rank}), {args.sample} byte-traced samples{receipt_note}")
+    if structure_only:
+        print(f"PASS {args.pack.name}: header geometry, {len(entries)} directory entries "
+              f"(tp {args.tp_degree}/{args.tp_rank}), structure-only (no warm "
+              f"checkpoint){receipt_note}")
+    else:
+        source = SafetensorsSource(args.checkpoint)
+        source.check_config()  # the qwen4_flash subclass pins text_config expectations
+        problems = sample_trace(args.pack, entries, source, args.tp_degree, args.tp_rank,
+                                args.sample, args.fp8_relative_l2, args.source_layout)
+        if problems:
+            for problem in problems:
+                print(f"FAIL {problem}", file=sys.stderr)
+            return 1
+        print(f"PASS {args.pack.name}: header geometry, {len(entries)} directory entries "
+              f"(tp {args.tp_degree}/{args.tp_rank}), {args.sample} byte-traced samples{receipt_note}")
+    if args.emit_receipt:
+        written = emit_receipt(args.pack, header, args.tp_degree, args.tp_rank,
+                               structure_only)
+        if written is not None:
+            print(f"receipt {written[0].name} + {written[1].name} written")
     return 0
 
 

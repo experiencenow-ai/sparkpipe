@@ -170,29 +170,56 @@ def expected_scale_bytes(s):
 
 
 def main():
-    path = sys.argv[1]
-    tp = int(sys.argv[2])
+    argv = [a for a in sys.argv[1:] if a != "--stage"]
+    stage_mode = "--stage" in sys.argv
+    if len(argv) < 2:
+        print("usage: glm52_validate_pack.py PACK TP [--stage]")
+        return 2
+    path = argv[0]
+    tp = int(argv[1])
+    import os
+    file_size = os.path.getsize(path)
     with open(path, "rb") as f:
         h = f.read(264)
         vals = struct.unpack_from("<20I", h, 0)
         magic, ver, hb, eb, abi, flags, count = vals[0:7]
+        stage_count, stage_index = vals[7], vals[8]
+        first_layer, layer_count, total_layers = vals[9], vals[10], vals[11]
         lin, expc, kv = vals[15], vals[16], vals[17]
         tp_degree, tp_rank = vals[18], vals[19]
         dir_off, file_bytes = struct.unpack_from("<2Q", h, 80)
     assert magic == 0x32534C47 and ver == 3
     print("header: tensors=%d linear_codec=%d expert_codec=%d kv_codec=%d tp=%d rank=%d" % (count, lin, expc, kv, tp_degree, tp_rank))
+    if stage_mode:
+        print("stage: index=%d/%d layers=[%d,%d) of %d" % (
+            stage_index, stage_count, first_layer,
+            first_layer + layer_count, total_layers))
     if expc not in (BF16, FP8, NVFP4):
         print("UNSUPPORTED expert codec %d (expected bf16=1, fp8=5 or nvfp4=6)" % expc)
         return 1
     if tp_degree != tp:
         print("WARNING: header tp_degree %d != requested %d" % (tp_degree, tp))
     errors = 0
+    if stage_mode:
+        if total_layers != 78:
+            print("stage mode: total_layers %d != 78" % total_layers)
+            errors += 1
+        if layer_count <= 0 or first_layer < 0 or \
+                first_layer + layer_count > total_layers:
+            print("stage mode: invalid layer span [%d,%d) of %d" % (
+                first_layer, first_layer + layer_count, total_layers))
+            errors += 1
+        if file_bytes != file_size:
+            print("extent: header file_bytes %d != stat %d" % (file_bytes, file_size))
+            errors += 1
     with open(path, "rb") as f:
         f.seek(dir_off)
         raw = f.read(count * 64)
     seen_layer = {}
     seen_global = 0
     dir_end = dir_off + count * 64
+    span_min = first_layer if stage_mode else 0
+    span_max = first_layer + layer_count if stage_mode else 78
     for i in range(count):
         e = struct.unpack_from("<8I4Q", raw, i * 64)
         kind, layer, pt, wc, se, g, rows, cols = e[0:8]
@@ -200,6 +227,12 @@ def main():
         es, err = expected_shape(kind, layer, tp_degree, expc)
         if es is None:
             print("entry %d kind %s layer %s: EXPECTED SHAPE ERROR: %s" % (i, KIND_NAME.get(kind, kind), layer, err))
+            errors += 1
+            continue
+        if stage_mode and layer != GLOBAL_LAYER and \
+                not (span_min <= layer < span_max):
+            print("entry %d kind %s layer %d: outside the stage span [%d,%d)" % (
+                i, KIND_NAME.get(kind, kind), layer, span_min, span_max))
             errors += 1
             continue
         e_pt, e_wc, e_se, e_g, e_rows, e_cols = es
@@ -234,7 +267,7 @@ def main():
     if seen_global != exp_global:
         print("global inventory mismatch: seen %x expected %x" % (seen_global, exp_global))
         errors += 1
-    for layer in range(78):
+    for layer in range(span_min, span_max):
         exp = 0
         for kind in range(3, KIND_COUNT):
             es, _err = expected_shape(kind, layer, tp_degree, expc)
@@ -247,7 +280,7 @@ def main():
             print("layer %d inventory: got %x expected %x missing=%s extra=%s" % (layer, got, exp, missing, extra))
             errors += 1
     print("errors: %d" % errors)
-    return 0
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":
