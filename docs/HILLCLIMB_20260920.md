@@ -398,3 +398,19 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   closed on a second arena for the same pack+identity — noted as a hygiene
   item, not a wedge.)
 - The #24 map client-lock stands as the real fix for the stolen-reply class.
+
+## 2026-09-21l tick close — #25 reclassified; ledger #26: the silent round spin
+
+- #25 reclassified (af070f0): harness artifact of the double-attach shape;
+  production cycling proven clean on-fleet (278/278 acquires status=0 this
+  boot, zero failures — the map client-lock holds).
+- LEDGER #26 (gdb evidence): the active chain parks INSIDE
+  SparkTpDeviceCollectiveRunRound → SparkWeightdClientAlive → poll — the
+  round thread is EXECUTING (not mutex-blocked, not lease-blocked; leases all
+  healthy) but never reaches any round print for 400+s: a silent spin with no
+  heartbeat. Fix shape: RunRound needs a progress heartbeat (every N seconds
+  print WHERE it is: publish/wait/cancel-poll/alive-check) per the
+  observability law — a spinning loop that prints nothing is undebuggable by
+  construction. Then the spin's actual location falls out of one repro.
+- Fleet: leases 278/278 clean, weightds single+latched, engines up; serving
+  blocked by the #26 spin. Warm floor reference stays 0.68-0.92ms/round.
