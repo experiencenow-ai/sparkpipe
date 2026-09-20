@@ -522,3 +522,21 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - MEASURE (the valid warm numbers this tick, MEASURED): chains 149-167ms /
   91 rounds; allreduce 83-113ms / 91 = 0.91-1.25ms/round at 4-slot
   concurrency (single-slot warm floor previously measured 0.68-0.92ms/round).
+
+## 2026-09-21r tick — #22 fixed (bd93101): the FailStop-on-anything loop
+
+- ROOT CAUSE: SparkModelResidentClientProgress called FailStop on ANY non-OK
+  from flush/read — benign backpressure (output queue full behind the slow
+  single-session consumer) killed HEALTHY connections; each reconnect bumped
+  the engine generation, moved the sum fingerprint, and the batch engine
+  invalidated in-flight requests (status=4); the retry drove the next
+  reconnect. 749 reconnects/897s measured against a fleet with zero
+  server-side issues.
+- FIX (bd93101): FailStop only on IO_ERROR (benign statuses keep the
+  connection) + a churn guard (a reconnect whose previous cycle was short
+  inherits a doubled backoff, 5s cap — any storm mechanically decays).
+  DEPLOYED. Rate halved immediately (0.83/s → 0.36/s on the fresh boot) but
+  not collapsed: a residual IO_ERROR driver remains; the new
+  client_connection_lost/churn_guard prints name it on the next read.
+- Canary verdict pending the post-rollout warmup (engines 219s into cold
+  loads at close).
