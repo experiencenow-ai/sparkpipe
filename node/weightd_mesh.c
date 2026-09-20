@@ -279,6 +279,8 @@ static void SparkWeightdMeshTryWireLocked(void)
     {
         struct ibv_qp_attr attr;
         struct ibv_qp_init_attr init;
+        uint32_t send_in_rts = 1u;
+        uint32_t recv_in_rts = 1u;
         force_wire[peer] = 0u;
         peer_rank = peer < weightd_mesh.local_rank ? peer : peer + 1u;
         if (SparkWeightdMeshReadPeerRecord(peer_rank,
@@ -291,28 +293,37 @@ static void SparkWeightdMeshTryWireLocked(void)
         if (peer_records[peer].boot_ns != weightd_mesh.wired_boot_ns[peer])
         {
             changed = 1u;
+            force_wire[peer] = 1u;
             continue;
         }
-        memset(&attr,0,sizeof(attr));
-        memset(&init,0,sizeof(init));
-        if (weightd_mesh.send_qps[peer] != 0 &&
-            (ibv_query_qp(weightd_mesh.send_qps[peer],&attr,
-                 IBV_QP_STATE,&init) != 0 ||
-             attr.qp_state != IBV_QPS_RTS))
-            force_wire[peer] = 1u;
-        memset(&attr,0,sizeof(attr));
-        memset(&init,0,sizeof(init));
-        if (force_wire[peer] == 0u && weightd_mesh.recv_qps[peer] != 0 &&
-            (ibv_query_qp(weightd_mesh.recv_qps[peer],&attr,
-                 IBV_QP_STATE,&init) != 0 ||
-             attr.qp_state != IBV_QPS_RTS))
-            force_wire[peer] = 1u;
+        if (weightd_mesh.send_qps[peer] != 0)
+        {
+            memset(&attr,0,sizeof(attr));
+            memset(&init,0,sizeof(init));
+            if (ibv_query_qp(weightd_mesh.send_qps[peer],&attr,
+                    IBV_QP_STATE,&init) != 0 ||
+                attr.qp_state != IBV_QPS_RTS)
+                send_in_rts = 0u;
+        }
+        if (weightd_mesh.recv_qps[peer] != 0)
+        {
+            memset(&attr,0,sizeof(attr));
+            memset(&init,0,sizeof(init));
+            if (ibv_query_qp(weightd_mesh.recv_qps[peer],&attr,
+                    IBV_QP_STATE,&init) != 0 ||
+                attr.qp_state != IBV_QPS_RTS)
+                recv_in_rts = 0u;
+        }
+        force_wire[peer] = SparkWeightdMeshRewireNeeded(
+            peer_records[peer].boot_ns,
+            weightd_mesh.wired_boot_ns[peer],send_in_rts,recv_in_rts);
         if (force_wire[peer] != 0u)
         {
             changed = 1u;
-            fprintf(stderr,
-                "WD-QP-REPAIR rank=%u peer=%u — qp left RTS after errors; re-transitioning on the same record\n",
-                weightd_mesh.local_rank,peer);
+            if (send_in_rts == 0u || recv_in_rts == 0u)
+                fprintf(stderr,
+                    "WD-QP-REPAIR rank=%u peer=%u — qp left RTS after errors; re-transitioning on the same record\n",
+                    weightd_mesh.local_rank,peer);
         }
     }
     if (changed == 0u)
@@ -320,8 +331,7 @@ static void SparkWeightdMeshTryWireLocked(void)
     wired = 1u;
     for (peer = 0u; peer < SPARK_WEIGHTD_MESH_PEERS; peer++)
     {
-        if (force_wire[peer] == 0u &&
-            peer_records[peer].boot_ns == weightd_mesh.wired_boot_ns[peer])
+        if (force_wire[peer] == 0u)
             continue;
         peer_rank = peer < weightd_mesh.local_rank ? peer : peer + 1u;
         my_index_in_peer = weightd_mesh.local_rank < peer_rank ?
@@ -510,6 +520,14 @@ SparkStatus SparkWeightdMeshInit(uint32_t rank, const char *interface_name,
         fprintf(stderr,"weightd-mesh: mr failed errno=%d\n",errno);
         return SPARK_STATUS_DRIVER_LOAD_ERROR;
     }
+    printf("weightd-mesh region bytes=%llu (bands=%u ranks=%u slots/rank=%u rows/slot=%u slot_bytes=%u)\n",
+        (unsigned long long)SPARK_WEIGHTD_MESH_REGION_BYTES,
+        (unsigned)SPARK_WEIGHTD_MESH_BANDS,
+        (unsigned)SPARK_WEIGHTD_MESH_RANKS_PER_BAND,
+        (unsigned)SPARK_WEIGHTD_MESH_SLOTS_PER_RANK,
+        (unsigned)SPARK_WEIGHTD_MESH_SLOT_ROWS,
+        (unsigned)SPARK_WEIGHTD_MESH_SLOT_BYTES);
+    fflush(stdout);
     SparkWeightdMeshPhase("recv-mr-registered");
     weightd_mesh.seq_mr = ibv_reg_mr(weightd_mesh.protection_domain,
         &weightd_mesh.seq_storage,sizeof(weightd_mesh.seq_storage),

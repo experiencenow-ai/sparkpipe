@@ -1185,22 +1185,8 @@ int main(int argc, char **argv)
 	}
 	{
 		char seq_path[1024];
-		char seq_text[64];
-		uint64_t seeded = 1u;
+		uint64_t seeded = 1000000u;
 		(void)snprintf(seq_path,sizeof(seq_path),"%s/api_submission.seq",root);
-		{
-			FILE *seq_in = fopen(seq_path,"r");
-			if ( seq_in != 0 )
-			{
-				if ( fgets(seq_text,sizeof(seq_text),seq_in) != 0 )
-				{
-					uint64_t saved = strtoull(seq_text,0,10);
-					if ( saved != 0u )
-						seeded = saved + 1000000u;
-				}
-				(void)fclose(seq_in);
-			}
-		}
 		SparkModelBatchEngineSeedSubmissionId(S.engine,seeded);
 		{
 			FILE *seq_out = fopen(seq_path,"w");
@@ -1210,7 +1196,7 @@ int main(int argc, char **argv)
 				(void)fclose(seq_out);
 			}
 		}
-		api_logf("submission_id_seeded next=%llu",(unsigned long long)SparkModelBatchEnginePeekSubmissionId(S.engine));
+		api_logf("submission_id_seeded next=%llu (session base; ids unique within one engine session, rebased every boot)",(unsigned long long)SparkModelBatchEnginePeekSubmissionId(S.engine));
 	}
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGTERM, api_term_signal);

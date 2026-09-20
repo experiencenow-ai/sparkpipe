@@ -1967,18 +1967,21 @@ static SparkStatus SparkModelBatchDispatchKind(
 	if ( engine->next_submission_id == 0u )
 	{
 		state->active = 0u;
+		engine->next_submission_id--;
 		SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
 	}
 	lane_count = SparkModelBatchBuildSubmission(engine,work_kind,&submission);
 	if ( lane_count == 0u )
 	{
 		state->active = 0u;
+		engine->next_submission_id--;
 		SPARK_FAIL(SPARK_STATUS_NOT_FOUND);
 	}
 	status = SparkModelPipelineClientSubmit(engine->pipeline,&submission);
 	if ( status != SPARK_STATUS_OK )
 	{
 		state->active = 0u;
+		engine->next_submission_id--;
 		/* BUSY is transient backpressure (a rank mid-chain); it must not
 		 * count toward the circuit — the circuit exists for real faults */
 		if ( status != SPARK_STATUS_BUSY )

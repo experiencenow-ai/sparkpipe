@@ -40,15 +40,6 @@ extern int SparkGlm5NextLaunchMeshWait(void *stream,
     void *error_word,unsigned long long deadline_ns,void *diag_word,
     volatile void *cancel_cell,const void *cancel_expected);
 
-#define SPARK_TP_DEVICE_COLLECTIVE_STAGING_SETS \
-    (SPARK_WEIGHTD_MESH_SLOTS_PER_RANK * 16u)
-typedef struct SparkTpDeviceCollectiveStagingSet
-{
-    uint64_t seq;
-    uint64_t bytes;
-    uint64_t slot;
-} SparkTpDeviceCollectiveStagingSet;
-
 typedef struct SparkTpDeviceCollectiveCompletionNode
 {
     struct SparkTpDeviceCollectiveCompletionNode *next;
@@ -72,11 +63,9 @@ typedef struct SparkTpDeviceCollectiveImplementation
     uint64_t chain_epoch;
     uint64_t consumed_cell;
     uint64_t round_index;
-    uint64_t cancel_epoch;
-    uint64_t publish_ack_prev;
-    SparkTpDeviceCollectiveStagingSet
-        staging[SPARK_TP_DEVICE_COLLECTIVE_STAGING_SETS];
-    void *seq_cell;
+        uint64_t cancel_epoch;
+        uint64_t publish_ack_prev;
+        void *seq_cell;
     void *epoch_cell;
     void *round_seq_device;
     void *error_word;

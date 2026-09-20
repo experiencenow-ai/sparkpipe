@@ -1424,8 +1424,7 @@ static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
     }
     if (SparkWeightdStringBounded(request->pack_path,
             SPARK_WEIGHTD_PATH_BYTES) != SPARK_STATUS_OK ||
-        request->expert_pool_bytes == 0ull ||
-        request->expert_pool_bytes > server->config.device_bytes_max)
+        request->expert_pool_bytes == 0ull)
     {
         result->status = (uint32_t)SPARK_STATUS_INVALID_ARGUMENT;
         return;
@@ -1533,6 +1532,23 @@ static void SparkWeightdServerAttachLazy(SparkWeightdServer *server,
     }
     server->arenas[slot].lazy = 1u;
     server->arenas[slot].expert_pool_bytes = request->expert_pool_bytes;
+    if (request->expert_pool_bytes > identity.arena_bytes)
+    {
+        uint64_t span_bytes = ((identity.arena_bytes +
+            server->arenas[slot].chunk_bytes - 1ull) /
+            server->arenas[slot].chunk_bytes) * server->arenas[slot].chunk_bytes;
+        if (span_bytes > server->config.device_bytes_max)
+        {
+            server->arenas[slot].expert_pool_bytes =
+                server->config.device_bytes_max;
+            fprintf(stderr,
+                "WD-POOL-CLAMP pack=%llu span=%llu exceeds device budget=%llu: per-chunk lazy with a %llu working set (full residency needs a bigger budget)\n",
+                (unsigned long long)identity.arena_bytes,
+                (unsigned long long)span_bytes,
+                (unsigned long long)server->config.device_bytes_max,
+                (unsigned long long)server->config.device_bytes_max);
+        }
+    }
     server->arenas[slot].experts = entries;
     server->arenas[slot].manifest = manifest;
     server->arenas[slot].expert_count = expert_count;
