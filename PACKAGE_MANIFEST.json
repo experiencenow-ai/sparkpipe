@@ -1,5 +1,5 @@
 {
-  "file_count": 3193,
+  "file_count": 3194,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -7035,6 +7035,11 @@
       "path": "qualification/pack_sweep/2026-09-19/emission-wave.md",
       "sha256": "3a13c81f7c6602c1647940aa8e9a6646629154c44a34c6f66176f094ff4927ad",
       "size_bytes": 13970
+    },
+    {
+      "path": "qualification/pack_sweep/2026-09-19/emission-wave2.md",
+      "sha256": "7040f19af8bfc43aa64eac18983015cbebcf0e37a81d65545a28c375449a9dfc",
+      "size_bytes": 18656
     },
     {
       "path": "qualification/pack_sweep/2026-09-19/matrix.md",
@@ -15970,5 +15975,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 74967125
+  "total_bytes": 74985781
 }
