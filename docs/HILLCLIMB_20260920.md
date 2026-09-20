@@ -199,7 +199,7 @@ instance. Numbers refer to PRs/commits on #1067 unless noted.
 | 7 | stale mesh records post-restart | records written only-if-missing | artifacts without ownership validation | FIXED (#1064 self-heal) |
 | 8 | 15/16 weightds missing --mesh-dir | config by repeated argv | flags where defaults belong | FIXED (default) |
 | 9 | janitor killed healthy weightds | identity guessed from a path string | name-based resource identity | FIXED (rule deleted + latch) |
-| 10 | twin weightds | unix socket file deletable | file-based identity | FIXED (TCP latch port) |
+| 10 | twin weightds | flock singleton on NFS home does NOT exclude; the "TCP latch" the handoff documented was never committed (evidence-law instance #3 — my own record) | file-based identity | FIXED FOR REAL 5855105 (loopback:61900 latch, idempotent exit-0, wedged-holder kill, flock deleted); 13/16 nodes were running twins at discovery |
 | 11 | missing={4,7,9,11,14} forever | TryWire only re-wired on RECORD change; QPs that left RTS on an unchanged record stayed dead | health keyed on a PROXY (record) not the resource (QP state) | FIXED (state-based repair) |
 | 12 | rank6<->9 REM_ACCESS loop | records/rkeys verified CORRECT; kills recurred through repairs | UNRESOLVED — suspect same class as 11, unproven | OPEN (verify) |
 | 13 | ordinal exhaustion (162M) | id space finite (~162.07M), counter unbounded, burn on failed dispatches | invisible finite-resource consumption | FIXED (rollback + session seed + fuzzer wall) |
@@ -266,3 +266,22 @@ inside one CUDA graph replay — publish/wait/combine on-device, zero host
 ceremony per round. Current warm eager floor 0.6-1.5ms/round is all host
 ceremony; the graph path removes it. S3 blockers in the ledger: the spark3
 full-replay illegal access (#4) and the graph-env admission rejection (#5).
+
+## 2026-09-21e tick — the twin-weightd discovery (wedge #10 for real)
+
+- Symptom chain: probe timeout → spark0 engine BUSY with tp_chain_active
+  stuck → census found 13 of 16 nodes running TWO weightds on the same socket.
+  The twins explain the night's churn classes wholesale: engines "re-colding"
+  (attach to the other twin's arena), REM_ACCESS relay loops (a twin with dead
+  MRs), wedges that healed after bounces (TERM hit one twin, the other kept
+  serving stale state).
+- Root cause: the singleton was an flock on a home-path file — home is NFS
+  where flock does not exclude. AND the TCP latch the 09-20 handoff described
+  as deployed ("port 61900, EADDRINUSE+probe → exit 0...") NEVER EXISTED in
+  the tree — grep found zero latch code. My own handoff was the false record.
+- Fix (5855105): the real latch — bind loopback:61900 before anything else;
+  held-by-live → exit 0 idempotent; busy-unresponsive → /proc/net/tcp inode
+  hunt → SIGKILL the wedged weightd → retry ×8 → fail loudly. The flock block
+  is deleted. Verified: 16/16 exactly one weightd, "latch: acquired" on all.
+- MEASURE this tick (pre-wedge, from the prior tick's lines): warm 0.6-1.5
+  ms/round contention-dependent; the twin chaos invalidated mid-tick numbers.
