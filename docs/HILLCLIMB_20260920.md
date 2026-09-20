@@ -285,3 +285,24 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   is deleted. Verified: 16/16 exactly one weightd, "latch: acquired" on all.
 - MEASURE this tick (pre-wedge, from the prior tick's lines): warm 0.6-1.5
   ms/round contention-dependent; the twin chaos invalidated mid-tick numbers.
+
+## 2026-09-21f tick close — twins fixed, rank0-record wedge class named
+
+- Post-latch state: 16/16 single weightd, latch acquired. A NEW wedge class
+  surfaced during settle: after mass weightd restarts, rank0's engine saw a
+  FIXED missing set {1,4,6,8,10,11,13} — rank0's own record carried a mix of
+  QP eras (two mesh-ready prints in one boot = two wiring eras; peers wired
+  the old record; addr+rkey LOOK identical across boots because fresh boots
+  reproduce the same VAs/rkeys, masking the staleness). Bouncing ONLY rank0's
+  weightd (one fresh record, all peers rewire) cleared it — the
+  proven-convergent shape. LEDGER #21: the mesh record must be written
+  ATOMICALLY once at ready — a partially-rewired boot must rewrite its record,
+  and peers must treat addr/rkey equality as NOT proof of sameness (boot_ns is
+  the only identity). Open fix.
+- Warm floor re-confirmed after unwedge: 128-150ms full chains, allreduce
+  62-84ms per 91 rounds = 0.68-0.92ms/round, status=0. Cold = 260-283s per
+  slot, one time per slot per weightd generation.
+- New finding for the queue: single-session API serializes behind per-slot
+  cold loads; probes that time out client-side leave their request queued
+  (zombie queue). The readiness gate makes API restarts safe — draining by
+  restart is now the clean move (used twice this tick).
