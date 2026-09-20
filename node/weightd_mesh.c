@@ -638,7 +638,26 @@ void SparkWeightdMeshPoll(void)
         }
         (void)snprintf(artifact_path,sizeof(artifact_path),"%s/mesh-%x.rec",
             weightd_mesh_dir,weightd_mesh.local_rank);
-        if (stat(artifact_path,&artifact_st) != 0)
+        {
+            SparkWeightdMeshRecord existing;
+            int artifact_fd = open(artifact_path,O_RDONLY);
+            uint32_t stale = 1u;
+            if (artifact_fd >= 0)
+            {
+                memset(&existing,0,sizeof(existing));
+                if (read(artifact_fd,&existing,sizeof(existing)) ==
+                        (ssize_t)sizeof(existing) &&
+                    existing.magic == SPARK_WEIGHTD_MESH_MAGIC &&
+                    existing.boot_ns == weightd_mesh.boot_ns &&
+                    existing.recv_addr ==
+                        (uint64_t)(uintptr_t)weightd_mesh.recv_buffer)
+                    stale = 0u;
+                close(artifact_fd);
+            }
+            if (stale == 0u)
+                goto artifact_current;
+        }
+        if (1u)
         {
             memset(&own_record,0,sizeof(own_record));
             own_record.magic = SPARK_WEIGHTD_MESH_MAGIC;
@@ -655,6 +674,7 @@ void SparkWeightdMeshPoll(void)
             }
             (void)SparkWeightdMeshWriteRecord(&own_record);
         }
+artifact_current:;
     }
     SparkWeightdMeshDrainCq();
     if (weightd_mesh.send_ok - weightd_mesh.send_logged >= 2048ull)
