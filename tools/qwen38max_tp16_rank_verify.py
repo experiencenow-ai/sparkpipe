@@ -178,11 +178,18 @@ def verify(pack: Path, tp_degree: int, tp_rank: int, checkpoint: Path | None,
             resident = 0
             if ref.kind in expert_kinds(tables):
                 resident = srows // (ref.rows // tables.EXPERT_COUNT)
-            want_fmt = tables.ref_weight_format(ref)
-            want_payload, want_scale = entry_bytes_for(
-                tables, want_fmt, ref.kind, srows, scols, resident)
-            planned[key] = (plan, want_fmt, want_group(tables, want_fmt, ref.kind),
-                            srows, scols, want_payload, want_scale)
+            ladder_fmt = tables.ref_weight_format(ref)
+            variants = {ladder_fmt: "packer"}
+            if ladder_fmt == tables.WEIGHT_NVFP4_PACKED:
+                variants[tables.WEIGHT_FP8_F32B128] = "placed-legacy"
+            accepted = {}
+            for fmt_variant in variants:
+                payload, scale = entry_bytes_for(
+                    tables, fmt_variant, ref.kind, srows, scols, resident)
+                accepted[fmt_variant] = (payload, scale,
+                                         want_group(tables, fmt_variant, ref.kind))
+            planned[key] = (plan, ladder_fmt, sorted(accepted), accepted,
+                            srows, scols)
 
         decoded = []
         wire_pairs: set[tuple[int, int]] = set()
@@ -200,11 +207,12 @@ def verify(pack: Path, tp_degree: int, tp_rank: int, checkpoint: Path | None,
                 fail(f"{tag}: not in the inventory of slice "
                      f"{first_layer}+{layer_count}")
                 continue
-            plan, want_fmt, w_group, srows, scols, want_payload, want_scale = \
-                planned[key]
-            if fmt != want_fmt:
-                fail(f"{tag}: weight_format={fmt}, packer format ladder says "
-                     f"{want_fmt}")
+            plan, ladder_fmt, fmts, accepted, srows, scols = planned[key]
+            if fmt not in accepted:
+                fail(f"{tag}: weight_format={fmt}, accepted formats for this "
+                     f"kind are {fmts} (packer ladder {ladder_fmt})")
+                continue
+            want_payload, want_scale, w_group = accepted[fmt]
             if scale_group != w_group:
                 fail(f"{tag}: scale_group_size={scale_group}, expected {w_group}")
             matches_plan = (rows, cols) == (srows, scols)

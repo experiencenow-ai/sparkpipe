@@ -16,7 +16,11 @@ Three layers of checking, all from raw bytes:
      directory entry count vs the format's computed inventory (optionally
      minus the 11-entry MTP pseudo-layer for the qwen36sp stripped form),
      per-entry shape/format/scale rules, payload alignment and bounds, no
-     duplicate or missing (kind, layer) pair.
+     duplicate or missing (kind, layer) pair. Both placed wire forms are
+     accepted and each is enforced strictly: the packer form (256-aligned,
+     bf16-natural kinds optionally fp8 f32b128 or nvfp4 with their scale
+     planes) and the qwen36sp compact-strip form (64-aligned, bf16-natural
+     kinds riding scale-less fp8, scale_group 0).
   2. CONTENT - every entry's payload+scale bytes are hashed out of the pack
      file and compared against the byte stream the packer's own copy path
      produces from the source checkpoint. Requires --checkpoint.
@@ -78,26 +82,21 @@ def load_tables(path: str | None = None):
 
 def payload_bytes_for(weight_format: int, rows: int, columns: int) -> int:
     elements = rows * columns
-    if weight_format == WEIGHT_FP8_E4M3_F32B128:
-        return elements
     if weight_format == WEIGHT_NVFP4_PACKED:
         return rows * (columns // 2)
+    if weight_format == WEIGHT_FP8_E4M3_F32B128:
+        return elements
     return elements * (BF16_BYTES if weight_format == WEIGHT_BF16 else F32_BYTES)
 
 
-def scale_bytes_for(weight_format: int, rows: int, columns: int) -> int:
+def scale_bytes_for(weight_format: int, rows: int, columns: int,
+                    scale_group: int = 0) -> int:
     if weight_format == WEIGHT_FP8_E4M3_F32B128:
+        if scale_group == 0:
+            return 0
         return (rows // FP8_SCALE_GROUP) * (columns // FP8_SCALE_GROUP) * F32_BYTES
     if weight_format == WEIGHT_NVFP4_PACKED:
         return rows * (columns // NVFP4_GROUP) + NVFP4_GLOBAL_TAIL_BYTES
-    return 0
-
-
-def scale_group_for(weight_format: int) -> int:
-    if weight_format == WEIGHT_FP8_E4M3_F32B128:
-        return FP8_SCALE_GROUP
-    if weight_format == WEIGHT_NVFP4_PACKED:
-        return NVFP4_GROUP
     return 0
 
 
@@ -212,9 +211,22 @@ def verify(pack: Path, checkpoint: Path | None, receipt_path: Path | None,
         if len(raw_dir) != tensor_count * ENTRY_BYTES:
             fail("directory truncated")
 
+        decoded = [ENTRY_STRUCT.unpack_from(raw_dir, index * ENTRY_BYTES)
+                   for index in range(tensor_count)]
+        offsets_256 = all(entry[6] % PAYLOAD_ALIGNMENT == 0 for entry in decoded)
+        offsets_64 = all(entry[6] % 64 == 0 for entry in decoded)
+        if offsets_256:
+            alignment = PAYLOAD_ALIGNMENT
+        elif offsets_64:
+            alignment = 64
+        else:
+            alignment = 0
+            fail("directory payload offsets are neither 256-aligned (the "
+                 "packer form) nor uniformly 64-aligned (the qwen36sp "
+                 "compact-strip form)")
+
         seen: set[tuple[int, int]] = set()
-        for index in range(tensor_count):
-            entry = ENTRY_STRUCT.unpack_from(raw_dir, index * ENTRY_BYTES)
+        for index, entry in enumerate(decoded):
             (kind, layer, fmt, rows, cols, scale_group, p_off, p_bytes,
              s_off, s_bytes) = entry
             tag = f"entry[{index}] kind={kind} layer={hex(layer)}"
@@ -235,22 +247,31 @@ def verify(pack: Path, checkpoint: Path | None, receipt_path: Path | None,
             if (rows, cols) != (packed_rows, packed_cols):
                 fail(f"{tag}: shape {rows}x{cols}, expected {packed_rows}x{packed_cols}")
             natural = natural_format(tables, kind)
-            allowed = {natural, WEIGHT_FP8_E4M3_F32B128, WEIGHT_NVFP4_PACKED}
-            if fmt not in allowed:
-                fail(f"{tag}: weight_format={fmt}, allowed {sorted(allowed)}")
-            if scale_group != scale_group_for(fmt):
-                fail(f"{tag}: scale_group_size={scale_group}, expected "
-                     f"{scale_group_for(fmt)}")
+            if fmt == natural:
+                want_group = 0
+            elif fmt == WEIGHT_FP8_E4M3_F32B128 and natural == WEIGHT_BF16 \
+                    and scale_group in (0, FP8_SCALE_GROUP):
+                want_group = scale_group
+            elif fmt == WEIGHT_NVFP4_PACKED and natural == WEIGHT_BF16:
+                want_group = NVFP4_GROUP
+            else:
+                want_group = -1
+                fail(f"{tag}: weight_format={fmt} scale_group={scale_group} "
+                     f"outside the packer ladder (natural {natural}, bf16 "
+                     f"kinds may ride fp8 f32b128, fp8 compact-strip, or "
+                     f"nvfp4)")
+            if scale_group != want_group:
+                fail(f"{tag}: scale_group_size={scale_group}, expected {want_group}")
             want_payload = payload_bytes_for(fmt, packed_rows, packed_cols)
-            want_scale = scale_bytes_for(fmt, packed_rows, packed_cols)
+            want_scale = scale_bytes_for(fmt, packed_rows, packed_cols, scale_group)
             if p_bytes != want_payload:
                 fail(f"{tag}: payload_bytes={p_bytes}, format math says {want_payload}")
             if s_bytes != want_scale:
                 fail(f"{tag}: scale_bytes={s_bytes}, format math says {want_scale}")
-            if p_off % PAYLOAD_ALIGNMENT != 0:
-                fail(f"{tag}: payload_offset {p_off} not {PAYLOAD_ALIGNMENT}-aligned")
-            if s_bytes and s_off % PAYLOAD_ALIGNMENT != 0:
-                fail(f"{tag}: scale_offset {s_off} not {PAYLOAD_ALIGNMENT}-aligned")
+            if alignment and p_off % alignment != 0:
+                fail(f"{tag}: payload_offset {p_off} not {alignment}-aligned")
+            if s_bytes and s_off % alignment != 0:
+                fail(f"{tag}: scale_offset {s_off} not {alignment}-aligned")
             if p_off + p_bytes > file_bytes_actual:
                 fail(f"{tag}: payload region overruns file")
             if s_bytes and s_off + s_bytes > file_bytes_actual:
