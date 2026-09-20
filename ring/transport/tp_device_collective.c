@@ -698,8 +698,27 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
             (implementation->mesh_buffer +
             SPARK_WEIGHTD_MESH_SHIPPED_ENTRY(band_index,
                 implementation->tp_rank));
+        uint64_t ship_heartbeat = SparkTpDeviceCollectiveTimeNs();
         while ( *shipped_cell != (uint32_t)implementation->publish_ack_prev )
         {
+            {
+                uint64_t now_ns = SparkTpDeviceCollectiveTimeNs();
+                if ( now_ns - ship_heartbeat >= UINT64_C(5000000000) )
+                {
+                    ship_heartbeat = now_ns;
+                    fprintf(stderr,
+                        "ROUND-HEARTBEAT rank=%u phase=ship-ack elapsed_ms=%llu want=%llu got=%u slot=%llu\n",
+                        implementation->tp_rank,
+                        (unsigned long long)((now_ns - deadline +
+                            (implementation->round_timeout_ns <
+                            SPARK_TP_DEVICE_COLLECTIVE_ROUND_SPIN_TIMEOUT_NS
+                                ? implementation->round_timeout_ns
+                                : SPARK_TP_DEVICE_COLLECTIVE_ROUND_SPIN_TIMEOUT_NS)) / 1000000ull),
+                        (unsigned long long)implementation->publish_ack_prev,
+                        (unsigned)*shipped_cell,
+                        (unsigned long long)slot_index);
+                }
+            }
             volatile uint64_t *cancel_cell = (volatile uint64_t *)
                 (implementation->mesh_buffer +
                 SparkTpDeviceCollectiveCancelCellOffset(band_index));
@@ -752,24 +771,55 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
             cudaGetErrorString(cudaGetLastError()));
         return SPARK_STATUS_IO_ERROR;
     }
-    if ( cudaMemcpyAsync((void *)implementation->published_host_cell,
+    {
+        uint64_t sync_started_ns = SparkTpDeviceCollectiveTimeNs();
+        int sync_failed = cudaMemcpyAsync((void *)implementation->published_host_cell,
             implementation->round_seq_device,sizeof(uint64_t),
             SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST,submission->cuda_stream) != 0 ||
-         cudaStreamSynchronize(submission->cuda_stream) != 0 )
-    {
-        fprintf(stderr,"MESH-READBACK-FAIL rank=%u bytes=%llu slot=%llu cuda=%s\n",
-            implementation->tp_rank,(unsigned long long)bytes,
-            (unsigned long long)slot_index,
-            cudaGetErrorString(cudaGetLastError()));
-        return SPARK_STATUS_IO_ERROR;
+         cudaStreamSynchronize(submission->cuda_stream) != 0;
+        if ( SparkTpDeviceCollectiveTimeNs() - sync_started_ns >=
+             UINT64_C(5000000000) )
+            fprintf(stderr,
+                "ROUND-HEARTBEAT rank=%u phase=stream-sync elapsed_ms=%llu failed=%d slot=%llu\n",
+                implementation->tp_rank,
+                (unsigned long long)((SparkTpDeviceCollectiveTimeNs() -
+                    sync_started_ns) / 1000000ull),
+                sync_failed,(unsigned long long)slot_index);
+        if ( sync_failed )
+        {
+            fprintf(stderr,"MESH-READBACK-FAIL rank=%u bytes=%llu slot=%llu cuda=%s\n",
+                implementation->tp_rank,(unsigned long long)bytes,
+                (unsigned long long)slot_index,
+                cudaGetErrorString(cudaGetLastError()));
+            return SPARK_STATUS_IO_ERROR;
+        }
     }
     published = *implementation->published_host_cell;
     implementation->publish_ack_prev = published;
     {
         uint32_t peers_remaining = implementation->tp_degree - 1u;
         uint32_t peer_passed[SPARK_TP_DEVICE_COLLECTIVE_MAX_DEGREE] = {0u};
+        uint64_t wait_heartbeat = SparkTpDeviceCollectiveTimeNs();
         while ( peers_remaining != 0u )
         {
+            {
+                uint64_t now_ns = SparkTpDeviceCollectiveTimeNs();
+                if ( now_ns - wait_heartbeat >= UINT64_C(5000000000) )
+                {
+                    wait_heartbeat = now_ns;
+                    fprintf(stderr,
+                        "ROUND-HEARTBEAT rank=%u phase=peer-wait remaining=%u elapsed_ms=%llu pub=%llu slot=%llu\n",
+                        implementation->tp_rank,
+                        (unsigned)peers_remaining,
+                        (unsigned long long)((now_ns - deadline +
+                            (implementation->round_timeout_ns <
+                            SPARK_TP_DEVICE_COLLECTIVE_ROUND_SPIN_TIMEOUT_NS
+                                ? implementation->round_timeout_ns
+                                : SPARK_TP_DEVICE_COLLECTIVE_ROUND_SPIN_TIMEOUT_NS)) / 1000000ull),
+                        (unsigned long long)published,
+                        (unsigned long long)slot_index);
+                }
+            }
             volatile uint64_t *cancel_cell = (volatile uint64_t *)
                 (implementation->mesh_buffer +
                 SparkTpDeviceCollectiveCancelCellOffset(band_index));
