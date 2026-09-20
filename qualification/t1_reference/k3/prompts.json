@@ -1,0 +1,43 @@
+{
+  "prompts": [
+    {
+      "name": "capital_of_france",
+      "text": "The capital of France is",
+      "prompt_token_ids": [
+        1008,
+        10484,
+        318,
+        15383,
+        387
+      ],
+      "new_tokens": 4,
+      "capture_layers": [
+        0,
+        3,
+        46,
+        92
+      ]
+    },
+    {
+      "name": "count_up",
+      "text": "Counting upward: one, two,",
+      "prompt_token_ids": [
+        3922,
+        288,
+        62867,
+        25,
+        1101,
+        11,
+        2069,
+        11
+      ],
+      "new_tokens": 4,
+      "capture_layers": [
+        0,
+        3,
+        46,
+        92
+      ]
+    }
+  ]
+}
