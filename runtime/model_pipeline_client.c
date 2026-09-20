@@ -781,22 +781,16 @@ uint32_t SparkModelPipelineClientAllRanksReady(
 	const SparkModelPipelineClient *pipeline)
 {
 	SparkModelResidentClientView view;
-	uint64_t generation;
 	uint32_t rank;
 	if ( pipeline == 0 || pipeline->rank_count == 0u )
 		return(0u);
-	generation = 0u;
 	for (rank=0u; rank<pipeline->rank_count; rank++)
 	{
 		if ( SparkModelResidentClientGetView(pipeline->clients[rank],&view) != SPARK_STATUS_OK ||
-		     view.connected == 0u )
-			return(0u);
-		if ( generation == 0u )
-			generation = view.client_generation;
-		else if ( view.client_generation != generation )
+		     view.connected == 0u || view.client_generation == 0u )
 			return(0u);
 	}
-	return(generation != 0u ? 1u : 0u);
+	return(1u);
 }
 
 uint64_t SparkModelPipelineClientSessionFingerprint(
