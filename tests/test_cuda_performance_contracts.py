@@ -408,8 +408,37 @@ def validate_stream_ordered_dispatch() -> None:
         "spark_glm52_serving_adapter.c"
     )
 
+    common_stage = read(
+        "common/common_glm_stage_module/spark_glm_stage_module.h"
+    )
+
     require(module, "cudaHostAlloc(", "persistent pinned request metadata")
-    require(module, "cudaLaunchHostFunc(", "stream-ordered stage completion")
+    # Commit d00cb0e hoisted the completion enqueue into the shared GLM
+    # stage header: the module includes it and binds its callback through
+    # SPARK_GLM_STAGE_COMPLETE_ASYNC, so the stream-ordered
+    # cudaLaunchHostFunc lives in common_stage and the call site stays in
+    # the module under the contract marker.
+    require(
+        module,
+        "common/common_glm_stage_module/spark_glm_stage_module.h",
+        "glm52 adopts the shared GLM stage enqueue",
+    )
+    require(
+        module,
+        "SPARK_GLM_STAGE_COMPLETE_ASYNC SparkGlm52CompleteAsync",
+        "glm52 binds its callback into the shared enqueue",
+    )
+    require(
+        module,
+        "STREAM-ORDERED STAGE COMPLETION CONTRACT",
+        "glm52 completion call-site contract marker",
+    )
+    require(
+        common_stage,
+        "STREAM-ORDERED STAGE COMPLETION CONTRACT",
+        "shared enqueue stream-order contract marker",
+    )
+    require(common_stage, "cudaLaunchHostFunc(", "stream-ordered stage completion")
     require(module, "SparkStageModuleSlotRelease", "callback-owned slot release")
     require(module, "host_callback_completion_count", "callback completion telemetry")
     require(
@@ -418,13 +447,17 @@ def validate_stream_ordered_dispatch() -> None:
         "external completion adapter contract",
     )
     forbid(cuda, "cudaStreamSynchronize(", "successful CUDA wave synchronization")
-    # Three sanctioned sites: the async TP chain's fail branch (added with
+    # Six sanctioned sites: the async TP chain's fail branch (added with
     # the TP8 continuation chunk chain, commit 42505e2), the submit error
-    # branch, and Destroy's quiesce. All are failure/teardown paths.
-    if module.count("cudaStreamSynchronize(") != 3:
+    # branch, Destroy's quiesce, the lazy expert-lease completion record
+    # fence (278013e, narrowed to a single retirement fence by 1e08ebb),
+    # and the two serving-gated T1 reference-tap fences (f5fe7fa). All are
+    # failure/teardown, lease-retirement, or opt-in tap paths.
+    if module.count("cudaStreamSynchronize(") != 6:
         raise AssertionError(
             "GLM host module synchronization must be limited to failed-enqueue "
-            "cleanup (including the TP chain fail branch) and teardown"
+            "cleanup (including the TP chain fail branch), teardown, the lazy "
+            "expert-lease record fence, and the opt-in T1 taps"
         )
 
     dsv4_module = read(
