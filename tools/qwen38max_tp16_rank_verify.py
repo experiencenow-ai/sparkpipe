@@ -118,7 +118,7 @@ def verify(pack: Path, tp_degree: int, tp_rank: int, checkpoint: Path | None,
             if got != expected:
                 fail(f"header {field}={got}, expected {expected}")
 
-        want("magic", magic, MAGIC)
+        want("magic", magic, tables.MAGIC)
         want("format_version", version, tables.FORMAT2_VERSION)
         want("header_bytes", header_bytes, tables.HEADER2_BYTES)
         want("directory_entry_bytes", entry_bytes, tables.ENTRY_BYTES)
@@ -239,15 +239,18 @@ def verify(pack: Path, tp_degree: int, tp_rank: int, checkpoint: Path | None,
         for key in sorted(set(planned) - {d[0] for d in decoded}):
             fail(f"missing tensor kind={key[0]} layer={hex(key[1])}")
 
-        if decoded and len(wire_pairs) == 1 and plan_matches != {True}:
-            last_key = list(planned)[-1]
-            last_shape = (planned[last_key][4], planned[last_key][5])
-            wire_pair = next(iter(wire_pairs))
-            if wire_pair != last_shape:
-                fail(f"directory carries a uniform non-plan shape "
-                     f"{wire_pair[0]}x{wire_pair[1]}; the late-binding stale "
-                     f"signature must equal the last inventory ref's packed "
-                     f"shape {last_shape[0]}x{last_shape[1]}")
+        if decoded and plan_matches != {True}:
+            if len(wire_pairs) > 1:
+                fail("directory mixes plan-shaped and non-plan-shaped entries")
+            else:
+                last_key = list(planned)[-1]
+                last_shape = (planned[last_key][4], planned[last_key][5])
+                wire_pair = next(iter(wire_pairs))
+                if wire_pair != last_shape:
+                    fail(f"directory carries a uniform non-plan shape "
+                         f"{wire_pair[0]}x{wire_pair[1]}; the late-binding stale "
+                         f"signature must equal the last inventory ref's packed "
+                         f"shape {last_shape[0]}x{last_shape[1]}")
 
     stale_any = bool(decoded) and len(wire_pairs) == 1 and plan_matches != {True}
     expert_fmt4 = any(d[3] == tables.WEIGHT_FP8_F32B128 and

@@ -709,21 +709,21 @@ def verify_existing(output: Path, geometry_name: str, first_layer: int,
         file_bytes=header[-1], directory_offset=header[-2])
     manifest_path = Path(str(output).rsplit(".", 1)[0] + ".experts")
     manifest_report = None
-    if geometry["experts"] is not None and manifest_path.is_file():
+    manifest_present = manifest_path.is_file()
+    if geometry["experts"] is not None and manifest_present:
         if len(rank_reports) != 1:
             raise PackFailure("verify: the experts manifest rank walk needs a "
                               "single-rank --verify-ranks list")
         manifest_report = verify_experts_manifest(
             manifest_path, output, geometry, reference_plan, tp_degree,
             next(iter(sorted(rank_reports))), first_layer, layer_count)
-    elif geometry["experts"] is not None and len(rank_reports) == 1:
-        raise PackFailure(f"verify: experts manifest missing at {manifest_path}")
     expert_bytes = sum(e["payload_bytes"] for e in reference_plan
                        if e["kind"] in (KIND_EXPERT_GATE_UP, KIND_EXPERT_DOWN))
     return dict(model_id=geometry["model_id"], topology=geometry["topology"],
                 tensor_count=len(reference_plan), file_bytes=header[-1],
                 spine_bytes=payload_bytes - expert_bytes, expert_bytes=expert_bytes,
-                experts_manifest=str(manifest_path) if manifest_report else None,
+                experts_manifest=str(manifest_path) if manifest_present else None,
+                experts_manifest_present=manifest_present,
                 experts_manifest_records=None if manifest_report is None else manifest_report["records"],
                 experts_manifest_ok=None if manifest_report is None else (manifest_report["magic_ok"] and manifest_report["version_ok"] and not manifest_report["problems"]),
                 experts_manifest_problems=None if manifest_report is None else manifest_report["problems"],
