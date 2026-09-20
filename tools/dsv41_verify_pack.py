@@ -52,6 +52,7 @@ DEFAULT_CONTRACT = REPO_ROOT / "model_contracts" / "dsv4_flash.json"
 def load_module(name: str, path: str):
     spec = importlib.util.spec_from_file_location(name, str(Path(_TOOLS_DIR) / path))
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -87,7 +88,7 @@ def verify_dsv41(pack: Path) -> dict:
         digests = [head[161 + slot * 32:193 + slot * 32].hex() for slot in range(3)]
         (magic, version, hb, eb, abi, flags, tensor_count, stage_count,
          stage_index, first_layer, layer_count, total_layers, hidden, vocab,
-         experts, linear_codec, expert_codec, tp_degree, tp_rank, _pad) = vals
+         experts, linear_codec, expert_codec, tp_degree, tp_rank) = vals[:19]
         directory_offset, file_bytes = vals[20], vals[21]
         if magic != dsv41.MAGIC:
             fail("magic", f"{pack.name}: {magic:#x}")
@@ -105,7 +106,8 @@ def verify_dsv41(pack: Path) -> dict:
                            f"layers {first_layer}+{layer_count}/{total_layers}")
         if not revision:
             fail("revision", f"{pack.name}: empty model revision field")
-        if directory_offset != align:
+        dir_expect = (header_bytes + align - 1) & ~(align - 1)
+        if directory_offset != dir_expect:
             fail("directory_offset", f"{pack.name}: {directory_offset}")
         if file_bytes != size:
             fail("extent", f"{pack.name}: header {file_bytes}, stat {size}")
@@ -117,7 +119,13 @@ def verify_dsv41(pack: Path) -> dict:
             fail("directory", f"{pack.name}: truncated directory")
 
     expected = []
-    for kind, layer, _spec in dsv41.entry_specs():
+    order = [(kind, dsv41.GLOBAL_LAYER) for kind in range(dsv41.KIND_COUNT)
+             if dsv41.is_global(kind)]
+    for layer in range(dsv41.LAYER_COUNT):
+        for kind in range(dsv41.K_ATTN_NORM, dsv41.KIND_COUNT):
+            if dsv41.kind_in_layer(kind, layer):
+                order.append((kind, layer))
+    for kind, layer in order:
         rows, cols, groups = dsv41.entry_shape(kind, tp_degree)
         payload_type, codec, scale_enc, pbytes, sbytes = dsv41.entry_layout(kind, tp_degree)
         expected.append(dict(kind=kind, layer=layer, payload_type=payload_type,
@@ -193,7 +201,8 @@ def verify_dsv4flash(pack: Path, contract_path: Path, rank: int | None) -> dict:
                            f"{(linear_codec, expert_codec, kv_codec)}")
         if (hidden, vocab, experts) != (tp16.HIDDEN, tp16.VOCAB, tp16.EXPERTS):
             fail("geometry", f"{pack.name}: {hidden}x{vocab}x{experts}")
-        if (first_layer, layer_count, total_layers) != tp16.layer_slice(1, 0):
+        if (first_layer, layer_count) != tp16.layer_slice(1, 0) or \
+                total_layers != tp16.LAYERS:
             fail("stages", f"{pack.name}: layers {first_layer}+{layer_count}/{total_layers}")
         if packed_mtp != stagepack.MTP_LAYER_COUNT_MAX:
             fail("mtp", f"{pack.name}: packed_mtp_layer_count {packed_mtp}")
