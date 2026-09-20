@@ -134,3 +134,111 @@ no GPU. One verify at a time per node, `nice 10`.
 - `qwen38max.tp4` [MISSING] nodes 0,1,2,3,4,5,6,7,8,9,a,b,c,d,e,f: local rank pack absent on this node
 - `qwen3flash.bf16.tp4pp4` [NO-TOOL] nodes 0,1,2,3,4,5,6,7,8,9,a,b,c,d,e,f: pack present; no family tool usable locally and no sha receipt placed
 - `qwen3flash.bf16.tp8` [NO-TOOL] nodes 0,1,2,3,6,7,8,9,a,b,c,d,e,f: pack present; no family tool usable locally and no sha receipt placed
+
+## Addendum — 2026-09-20: sweep-tool fixes re-run (lane/sweep-tool-fixes)
+
+The NO-TOOL gaps below were fixed on `lane/sweep-tool-fixes` and every
+affected row was re-run on all 16 nodes under the same sweep law (CPU only,
+node-local NVMe reads only, no warm checkpoint, one verify per node at a
+time, `nice 10`). History above is untouched; the verdicts in this section
+supersede the matching cells above. No FAIL or MISSING cell was edited.
+
+Tool fixes (each measured against a real placed pack before the fleet run):
+
+1. `tools/qwen38_pack_verify.py` — the 8 stale attribute references against
+   the current v3 dense-FFN 27B tables (`EXPERT_COUNT`, `EXPERTS_PER_TOKEN`,
+   `EXPERT_INTERMEDIATE`, `KIND_MOE_W1/W3/DOWN` and the old header map) are
+   gone; the verifier now reads the geometry, kind table and tp plan from
+   the 27B packer itself, enforces the v3 header (tp_degree/tp_rank on the
+   wire), accepts both placed 27B wire forms (the packer form and the
+   qwen36sp compact-strip form: 64-aligned, bf16-natural kinds riding
+   scale-less fp8 with `scale_group` 0, MTP pseudo-layer stripped) and
+   takes `--strip-mtp` accordingly.
+2. `tools/qwen38max_tp16_rank_verify.py` — misparsed the placed max packs;
+   now covers both placed generations: the current codec-8 form (plan-shaped
+   directory, per-expert f32 tails) and the placed tp4pp4 legacy form
+   (experts stamped 4 with the tail-less per-16 scale plane, directory
+   shapes riding the packer's late-binding defect — every entry carries the
+   last inventory ref's packed shape, commit 4ca697a). On legacy packs the
+   payload/scale byte math is proven from the tp plan instead of the stale
+   on-wire shape fields. Verified on `qwen38_max.tp4pp4.rank11` (sparkb).
+3. `tools/gemma4_stagepack.py` — `--verify-existing` takes `--verify-ranks`
+   and plans each requested rank instead of always rank 0; with a single
+   rank and a MoE geometry it additionally walks the placed experts
+   manifest (header, record count, expert-id span == the rank's span,
+   offsets, truncated-ck128 payload digests). The fleet places the manifest
+   under two names; both are resolved. Exits nonzero on any failure and
+   writes `<pack>.verify-receipt.json` (never the placed receipt).
+4. `tools/glm52_validate_pack.py` — new `--stage` mode keyed on the stage
+   header (`first_layer`/`layer_count`): inventories only the header's
+   span, rejects entries outside it, checks the header extent against the
+   file, keeps the 1:1 module-policy shape/payload/scale checks, and now
+   exits nonzero on errors (both modes).
+5. `tools/dsv41_verify_pack.py` — NEW. No-warm mechanical verifier modeled
+   on `ling_verify_pack.py`: `dsv41flash` (257-byte header, kind-map
+   closure, entry_shape/entry_layout byte math, exact cmd_plan cursor
+   layout, revision + digest slots, tp/rank identity) and `dsv4flash`
+   (80-byte header, contract records re-sharded through
+   `dsv4_tp16_stagepack.plan_entry`, exact offsets and extent).
+   `--emit-receipt` writes the placed receipt pair.
+6. `tools/qwen4_flash_pack_verify.py` — `--checkpoint` is optional
+   (structure-only pass: header geometry + full directory + extent +
+   receipt sha when present) and `--emit-receipt` writes
+   `<pack>.receipt.json` + `<pack>.sha256` on PASS, never overwriting a
+   packer-written receipt (a present receipt is cross-checked instead).
+
+### Re-run verdicts (arm × node)
+
+| arm | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | a | b | c | d | e | f |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| glm53full.bf16.tp4pp4 | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P |
+| glm53full.fp8.tp4pp4 | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P |
+| glm53full.nvfp4.tp4pp4 | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P |
+| qwen3flash.bf16.tp4pp4 | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P |
+| qwen3flash.bf16.tp8 | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P |
+| qwen27b.tp4pp4 | P | P | P | P | — | — | — | — | — | — | — | — | — | — | — | — |
+| gemma4_26b.tp4pp4.t1 | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P |
+| dsv4flash.tp16 | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P |
+| dsv41flash.mxfp4.tp8 | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P | P |
+
+`P` PASS via the family tool (structure + layout + extent; `M` cells from
+the original matrix are unchanged — those nodes hold no pack). Cells that
+were already `S` and are re-verified by a tool here (qwen3flash.bf16.tp8
+nodes 4 and 5) keep their placed packer receipts, which the tool
+cross-checked (`receipt=verified`).
+
+### Verdict provenance per row
+
+- glm53full.{bf16,fp8,nvfp4}.tp4pp4 — `glm52_validate_pack.py <pack> 4
+  --stage` on the node's local rank pack: `errors: 0` on all 48 cells.
+- qwen3flash.bf16.tp4pp4 — `qwen4_flash_pack_verify.py --tp-degree 4
+  --tp-rank <local> --emit-receipt` (structure-only): 311-entry stage
+  inventories pass on all 16 nodes; receipts emitted on the 14 nodes that
+  had none (nodes 4/5 already held packer receipts — cross-checked).
+- qwen3flash.bf16.tp8 — same tool, `--tp-degree 8`: 1246 entries pass on
+  all 16 nodes; the two nodes with packer receipts (4, 5) verified against
+  them; receipts emitted on the other 14.
+- qwen27b.tp4pp4 — `qwen38_pack_verify.py --tp-degree 4 --strip-mtp` on the
+  qwen36sp packs of nodes 0-3 (compact-strip wire form): PASS on all 4;
+  nodes 4-f remain M (no pack placed).
+- gemma4_26b.tp4pp4.t1 — `gemma4_stagepack.py --verify-existing
+  --verify-ranks <local rank>` per node with the node's own rank/stage:
+  rank-correct placement proof plus experts-manifest expert-id span +
+  ck128 payload walk pass on all 16 nodes (manifests found under both
+  placed names). `.verify-receipt.json` written per pack.
+- dsv4flash.tp16 — `dsv41_verify_pack.py --family dsv4flash
+  --emit-receipt`: 1409 entries per rank pack pass on all 16 nodes;
+  receipts emitted.
+- dsv41flash.mxfp4.tp8 — `dsv41_verify_pack.py --emit-receipt`: 1038
+  entries per rank pack pass on all 16 nodes; receipts emitted. Node 6
+  holds a full 8-pack staging set under `packs-r2/` (no `packs/`); its
+  placement-mapped `packs-r2/rank6.spstage` was verified and receipted.
+
+### Updated verdict counts (this section's verdicts supersede the cells above)
+
+- PASS — tool (`P`): 253 (was 126)
+- PASS — sha vs placed receipt (`S`): 324 (was 337; 13 gemma4 cells
+  previously sha-only are now tool-verified `P`)
+- FAIL (`F`): 30 (unchanged)
+- NO-TOOL (`NT`): 0 (was 114)
+- MISSING (`M`): 33 (unchanged)
