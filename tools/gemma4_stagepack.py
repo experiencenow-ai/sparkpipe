@@ -708,8 +708,13 @@ def verify_existing(output: Path, geometry_name: str, first_layer: int,
         checked_entries=len(reference_plan),
         file_bytes=header[-1], directory_offset=header[-2])
     manifest_path = Path(str(output).rsplit(".", 1)[0] + ".experts")
-    manifest_report = None
     manifest_present = manifest_path.is_file()
+    if not manifest_present:
+        alt = Path(str(output) + ".experts")
+        if alt.is_file():
+            manifest_path = alt
+            manifest_present = True
+    manifest_report = None
     if geometry["experts"] is not None and manifest_present:
         if len(rank_reports) != 1:
             raise PackFailure("verify: the experts manifest rank walk needs a "
