@@ -480,3 +480,20 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   cold loads (slots 2/3 status=0, allreduce 84ms-1.4s across cold/warm
   mixes), 8 ROUTE-STUCK entries from the mixed-generation window; the warm
   verdict + measure lands next tick after warmup completes.
+
+## 2026-09-21p tick — ledger #27: the mixed-build weightd fleet (self-inflicted)
+
+- The recurring mid-chain peer deaths (REM_ACCESS on peers 6/8, 89 MESH-SPIN
+  events, QP repairs firing mid-chain) traced to a MIXED-BUILD fleet: spark8
+  ran exe af955ef5 vs disk d232e396 (a leftover from the multi-wave manual
+  deploys during the probe/latch iterations); the agent's correct exe≠disk
+  recycle then bounced weightds MID-CHAIN — each bounce killed in-flight
+  rounds to that peer, self-healed records rewired, chains died meanwhile.
+- FIX: one canonical build (HEAD 7b5f683, sha 38dce24e) deployed 16/16,
+  verified exe==disk on sample + latch active. The agent now has nothing to
+  recycle; the churn source is gone. LAW (ledger #27): binary deploys are
+  all-16-or-nothing; a partial wave guarantees an agent-recycle storm later.
+- The #26 completion-drop fix stays in effect (0 PENDING-INACTIVE prints =
+  no inactive-pending completions this window — the drop path didn't fire;
+  the mesh churn was the killer). Verdict probe after the one recycle-cycle
+  warmup.
