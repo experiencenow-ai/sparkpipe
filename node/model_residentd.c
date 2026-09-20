@@ -147,7 +147,6 @@ typedef struct SparkModelResidentdClient
 	uint64_t generation;
 	uint64_t pending_client_reset;
 	uint64_t reset_done;
-	uint64_t last_stuck_scan_ns;
 	uint64_t last_message_id;
 	uint64_t last_activity_ns;
 	uint64_t last_submission_id;
@@ -212,6 +211,7 @@ typedef struct SparkModelResidentdRuntime
 	SparkModelResidentdSequenceSlot *sequence_slots;
 	uint8_t *route_messages;
 	uint32_t route_capacity;
+	uint64_t last_stuck_scan_ns;
 	uint32_t route_message_capacity;
 	uint32_t next_adapter_route;
 	uint32_t committed_fifo_head;
@@ -2662,8 +2662,8 @@ static void SparkModelResidentdReportStuckRoutes(
 	uint64_t now_ns = SparkModelResidentdMonotonicTimeNs();
 	uint32_t index;
 	uint32_t stuck = 0u;
-	if ( runtime->routes == 0 || runtime->last_stuck_scan_ns != 0u &&
-	     now_ns - runtime->last_stuck_scan_ns < UINT64_C(10000000000) )
+	if ( runtime->routes == 0 || (runtime->last_stuck_scan_ns != 0u &&
+	     now_ns - runtime->last_stuck_scan_ns < UINT64_C(10000000000)) )
 		return;
 	runtime->last_stuck_scan_ns = now_ns;
 	for (index=0u; index<runtime->route_capacity; index++)
@@ -2676,8 +2676,7 @@ static void SparkModelResidentdReportStuckRoutes(
 			continue;
 		route->last_reported_state = route->state;
 		fprintf(stderr,
-			"ROUTE-STUCK id=%llu state=%u age_ms=%llu claimed=%u abandoned=%u gen=%llu
-",
+			"ROUTE-STUCK id=%llu state=%u age_ms=%llu claimed=%u abandoned=%u gen=%llu\n",
 			(unsigned long long)route->submission_id,
 			(unsigned)route->state,
 			(unsigned long long)((now_ns - route->active_since_ns) / 1000000ull),
