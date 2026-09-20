@@ -438,3 +438,24 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   mismatch path drops the completion WITHOUT releasing claims (the schema
   branch routes to READY_COMPLETION, but a mismatched identity on a RELEASED
   route prints "late completion... NOT fatal" and leaves claims held).
+
+## 2026-09-21n tick — #26 pinned to WAIT_ADAPTER; delivery chain audited
+
+- ROUTE-STUCK scanner deployed (28c9be0, build 8621ac88): first repro prints
+  `ROUTE-STUCK id=1000001 state=5 age_ms=36552 claimed=1 abandoned=0` —
+  DEFINITIVE: the submission was accepted with claims, the completion NEVER
+  ARRIVED (state 5 = WAIT_ADAPTER; a mismatched delivery would have
+  transitioned the route or printed "late completion"). Lost-delivery, not
+  identity-mismatch.
+- Worker audit: the completion worker's queue/wakeup logic is correct
+  (locked enqueue+signal, locked dequeue+wait; BUSY-on-full → the module
+  completes INLINE — no drop there). The lazy-work submit at module.c:3348 is
+  the remaining unaudited link: if THAT submit fails swallowed, the chain
+  never advances to its final event = a LOST CHAIN (upstream of any
+  completion).
+- NEXT INSTRUMENT (module level): CHAIN-STUCK — a chain whose final event
+  stays pending >30s prints slot/layer/lease/pending-event state; splits
+  "GPU never finished" (device-side hang) from "never scheduled" (lazy-work
+  submit swallowed). Then the fix lands at the true site.
+- Fleet this tick: engine alive (LAZYWORK progressing on other slots); the
+  stuck route holds its slot; serving degrades but doesn't cascade.
