@@ -2,7 +2,7 @@
   "checkpoint": {
     "config_sha256": "8be45ce0476004a3f529fd896115a4a2e800a129ad2d3ec05b16050f52e21879",
     "index_sha256": "74b0686a3d2891980d5e303251b075a3bccae2c2ff650747db2620a649b98fa8",
-    "path": "/mnt/model-warm/deepseek-v4.1-flash"
+    "path": "/home/spark6/dsv41-nvme/deepseek-v4.1-flash"
   },
   "defines_config_mismatches": [
     {
@@ -14,135 +14,20 @@
       "define": "SPARK_LLM_KV_GLOBAL_SCALE_CHANNELS",
       "note": "compressed-KV fp4 activation scale group width 16 per the official kernel",
       "value": 16
-    },
-    {
-      "checked": [
-        "SPARK_DSV41_FLASH_MODEL_HIDDEN_DIMENSION",
-        "SPARK_DSV41_FLASH_MODEL_LAYER_COUNT",
-        "SPARK_DSV41_FLASH_MODEL_OUTPUT_VOCAB_COUNT",
-        "SPARK_DSV41_FLASH_MODEL_RMS_NORM_EPSILON",
-        "SPARK_DSV41_FLASH_MODEL_EOS_TOKEN_ID",
-        "SPARK_DSV41_FLASH_MODEL_ATTENTION_HEAD_COUNT",
-        "SPARK_DSV41_FLASH_MODEL_HEAD_DIMENSION",
-        "SPARK_DSV41_FLASH_MODEL_QK_ROPE_HEAD_DIMENSION",
-        "SPARK_DSV41_FLASH_MODEL_QUERY_LORA_RANK",
-        "SPARK_DSV41_FLASH_MODEL_OUTPUT_LORA_RANK",
-        "SPARK_DSV41_FLASH_MODEL_OUTPUT_GROUP_COUNT",
-        "SPARK_DSV41_FLASH_MODEL_SLIDING_WINDOW",
-        "SPARK_DSV41_FLASH_MODEL_ROUTED_EXPERT_COUNT",
-        "SPARK_DSV41_FLASH_MODEL_EXPERTS_PER_TOKEN",
-        "SPARK_DSV41_FLASH_MODEL_MOE_INTERMEDIATE_DIMENSION",
-        "SPARK_DSV41_FLASH_MODEL_HC_MULT",
-        "SPARK_DSV41_FLASH_MODEL_INDEX_HEAD_COUNT",
-        "SPARK_DSV41_FLASH_MODEL_INDEX_HEAD_DIMENSION",
-        "SPARK_DSV41_FLASH_MODEL_INDEX_TOP_K",
-        "SPARK_DSV41_FLASH_MODEL_CANDIDATE_SOURCE_LAYER",
-        "SPARK_DSV41_FLASH_MODEL_CANDIDATE_BLOCK_COUNT",
-        "SPARK_DSV41_FLASH_MODEL_CANDIDATE_BLOCK_SIZE",
-        "SPARK_DSV41_FLASH_MODEL_ENGRAM_MODULE_COUNT"
-      ],
-      "family_header": "/home/spark6/lane-dsv41-rt/model-families/dsv41_flash/include/sparkpipe/spark_dsv41_flash_model.h"
-    },
-    {
-      "checkpoint_compress_ratios": [
-        0,
-        0,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1
-      ],
-      "family_header_ratio_table": [
-        0,
-        0,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        2,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        1,
-        0,
-        0
-      ],
-      "note": "the family header compression table disagrees with the checkpoint; the checkpoint and both published configs agree, so the reference follows the checkpoint"
     }
   ],
   "family": "dsv41",
   "fixtures": {
     "capital_of_france.t1r": {
-      "bytes": 1341054,
-      "sha256": "33a156f0526b2437f5e6416ac80e8d48359d2c882235596a4c8e9b071465e808"
+      "bytes": 1340135,
+      "sha256": "7c4c6213b60880c355d318687f34b4601c8efa6e6169b1aef83eae2a745cd876"
     },
     "count_up.t1r": {
-      "bytes": 3572247,
-      "sha256": "08516a563fc051ebcdb10cee973a0748efe94ef69b24083ed1f67333d8d0a1ea"
+      "bytes": 3572370,
+      "sha256": "3dede8533bc25c1d97397be259fd75e1f70429deb499677a96118557691f40d7"
     }
   },
-  "generated_utc": "2026-09-19T07:29:51Z",
+  "generated_utc": "2026-09-20T16:04:27Z",
   "generator": "t1_reference_decoder.py",
   "host": "spark6",
   "llm_defines_sha256": "8047799d934e7e001d7b88ae5e68a0a003b1cb9557ff3eb8e108a37ecb4ed5f7",
@@ -151,7 +36,7 @@
   "python_version": "3.12.3",
   "threading_env": {
     "MKL_NUM_THREADS": "8",
-    "OMP_NUM_THREADS": "1",
-    "OPENBLAS_NUM_THREADS": "1"
+    "OMP_NUM_THREADS": "8",
+    "OPENBLAS_NUM_THREADS": "8"
   }
 }
