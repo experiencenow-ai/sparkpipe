@@ -1181,7 +1181,24 @@ int main(int argc, char **argv)
 			}
 			sleep(1);
 		}
-		api_logf("engine_connected attempts=%u elapsed_ms=%llu", connect_attempt,
+		{
+			unsigned ready_attempt = 0;
+			for (;;)
+			{
+				if ( SparkModelBatchEngineAllRanksReady(S.engine) != 0u )
+					break;
+				if ( (ready_attempt % 10u) == 0u )
+					api_logf("engine_ranks_waiting — not every rank is connected+helloed on one generation yet");
+				if ( api_now_ms() - connect_started_ms >= connect_deadline_ms )
+				{
+					api_logf("api_exit reason=engine_ranks_not_ready_deadline");
+					return 1;
+				}
+				ready_attempt++;
+				sleep(1);
+			}
+		}
+		api_logf("engine_connected attempts=%u elapsed_ms=%llu all_ranks_ready=1", connect_attempt,
 			(unsigned long long)(api_now_ms() - connect_started_ms));
 	}
 	{

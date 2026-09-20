@@ -1960,6 +1960,8 @@ static SparkStatus SparkModelBatchDispatchKind(
 	now_ns = SparkModelBatchNowNs();
 	if ( engine->circuit_open_until_ns != 0u && now_ns < engine->circuit_open_until_ns )
 		SPARK_FAIL(SPARK_STATUS_BUSY);
+	if ( SparkModelPipelineClientAllRanksReady(engine->pipeline) == 0u )
+		SPARK_FAIL(SPARK_STATUS_BUSY);
 	state = SparkModelBatchReserveSubmission(engine,work_kind);
 	if ( state == 0 )
 		SPARK_FAIL(SPARK_STATUS_BUSY);
@@ -2287,6 +2289,13 @@ uint64_t SparkModelBatchEngineSessionFingerprint(
 {
 	return(engine == 0 ? 1u :
 	    SparkModelPipelineClientSessionFingerprint(engine->pipeline));
+}
+
+uint32_t SparkModelBatchEngineAllRanksReady(
+	const SparkModelBatchEngine *engine)
+{
+	return(engine == 0 ? 0u :
+	    SparkModelPipelineClientAllRanksReady(engine->pipeline));
 }
 
 SparkStatus SparkModelBatchEngineGetView(

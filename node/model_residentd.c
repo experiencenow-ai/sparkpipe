@@ -1127,6 +1127,9 @@ static void SparkModelResidentdResetRuntime(SparkModelResidentdRuntime *runtime)
 	runtime->wake_read_fd = -1;
 	runtime->wake_write_fd = -1;
 	runtime->client.fd = -1;
+	runtime->client.generation = SparkModelResidentdMonotonicTimeNs();
+	if ( runtime->client.generation == 0u )
+		runtime->client.generation = 1u;
 	atomic_init(&runtime->failed_status,SPARK_STATUS_OK);
 	pthread_mutex_init(&runtime->mutex,0);
 }
