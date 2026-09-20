@@ -572,3 +572,18 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - Verdict discipline: every diagnostic cycle recycled engines and reset the
   warm state — the green canary needs a QUIET window (no probes/recycles,
   ~10 min) then one probe. Next tick opens with exactly that.
+
+## 2026-09-21u tick — ledger #28: the pre-module stall (decisions without submissions)
+
+- The quiet-window verdict failed on a NEW shape: the admission layer accepts
+  (DECISION status=0, ids advancing) but ZERO submissions reach the module
+  (no reduce-submits, no leases, no CHAIN-TIME) — the request BUSY-fails at
+  the API after ~120s of accepted-but-never-submitted cycles.
+- My ring-transport theory was DISPROVEN honestly: the single-link TCP shape
+  (one connection from sparkf per rank) is the STEADY state this fleet served
+  with all night — the chains ride the weightd mesh, not this TCP path.
+- NEXT INSTRUMENT: ProcessSubmission-entry print on the residentd (did the
+  submission message arrive at the engine at all?) + a prepare-stage progress
+  print on the pipeline client — splits transport-stall (message never sent/
+  delivered) from prepare-stall (the pipeline's prepare handshake not
+  completing across ranks). Ledger #28 open.
