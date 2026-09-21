@@ -69,11 +69,12 @@ extern "C" {
 #define SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES (64u * 1024u)
 #define SPARK_WEIGHTD_MESH_MAX_BATCH_ROWS 128u
 #define SPARK_WEIGHTD_MESH_ROW_BYTES_MAX (16u * 1024u * 2u)
+#define SPARK_WEIGHTD_MESH_SLOT_ROWS 8u
 #define SPARK_WEIGHTD_MESH_SLOT_BYTES \
-    (SPARK_WEIGHTD_MESH_MAX_BATCH_ROWS * SPARK_WEIGHTD_MESH_ROW_BYTES_MAX)
+    (SPARK_WEIGHTD_MESH_SLOT_ROWS * SPARK_WEIGHTD_MESH_ROW_BYTES_MAX)
 #define SPARK_WEIGHTD_MESH_RANKS_PER_BAND 16u
 #define SPARK_WEIGHTD_MESH_RANKS SPARK_WEIGHTD_MESH_RANKS_PER_BAND
-#define SPARK_WEIGHTD_MESH_SLOTS_PER_RANK 16u
+#define SPARK_WEIGHTD_MESH_SLOTS_PER_RANK 2u
 #define SPARK_WEIGHTD_MESH_SLOTS_PER_BAND \
     (SPARK_WEIGHTD_MESH_RANKS_PER_BAND * SPARK_WEIGHTD_MESH_SLOTS_PER_RANK)
 #define SPARK_WEIGHTD_MESH_BANDS (2u * SPARK_WEIGHTD_MESH_MAX_LANES)
@@ -121,8 +122,18 @@ _Static_assert((SPARK_WEIGHTD_MESH_DOORBELL_RANK_CELLS + 2u * \
     "shipped cells must fit the doorbell page");
 #endif
 
+static inline uint32_t SparkWeightdMeshRewireNeeded(uint64_t record_boot_ns,
+    uint64_t wired_boot_ns,uint32_t send_qp_in_rts,uint32_t recv_qp_in_rts)
+{
+	if ( record_boot_ns != wired_boot_ns )
+		return(1u);
+	if ( send_qp_in_rts == 0u || recv_qp_in_rts == 0u )
+		return(1u);
+	return(0u);
+}
+
 #define SPARK_WEIGHTD_EXPERT_COUNT_MAX 40960u
-#define SPARK_WEIGHTD_LAZY_POOL_BYTES_DEFAULT (8ull * 1024ull * 1024ull * 1024ull)
+
 #define SPARK_WEIGHTD_EXPERT_BYTES_MAX (64ull * 1024ull * 1024ull)
 #define SPARK_WEIGHTD_EXPERT_MANIFEST_MAGIC UINT32_C(0x58504557)
 #define SPARK_WEIGHTD_EXPERT_MANIFEST_VERSION 1u
@@ -274,6 +285,7 @@ typedef struct SparkWeightdIpcAttachLazyResult
     uint64_t mesh_send_buffer_addr;
     uint64_t mesh_send_buffer_bytes;
     uint8_t manifest_sha256[32];
+    int pool_fd;
 } SparkWeightdIpcAttachLazyResult;
 
 typedef struct SparkWeightdIpcEpochExport
@@ -550,6 +562,7 @@ typedef struct SparkWeightdLazyAttachResult
     uint32_t mesh_ready;
     uint64_t mesh_send_buffer_addr;
     uint64_t mesh_send_buffer_bytes;
+    int pool_fd;
     void *mesh_mapping;
     uint64_t chunk_bytes;
     uint32_t chunk_count;

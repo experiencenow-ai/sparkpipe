@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include "sparkpipe/spark_tp_device_collective.h"
+#include "sparkpipe/spark_tp_chain_ordinal.h"
 #include "sparkpipe/spark_weightd.h"
 
 #define FUZZ_MAX_RANKS SPARK_TP_DEVICE_COLLECTIVE_MAX_DEGREE
@@ -449,6 +450,86 @@ static uint32_t FuzzAllRanks(uint32_t *run)
 	return(g_rank_count);
 }
 
+static void FuzzEdgeOrdinal(void)
+{
+	uint64_t ordinal,capacity;
+	uint32_t lanes = 4u;
+	uint32_t ops = 6946816u;
+	uint32_t last_op = ops - 1u;
+	capacity = SparkTpChainIdCapacity(lanes,ops);
+	CHECK( capacity != 0u, "chain id capacity nonzero" );
+	CHECK( capacity < 162968247ull,
+	    "the fleet counter that wedged 2026-09-21 sits past the wall" );
+	CHECK( SparkTpChainOrdinal(capacity,lanes,2u,ops,last_op,&ordinal) ==
+	    SPARK_STATUS_OK, "last chain id inside the ordinal space" );
+	CHECK( SparkTpChainOrdinal(capacity + 1ull,lanes,2u,ops,last_op,&ordinal) ==
+	    SPARK_STATUS_CAPACITY_EXCEEDED,
+	    "chain id past the wall rejected with capacity_exceeded (the wedge shape)" );
+	CHECK( SparkTpChainOrdinal(1ull,lanes,2u,ops,0u,&ordinal) ==
+	    SPARK_STATUS_OK, "first chain id accepted" );
+}
+
+static void FuzzEdgeIdPolicy(void)
+{
+	uint64_t next_id = 1000000u;
+	uint64_t capacity = SparkTpChainIdCapacity(4u,6946816u);
+	uint32_t accepted = 0u;
+	uint32_t attempts;
+	for ( attempts = 0u; attempts < 100000u; attempts++ )
+	{
+		if ( (attempts % 3u) != 0u )
+		{
+			next_id++;
+			accepted++;
+		}
+	}
+	CHECK( next_id == (1000000ull + accepted),
+	    "failed dispatches do not burn chain ids (retry storms cannot reach the wall)" );
+	CHECK( next_id < capacity, "id consumption stays inside the ordinal space" );
+	{
+		uint64_t same_session = 1000000u + 50000u;
+		uint64_t crash_skip = same_session + 10001u;
+		CHECK( crash_skip < capacity,
+		    "same-session restart skips the crash window and stays under the wall" );
+		CHECK( SparkTpChainOrdinal(crash_skip,4u,2u,6946816u,6946815u,&next_id) ==
+		    SPARK_STATUS_OK, "same-session reseed id still inside the ordinal space" );
+	}
+	CHECK( 1000000ull < capacity,
+	    "cross-session rebase always restarts below the wall" );
+}
+
+static void FuzzEdgeRewirePolicy(void)
+{
+	CHECK( SparkWeightdMeshRewireNeeded(7u,7u,1u,1u) == 0u,
+	    "healthy peer untouched" );
+	CHECK( SparkWeightdMeshRewireNeeded(8u,7u,1u,1u) != 0u,
+	    "record change rewires" );
+	CHECK( SparkWeightdMeshRewireNeeded(7u,7u,0u,1u) != 0u,
+	    "send qp dead on same record rewires (2026-09-21 missing-set wedge class)" );
+	CHECK( SparkWeightdMeshRewireNeeded(7u,7u,1u,0u) != 0u,
+	    "recv qp dead on same record rewires" );
+}
+
+static void FuzzEdgeGeometry(void)
+{
+	uint32_t band;
+	CHECK( (SPARK_WEIGHTD_MESH_SLOTS_PER_RANK &
+	        (SPARK_WEIGHTD_MESH_SLOTS_PER_RANK - 1u)) == 0u,
+	    "slots per rank power of two (parity mask contract)" );
+	CHECK( SPARK_WEIGHTD_MESH_SLOT_ROWS *
+	        SPARK_WEIGHTD_MESH_ROW_BYTES_MAX == SPARK_WEIGHTD_MESH_SLOT_BYTES,
+	    "slot bytes derive from rows x row max" );
+	for ( band = 0u; band < SPARK_WEIGHTD_MESH_BANDS; band++ )
+	{
+		uint64_t band_end = ((uint64_t)band + 1ull) *
+		    SPARK_WEIGHTD_MESH_SLOT_BYTES * SPARK_WEIGHTD_MESH_SLOTS_PER_BAND;
+		CHECK( band_end <= SPARK_WEIGHTD_MESH_DOORBELL_OFFSET,
+		    "band writes stay inside the buffer" );
+	}
+	CHECK( SPARK_WEIGHTD_MESH_REGION_BYTES <= (1024ull * 1024ull * 1024ull),
+	    "mesh region at most 1GiB per daemon (right-sized 2026-09-21 ruling)" );
+}
+
 static void FuzzBasic(void)
 {
 	uint32_t run[FUZZ_MAX_RANKS];
@@ -812,6 +893,10 @@ int main(int argc, char **argv)
 	}
 	for ( rank = 0u; rank < ranks; rank++ )
 		CHECK( FuzzCreateRank(rank) == SPARK_STATUS_OK, "rank create" );
+	FuzzEdgeOrdinal();
+	FuzzEdgeIdPolicy();
+	FuzzEdgeRewirePolicy();
+	FuzzEdgeGeometry();
 	for ( rank = 0u; rank < ranks; rank++ )
 		g_tasks[rank].rank = &g_ranks[rank];
 	wedge = 0u;

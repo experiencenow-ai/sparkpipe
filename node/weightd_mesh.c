@@ -3,6 +3,7 @@
 #include "sparkpipe/spark_error_site.h"
 #include "sparkpipe/spark_weightd.h"
 #include <infiniband/verbs.h>
+#include <cuda.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -267,6 +268,7 @@ static pthread_mutex_t SparkWeightdMeshWireLock = PTHREAD_MUTEX_INITIALIZER;
 static void SparkWeightdMeshTryWireLocked(void)
 {
     SparkWeightdMeshRecord peer_records[SPARK_WEIGHTD_MESH_PEERS];
+    uint32_t force_wire[SPARK_WEIGHTD_MESH_PEERS];
     uint32_t peer;
     uint32_t peer_rank;
     uint32_t my_index_in_peer;
@@ -276,6 +278,11 @@ static void SparkWeightdMeshTryWireLocked(void)
     changed = weightd_mesh.mesh_ready == 0u;
     for (peer = 0u; peer < SPARK_WEIGHTD_MESH_PEERS; peer++)
     {
+        struct ibv_qp_attr attr;
+        struct ibv_qp_init_attr init;
+        uint32_t send_in_rts = 1u;
+        uint32_t recv_in_rts = 1u;
+        force_wire[peer] = 0u;
         peer_rank = peer < weightd_mesh.local_rank ? peer : peer + 1u;
         if (SparkWeightdMeshReadPeerRecord(peer_rank,
                 &peer_records[peer]) != SPARK_STATUS_OK)
@@ -285,14 +292,47 @@ static void SparkWeightdMeshTryWireLocked(void)
             continue;
         }
         if (peer_records[peer].boot_ns != weightd_mesh.wired_boot_ns[peer])
+        {
             changed = 1u;
+            force_wire[peer] = 1u;
+            continue;
+        }
+        if (weightd_mesh.send_qps[peer] != 0)
+        {
+            memset(&attr,0,sizeof(attr));
+            memset(&init,0,sizeof(init));
+            if (ibv_query_qp(weightd_mesh.send_qps[peer],&attr,
+                    IBV_QP_STATE,&init) != 0 ||
+                attr.qp_state != IBV_QPS_RTS)
+                send_in_rts = 0u;
+        }
+        if (weightd_mesh.recv_qps[peer] != 0)
+        {
+            memset(&attr,0,sizeof(attr));
+            memset(&init,0,sizeof(init));
+            if (ibv_query_qp(weightd_mesh.recv_qps[peer],&attr,
+                    IBV_QP_STATE,&init) != 0 ||
+                attr.qp_state != IBV_QPS_RTS)
+                recv_in_rts = 0u;
+        }
+        force_wire[peer] = SparkWeightdMeshRewireNeeded(
+            peer_records[peer].boot_ns,
+            weightd_mesh.wired_boot_ns[peer],send_in_rts,recv_in_rts);
+        if (force_wire[peer] != 0u)
+        {
+            changed = 1u;
+            if (send_in_rts == 0u || recv_in_rts == 0u)
+                fprintf(stderr,
+                    "WD-QP-REPAIR rank=%u peer=%u — qp left RTS after errors; re-transitioning on the same record\n",
+                    weightd_mesh.local_rank,peer);
+        }
     }
     if (changed == 0u)
         return;
     wired = 1u;
     for (peer = 0u; peer < SPARK_WEIGHTD_MESH_PEERS; peer++)
     {
-        if (peer_records[peer].boot_ns == weightd_mesh.wired_boot_ns[peer])
+        if (force_wire[peer] == 0u)
             continue;
         peer_rank = peer < weightd_mesh.local_rank ? peer : peer + 1u;
         my_index_in_peer = weightd_mesh.local_rank < peer_rank ?
@@ -481,6 +521,14 @@ SparkStatus SparkWeightdMeshInit(uint32_t rank, const char *interface_name,
         fprintf(stderr,"weightd-mesh: mr failed errno=%d\n",errno);
         return SPARK_STATUS_DRIVER_LOAD_ERROR;
     }
+    printf("weightd-mesh region bytes=%llu (bands=%u ranks=%u slots/rank=%u rows/slot=%u slot_bytes=%u)\n",
+        (unsigned long long)SPARK_WEIGHTD_MESH_REGION_BYTES,
+        (unsigned)SPARK_WEIGHTD_MESH_BANDS,
+        (unsigned)SPARK_WEIGHTD_MESH_RANKS_PER_BAND,
+        (unsigned)SPARK_WEIGHTD_MESH_SLOTS_PER_RANK,
+        (unsigned)SPARK_WEIGHTD_MESH_SLOT_ROWS,
+        (unsigned)SPARK_WEIGHTD_MESH_SLOT_BYTES);
+    fflush(stdout);
     SparkWeightdMeshPhase("recv-mr-registered");
     weightd_mesh.seq_mr = ibv_reg_mr(weightd_mesh.protection_domain,
         &weightd_mesh.seq_storage,sizeof(weightd_mesh.seq_storage),
@@ -545,6 +593,59 @@ SparkStatus SparkWeightdMeshInit(uint32_t rank, const char *interface_name,
     SparkWeightdMeshPhase("published");
     weightd_mesh.mesh_active = 1u;
     return SPARK_STATUS_BUSY;
+}
+
+void SparkWeightdMeshDeviceProbe(const char *tag,void *device_pointer,
+    uint64_t bytes)
+{
+    struct ibv_mr *mr;
+    if ( getenv("SPARK_WEIGHTD_MESH_DEVICE_PROBE") == 0 ||
+         weightd_mesh.protection_domain == 0 || device_pointer == 0 ||
+         bytes == 0ull )
+        return;
+    mr = ibv_reg_mr(weightd_mesh.protection_domain,device_pointer,(size_t)bytes,
+        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+    if ( mr != 0 )
+    {
+        fprintf(stderr,
+            "WD-DEVPROBE VA-OK tag=%s ptr=%llx bytes=%llu rkey=%u lkey=%u\n",
+            tag,(unsigned long long)(uintptr_t)device_pointer,
+            (unsigned long long)bytes,mr->rkey,mr->lkey);
+        (void)ibv_dereg_mr(mr);
+    }
+    else
+    {
+        int dmabuf_fd = -1;
+        struct ibv_mr *dmabuf_mr;
+        fprintf(stderr,
+            "WD-DEVPROBE VA-FAIL tag=%s errno=%d — trying the dmabuf route\n",
+            tag,errno);
+        if ( cuMemGetHandleForAddressRange((void *)&dmabuf_fd,
+                 (CUdeviceptr)(uintptr_t)device_pointer,(size_t)bytes,
+                 CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,0ull) == CUDA_SUCCESS &&
+             dmabuf_fd >= 0 )
+        {
+            dmabuf_mr = ibv_reg_dmabuf_mr(weightd_mesh.protection_domain,0u,
+                (size_t)bytes,(uint64_t)(uintptr_t)device_pointer,dmabuf_fd,
+                IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+            if ( dmabuf_mr != 0 )
+                fprintf(stderr,
+                    "WD-DEVPROBE DMABUF-OK tag=%s fd=%d rkey=%u lkey=%u — GPUDirect via dmabuf WORKS; S2.5 unblocked\n",
+                    tag,dmabuf_fd,dmabuf_mr->rkey,dmabuf_mr->lkey);
+            else
+                fprintf(stderr,
+                    "WD-DEVPROBE DMABUF-FAIL tag=%s fd=%d errno=%d — S2.5 dead on this hardware; the 100us route is the graph path only\n",
+                    tag,dmabuf_fd,errno);
+            if ( dmabuf_mr != 0 )
+                (void)ibv_dereg_mr(dmabuf_mr);
+            (void)close(dmabuf_fd);
+        }
+        else
+            fprintf(stderr,
+                "WD-DEVPROBE DMABUF-HANDLE-FAIL tag=%s fd=%d — no dmabuf handle for the range; S2.5 dead on this hardware\n",
+                tag,dmabuf_fd);
+    }
+    fflush(stderr);
 }
 
 uint32_t SparkWeightdMeshReady(void)

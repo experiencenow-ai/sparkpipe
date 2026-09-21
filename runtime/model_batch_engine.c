@@ -1960,6 +1960,8 @@ static SparkStatus SparkModelBatchDispatchKind(
 	now_ns = SparkModelBatchNowNs();
 	if ( engine->circuit_open_until_ns != 0u && now_ns < engine->circuit_open_until_ns )
 		SPARK_FAIL(SPARK_STATUS_BUSY);
+	if ( SparkModelPipelineClientAllRanksReady(engine->pipeline) == 0u )
+		SPARK_FAIL(SPARK_STATUS_BUSY);
 	state = SparkModelBatchReserveSubmission(engine,work_kind);
 	if ( state == 0 )
 		SPARK_FAIL(SPARK_STATUS_BUSY);
@@ -1967,18 +1969,21 @@ static SparkStatus SparkModelBatchDispatchKind(
 	if ( engine->next_submission_id == 0u )
 	{
 		state->active = 0u;
+		engine->next_submission_id--;
 		SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
 	}
 	lane_count = SparkModelBatchBuildSubmission(engine,work_kind,&submission);
 	if ( lane_count == 0u )
 	{
 		state->active = 0u;
+		engine->next_submission_id--;
 		SPARK_FAIL(SPARK_STATUS_NOT_FOUND);
 	}
 	status = SparkModelPipelineClientSubmit(engine->pipeline,&submission);
 	if ( status != SPARK_STATUS_OK )
 	{
 		state->active = 0u;
+		engine->next_submission_id--;
 		/* BUSY is transient backpressure (a rank mid-chain); it must not
 		 * count toward the circuit — the circuit exists for real faults */
 		if ( status != SPARK_STATUS_BUSY )
@@ -2277,6 +2282,20 @@ uint64_t SparkModelBatchEnginePeekSubmissionId(
 	const SparkModelBatchEngine *engine)
 {
 	return(engine == 0 ? 0u : engine->next_submission_id);
+}
+
+uint64_t SparkModelBatchEngineSessionFingerprint(
+	const SparkModelBatchEngine *engine)
+{
+	return(engine == 0 ? 1u :
+	    SparkModelPipelineClientSessionFingerprint(engine->pipeline));
+}
+
+uint32_t SparkModelBatchEngineAllRanksReady(
+	const SparkModelBatchEngine *engine)
+{
+	return(engine == 0 ? 0u :
+	    SparkModelPipelineClientAllRanksReady(engine->pipeline));
 }
 
 SparkStatus SparkModelBatchEngineGetView(

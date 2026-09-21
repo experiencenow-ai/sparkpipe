@@ -184,8 +184,16 @@ static void SparkModelPipelineClientSetFailure(
 	pipeline->failed_stage_index = stage_index;
 	fprintf(stderr,"pipeline set-failure status=%u stage=%u\n",
 		(unsigned)status,(unsigned)stage_index);
-	for (rank=0u; rank<pipeline->rank_count; rank++)
-		SparkModelResidentClientFailStop(pipeline->clients[rank]);
+	if ( stage_index < pipeline->rank_count )
+	{
+		SparkModelResidentClientFailStop(pipeline->clients[stage_index]);
+		fprintf(stderr,
+			"pipeline rank-scoped failure: only rank %u connection dropped (16-way teardown was the #22 reconnect storm)\n",
+			(unsigned)stage_index);
+	}
+	else
+		for (rank=0u; rank<pipeline->rank_count; rank++)
+			SparkModelResidentClientFailStop(pipeline->clients[rank]);
 	for (slot=0u; slot<pipeline->runtime_limits.resident_sequence_capacity;
 		slot++)
 	{
@@ -775,6 +783,22 @@ uint64_t SparkModelPipelineClientControlGeneration(
 			generation = view.client_generation;
 	}
 	return(generation);
+}
+
+uint32_t SparkModelPipelineClientAllRanksReady(
+	const SparkModelPipelineClient *pipeline)
+{
+	SparkModelResidentClientView view;
+	uint32_t rank;
+	if ( pipeline == 0 || pipeline->rank_count == 0u )
+		return(0u);
+	for (rank=0u; rank<pipeline->rank_count; rank++)
+	{
+		if ( SparkModelResidentClientGetView(pipeline->clients[rank],&view) != SPARK_STATUS_OK ||
+		     view.connected == 0u || view.client_generation == 0u )
+			return(0u);
+	}
+	return(1u);
 }
 
 uint64_t SparkModelPipelineClientSessionFingerprint(

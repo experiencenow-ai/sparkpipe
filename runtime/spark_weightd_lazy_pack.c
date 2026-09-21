@@ -114,7 +114,8 @@ static SparkStatus lazy_pack_initialize(SparkWeightdLazyPack *pack,int32_t fd,co
 			    pack->attached.arena_generation,&epoch_fd,timeout);
 			{
 				status = SparkWeightdMapCreate(pack->client,
-				    &pack->attached,epoch_fd,-1,&pack->map);
+				    &pack->attached,epoch_fd,
+				    pack->attached.pool_fd,&pack->map);
 			}
 		}
 	if ( status == SPARK_STATUS_OK )

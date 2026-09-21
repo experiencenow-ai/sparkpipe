@@ -157,6 +157,8 @@ typedef struct SparkModelResidentdClient
 typedef struct SparkModelResidentdRoute
 {
 	uint32_t active;
+	uint64_t active_since_ns;
+	uint32_t last_reported_state;
 	uint32_t result_queued;
 	uint32_t abandoned;
 	uint32_t state;
@@ -209,6 +211,7 @@ typedef struct SparkModelResidentdRuntime
 	SparkModelResidentdSequenceSlot *sequence_slots;
 	uint8_t *route_messages;
 	uint32_t route_capacity;
+	uint64_t last_stuck_scan_ns;
 	uint32_t route_message_capacity;
 	uint32_t next_adapter_route;
 	uint32_t committed_fifo_head;
@@ -1028,6 +1031,11 @@ static void SparkModelResidentdCompletion(
 	pthread_mutex_lock(&runtime->mutex);
 	route = SparkModelResidentdFindRoute(runtime,completion->submission_id);
 	status = route == 0 ? SPARK_STATUS_NOT_FOUND : SPARK_STATUS_OK;
+	if ( route == 0 )
+		fprintf(stderr,
+			"COMPLETION-NOROUTE id=%llu status=%u — completion arrived, no route\n",
+			(unsigned long long)completion->submission_id,
+			(unsigned)completion->status);
 	failure_reason = route == 0 ? SPARK_MODEL_RESIDENTD_FAILURE_COMPLETION_ROUTE : 0u;
 	if ( status == SPARK_STATUS_OK )
 	{
@@ -1127,6 +1135,9 @@ static void SparkModelResidentdResetRuntime(SparkModelResidentdRuntime *runtime)
 	runtime->wake_read_fd = -1;
 	runtime->wake_write_fd = -1;
 	runtime->client.fd = -1;
+	runtime->client.generation = SparkModelResidentdMonotonicTimeNs();
+	if ( runtime->client.generation == 0u )
+		runtime->client.generation = 1u;
 	atomic_init(&runtime->failed_status,SPARK_STATUS_OK);
 	pthread_mutex_init(&runtime->mutex,0);
 }
@@ -1599,6 +1610,8 @@ static SparkModelResidentdRoute *SparkModelResidentdReserveRoute(
 		{
 			memset(route,0,sizeof(*route));
 			route->active = 1u;
+			route->active_since_ns = SparkModelResidentdMonotonicTimeNs();
+			route->last_reported_state = 0u;
 			route->slot_index = index;
 			route->message_id = message_id;
 			route->submission_id = submission->submission_id;
@@ -1747,9 +1760,40 @@ static SparkStatus SparkModelResidentdProcessHello(
 	}
 	if ( status == SPARK_STATUS_OK && queue_status == SPARK_STATUS_OK )
 	{
+		pthread_mutex_lock(&runtime->mutex);
 		runtime->client.hello_complete = 1u;
 		runtime->client.last_submission_id = 0u;
 		runtime->client.pending_client_reset = runtime->client.generation;
+		{
+			uint32_t slot_index;
+			uint32_t released_claims = 0u;
+			if ( runtime->sequence_slots != 0 )
+				for (slot_index=0u;
+					slot_index<runtime->runtime_limits.resident_sequence_capacity;
+					slot_index++)
+					if ( runtime->sequence_slots[slot_index].active_owner != 0u )
+					{
+						runtime->sequence_slots[slot_index].active_owner = 0u;
+						released_claims++;
+					}
+			if ( runtime->routes != 0 )
+				for (slot_index=0u; slot_index<runtime->route_capacity;
+					slot_index++)
+					if ( runtime->routes[slot_index].active != 0u &&
+						runtime->routes[slot_index].client_generation !=
+							runtime->client.generation )
+					{
+						runtime->routes[slot_index].resident_slots_claimed = 0u;
+						if ( runtime->routes[slot_index].state !=
+							SPARK_MODEL_RESIDENTD_ROUTE_RESERVED )
+							runtime->routes[slot_index].abandoned = 1u;
+					}
+			if ( released_claims != 0u )
+				fprintf(stderr,
+					"model_residentd hello-reset released %u orphaned slot claims; stale-generation routes abandoned\n",
+					released_claims);
+		}
+		pthread_mutex_unlock(&runtime->mutex);
 		fprintf(stderr,"model_residentd client reset armed generation=%llu resumed=%u\n",
 			(unsigned long long)runtime->client.generation,
 			(unsigned)runtime->client.reset_done);
@@ -1788,6 +1832,9 @@ static SparkStatus SparkModelResidentdProcessSubmission(
 	SparkStatus cleanup_status,queue_status,resolution_status,status;
 	uint32_t cache_committed,cache_prepared;
 	wire = (const SparkModelResidentIpcSubmit *)message;
+	fprintf(stderr,"SUBMIT-ARRIVED id=%llu bytes=%u decision=%u\n",
+		(unsigned long long)(message_bytes >= 24u ? wire->submission_id : 0ull),
+		(unsigned)message_bytes,(unsigned)decision_required);
 	status = SparkModelResidentIpcDecodeSubmission(message,message_bytes,&submission);
 	if ( status == SPARK_STATUS_OK && decision_required == 0u )
 		status = SparkModelResidentIpcValidateDirectSubmitDescriptor(
@@ -2617,9 +2664,66 @@ static SparkStatus SparkModelResidentdProgressRoutes(
 	SPARK_RETURN(status);
 }
 
+static void SparkModelResidentdReportStuckRoutes(
+	SparkModelResidentdRuntime *runtime)
+{
+	uint64_t now_ns = SparkModelResidentdMonotonicTimeNs();
+	uint32_t index;
+	uint32_t stuck = 0u;
+	if ( runtime->routes == 0 || (runtime->last_stuck_scan_ns != 0u &&
+	     now_ns - runtime->last_stuck_scan_ns < UINT64_C(10000000000)) )
+		return;
+	runtime->last_stuck_scan_ns = now_ns;
+	for (index=0u; index<runtime->route_capacity; index++)
+	{
+		SparkModelResidentdRoute *route = &runtime->routes[index];
+		if ( route->active == 0u || route->active_since_ns == 0u ||
+		     now_ns - route->active_since_ns < UINT64_C(30000000000) )
+			continue;
+		if ( route->state != route->last_reported_state )
+		{
+			route->last_reported_state = route->state;
+			fprintf(stderr,
+				"ROUTE-STUCK id=%llu state=%u age_ms=%llu claimed=%u abandoned=%u gen=%llu\n",
+				(unsigned long long)route->submission_id,
+				(unsigned)route->state,
+				(unsigned long long)((now_ns - route->active_since_ns) / 1000000ull),
+				(unsigned)route->resident_slots_claimed,
+				(unsigned)route->abandoned,
+				(unsigned long long)route->client_generation);
+			stuck++;
+		}
+		if ( now_ns - route->active_since_ns >= UINT64_C(120000000000) )
+		{
+			SparkModelServingCompletion failed;
+			memset(&failed,0,sizeof(failed));
+			failed.abi_version = SPARK_MODEL_SERVING_ADAPTER_ABI_VERSION;
+			failed.descriptor_bytes = SPARK_MODEL_SERVING_COMPLETION_BYTES;
+			failed.status = SPARK_STATUS_NOT_FOUND;
+			failed.submission_id = route->submission_id;
+			failed.request_id = route->request_id;
+			failed.sequence_id = route->sequence_id;
+			failed.sequence_position = route->sequence_position;
+			failed.control_generation = route->submission.control_generation;
+			failed.transaction_id = route->submission.transaction_id;
+			failed.dispatch_generation = route->submission.dispatch_generation;
+			failed.request_generation = route->submission.request_generation;
+			failed.step_generation = route->submission.step_generation;
+			fprintf(stderr,
+				"ROUTE-REAPED id=%llu state=%u — stuck past 120s; completing NOT_FOUND and releasing claims\n",
+				(unsigned long long)route->submission_id,
+				(unsigned)route->state);
+			route->completion = failed;
+			route->state = SPARK_MODEL_RESIDENTD_ROUTE_READY_COMPLETION;
+		}
+	}
+	(void)stuck;
+}
+
 static SparkStatus SparkModelResidentdProgress(SparkModelResidentdRuntime *runtime)
 {
 	SparkStatus status;
+	SparkModelResidentdReportStuckRoutes(runtime);
 	if ( runtime->client.pending_client_reset != 0u &&
 		runtime->adapter_library.adapter_interface.reset != 0 )
 	{

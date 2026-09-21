@@ -424,6 +424,63 @@ static void check_many_exports(void)
 	assert(unlink(manifest) == 0 && unlink(path) == 0 && rmdir(root) == 0);
 }
 
+static void check_pooled_attach(void)
+{
+	char root[] = "/tmp/weightd-pool-XXXXXX",path[256],manifest[272],socket_path[256];
+	SparkWeightdServerConfig config = {0};
+	SparkWeightdLazyAttachRequest request = {0};
+	SparkWeightdLazyAttachResult result;
+	SparkWeightdExpertKey keys[65];
+	SparkWeightdWorkingSetResult working;
+	SparkWeightdExportBatch batch;
+	TestServer state = {0};
+	pthread_t thread;
+	SparkWeightdClient *a,*b;
+	uint64_t generation;
+	uint32_t i;
+	assert(mkdtemp(root) != 0);
+	snprintf(path,sizeof(path),"%s/pack",root);
+	snprintf(manifest,sizeof(manifest),"%s.experts",path);
+	snprintf(socket_path,sizeof(socket_path),"%s/socket",root);
+	write_many(path,manifest);
+	config.socket_path = socket_path;
+	config.device_bytes_max = (66u * CHUNK);
+	assert(SparkWeightdServerCreate(&config,&state.server) == SPARK_STATUS_OK);
+	assert(pthread_create(&thread,0,run_server,&state) == 0);
+	assert(SparkWeightdClientConnect(socket_path,&a,0) == SPARK_STATUS_OK);
+	request.identity.abi_version = SPARK_WEIGHTD_IPC_ABI_VERSION;
+	request.identity.arena_bytes = (65u * CHUNK);
+	memcpy(request.identity.model,"pooled-attach-test",19u);
+	memset(request.identity.pack_sha256,'a',64u);
+	assert(SparkWeightdIdentityPrepare(&request.identity) == SPARK_STATUS_OK);
+	snprintf(request.pack_path,sizeof(request.pack_path),"%s",path);
+	request.expert_pool_bytes = (66u * CHUNK);
+	assert(SparkWeightdClientAttachLazy(a,&request,&result,TIMEOUT) == SPARK_STATUS_OK);
+	assert(result.status == SPARK_STATUS_OK && result.expert_count == 65u);
+	assert(result.pool_fd >= 0);
+	assert(close(result.pool_fd) == 0);
+	generation = result.arena_generation;
+	for (i=0u; i<65u; i++)
+		keys[i] = (SparkWeightdExpertKey){0u,i};
+	assert(SparkWeightdClientAcquire(a,generation,keys,65u,&working,TIMEOUT) == SPARK_STATUS_OK);
+	assert(SparkWeightdClientExportLeaseBatch(a,generation,working.lease_identifier,0u,&batch,TIMEOUT) == SPARK_STATUS_OK);
+	assert(batch.status == SPARK_STATUS_OK && batch.lease_chunk_count == 0u && batch.batch_count == 0u);
+	assert(SparkWeightdClientRelease(a,generation,working.lease_identifier,&working,TIMEOUT) == SPARK_STATUS_OK);
+	assert(SparkWeightdClientConnect(socket_path,&b,0) == SPARK_STATUS_OK);
+	memset(&result,0,sizeof(result));
+	assert(SparkWeightdClientAttachLazy(b,&request,&result,TIMEOUT) == SPARK_STATUS_OK);
+	assert(result.status == SPARK_STATUS_OK && result.arena_generation == generation);
+	assert(result.pool_fd >= 0);
+	assert(close(result.pool_fd) == 0);
+	SparkWeightdClientClose(b);
+	SparkWeightdClientClose(a);
+	__atomic_store_n(&state.stop,1,__ATOMIC_SEQ_CST);
+	assert(pthread_join(thread,0) == 0);
+	SparkWeightdServerDestroy(state.server);
+	assert(spark_stub_cuda_outstanding_allocs() == 0u);
+	assert(unlink(manifest) == 0 && unlink(path) == 0 && rmdir(root) == 0);
+}
+
 static SparkStatus reject_manifest(const SparkWeightdManifest *manifest,void *context)
 {
 	uint32_t *calls = (uint32_t *)context;
@@ -537,6 +594,7 @@ int main(void)
 	assert(spark_stub_cuda_outstanding_allocs() == 0u);
 	assert(unlink(manifest) == 0 && unlink(path) == 0 && rmdir(root) == 0);
 	check_many_exports();
-	puts("PASS working-set IPC: all ranges, leases, rollback, scoped imports and 65-chunk exports");
+	check_pooled_attach();
+	puts("PASS working-set IPC: all ranges, leases, rollback, scoped imports, 65-chunk exports and pooled single-alloc attach");
 	return(0);
 }

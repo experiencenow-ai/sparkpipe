@@ -148,7 +148,8 @@ SparkStatus SparkWeightdAttachPack(const SparkWeightdPackSlice *slice,
             strlen(pack_path) + 1u <= SPARK_WEIGHTD_PATH_BYTES
                 ? strlen(pack_path) + 1u
                 : SPARK_WEIGHTD_PATH_BYTES);
-        lazy_request.expert_pool_bytes = SPARK_WEIGHTD_LAZY_POOL_BYTES_DEFAULT;
+        lazy_request.expert_pool_bytes =
+            identity.arena_bytes + (2ull * 1024ull * 1024ull);
         memset(&lazy_result, 0, sizeof(lazy_result));
         status = SparkWeightdClientAttachLazy(outcome->client,
             &lazy_request, &lazy_result, timeout_nanoseconds);
