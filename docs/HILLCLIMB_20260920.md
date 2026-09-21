@@ -1415,3 +1415,20 @@ ALSO THIS TICK (all committed 5ef662d..81c476e):
 FLEET: driver 79aa97f1 16/16, engines survive chain failures, KV lanes
 self-heal, single API discipline (two APIs fight for the single-client
 slots — kill all, start one after residentd boots).
+
+## 09-22 02:20 TICK — FIRST COMPLETE GRAPH CHAIN: status=0, 91 rounds, 330ms/round MEASURED
+
+The re-arm machinery worked end to end: first chain stalled 77/91 (streak=1)
+→ GRAPH-REARM → retry chain COMPLETED (CHAIN-TIME slot=2 status=0 total_ms
+=30078 rounds=91; GRAPH-REPLAY-TIME ns=30064845812). allreduce_ms=0.33
+(host-side). Honest grade: 330ms/round = WORSE than eager (0.55ms) — the
+graph path is CORRECT but SLOW: 91 publishes burst at GPU speed while the
+waits pass at relay-arrival rate (~3 rounds/s per the timing). Suspects:
+(a) the weightd relay's per-pass handling under bursts (doorbell watermark
+vs missed-seq resync pacing), (b) __nanosleep(200) spin granularity in the
+wait kernel (operator no-sleeps law applies), (c) .cv load latency × poll
+loop shape. NEXT LADDER STEP: instrument per-round arrival (timestamp the
+tail-visible moment in the wait kernel via %globaltimer into diag), then
+fix the pacing class. The 77/91 stall+garbage error_word from the previous
+tick did NOT recur on the retry — cold-start-class, keep the repro in mind
+but the pacing is the throughput killer now.
