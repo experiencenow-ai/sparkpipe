@@ -261,6 +261,7 @@ TEST_NAMES := \
     test_tokenizer_sidecar \
     test_pipeline_runtime \
     test_serving_fault_fuzz \
+    test_kv_lane_fuzz \
     test_dsv4_serving_adapter \
     test_dsv4_tp16_serving_adapter \
 	test_dsv4_tp4_pp4_serving_adapter \
@@ -991,6 +992,9 @@ build/test_tp_device_collective_mock: tests/test_tp_device_collective_mock.c rin
 
 build/test_tp_allreduce_fuzz: tests/test_tp_allreduce_fuzz.c ring/transport/tp_device_collective.c tests/cuda_stub/cuda_runtime_stub.c $(CORE_LIBRARY)
 	$(CC) $(CPPFLAGS) -Itests/cuda_stub $(CFLAGS) tests/test_tp_allreduce_fuzz.c ring/transport/tp_device_collective.c tests/cuda_stub/cuda_runtime_stub.c $(CORE_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@
+
+build/test_kv_lane_fuzz: tests/test_kv_lane_fuzz.c build/libsparkpipe_model_common.a build/libsparkpipe_core.a
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_kv_lane_fuzz.c build/libsparkpipe_model_common.a build/libsparkpipe_core.a $(LDFLAGS) $(LDLIBS) -o $@
 
 build/test_serving_fault_fuzz: tests/test_serving_fault_fuzz.c tests/mock_model_resident_client.c tests/fixtures/model_resident_deployment_fixture.c $(TEST_MODEL_SERVING_ADAPTER_MODULE) $(TEST_MODEL_RESIDENT_TRANSPORT_MODULE) $(RUNTIME_LIBRARY) $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY)
 	$(CC) $(CPPFLAGS) -DTEST_MODEL_SERVING_ADAPTER_PATH=\"$(TEST_MODEL_SERVING_ADAPTER_MODULE)\" -DTEST_MODEL_RESIDENT_TRANSPORT_PATH=\"$(TEST_MODEL_RESIDENT_TRANSPORT_MODULE)\" $(CFLAGS) tests/test_serving_fault_fuzz.c tests/mock_model_resident_client.c tests/fixtures/model_resident_deployment_fixture.c $(RUNTIME_LIBRARY) $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@
