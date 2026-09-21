@@ -1850,6 +1850,15 @@ SparkStatus SparkTpDeviceCollectiveGraphArrivalDump(
     if ( cudaMemcpy(ring,implementation->arrival_ring,
             sizeof(ring),SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST) != 0 )
         SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+    {
+        uint32_t nonzero = 0u;
+        for ( index = 0u; index < 256u; index++ )
+            if ( ring[index] != 0ull )
+                nonzero++;
+        fprintf(stderr,
+            "ARRIVAL-DUMP rank=%u ring_ptr=%p nonzero=%u\n",
+            rank,implementation->arrival_ring,nonzero);
+    }
     for ( index = 0u; index < 256u && printed < 96u; index++ )
     {
         if ( ring[index] == 0ull )

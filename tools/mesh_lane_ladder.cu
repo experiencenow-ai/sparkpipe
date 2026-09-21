@@ -500,6 +500,9 @@ static int ladder_mesh_run(const char *socket_path,uint32_t rank,
                 replay_t1 = ladder_now_ns();
                 graph_error = SparkTpDeviceCollectiveGraphError(&collective);
                 SparkTpDeviceCollectiveClearGraphError(&collective);
+                if ( graph_error == 0ull )
+                    (void)SparkTpDeviceCollectiveGraphArrivalDump(
+                        &collective,rank);
                 if (graph_error != 0ull)
                 {
                     fprintf(stderr,

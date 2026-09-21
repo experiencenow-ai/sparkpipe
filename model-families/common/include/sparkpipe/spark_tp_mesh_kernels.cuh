@@ -149,7 +149,7 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 					return;
 				}
 				spins++;
-				if ( (spins & 4095ull) == 0ull &&
+				if ( (spins & 255ull) == 0ull &&
 				     ( spins >= spin_cap ||
 				       SparkGlm5NextGlobalTimerNs() >= stop_at ) )
 				{
@@ -165,7 +165,6 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 					atomicExch((unsigned long long *)error_word,sequence);
 					return;
 				}
-				__nanosleep(200u);
 			}
 		}
 	}

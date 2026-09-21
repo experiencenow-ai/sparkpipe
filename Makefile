@@ -1190,8 +1190,10 @@ build/mb_doorbell: tools/mb_doorbell.cu $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY)
 
 GLM5_NEXT_CUDA_SOURCE := \
 	modules/glm5_next_resident_decode_stage/source/spark_glm5_next_resident_decode_stage_cuda.cu
+MESH_KERNELS_HEADER := \
+	model-families/common/include/sparkpipe/spark_tp_mesh_kernels.cuh
 
-build/mesh_lane_ladder: tools/mesh_lane_ladder.cu $(GLM5_NEXT_CUDA_SOURCE) $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY) $(RUNTIME_LIBRARY) | build
+build/mesh_lane_ladder: tools/mesh_lane_ladder.cu $(GLM5_NEXT_CUDA_SOURCE) $(MESH_KERNELS_HEADER) $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY) $(RUNTIME_LIBRARY) | build
 	$(NVCC) -std=c++17 $(NVCCFLAGS) $(MODEL_COMMON_INCLUDE_FLAGS) \
 		-Imodel-families/glm5_next/include \
 		-Imodules/glm5_next_resident_decode_stage/include \
