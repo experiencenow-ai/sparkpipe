@@ -1,5 +1,15 @@
 # K3 serving-path performance audit and improvement plan
 
+## 2026-09-21: the gb10-vllm comparison (K3_VS_GB10_VLLM)
+
+The full per-lever comparison against the announced-stack
+(github.com/ciprianveg/gb10-vllm kimi-k3/v5) lives in
+docs/K3_VS_GB10_VLLM.md: their 29.81 C1 decomposes into the transport class
+we already run (one-shot mesh, warm 561-700 us/round MEASURED), DSpark nst6
+speculation (our engine draft-verify loop + this lane's adaptive depth), and
+kernel/quant polish we do not carry. The 18.0 -> >=30 route and the
+CPU-proven vs compile-gated split are in that doc.
+
 ## 2026-09-19: 29 tok/s on 16x sparks (announced perf point)
 
 @ciprianveg announced 29 tok/sec for kimi K3 decode on the 16-spark fleet
@@ -8,7 +18,9 @@ current best-known K3 decode point, superseding the 18.0 anchor. Graded
 ANNOUNCED-MEASURED (attributed to its author): batch scope, precision,
 prompt length, and the code hash are not yet in a receipt — the k3 lane
 should append them here when the run artifacts are available so the point
-moves to full MEASURED standing.
+moves to full MEASURED standing. Their published v5-prd table now pins
+C1 29.81, C2 42.00 agg, C8 87.12 agg (136 peak) at TP16+DCP8, nst6 spec
+(gb10-vllm kimi-k3/v5/README.md:68-79).
 
 ## 2026-08-17: the tail nondeterminism root cause (FIXED)
 

@@ -91,21 +91,29 @@ CONTRACT_PATH = ROOT_STR = "model_contracts/laguna_authoritative.json"
 MAGIC = 0x334C4147  # matches SPARK_LAGUNA_STAGEPACK_MAGIC ("GAL3" LE)
 
 
-def load_census(repo_root: Path):
+def load_census(repo_root: Path, variant: str = "bf16"):
     patterns = json.loads(
         (repo_root / "model-families/laguna/tensor_patterns.json").read_text())
-    if patterns["tensor_pattern_count"] != CENSUS_PATTERNS or patterns["tensor_count"] != CENSUS_TENSORS:
-        raise PackFailure(
-            f"tensor_patterns census {patterns['tensor_pattern_count']}/"
-            f"{patterns['tensor_count']} != locked 23/36769")
-    return patterns
+    if variant == "bf16":
+        if patterns["tensor_pattern_count"] != CENSUS_PATTERNS or patterns["tensor_count"] != CENSUS_TENSORS:
+            raise PackFailure(
+                f"tensor_patterns census {patterns['tensor_pattern_count']}/"
+                f"{patterns['tensor_count']} != locked 23/36769")
+        return patterns["patterns"], patterns["tensor_count"]
+    variants = patterns.get("variants", {})
+    if variant not in variants:
+        raise PackFailure(f"no {variant} census variant is pinned in "
+                          f"tensor_patterns.json")
+    entry = variants[variant]
+    return entry["patterns"], entry["tensor_count"]
 
 
-def census_lock(source: "SourceReader"):
-    """Fail closed on any checkpoint tensor outside the 23 locked patterns
-    and on any count mismatch."""
+def census_lock(source: "SourceReader", variant: str = "bf16"):
+    """Fail closed on any checkpoint tensor outside the locked patterns
+    and on any count mismatch. The variant selects the release census:
+    bf16 (the 23-pattern official lock), fp8 or nvfp4."""
     import re
-    census = load_census(Path(__file__).resolve().parents[1])
+    census, total = load_census(Path(__file__).resolve().parents[1], variant)
 
     def pattern_regex(pattern: str) -> "re.Pattern":
         parts = []
@@ -116,8 +124,8 @@ def census_lock(source: "SourceReader"):
                 parts.append(re.escape(token))
         return re.compile("^" + "".join(parts) + "$")
 
-    compiled = {pattern: pattern_regex(pattern) for pattern in census["patterns"]}
-    counts = {pattern: 0 for pattern in census["patterns"]}
+    compiled = {pattern: pattern_regex(pattern) for pattern in census}
+    counts = {pattern: 0 for pattern in census}
     for name in source.weight_map:
         for pattern, regex in compiled.items():
             if regex.match(name):
@@ -125,10 +133,13 @@ def census_lock(source: "SourceReader"):
                 break
         else:
             raise PackFailure(f"unknown checkpoint tensor (census lock): {name}")
-    for pattern, expected in census["patterns"].items():
+    for pattern, expected in census.items():
         if counts[pattern] != expected["count"]:
             raise PackFailure(
                 f"census lock: {pattern} count {counts[pattern]} != {expected['count']}")
+    if len(source.weight_map) != total:
+        raise PackFailure(f"census lock: {len(source.weight_map)} tensors, "
+                          f"variant {variant} pins {total}")
 
 
 def load_name_map(repo_root: Path) -> Dict[str, Any]:
@@ -526,6 +537,12 @@ class Packer:
         w1_r1 = w1_r0 + width
         w1_out_rows = 2 * width
         w2_out_cols = width
+        if self.expert_codec == CODEC_FP8:
+            self._add_experts_fp8(layer, prefix, w1_r0, width)
+            return
+        if self.expert_codec == CODEC_NVFP4:
+            self._add_experts_nvfp4(layer, prefix, w1_r0, width)
+            return
         w1 = Entry(K_EXPERT_GATE_UP, layer, PAYLOAD_BF16, CODEC_BF16, SCALE_NONE,
                    EXPERTS, w1_out_rows, HIDDEN)
         w2 = Entry(K_EXPERT_DOWN, layer, PAYLOAD_BF16, CODEC_BF16, SCALE_NONE,
@@ -559,6 +576,148 @@ class Packer:
 
         self.plan.append(PlanItem(w1, produce_w1))
         self.plan.append(PlanItem(w2, produce_w2))
+
+    def _check_expert_layer_codec(self, layer: int, prefix: str, dtype_want: str,
+                                  packed: bool):
+        """One expert codec per pack: the module build pins a single
+        LAGUNA_EXPERT_WEIGHT_CODEC and validates every routed-expert
+        entry against it, so a layer whose experts are not native to the
+        arm's codec fails the plan here - bridging the gap would require
+        quantizing (forbidden) and a mixed-dtype pack cannot load."""
+        for expert in (0, EXPERTS - 1):
+            if packed:
+                name = f"{prefix}.{expert}.gate_proj.weight_packed"
+                if name not in self.s.weight_map:
+                    raise PackFailure(
+                        f"layer {layer} routed experts are not native to the "
+                        f"nvfp4 arm: {prefix}.{expert}.gate_proj.weight_packed "
+                        f"is absent (this release quantizes a subset of the "
+                        f"routed layers; the packer never quantizes and a "
+                        f"mixed pack cannot load)")
+            else:
+                name = f"{prefix}.{expert}.gate_proj.weight"
+            dtype, _, _ = self.s.meta(name)
+            if dtype != dtype_want:
+                raise PackFailure(
+                    f"layer {layer} routed experts are not native to the "
+                    f"{self.expert_codec} arm: {name} is {dtype} "
+                    f"(this release quantizes a subset of the routed layers; "
+                    f"the packer never quantizes and a mixed pack cannot load)")
+
+    def _add_experts_fp8(self, layer: int, prefix: str, w1_r0: int, width: int):
+        """Routed experts on the FP8 wire (module expert codec 5, F32
+        per-row per-128-column-block scale planes): payload codes pass
+        through verbatim; the [rows/128, cols/128] weight_scale_inv plane
+        is regathered one scale row per output row (row r carries block
+        row r//128)."""
+        self._check_expert_layer_codec(layer, prefix, "F8_E4M3", packed=False)
+        inter_count = width
+        w1_rows = 2 * inter_count
+        w1_blocks = (HIDDEN + 127) // 128
+        w2_blocks = (inter_count + 127) // 128
+        w1 = Entry(K_EXPERT_GATE_UP, layer, PAYLOAD_PACKED_WEIGHT, CODEC_FP8,
+                   SCALE_F32, EXPERTS, w1_rows, HIDDEN)
+        w1.payload_bytes = EXPERTS * w1_rows * HIDDEN
+        w1.scale_bytes = EXPERTS * w1_rows * w1_blocks * 4
+        w2 = Entry(K_EXPERT_DOWN, layer, PAYLOAD_PACKED_WEIGHT, CODEC_FP8,
+                   SCALE_F32, EXPERTS, HIDDEN, inter_count)
+        w2.payload_bytes = EXPERTS * HIDDEN * inter_count
+        w2.scale_bytes = EXPERTS * HIDDEN * w2_blocks * 4
+        source = self.s
+
+        def produce_w1() -> Iterator[bytes]:
+            for expert in range(EXPERTS):
+                for proj in ("gate_proj", "up_proj"):
+                    codes = source.raw(f"{prefix}.{expert}.{proj}.weight")
+                    matrix = codes.reshape(EXPERT_INTER, HIDDEN)
+                    yield np.ascontiguousarray(matrix[w1_r0:w1_r0 + inter_count, :]).tobytes()
+
+        def produce_w1_scale() -> Iterator[bytes]:
+            for expert in range(EXPERTS):
+                parts = []
+                for proj in ("gate_proj", "up_proj"):
+                    name = f"{prefix}.{expert}.{proj}.weight_scale_inv"
+                    _dt, shape, _ = source.meta(name)
+                    plane = source.raw(name).view(np.float32).reshape(shape)
+                    parts.append(plane[[r // 128 for r in range(w1_r0, w1_r0 + inter_count)], :])
+                yield to_bytes(np.concatenate(parts, axis=0))
+
+        def produce_w2() -> Iterator[bytes]:
+            for expert in range(EXPERTS):
+                codes = source.raw(f"{prefix}.{expert}.down_proj.weight")
+                matrix = codes.reshape(HIDDEN, EXPERT_INTER)
+                yield np.ascontiguousarray(matrix[:, w1_r0:w1_r0 + inter_count]).tobytes()
+
+        def produce_w2_scale() -> Iterator[bytes]:
+            for expert in range(EXPERTS):
+                name = f"{prefix}.{expert}.down_proj.weight_scale_inv"
+                _dt, shape, _ = source.meta(name)
+                plane = source.raw(name).view(np.float32).reshape(shape)
+                cols = [(w1_r0 + b * 128) // 128 for b in range(w2_blocks)]
+                picked = plane[[r // 128 for r in range(HIDDEN)], :][:, cols]
+                yield to_bytes(picked)
+
+        self.plan.append(PlanItem(w1, produce_w1, produce_w1_scale))
+        self.plan.append(PlanItem(w2, produce_w2, produce_w2_scale))
+
+    def _add_experts_nvfp4(self, layer: int, prefix: str, w1_r0: int, width: int):
+        """Routed experts on the NVFP4 wire (module expert codec 6,
+        UE4M3_F32_GLOBAL scale encoding): U8-packed e2m1 codes and the
+        per-16 e4m3 plane pass through verbatim; the F32
+        weight_global_scale rides the 4-byte tail of each expert's scale
+        slab (the manifest slices per-expert slabs of
+        scale_bytes/group_count). input_global_scale is the activation
+        side and is not carried."""
+        self._check_expert_layer_codec(layer, prefix, "U8", packed=True)
+        inter_count = width
+        w1_rows = 2 * inter_count
+        w1_blocks = HIDDEN // 16
+        w2_blocks = inter_count // 16
+        w1 = Entry(K_EXPERT_GATE_UP, layer, PAYLOAD_PACKED_WEIGHT, CODEC_NVFP4,
+                   SCALE_UE4M3_F32_GLOBAL, EXPERTS, w1_rows, HIDDEN)
+        w1.payload_bytes = EXPERTS * w1_rows * HIDDEN // 2
+        w1.scale_bytes = EXPERTS * (w1_rows * w1_blocks + 4)
+        w2 = Entry(K_EXPERT_DOWN, layer, PAYLOAD_PACKED_WEIGHT, CODEC_NVFP4,
+                   SCALE_UE4M3_F32_GLOBAL, EXPERTS, HIDDEN, inter_count)
+        w2.payload_bytes = EXPERTS * HIDDEN * inter_count // 2
+        w2.scale_bytes = EXPERTS * (HIDDEN * w2_blocks + 4)
+        source = self.s
+
+        def produce_w1() -> Iterator[bytes]:
+            for expert in range(EXPERTS):
+                for proj in ("gate_proj", "up_proj"):
+                    codes = source.raw(f"{prefix}.{expert}.{proj}.weight_packed")
+                    matrix = codes.reshape(EXPERT_INTER, HIDDEN // 2)
+                    yield np.ascontiguousarray(matrix[w1_r0:w1_r0 + inter_count, :]).tobytes()
+
+        def produce_w1_scale() -> Iterator[bytes]:
+            for expert in range(EXPERTS):
+                for proj in ("gate_proj", "up_proj"):
+                    name = f"{prefix}.{expert}.{proj}.weight_scale"
+                    _dt, shape, _ = source.meta(name)
+                    plane = source.raw(name).reshape(shape)
+                    yield np.ascontiguousarray(plane[w1_r0:w1_r0 + inter_count, :]).tobytes()
+                    gname = f"{prefix}.{expert}.{proj}.weight_global_scale"
+                    yield to_bytes(source.raw(gname).view(np.float32))
+
+        def produce_w2() -> Iterator[bytes]:
+            for expert in range(EXPERTS):
+                codes = source.raw(f"{prefix}.{expert}.down_proj.weight_packed")
+                matrix = codes.reshape(HIDDEN, EXPERT_INTER // 2)
+                yield np.ascontiguousarray(matrix[:, w1_r0:w1_r0 + inter_count]).tobytes()
+
+        def produce_w2_scale() -> Iterator[bytes]:
+            for expert in range(EXPERTS):
+                name = f"{prefix}.{expert}.down_proj.weight_scale"
+                _dt, shape, _ = source.meta(name)
+                plane = source.raw(name).reshape(shape)
+                c0 = w1_r0 // 16
+                yield np.ascontiguousarray(plane[:, c0:c0 + w2_blocks]).tobytes()
+                gname = f"{prefix}.{expert}.down_proj.weight_global_scale"
+                yield to_bytes(source.raw(gname).view(np.float32))
+
+        self.plan.append(PlanItem(w1, produce_w1, produce_w1_scale))
+        self.plan.append(PlanItem(w2, produce_w2, produce_w2_scale))
 
     def receipt(self) -> dict:
         return {
@@ -749,6 +908,11 @@ def main() -> int:
     parser.add_argument("--tp-degree", type=int, default=8)
     parser.add_argument("--tp-all", type=int, default=0,
                         help="emit all N rank packs in one process (shared dequant cache)")
+    parser.add_argument("--expert-codec", default="bf16",
+                        choices=["bf16", "fp8", "nvfp4"],
+                        help="routed-expert wire codec; fp8/nvfp4 select the "
+                             "matching census variant and fail closed unless "
+                             "EVERY routed layer is native to the codec")
     parser.add_argument("--revision", required=True,
                         help="model revision stamped into the pack header (the warm snapshot's HF tree id)")
     parser.add_argument("--contract-sha256", required=True,
@@ -762,14 +926,17 @@ def main() -> int:
         raise PackFailure("supported fleet shapes: tp8/pp2 (default), tp4/pp4, single-stage")
 
     source = SourceReader(Path(args.source))
-    census_lock(source)
+    codec_ids = {"bf16": CODEC_BF16, "fp8": CODEC_FP8, "nvfp4": CODEC_NVFP4}
+    expert_codec = codec_ids[args.expert_codec]
+    census_lock(source, variant=args.expert_codec)
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     ranks = range(args.tp_all) if args.tp_all else [args.tp_rank]
     for rank in ranks:
         packer = Packer(source, args.tp_all or args.tp_degree, rank,
                         args.first_layer, args.layer_count,
-                        args.owns_embedding, args.owns_head)
+                        args.owns_embedding, args.owns_head,
+                        expert_codec=expert_codec)
         if args.dry_plan:
             packer.build()
             receipt = packer.receipt()
