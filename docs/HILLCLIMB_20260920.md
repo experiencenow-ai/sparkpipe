@@ -1875,3 +1875,20 @@ EnqueueCommitted + its ready_state (one instrument names the parking state);
 resets — each reconnect may invalidate the transport session carrying the
 request payload; (c) whether the per-reconnect pending reset fences the
 routes (cleaning them before the 30s scanner).
+
+## 09-22 14:00 TICK — the lifecycle trace: the API's rank-0 connection drops between SUBMIT and DECISION
+
+THE INSTRUMENT (COMMIT-TRACE, deployed efcf6f47): ZERO commit lines — the
+DECISION message never arrives because THE API CONNECTION DROPS right after
+SUBMIT-ARRIVED (residentd sees peer eof → reconnect → reset arms → next
+submission → 1000003 dies ADMIT9 behind 1000002's dead lease). The chain
+never starts because every submission's decision round-trip is killed by
+the connection drop. The drops: API-side rank-0 only (model_resident_client
+1031/1042 status 4), residentd never closes first. The suspect pair: (a) the
+residentd's decision-required RESPONSE never flushes (output-queue/POLLOUT
+path — the API times out and closes), or (b) the API's own read poll fails
+on rank 0. NEXT INSTRUMENT (one deploy): prints at queue-decision-required
+and at flush in WriteClient (residentd side) + the API's per-rank read-error
+context — whichever side is silent names the breaker. NOTE: this is the OLD
+"#22 reconnect storm" lineage — tonight's fixes exposed it as the remaining
+serving blocker.

@@ -854,6 +854,20 @@ static SparkStatus SparkModelResidentdEnqueueCommittedLocked(
 	runtime->committed_fifo_tail = encoded_index;
 	route->committed_fifo_queued = 1u;
 	route->committed_fifo_next = 0u;
+	{
+		static uint32_t commit_trace;
+		if ( commit_trace < 12u )
+		{
+			commit_trace++;
+			fprintf(stderr,
+			    "COMMIT-TRACE id=%llu slot=%u ready_state=%u fifo_head=%u lanes=%u\n",
+			    (unsigned long long)route->submission_id,
+			    (unsigned)route->slot_index,
+			    (unsigned)route->ready_state,
+			    (unsigned)runtime->committed_fifo_head,
+			    (unsigned)route->resident_slots_claimed);
+		}
+	}
 	return(SPARK_STATUS_OK);
 }
 
