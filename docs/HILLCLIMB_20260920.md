@@ -911,3 +911,21 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - This window: cold cycle (24 LAZYWORKs), request failed reaped-queued;
   no fresh convergence failures to observe yet (the window needs a node
   bounce to prove the fix). Floor 0.55ms/round stands.
+
+## 2026-09-21ap tick — the state-5 wedge again, mid-work; the watchdog bounds are armed but slower than the reaper
+
+- The claim-holder lifecycle (1015466): chain began advancing normally
+  (stage 0→4, layer 0→1...) and stopped mid-work — the stream-drain/
+  mid-execution class once more. The CHAIN-WATCHDOG bounds (300s/45s) are
+  armed but the RESIDENTD reaper (120s) fires first on state=5, so the
+  module watchdog has not been the observed recovery path yet. The residual
+  generator: chains stopping mid-layer — candidates: a lazy lease stuck on
+  a weightd acquire (the map lock serializes, one slow acquire stalls the
+  chain), or a lost advance continuation between layers.
+- MEASURE: the cold chain completed healthy (287s/91r, 255µs/round cold-
+  contended). The request faces: BUSY-rejects behind the wedged claims →
+  reaped at 120s → cycle.
+- NEXT (the endgame instrument): LAZYWORK-STALL — stamp each lazy lease
+  acquire's start; any acquire >10s prints its keys + the weightd's lease
+  state. The mid-layer stop is either a lease wait (proven by the print) or
+  a lost continuation (ruled out by its silence).
