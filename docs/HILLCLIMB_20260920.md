@@ -1212,3 +1212,23 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   loop kernel compiles through the same spark_tp_mesh_kernels.cuh the
   glm5_next module builds from.
 
+
+## 2026-09-21bb tick — coredev gate items executed
+
+- #1075 gate list DONE: (a) retitled/rescoped to the serving-ledger line
+  (S3 graph code is main's via #1074; this branch merges main and composes
+  with #1074's device-resident round control + #1073's ALL_GATHER); (b)
+  main merged + manifests regenerated (verifier green locally — FAIL(10)
+  cleared); (c) the completion overflow pool is now PER-STATE PREALLOCATED
+  (slot_count*2, no process globals, no malloc — the cross-instance
+  contamination and the malloc-failure drop both structurally gone);
+  (d) the S2.5/#1074 payload-vs-control-plane distinction documented;
+  (e) reaper message carries state; gate-fixed driver published.
+- #1014 CLOSED superseded (premise erased by #1030; successor = #1067/
+  #1075 with the re-derivation vehicle being the fuzzer-first ledger).
+- Receipts standing (MEASURED): warm allreduce floor 0.55ms/round
+  single-slot, 0.71-0.93 contended, cold ~250µs/round; S1 = 1334µs. The
+  ≤100µs figure graded GOAL until S3 receipts.
+- glm53flash family lane items NOTED (not this tick): fp8.tp8 rank6@
+  spark6 pre-#877 defective generation needs re-emit; nvfp4.tp16 hygiene
+  (node-f identity-unpinned, spark8 stale sidecar).
