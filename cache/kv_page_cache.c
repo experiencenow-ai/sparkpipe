@@ -1241,8 +1241,7 @@ static SparkStatus SparkKvLaneTransactionsPrepare(SparkKvLaneTransactions *trans
 		uint64_t now_ns = clock_gettime(CLOCK_MONOTONIC,&now_ts) == 0 ?
 		    (uint64_t)now_ts.tv_sec * UINT64_C(1000000000) + (uint64_t)now_ts.tv_nsec : 0u;
 		owner = &transactions->lanes[request->cache_lanes[index].resident_sequence_slot];
-		if ( (owner->phase == SPARK_KV_LANE_TRANSACTION_PREPARED ||
-		       owner->phase == SPARK_KV_LANE_TRANSACTION_COMMITTED ||
+		if ( (owner->phase == SPARK_KV_LANE_TRANSACTION_COMMITTED ||
 		       (owner->phase == SPARK_KV_LANE_TRANSACTION_EXECUTING &&
 		        owner->executing_since_ns != 0u && now_ns - owner->executing_since_ns > UINT64_C(60000000000))) &&
 		     request->request_id != owner->request.request_id )
