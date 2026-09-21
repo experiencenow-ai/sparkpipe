@@ -10,6 +10,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <cuda.h>
 
 #include <cuda_runtime.h>
 #include "sparkpipe/spark_tp_chain_ordinal.h"
@@ -200,6 +201,11 @@ struct SparkGlm5NextModuleState
 	char kv_backing_default[256];
 	SparkGlm5NextExecutionSlot slots[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
 	SparkGlm5NextAsyncCompletion completions[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
+	uint64_t completion_armed_ns[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
+	pthread_mutex_t completion_watch_lock;
+	pthread_t completion_watch_thread;
+	uint32_t completion_watch_live;
+	uint32_t completion_watch_stop;
 	atomic_uint slot_states[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
 	atomic_uint lane_states[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT];
 	atomic_uchar lane_bound[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT];
@@ -1232,6 +1238,12 @@ static SparkStatus SparkGlm5NextKvInitialize(SparkGlm5NextModuleState *state)
 	uint64_t block_bytes,index_block_bytes,payload_bytes;
 	uint64_t lane_page_entries;
 	SparkStatus status;
+	if ( pthread_mutex_init(&state->completion_watch_lock,0) != 0 )
+	{
+	}
+	if ( pthread_create(&state->completion_watch_thread,0,
+		SparkGlm5NextCompletionWatchdog,state) == 0 )
+		state->completion_watch_live = 1u;
 	if ( pthread_mutex_init(&state->kv_mutex,0) != 0 )
 		SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
 	state->kv_mutex_initialized = 1u;
@@ -3627,6 +3639,9 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 	void *complete_context;
 	if ( state == 0 )
 		return;
+	pthread_mutex_lock(&state->completion_watch_lock);
+	state->completion_armed_ns[async->slot_index] = 0u;
+	pthread_mutex_unlock(&state->completion_watch_lock);
 	SparkGlm5NextDrainParkedCompletions(state);
 	state->tp_chain_active = 0u;
 	if ( async->slot_index >= state->pipeline_slot_count )
@@ -3767,11 +3782,62 @@ static void CUDART_CB SparkGlm5NextCompleteAsync(void *context)
 		SparkGlm5NextParkCompletion(async);
 }
 
+static void SparkGlm5NextCompleteOnWorker(void *context);
+
+static void *SparkGlm5NextCompletionWatchdog(void *argument)
+{
+	SparkGlm5NextModuleState *state = (SparkGlm5NextModuleState *)argument;
+	uint32_t slot_index;
+	CUcontext watch_context = 0;
+	if ( state == 0 )
+		return(0);
+	(void)cuCtxGetCurrent(&watch_context);
+	if ( watch_context != 0 )
+		(void)cuCtxSetCurrent(watch_context);
+	for (;;)
+	{
+		uint64_t now_ns;
+		struct timespec pause;
+		pause.tv_sec = 1;
+		pause.tv_nsec = 0;
+		(void)nanosleep(&pause,0);
+		if ( state->completion_watch_stop != 0u )
+			return(0);
+		now_ns = SparkGlm5NextNowNs();
+		pthread_mutex_lock(&state->completion_watch_lock);
+		for (slot_index=0u;
+			slot_index<SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT;
+			slot_index++)
+		{
+			SparkGlm5NextAsyncCompletion *async;
+			uint64_t armed = state->completion_armed_ns[slot_index];
+			if ( armed == 0u || now_ns - armed < UINT64_C(45000000000) )
+				continue;
+			state->completion_armed_ns[slot_index] = 0u;
+			async = &state->completions[slot_index];
+			if ( async->completion.status == SPARK_STATUS_OK )
+				async->completion.status = SPARK_STATUS_INTERNAL_ERROR;
+			fprintf(stderr,
+				"CHAIN-WATCHDOG slot=%u — completion armed %.1fs ago never fired (stream drain lost); completing loudly\n",
+				(unsigned)slot_index,
+				(double)(now_ns - armed) / 1000000000.0);
+			pthread_mutex_unlock(&state->completion_watch_lock);
+			SparkGlm5NextCompleteOnWorker(async);
+			pthread_mutex_lock(&state->completion_watch_lock);
+		}
+		pthread_mutex_unlock(&state->completion_watch_lock);
+	}
+}
+
 static SparkStatus SparkGlm5NextEnqueueAsyncCompletion(
 	SparkGlm5NextModuleState *state,
 	SparkGlm5NextExecutionSlot *slot,
 	uint32_t slot_index)
 {
+	pthread_mutex_lock(&state->completion_watch_lock);
+	state->completion_armed_ns[slot_index] = SparkGlm5NextNowNs();
+	pthread_mutex_unlock(&state->completion_watch_lock);
+
 	cudaStream_t stream;
 	cudaError_t error;
 	stream = (cudaStream_t)slot->stream;
