@@ -1819,3 +1819,19 @@ the weightsd's chunk registry/working-set resolve for those keys (read the
 acquire handler's TARGET_MISMATCH conditions; compare a failing key vs a
 succeeding one; check the pack tail's chunk files). Reset cadence: bounded
 (250ms) — the reset-attempt prints now sparse ✓.
+
+## 09-22 12:30 TICK — THE ROOT: the weightsd worker's CUDA context fails (TARGET_MISMATCH = cuCtxSetCurrent)
+
+NO layer/ownership logic returns TARGET_MISMATCH anywhere in the resolve
+path — the ONLY producers: spark_weightd_worker.c line 30/70 — cuCtxSetCurrent
+failing in the WEIGHTSD'S WORKER THREAD. THE PICTURE: layers 39-44 are the
+ones whose chunks are NOT YET PRESENT (every boot: 39 layers' chunks stay
+resident in the pool; the tail 6 need CREATION) — chunk creation runs on the
+worker's CUDA context — cuCtxSetCurrent FAILS → TARGET_MISMATCH propagates as
+the acquire status → the prefetch fails those layers AND the chain's own
+acquires retry through the same failure for 497s (the cold walk). WHY the
+context set fails intermittently (context destroyed once? device reset?
+GB10 context exhaustion with 16 engines + the daemon?) = the final question.
+FIX TARGET: the worker's context self-heal (recreate on set-failure, loudly)
++ why it died once. This collapses the cold walk AND the prefetch failures
+in one fix.
