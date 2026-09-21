@@ -946,3 +946,22 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   a NEW fast-fail face replacing the wedges (the bounded path converting
   what would have been wedges into instant failures — or a boot-cycle
   artifact; the next window discriminates). The verdict probe continues.
+
+## 2026-09-21ar tick — THE 30-MINUTE KILLER found and deleted
+
+- The instant status=4 chain fails traced to ZERO weightd socket connec-
+  tions — and the journal named the killer: "janitor: killing stale weightd
+  age=1801s (not the singleton holder)" — the janitor's weightd rule SUR-
+  VIVED in the deployed agent, killing every weightd at 30 minutes via the
+  OBSOLETE file-singleton check (/tmp/spark_weightd.singleton no longer
+  exists since the TCP latch; every healthy weightd read as "not the
+  holder"). Each kill = engine socket loss (the pre-restart engine never
+  re-established its lazy-pack connection) + a 52-86s rewire window. THIS
+  was the residual node-bounce generator behind the round-0/1 convergence
+  racer, the reaped-queued cycles, and the cold-cycle churn.
+- FIX (de18669, agent self-updated 16/16 to 5c272d57): the weightd janitor
+  rule deleted (this time in the source that ships through core publish);
+  engines-only rules remain. weightds now age past 30 min (s0 1194s,
+  rising).
+- Post-rollout: cold cycle on the recycled engines; the verdict probe
+  continues on the settle. Floor 0.55ms/round stands.
