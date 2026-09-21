@@ -63,6 +63,15 @@ _Static_assert(offsetof(SparkTpMeshRoundControl,cancel_expected) ==
     SPARK_TP_MESH_ROUND_CONTROL_WORD_CANCEL_EXPECTED * sizeof(uint64_t),
     "cancel word");
 
+#define SPARK_TP_DEVICE_COLLECTIVE_STAGING_SETS \
+    (SPARK_WEIGHTD_MESH_SLOTS_PER_RANK * 16u)
+typedef struct SparkTpDeviceCollectiveStagingSet
+{
+    uint64_t seq;
+    uint64_t bytes;
+    uint64_t slot;
+} SparkTpDeviceCollectiveStagingSet;
+
 typedef struct SparkTpDeviceCollectiveCompletionNode
 {
     struct SparkTpDeviceCollectiveCompletionNode *next;
