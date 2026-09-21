@@ -258,6 +258,9 @@ struct SparkGlm5NextModuleState
 	uint32_t graph_fail_streak;
 	uint32_t graph_arrival_dumped;
 	uint32_t experts_warm;
+	uint32_t prefetch_started;
+	uint32_t prefetch_live;
+	uint64_t prefetch_layers_done;
 	uint64_t degrade_graph_fallback;
 	uint64_t degrade_covered_abandon;
 	uint64_t degrade_graph_disabled;
@@ -2531,6 +2534,62 @@ static SparkStatus SparkGlm5NextPinAllExperts(SparkGlm5NextModuleState *state)
 	SPARK_RETURN(status);
 }
 
+static void *SparkGlm5NextPrefetchMain(void *argument)
+{
+	SparkGlm5NextModuleState *state = (SparkGlm5NextModuleState *)argument;
+	SparkWeightdMap *map;
+	uint32_t layer;
+	map = state->lazy_pack != 0 ? state->lazy_pack->map : 0;
+	if ( map == 0 )
+	{
+		fprintf(stderr,"PREFETCH-ABORT no map\n");
+		state->prefetch_live = 0u;
+		return(0);
+	}
+	for ( layer = SPARK_GLM5_NEXT_MODEL_FIRST_ROUTED_LAYER;
+	      layer < SPARK_GLM5_NEXT_MODEL_LAYER_COUNT;
+	      layer++ )
+	{
+		SparkWeightdExpertKey keys[SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT];
+		uint64_t lease = 0u;
+		uint32_t expert;
+		SparkStatus status;
+		void *address = 0;
+		for ( expert = 0u;
+		      expert < SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT;
+		      expert++ )
+		{
+			keys[expert].layer = layer;
+			keys[expert].expert = expert;
+		}
+		status = SparkWeightdMapAcquire(map,keys,
+		    SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT,&lease,
+		    UINT64_C(240000000000));
+		if ( status == SPARK_STATUS_OK && lease != 0u )
+		{
+			status = SparkWeightdMapBeginUse(map,lease,&address);
+			if ( status == SPARK_STATUS_OK )
+				(void)SparkWeightdMapRelease(map,lease,
+				    UINT64_C(240000000000));
+			else
+				(void)SparkWeightdMapRelease(map,lease,
+				    UINT64_C(240000000000));
+		}
+		state->prefetch_layers_done++;
+		if ( status != SPARK_STATUS_OK )
+			fprintf(stderr,
+			    "PREFETCH-LAYER-FAIL layer=%u status=%d\n",
+			    layer,(int)status);
+		else if ( (layer % 8u) == 0u )
+			fprintf(stderr,"PREFETCH-WARM layer=%u\n",layer);
+	}
+	fprintf(stderr,"PREFETCH-DONE layers=%llu\n",
+	    (unsigned long long)state->prefetch_layers_done);
+	state->experts_warm = 1u;
+	state->prefetch_live = 0u;
+	return(0);
+}
+
 static SparkStatus SparkGlm5NextLazyExperts(SparkGlm5NextTpChain *chain)
 {
 	SparkWeightdExpertKey keys[SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT];
@@ -3350,6 +3409,20 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 			    (unsigned)state->tp_degree,
 			    (unsigned)state->graph_path_enabled,
 			    (unsigned)chain->context->flags);
+		}
+		if ( state->prefetch_started == 0u &&
+		     state->lazy_pack != 0 &&
+		     state->lazy_pack->map != 0 )
+		{
+			pthread_t prefetch_thread;
+			state->prefetch_started = 1u;
+			state->prefetch_live = 1u;
+			if ( pthread_create(&prefetch_thread,0,
+			        SparkGlm5NextPrefetchMain,state) != 0 )
+			{
+				state->prefetch_live = 0u;
+				fprintf(stderr,"PREFETCH-THREAD-FAIL\n");
+			}
 		}
 		if ( state->graph_path_enabled != 0u &&
 		     state->experts_warm == 0u &&

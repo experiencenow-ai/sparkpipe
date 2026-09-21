@@ -1799,8 +1799,6 @@ static SparkStatus SparkModelResidentdProcessHello(
 			(unsigned long long)runtime->client.generation,
 			(unsigned)runtime->client.reset_done);
 	}
-	else
-		runtime->client.close_after_output = 1u;
 	SPARK_RETURN(queue_status);
 }
 
