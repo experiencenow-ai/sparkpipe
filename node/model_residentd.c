@@ -2915,20 +2915,6 @@ static SparkStatus SparkModelResidentdRun(SparkModelResidentdRuntime *runtime)
 			}
 			status = progress_status;
 		}
-		if ( runtime->client.fd >= 0 && runtime->client.close_after_output != 0u )
-		{
-			uint32_t pending_output;
-			pthread_mutex_lock(&runtime->mutex);
-			pending_output = runtime->client.output_count;
-			pthread_mutex_unlock(&runtime->mutex);
-			if ( pending_output == 0u )
-			{
-				fprintf(stderr,
-				    "model_residentd close-after-output drained; closing fd=%d\n",
-				    runtime->client.fd);
-				SparkModelResidentdCloseClient(runtime);
-			}
-		}
 		poll_status = poll(fds,count,SparkModelResidentdPollTimeoutMs(runtime));
 		if ( runtime->client.fd >= 0 && runtime->client.hello_complete == 0u && runtime->client.last_activity_ns != 0u &&
 		     SparkModelResidentdMonotonicTimeNs() - runtime->client.last_activity_ns > UINT64_C(30000000000) )
