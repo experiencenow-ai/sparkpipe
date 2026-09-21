@@ -1272,3 +1272,20 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   state-based. The reaper's route triage (ask the adapter the submis-
   sion's liveness) is the next piece; the module-sim gives all of it an
   offline home.
+
+## 2026-09-21be tick — the triage stack's first measured window
+
+- MEASURE (triage stack, engines 30min stable): the cold chain COMPLETED
+  at 202s/91r (status=0) — on the old 120s bound it would have been
+  reaped mid-walk; ZERO chain-watchdog fires; the triage is letting live
+  chains live. Warm chain: 136.8ms/91r, allreduce 82.7ms = 0.91ms/round
+  contended (floor 0.55 stands).
+- Residual faces: 4 state=4 (READY_ADAPTER — queued-behind-single-chain)
+  reaps at 120s — the QUEUE pressure, not lost work: the adapter is busy
+  on the previous chain and these are waiters. With cold chains now
+  living 200s+, the 120s waiter bound fires first. The remaining fix is
+  throughput (S3) or admission backpressure (reject fast instead of
+  queueing behind a 200s cold chain) — not recovery.
+- All 16 ranks progressing uniformly (lazy=210, chains=5 on every sampled
+  rank). The request 500s this window: status=3/4 (reaped-waiter +
+  session churn from the rollout). The stack is converging.
