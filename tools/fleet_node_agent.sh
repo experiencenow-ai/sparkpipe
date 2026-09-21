@@ -301,7 +301,7 @@ sync_rendezvous() {
             fn="$mesh_dir/mesh-$pr.rec"
             if [ -f "$fn" ]; then
                 age=$(( now - $(stat -c %Y "$fn" 2>/dev/null || echo "$now") ))
-                [ "$age" -lt 10 ] && continue
+                [ "$age" -lt 2 ] && continue
             fi
             if curl -sf --max-time 2 "$RELEASE_HTTP/qpn/$pn/mesh/mesh-$pr.rec" \
                 -o "$fn.tmp" 2>/dev/null; then
@@ -521,6 +521,8 @@ ensure_weightd() {
         --mesh-rank "$RANK" --mesh-interface "$MESH_INTERFACE" \
         --mesh-sgid-index "$MESH_SGID_INDEX" \
         > "$HOME/weightd.log" 2>&1 < /dev/null &
+    rm -f /tmp/weightd-mesh/.shipped_sha 2>/dev/null
+    ( sleep 2; sync_rendezvous "glm53flash.fp8.tp16" ) >/dev/null 2>&1 &
 }
 
 prune_logs() {
