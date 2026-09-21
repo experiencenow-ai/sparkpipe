@@ -1343,8 +1343,8 @@
     },
     {
       "path": "docs/HILLCLIMB_20260920.md",
-      "sha256": "b8d86c569640e026867e7b22e9ff9001b565af2da2b185a6d2fc002a3fba0964",
-      "size_bytes": 94557
+      "sha256": "6ee5a98ae4156ebd4046be75e88b22bb44852b2ac7c5819062794eaff4b4a614",
+      "size_bytes": 95782
     },
     {
       "path": "docs/HILL_CLIMB_DEPLOY.md",
@@ -16090,5 +16090,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 75619222
+  "total_bytes": 75620447
 }
