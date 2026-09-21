@@ -212,6 +212,7 @@ typedef struct SparkModelResidentdRuntime
 	uint8_t *route_messages;
 	uint32_t route_capacity;
 	uint64_t last_stuck_scan_ns;
+	uint64_t fairness_log_ns;
 	uint32_t route_message_capacity;
 	uint32_t next_adapter_route;
 	uint32_t committed_fifo_head;
@@ -2660,9 +2661,16 @@ static SparkStatus SparkModelResidentdProgressRoutes(
 
 		runtime->next_adapter_route = (index + 1u) % runtime->route_capacity;
 		if ( budget.refused != 0u && budget.ops == 0u )
-			fprintf(stderr,
-				"ROUTE-FAIRNESS pass refused at index=%u state=%u — cursor advancing past it so later routes are not starved behind a busy adapter\n",
-				(unsigned)index,(unsigned)runtime->routes[index].state);
+		{
+			uint64_t now_ns = SparkModelResidentdMonotonicTimeNs();
+			if ( runtime->fairness_log_ns == 0u ||
+			     now_ns - runtime->fairness_log_ns >= UINT64_C(1000000000) )
+			{
+				runtime->fairness_log_ns = now_ns;
+				fprintf(stderr,
+					"ROUTE-FAIRNESS adapter busy; routes queue fairly behind the active chain\n");
+			}
+		}
 	}
 	SPARK_RETURN(status);
 }
@@ -2696,7 +2704,9 @@ static void SparkModelResidentdReportStuckRoutes(
 				(unsigned long long)route->client_generation);
 			stuck++;
 		}
-		if ( now_ns - route->active_since_ns >= UINT64_C(120000000000) )
+		if ( now_ns - route->active_since_ns >=
+		     (route->state == SPARK_MODEL_RESIDENTD_ROUTE_RESERVED ?
+		      UINT64_C(600000000000) : UINT64_C(120000000000)) )
 		{
 			SparkModelServingCompletion failed;
 			memset(&failed,0,sizeof(failed));
