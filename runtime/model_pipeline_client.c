@@ -169,7 +169,13 @@ static void SparkModelPipelineClientRecordFailure(
 	SparkStatus status)
 {
 	if ( transaction->status == SPARK_STATUS_OK )
+	{
 		transaction->status = (uint32_t)status;
+		fprintf(stderr,
+			"TXN-FAIL-FIRST id=%llu status=%u — the first failing result for this transaction (the #30 abort source)\n",
+			(unsigned long long)transaction->submission_id,
+			(unsigned)status);
+	}
 }
 
 static void SparkModelPipelineClientSetFailure(
