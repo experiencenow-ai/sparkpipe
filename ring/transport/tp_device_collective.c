@@ -669,6 +669,13 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
     }
     ordinal = submission->ordinal;
     slot_bytes = implementation->slot_bytes;
+    if ( getenv("SPARK_TP_ROUND_TRACE") != 0 )
+        fprintf(stderr,
+            "ROUND-TRACE rank=%u armed=%u mirror=%llu cap_rounds=%u cap_parity=%u ordinal=%llu\n",
+            implementation->tp_rank,implementation->capture_armed,
+            (unsigned long long)implementation->cell_mirror,
+            implementation->capture_rounds,implementation->capture_parity,
+            (unsigned long long)ordinal);
     parity = (implementation->capture_armed != 0u ?
         implementation->cell_mirror + implementation->capture_rounds :
         implementation->cell_mirror) &
@@ -1052,7 +1059,7 @@ combine:
                 implementation->combine_context,
                 implementation->f32_scratch,slot_zero,slot_one,
                 (uint32_t)(bytes / 2u),submission->cuda_stream);
-            for ( peer = 1u;
+            for ( peer = 2u;
                   peer < implementation->tp_degree && f32_status == SPARK_STATUS_OK;
                   peer++ )
             {
@@ -1627,7 +1634,17 @@ SparkStatus SparkTpDeviceCollectiveGraphPreLaunch(
     implementation = collective->implementation;
     if ( implementation->seq_cell == 0 )
         SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
-    if ( cudaMemcpy(&cell,implementation->seq_cell,sizeof(uint64_t),
+    if ( stream != 0 )
+    {
+        uint64_t scratch = 0ull;
+        if ( cudaMemcpyAsync(&scratch,implementation->seq_cell,
+                sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST,
+                stream) != 0 ||
+             cudaStreamSynchronize(stream) != 0 )
+            SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+        cell = scratch;
+    }
+    else if ( cudaMemcpy(&cell,implementation->seq_cell,sizeof(uint64_t),
             SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST) != 0 )
         SPARK_FAIL(SPARK_STATUS_IO_ERROR);
     implementation->cell_mirror = cell;

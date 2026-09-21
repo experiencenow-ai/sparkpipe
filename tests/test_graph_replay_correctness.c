@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <math.h>
 #include <pthread.h>
 #include <time.h>
 #include <unistd.h>
@@ -27,10 +28,14 @@ extern int SparkGlm5NextLaunchAddF32(void *stream,float *destination,
     const void *b,uint32_t element_count);
 extern int SparkGlm5NextLaunchRoundF32(void *stream,void *destination,
     const float *source,uint32_t element_count);
+extern int SparkGlm5NextLaunchSumRanksF32(void *stream,void *destination,
+    const void *const *sources,uint32_t source_count,
+    uint32_t element_count);
 
 static int g_failures;
 static void *g_mesh;
 static pthread_barrier_t g_barrier;
+static volatile uint32_t g_ship_stop;
 
 static void Failf(const char *format,...)
 {
@@ -49,9 +54,20 @@ static void Failf(const char *format,...)
     } \
 } while (0)
 
-static void CompletionNoop(void *context,SparkStatus status)
+static void CompletionNoop(void *context,
+    const SparkTpDeviceCollectiveCompletion *completion)
 {
-    (void)context;(void)status;
+    (void)context;(void)completion;
+}
+
+static SparkStatus CombineBf16(void *context,void *destination,
+    const void *source,uint32_t active_sequence_count,
+    uint32_t hidden_dimension,void *stream)
+{
+    (void)context;
+    return SparkGlm5NextLaunchSumRanksF32(stream,destination,&source,1u,
+        active_sequence_count * hidden_dimension) == cudaSuccess ?
+        SPARK_STATUS_OK : SPARK_STATUS_IO_ERROR;
 }
 
 static SparkStatus CombineSeed(void *context,void *destination,
@@ -79,6 +95,29 @@ static SparkStatus CombineRound(void *context,void *destination,
     return SparkGlm5NextLaunchRoundF32(stream,destination,
         (const float *)source,element_count) == cudaSuccess ?
         SPARK_STATUS_OK : SPARK_STATUS_IO_ERROR;
+}
+
+static void *ShipEmulatorMain(void *argument)
+{
+    (void)argument;
+    while ( g_ship_stop == 0u )
+    {
+        uint32_t rank;
+        for ( rank = 0u; rank < TEST_DEGREE; rank++ )
+        {
+            volatile uint64_t *entry = (volatile uint64_t *)
+                ((uint8_t *)g_mesh + SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(0,
+                    rank));
+            volatile uint32_t *shipped = (volatile uint32_t *)
+                ((uint8_t *)g_mesh + SPARK_WEIGHTD_MESH_SHIPPED_ENTRY(0,
+                    rank));
+            if ( entry[0] != 0ull &&
+                 *shipped != (uint32_t)entry[0] )
+                *shipped = (uint32_t)entry[0];
+        }
+        usleep(50);
+    }
+    return 0;
 }
 
 typedef struct RankThread
@@ -141,6 +180,65 @@ static uint16_t FloatToBf16(float value)
     return bits;
 }
 
+static void DebugDump(RankThread *rank_thread,const char *phase)
+{
+    uint32_t element;
+    if ( getenv("SPARK_RIG_DEBUG") == 0 )
+        return;
+    cudaMemcpy(rank_thread->host_scratch,rank_thread->scratch,
+        TEST_PAYLOAD_BYTES,cudaMemcpyDeviceToHost);
+    fprintf(stderr,"RIG-DBG rank=%u %s rounds=%llu vals=",
+        rank_thread->rank,phase,
+        (unsigned long long)rank_thread->rounds_done);
+    for ( element = 0u; element < 4u; element++ )
+        fprintf(stderr,"%g(0x%04x) ",
+            (double)Bf16ToFloat(rank_thread->host_scratch[element]),
+            (unsigned)rank_thread->host_scratch[element]);
+    fprintf(stderr,"\n");
+}
+
+static void DumpSlots(const char *phase)
+{
+    uint32_t slot;
+    if ( getenv("SPARK_RIG_DEBUG") == 0 )
+        return;
+    fprintf(stderr,"RIG-SLOTS %s:",phase);
+    for ( slot = 0u; slot < 2u * TEST_DEGREE; slot++ )
+    {
+        uint16_t first = *(uint16_t *)((uint8_t *)g_mesh +
+            (uint64_t)slot * 8192u);
+        volatile uint64_t *tail = (volatile uint64_t *)
+            ((uint8_t *)g_mesh + (uint64_t)slot * 8192u + 8184u);
+        fprintf(stderr," s%u=%g/%llu",(double)Bf16ToFloat(first),
+            slot,(unsigned long long)*tail),
+            (void)0;
+    }
+    fprintf(stderr,"\n");
+    {
+        uint64_t *words = (uint64_t *)g_mesh;
+        uint64_t found = 0ull;
+        uint64_t i;
+        for ( i = 0ull; i < 1048576ull / 8ull && found < 8ull; i++ )
+            if ( (words[i] >> 32ull) == 1ull && words[i] != 0ull )
+            {
+                fprintf(stderr,"RIG-SCAN tag=%llu at +%llu (%lluKB)\n",
+                    (unsigned long long)words[i],
+                    (unsigned long long)(i * 8ull),
+                    (unsigned long long)(i * 8ull / 1024ull));
+                found++;
+            }
+        for ( i = 0u; i < TEST_DEGREE; i++ )
+        {
+            volatile uint64_t *entry = (volatile uint64_t *)
+                ((uint8_t *)g_mesh + SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(0,i));
+            fprintf(stderr,"RIG-DOORBELL rank=%u (%llu,%llu,%llu)\n",i,
+                (unsigned long long)entry[0],
+                (unsigned long long)entry[1],
+                (unsigned long long)entry[2]);
+        }
+    }
+}
+
 static void EnqueueRound(RankThread *rank_thread,uint64_t ordinal,
     uint32_t capture_mode)
 {
@@ -161,19 +259,26 @@ static void EnqueueRound(RankThread *rank_thread,uint64_t ordinal,
         SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_REDUCE_SUM_BF16);
     if ( capture_mode == 0u )
     {
-        CHECK(status == SPARK_STATUS_OK,"eager enqueue ok");
+        if ( status != SPARK_STATUS_OK )
+            Failf("rank=%u eager enqueue status=%d rounds=%llu",
+                rank_thread->rank,(int)status,
+                (unsigned long long)rank_thread->rounds_done);
         WaitStream(rank_thread->stream,rank_thread->rank,"eager round");
         rank_thread->rounds_done++;
+        DebugDump(rank_thread,"eager");
     }
-    else
-        CHECK(status == SPARK_STATUS_OK,"captured enqueue ok");
+    else if ( status != SPARK_STATUS_OK )
+        Failf("rank=%u captured enqueue status=%d",rank_thread->rank,
+            (int)status);
 }
 
 static void CheckValue(RankThread *rank_thread,const char *phase)
 {
     uint32_t element;
-    float expected = (float)((uint64_t)rank_thread->rounds_done *
-        ((uint64_t)TEST_DEGREE * (TEST_DEGREE + 1u) / 2u)) * TEST_STEP_F;
+    float expected = rank_thread->rounds_done == 0ull ? 0.0f :
+        ldexpf((float)((uint64_t)TEST_DEGREE * (TEST_DEGREE + 1u) / 2u) *
+            TEST_STEP_F,
+        2 * (int)(rank_thread->rounds_done - 1ull));
     cudaMemcpy(rank_thread->host_scratch,rank_thread->scratch,
         TEST_PAYLOAD_BYTES,cudaMemcpyDeviceToHost);
     for ( element = 0u; element < TEST_PAYLOAD_BYTES / 2u; element++ )
@@ -194,7 +299,7 @@ static void CheckValue(RankThread *rank_thread,const char *phase)
 static void *RankMain(void *argument)
 {
     RankThread *rank_thread = (RankThread *)argument;
-    SparkTpDeviceCollectiveConfiguration config;
+    SparkTpDeviceCollectiveConfig config;
     cudaGraph_t graph = 0;
     cudaGraphExec_t exec = 0;
     uint32_t round;
@@ -203,7 +308,7 @@ static void *RankMain(void *argument)
 
     memset(&config,0,sizeof(config));
     config.abi_version = SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION;
-    config.descriptor_bytes = sizeof(config);
+    config.backend_kind = SPARK_TP_DEVICE_COLLECTIVE_BACKEND_HIDDEN_TRANSPORT;
     config.tp_rank = rank_thread->rank;
     config.tp_degree = TEST_DEGREE;
     config.local_hidden_dimension = TEST_HIDDEN;
@@ -211,6 +316,7 @@ static void *RankMain(void *argument)
     config.connect_timeout_milli = 30000;
     config.operation_timeout_milli = 10000;
     config.max_active_sequence_count = 1;
+    config.combine_bf16_function = CombineBf16;
     config.combine_f32_seed_function = CombineSeed;
     config.combine_f32_add_function = CombineAdd;
     config.round_f32_function = CombineRound;
@@ -231,12 +337,18 @@ static void *RankMain(void *argument)
         TEST_CHAIN_KEY) == SPARK_STATUS_OK,"chain key");
 
     for ( round = 0u; round < TEST_ROUNDS; round++ )
+    {
         EnqueueRound(rank_thread,rank_thread->rank * 3u + round * 5u,0u);
+        DumpSlots("post-eager");
+    }
     CheckValue(rank_thread,"eager complete");
     pthread_barrier_wait(&g_barrier);
 
     CHECK(SparkTpDeviceCollectiveArmCapture(
         &rank_thread->collective) == SPARK_STATUS_OK,"arm capture");
+    pthread_barrier_wait(&g_barrier);
+    CHECK(cudaStreamBeginCapture(rank_thread->stream,
+        cudaStreamCaptureModeGlobal) == cudaSuccess,"begin capture");
     for ( round = 0u; round < TEST_ROUNDS; round++ )
         EnqueueRound(rank_thread,rank_thread->rank * 7u + round * 3u,1u);
     {
@@ -282,6 +394,19 @@ static void *RankMain(void *argument)
         {
             Failf("rank=%u replay %u graph error %llu",rank_thread->rank,
                 replay,(unsigned long long)graph_error);
+            (void)SparkTpDeviceCollectiveGraphStuckDump(
+                &rank_thread->collective);
+            {
+                uint64_t diag = SparkTpDeviceCollectiveGraphDiag(
+                    &rank_thread->collective);
+                Failf("rank=%u replay %u diag peer=%llu ring=%llu slotidx=%llu want=%llu got=%llu",
+                    rank_thread->rank,replay,
+                    (unsigned long long)(diag >> 56),
+                    (unsigned long long)((diag >> 48) & 0xffu),
+                    (unsigned long long)((diag >> 32) & 0xffffu),
+                    (unsigned long long)((diag >> 16) & 0xffffu),
+                    (unsigned long long)(diag & 0xffffu));
+            }
             SparkTpDeviceCollectiveBroadcastCancel(
                 &rank_thread->collective);
             break;
@@ -320,23 +445,30 @@ int main(void)
             "FAIL: SPARK_WEIGHTD_SOCKET not set (rig needs a private weightd)\n");
         return 2;
     }
-    if ( cudaMalloc(&g_mesh,SPARK_WEIGHTD_MESH_REGION_BYTES) != cudaSuccess )
+    if ( cudaHostAlloc(&g_mesh,SPARK_WEIGHTD_MESH_REGION_BYTES,
+             cudaHostAllocMapped) != cudaSuccess )
     {
         fprintf(stderr,"FAIL: mesh region alloc %s\n",
             cudaGetErrorString(cudaGetLastError()));
         return 2;
     }
-    cudaMemset(g_mesh,0,SPARK_WEIGHTD_MESH_REGION_BYTES);
+    memset(g_mesh,0,SPARK_WEIGHTD_MESH_REGION_BYTES);
     pthread_barrier_init(&g_barrier,0,TEST_DEGREE);
-    for ( rank = 0u; rank < TEST_DEGREE; rank++ )
+    {
+        pthread_t ship_thread;
+        pthread_create(&ship_thread,0,ShipEmulatorMain,0);
+        for ( rank = 0u; rank < TEST_DEGREE; rank++ )
     {
         g_ranks[rank].rank = rank;
         pthread_create(&threads[rank],0,RankMain,&g_ranks[rank]);
     }
-    for ( rank = 0u; rank < TEST_DEGREE; rank++ )
-        pthread_join(threads[rank],0);
+        for ( rank = 0u; rank < TEST_DEGREE; rank++ )
+            pthread_join(threads[rank],0);
+        g_ship_stop = 1u;
+        pthread_join(ship_thread,0);
+    }
     pthread_barrier_destroy(&g_barrier);
-    cudaFree(g_mesh);
+    cudaFreeHost(g_mesh);
     fprintf(stderr,"test_graph_replay_correctness: %d failures\n",
         g_failures);
     return g_failures ? 1 : 0;
