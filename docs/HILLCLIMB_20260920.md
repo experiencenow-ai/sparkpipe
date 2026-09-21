@@ -1604,3 +1604,24 @@ NEXT: the weightsd-side route table for the failing expert chunks —
     request-shape), (c) the prefetch's ABI_MISMATCH (status 11) at map.c:451
     is the same acquire machinery failing differently on 288-key batches —
     possibly one root (the request shape for large batches).
+
+## 09-22 07:00 TICK — the 30s chains = the acquire DEADLINE (mislabeled), not DNS
+
+IPv4-only connect deployed (a76b5cf4) — the 30s/rounds=0 chains PERSIST, so
+getaddrinfo was NOT the source. THE EXACT 30.001s = A DEADLINE: the chain's
+lazy acquire uses SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS (30s); when the
+weightsd cannot satisfy the working set, the acquire's deadline exit returns
+ROUTE_NOT_FOUND (a MISLABELED deadline status — the enum reading sent me to
+DNS first). STARVATION SUSPECT: the pool import (~21GB) + the prefetch's
+bulk acquires consuming the weightsd DEVICE BUDGET (the wave-6/acquire-17
+class) — the chain's acquires starve to the deadline. This boot: prefetch
+did 42 layers THEN the chain still deadline-failed = the budget stays
+consumed after the prefetch (the pool never evicts; leases released but
+device bytes accounted?).
+
+NEXT (quick unblock first): (a) defer the prefetch until AFTER the first
+eager chain completes (experts_warm via the chain; prefetch only tops up)
+— restores serving immediately; (b) label the acquire deadline exit
+honestly (DEADLINE/TIMEOUT status, loud print with the weightsd-side
+budget state); (c) the weightsd log at acquire time for the budget
+arithmetic (device_bytes_max vs pool+leases).

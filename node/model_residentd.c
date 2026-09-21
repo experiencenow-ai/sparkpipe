@@ -470,7 +470,7 @@ static SparkStatus SparkModelResidentdOpenTcpListenSocket(
 	if ( snprintf(service,sizeof(service),"%u",listen_port) < 0 )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	memset(&hints,0,sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
+	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 	hints.ai_flags = AI_NUMERICSERV;
