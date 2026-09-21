@@ -770,3 +770,20 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - Fleet: cold cycle + settle on the fixed stack; 1 route reaped this boot;
   the request in the window died reaped-queued (status=3). The verdict
   probe continues on the settled fleet next tick; floor 0.55ms/round.
+
+## 2026-09-21ag tick — the queue class is dead; the residual is mid-execution loss
+
+- The fairness + bounds fixes hold: NO state=1 (queued) wedges this boot —
+  the stuck are now state=5 (WAIT_ADAPTER, mid-execution): chains the
+  adapter ACCEPTED whose completion never arrives. That is the residual #26
+  rump (work lost between chain start and completion — the callback
+  starvation class is fixed, so these are chains whose EXECUTION stopped:
+  candidates: a lazy lease that never returned, a stream callback dropped
+  for a different reason, or the round-0 mesh wait with a missing deadline
+  path). Two reaped at 120s this window (the bound working as designed).
+- MEASURE: warm chain 137.66ms/91r, allreduce 76.88ms = 0.845ms/round
+  (contended window; floor reference 0.55). served=1 at the API (a queued
+  request completed — status faces still failed ones; green line next).
+- NEXT: pull the full lifecycle of the next state=5 stuck id (the CHAIN/
+  LAZYWORK/HEARTBEAT lines around it) — with the queue class eliminated,
+  every stuck chain now tells the execution-loss story cleanly.
