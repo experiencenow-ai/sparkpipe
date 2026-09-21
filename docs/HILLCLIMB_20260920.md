@@ -1126,3 +1126,14 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   kinds, self-heal verified), kv-lane transactions ✓. REMAINING: the
   module chain/completion layer (the S3 blocker's home) and the weightd
   server lease path (host tests exist). Next build: module-sim.
+
+## 2026-09-21ba tick — steady-state window measured; the queue face persists
+
+- MEASURE (settled window, engines 3h stable, self-heal stack live): cold
+  chains complete (255-261s/91r); the request faces are BUSY-queue (sta-
+  tus=15) behind a stuck state=5 route reaped at 120s (4 this boot) — the
+  residual module-layer class the module-sim targets. LAZYWORK cycling
+  normally (168).
+- The map's remaining layer (module chain/completion sim) is the next
+  build — it covers exactly this residual class AND the S3 graph blocker.
+  Floor 0.55ms/round stands.
