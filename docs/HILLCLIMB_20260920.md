@@ -1502,3 +1502,29 @@ diagnostics). The last chain degraded (35s, status 17) — no success this
 boot yet, so no ARRIVAL-DUMP line. NEXT: fix the reaper + the monitor slot
 duel, then the canary → arrival receipt (the 330ms/round relay-arrival
 conviction), then the ladder idle-GPU re-measure.
+
+## 09-22 04:30 TICK — THE COLD-EXPERT GRAPH GATE (biggest conviction yet) + reaper deleted
+
+REAPER: the elapsed-time reap block DELETED from ReportStuckRoutes (the
+scanner print stays); deployed 10c91d04 16/16. The "sparkf monitor duel"
+RESOLVED as a dead client — no live sparkf connection exists; the working
+takeover evicts it on the API's next connect.
+
+THE CONVICTION (this boot's degrade): ALL 16 RANKS STUCK AT THE SAME SEQ
+with ALL TAILS MUTUALLY VISIBLE (STUCK-TAILS: every peer at (11<<32)|2
+including self) — the mesh is HEALTHY; the GPU stopped EXECUTING the
+graph's compute kernels mid-replay. First chain after boot = COLD EXPERT
+WALK: the lazy expert loads (host memcpy into the pool) cannot happen
+inside a captured graph; the layer-compute kernels stall on missing
+pages. THE 2/2 EARLIER SUCCESSES WERE SECOND CHAINS — chain1 degrades →
+eager fallback warms the experts → chain2's graph succeeds (the 330ms
+receipt!). The "garbage" error values decoded: 0xFFFFFFFF93520000|N with
+N = each rank's round count — deterministic, payload-shaped (bf16 pair),
+written by a kernel with a mis-pointed destination — likely the stuck
+compute's partial writes; secondary to the gate fix.
+
+FIX (next code change): GATE THE GRAPH PATH ON THE EXPERT COVER — the
+decode_cover bitmap machinery already exists (GraphCoverEnsure); a chain
+whose routed experts are not covered takes the eager path FIRST (which
+warms them), the graph re-arm then succeeds on the next chain. Observable
+state, minimum fix, no time basing.

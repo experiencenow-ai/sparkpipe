@@ -2716,34 +2716,7 @@ static void SparkModelResidentdReportStuckRoutes(
 				(unsigned long long)route->client_generation);
 			stuck++;
 		}
-		if ( now_ns - route->active_since_ns >=
-		     (route->state == SPARK_MODEL_RESIDENTD_ROUTE_RESERVED ?
-		      UINT64_C(600000000000) :
-		      route->state == SPARK_MODEL_RESIDENTD_ROUTE_WAIT_ADAPTER ?
-		      UINT64_C(400000000000) : UINT64_C(120000000000)) )
-		{
-			SparkModelServingCompletion failed;
-			memset(&failed,0,sizeof(failed));
-			failed.abi_version = SPARK_MODEL_SERVING_ADAPTER_ABI_VERSION;
-			failed.descriptor_bytes = SPARK_MODEL_SERVING_COMPLETION_BYTES;
-			failed.status = SPARK_STATUS_NOT_FOUND;
-			failed.submission_id = route->submission_id;
-			failed.request_id = route->request_id;
-			failed.sequence_id = route->sequence_id;
-			failed.sequence_position = route->sequence_position;
-			failed.control_generation = route->submission.control_generation;
-			failed.transaction_id = route->submission.transaction_id;
-			failed.dispatch_generation = route->submission.dispatch_generation;
-			failed.request_generation = route->submission.request_generation;
-			failed.step_generation = route->submission.step_generation;
-			failed.residency = route->submission.residency;
-			fprintf(stderr,
-				"ROUTE-REAPED id=%llu state=%u — stuck past 120s; completing NOT_FOUND and releasing claims\n",
-				(unsigned long long)route->submission_id,
-				(unsigned)route->state);
-			route->completion = failed;
-			route->state = SPARK_MODEL_RESIDENTD_ROUTE_READY_COMPLETION;
-		}
+
 	}
 	(void)stuck;
 }
