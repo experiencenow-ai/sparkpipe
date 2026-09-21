@@ -202,6 +202,7 @@ struct SparkGlm5NextModuleState
 	SparkGlm5NextExecutionSlot slots[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
 	SparkGlm5NextAsyncCompletion completions[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
 	uint64_t completion_armed_ns[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
+	uint64_t chain_started_ns[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
 	pthread_mutex_t completion_watch_lock;
 	pthread_t completion_watch_thread;
 	uint32_t completion_watch_live;
@@ -3641,6 +3642,7 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 		return;
 	pthread_mutex_lock(&state->completion_watch_lock);
 	state->completion_armed_ns[async->slot_index] = 0u;
+	state->chain_started_ns[async->slot_index] = 0u;
 	pthread_mutex_unlock(&state->completion_watch_lock);
 	SparkGlm5NextDrainParkedCompletions(state);
 	state->tp_chain_active = 0u;
@@ -3810,9 +3812,30 @@ static void *SparkGlm5NextCompletionWatchdog(void *argument)
 			slot_index++)
 		{
 			SparkGlm5NextAsyncCompletion *async;
-			uint64_t armed = state->completion_armed_ns[slot_index];
-			if ( armed == 0u || now_ns - armed < UINT64_C(45000000000) )
+			uint64_t started = state->chain_started_ns[slot_index];
+			if ( started != 0u && now_ns - started >= UINT64_C(300000000000) )
+			{
+				SparkGlm5NextAsyncCompletion *chain_async =
+				    &state->completions[slot_index];
+				state->chain_started_ns[slot_index] = 0u;
+				state->completion_armed_ns[slot_index] = 0u;
+				if ( chain_async->completion.status == SPARK_STATUS_OK )
+					chain_async->completion.status =
+					    SPARK_STATUS_INTERNAL_ERROR;
+				fprintf(stderr,
+					"CHAIN-WATCHDOG-START slot=%u — whole chain %.1fs without completing (lost before/at work); completing loudly\n",
+					(unsigned)slot_index,
+					(double)(now_ns - started) / 1000000000.0);
+				pthread_mutex_unlock(&state->completion_watch_lock);
+				SparkGlm5NextCompleteOnWorker(chain_async);
+				pthread_mutex_lock(&state->completion_watch_lock);
 				continue;
+			}
+			{
+				uint64_t armed = state->completion_armed_ns[slot_index];
+				if ( armed == 0u || now_ns - armed < UINT64_C(45000000000) )
+					continue;
+			}
 			state->completion_armed_ns[slot_index] = 0u;
 			async = &state->completions[slot_index];
 			if ( async->completion.status == SPARK_STATUS_OK )
@@ -3965,6 +3988,9 @@ static SparkStatus SparkGlm5NextStartClaimedBatch(SparkGlm5NextModuleState *stat
 	chain->active = 1u;
 	atomic_fetch_add_explicit(&state->submitted_count,1u,memory_order_relaxed);
 	state->tp_chain_active = 1u;
+	pthread_mutex_lock(&state->completion_watch_lock);
+	state->chain_started_ns[slot_index] = SparkGlm5NextNowNs();
+	pthread_mutex_unlock(&state->completion_watch_lock);
 	if ( state->tp_device_collective_initialized != 0u )
 		status = SparkTpDeviceCollectiveChainKey(&state->tp_device_collective,chain->frame->request_id & SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK);
 	if ( status == SPARK_STATUS_OK && state->tp_device_collective_hc_initialized != 0u )
