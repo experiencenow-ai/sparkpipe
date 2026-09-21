@@ -1550,3 +1550,20 @@ graph gate opens immediately; (2) the first cold-boot canary then exercises
 chain1-eager-warm → chain2-GRAPH → the ARRIVAL-DUMP receipt; (3) the
 relay-arrival conviction at 330ms/round; (4) ladder idle re-measure; (5)
 the 0x9352 payload-write mystery (secondary).
+
+## 09-22 05:30 TICK — LEVER 2 PREFETCH LIVE (42/45 layers); the hello-close storm fixed; the first-chain BUSY origin = next
+
+DEPLOYED d357a21 (driver 13d71be8 + residentd 4d97c07b) 16/16:
+- PREFETCH-AT-ATTACH RAN: PREFETCH-DONE layers=42; layers 41-44 failed
+  status=11 (the weightsd device-budget starvation class — the known
+  acquire-17/wave-6 lineage; the pool budget vs the pack's tail layers).
+- THE HELLO-CLOSE STORM FIXED: the hello handler set close_after_output=1
+  for PERSISTENT pipeline sessions — the coordinator (rank0) closed after
+  every hello → the rank-scoped reconnect storm. Flag removed (first-
+  compiled-boot bug exposed by the drain fix).
+- STILL: the first chain = status=15 30s rounds=0 — with 42/45 layers
+  resident and experts_warm set, SOMETHING ELSE returns BUSY before any
+  mesh round. NEXT: find the origin (the LAZYWORK-KEYS print names the
+  acquire; if absent, it is admission/route-level — trace the BUSY source
+  in the chain-begin path), plus the 3 budget-failed layers (raise the
+  weightd device budget for the pack tail or split the prefetch).
