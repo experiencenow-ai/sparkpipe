@@ -630,3 +630,18 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - Fleet: cold cycle post-rollout; warm chain measured 173.3ms/91r with
   allreduce 101.4ms (1.11ms/round under cold-slot contention); 1 route
   reaped (the bound holds). Verdict probe still racing cold cycles.
+
+## 2026-09-21y tick — ledger #29: the head-pair cycle (spark0)
+
+- The verdict's blocker de-nested: spark0 (rank 0, the API-facing head) runs
+  an engine+weightd CYCLE LOOP — the weightd dies by SIGKILL (no kernel OOM
+  record, no latch-misfire print, no memory limits on the slice), the agent
+  restarts it (backoff working), and "engine predates weightd restart" recy-
+  cles the head engine → session churn (status=4) kills every request. Ranks
+  1-f stable (1500s+). Warm chains green whenever the head holds
+  (0.76-0.82ms/round MEASURED this tick: 137-140ms/91r, allreduce 69-74ms).
+- Ledger #29 (open): the spark0 weightd kill source. A live watcher is
+  planted (/tmp/wd_watch.log) to capture the death instant + the weightd log
+  tail; auditd/kill-source next. Candidates: an external killer (the mesh
+  hub? a stale automation?), a driver-level abort masquerading as SIGKILL,
+  or the latch hunt hitting a race (no print observed).
