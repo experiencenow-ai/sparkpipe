@@ -1063,3 +1063,23 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   precondition state (capture_armed, capture in flight, seeded lease) —
   and audit its failure release. That is the rung-1 unblock.
 - Fleet steady in eager (queue faces only). Floor 0.55ms/round.
+
+## 2026-09-21aw2 tick — the goal change executed: serving fault fuzzer live
+
+- GOAL REORDERED per the operator directive (660aaee): fuzzer covers all
+  known wedge classes + similar shapes FIRST; the ledger→fuzz-case map is
+  the checklist; S3 resumes on a fuzz-green stack.
+- BUILT: test_serving_fault_fuzz (fab21a5) — real pipeline client + mock
+  engine + randomized fault sequences with structural invariants (no
+  leaked transactions, monotonic generations, healthy-completion-after-
+  every-recovery). The fuzzer caught two real MOCK bugs in its first
+  minutes (registry leak per reconnect; the completion driver's
+  double-retire swap-remove reading inflight[-1]).
+- FIRST DETERMINISTIC FINDING: seed 7, 100 rounds — 100% of fault rounds
+  leave the pipeline unable to complete a fresh submission after the
+  recovery window (all 7 fault kinds, including the mildest scripted
+  BUSY). Reproducible offline in <1s: ./build/test_serving_fault_fuzz 7 100.
+  NEXT: discriminate real pipeline bug vs harness calibration (print the
+  post-fault submit status + the pipeline view's failed_status), then fix
+  — this is the #22/#30 class finally reproduced under deterministic
+  control, which is exactly what the operator demanded.
