@@ -237,6 +237,13 @@ static uint32_t FaultHealthyRun(SparkModelPipelineClient *pipeline, FaultState *
 		return(2u);
 	if ( status != SPARK_STATUS_OK )
 	{
+		SparkModelPipelineClientView v;
+		fprintf(stderr,"DIAG submit-status=%d after fault; ",(int)status);
+		if ( SparkModelPipelineClientGetView(pipeline,&v) == SPARK_STATUS_OK )
+			fprintf(stderr,"failed_status=%u active_txn=%u\n",
+			    (unsigned)v.failed_status,(unsigned)v.active_transaction_count);
+		else
+			fprintf(stderr,"view unreadable\n");
 		CHECK(0,tag);
 		return(0u);
 	}
@@ -245,6 +252,13 @@ static uint32_t FaultHealthyRun(SparkModelPipelineClient *pipeline, FaultState *
 		FaultDriveProgress(pipeline,1u);
 		if ( cb->completion_count > completions_before )
 			return(1u);
+	}
+	{
+		SparkModelPipelineClientView v;
+		fprintf(stderr,"DIAG no-completion after 40 spins; ");
+		if ( SparkModelPipelineClientGetView(pipeline,&v) == SPARK_STATUS_OK )
+			fprintf(stderr,"failed_status=%u active_txn=%u\n",
+			    (unsigned)v.failed_status,(unsigned)v.active_transaction_count);
 	}
 	(void)results_before;
 	CHECK(0,tag);

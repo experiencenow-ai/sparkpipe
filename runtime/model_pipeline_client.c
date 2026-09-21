@@ -1012,13 +1012,37 @@ SparkStatus SparkModelPipelineClientProgress(
 	if ( pipeline == 0 || maximum_message_count_per_rank == 0u )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	if ( pipeline->failed_status != SPARK_STATUS_OK )
-	{
 		SparkModelPipelineClientFailTransactions(pipeline,(SparkStatus)pipeline->failed_status);
-		return((SparkStatus)pipeline->failed_status);
-	}
 	status = SPARK_STATUS_OK;
-	for (rank=pipeline->rank_count; status==SPARK_STATUS_OK && pipeline->failed_status==SPARK_STATUS_OK && rank!=0u; rank--)
-		status = SparkModelResidentClientProgress(pipeline->clients[rank - 1u],maximum_message_count_per_rank);
+	for (rank=pipeline->rank_count; rank!=0u; rank--)
+	{
+		SparkStatus rank_status = SparkModelResidentClientProgress(
+		    pipeline->clients[rank - 1u],maximum_message_count_per_rank);
+		if ( rank_status != SPARK_STATUS_OK && status == SPARK_STATUS_OK )
+			status = rank_status;
+	}
+	if ( status != SPARK_STATUS_OK && pipeline->failed_status == SPARK_STATUS_OK )
+		SparkModelPipelineClientSetFailure(pipeline,status,rank);
+	if ( pipeline->failed_status != SPARK_STATUS_OK )
+	{
+		SparkModelResidentClientView probe;
+		uint32_t healthy = 1u;
+		for (rank=0u; rank<pipeline->rank_count; rank++)
+			if ( SparkModelResidentClientGetView(pipeline->clients[rank],&probe) != SPARK_STATUS_OK ||
+			     probe.connected == 0u )
+			{
+				healthy = 0u;
+				break;
+			}
+		if ( healthy != 0u )
+		{
+			fprintf(stderr,
+				"pipeline SELF-HEAL: failed_status=%u cleared (all ranks reconnected)\n",
+				(unsigned)pipeline->failed_status);
+			pipeline->failed_status = SPARK_STATUS_OK;
+			pipeline->failed_stage_index = SPARK_MODEL_PIPELINE_CLIENT_INVALID_STAGE_INDEX;
+		}
+	}
 	if ( status != SPARK_STATUS_OK || pipeline->failed_status != SPARK_STATUS_OK )
 	{
 		if ( pipeline->failed_status == SPARK_STATUS_OK )
