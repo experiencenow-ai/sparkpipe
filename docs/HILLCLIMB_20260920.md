@@ -1012,3 +1012,20 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   chains green, no wedges, generators gone. The remaining gap is THROUGHPUT
   (single-chain adapter + serialized slots), which is the S3/pipelining
   work itself, not a wedge. The climb resumes on the ladder.
+
+## 2026-09-21av tick — S3 rung 1 attempted; the graph-env rejection REPRODUCED and named
+
+- Rung N=2 armed on spark3 (GRAPH_PATH=1, RECORD_OPS=2; env verified in the
+  engine). Result: spark3's engine accepts prepares but EVERY transaction
+  aborts client-side (DECISION=2 loops, zero chains start fleet-wide — the
+  fleet cannot run without rank 3). TXN-FAIL-FIRST names it: **status=15
+  (BUSY)** — the first failing result per transaction is a BUSY from a
+  rank. With spark3 graph-armed, its adapter returns BUSY at prepare (the
+  graph-capture path cannot admit while... the admission gate). This IS
+  the recorded "graph-env admission rejection," now with the status named.
+- Reverted spark3 to eager (drop-in restored); the fleet resumes. NEXT
+  (discriminator): the BUSY's site on spark3 during graph-armed prepare —
+  the module's graph path gates admission on capture state; print the
+  gate's reason (GRAPH-GATE prints enabled=0 flags=1 on eager — the armed
+  run never even printed GRAPH-GATE, so the BUSY is BEFORE the gate: the
+  adapter's tp_chain_active or the capture_armed precondition).
