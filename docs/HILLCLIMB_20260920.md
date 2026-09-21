@@ -1432,3 +1432,26 @@ tail-visible moment in the wait kernel via %globaltimer into diag), then
 fix the pacing class. The 77/91 stall+garbage error_word from the previous
 tick did NOT recur on the retry — cold-start-class, keep the repro in mind
 but the pacing is the throughput killer now.
+
+## 09-22 02:40 TICK — MILESTONE MERGED; PR #1077 (graph pacing) OPEN; rig-tree anomaly blocking the instrument deploy
+
+MILESTONE: #1075 MERGED to main (operator-confirmed: first complete 16-rank
+graph chain, status=0, 91 rounds; CI green after manifest regen fc9aaf9).
+New branch hillclimb/graph-pacing = main; PR #1077 open with the arrival-ring
+instrumentation (256-slot device ring, %globaltimer per wait-kernel
+completion, reset at pre-launch, one-shot ARRIVAL dump; host fuzzer 273 green).
+
+BLOCKED ON: the spark3 build tree (~/g5graphrig, an rsync-frankenstein)
+SELF-REVERTS transport source edits mid-build — the compiled tp_device .o
+lacks functions the on-disk .c demonstrably contains (file content flips
+between greps; md5-matched then different at the same line). NEXT SESSION:
+rebuild the rig tree CLEAN from origin (git clone hillclimb/graph-pacing,
+never rsync over it), then: module publish → model_compile → publish_local →
+hub → canary → the ARRIVAL gap_us distribution convicts the 330ms/round
+pacing class (relay burst handling vs __nanosleep granularity vs .cv poll
+shape).
+
+FLEET STATE: driver 79aa97f1 (the merged #1075 era), engines healthy,
+serving eager fallback + graph retries per budget; hub release = same driver
+(the instrumented push never completed - publish_local correctly refused the
+failed compile).
