@@ -1471,3 +1471,34 @@ failed compile).
   implementation->arrival_ring is the remaining question. NEXT: print the
   ring pointer at ArmCapture and at dump (one-line discriminators), or
   debug the ring standalone in the ladder graph mode (single-node, fast).
+
+## 09-22 04:05 TICK — two serving-path convictions; the arrival receipt still pending
+
+OPERATOR INPUT: the spark GPUs are otherwise IDLE — the "production co-tenant"
+theory for the ladder's 8.7ms quantum is dead; the only moving load was my own
+canary traffic + weightd's CPU spin. Re-measure the ladder on the idle GPU
+after the fleet receipt (CONTENDED grading until then).
+
+CONVICTION 1 — THE ROUTE REAPER IS LIVE (banned class): ROUTE-REAPED
+id=1000001 state=10 "stuck past 120s; completing NOT_FOUND" fired MID-RETRY
+while the graph chain degraded at 35s and the API retried — the route's
+TOTAL lifetime crossed 120s. This code compiled tonight for the first time
+(the never-compiled-boot class); the operator's ruling replaced reapers with
+minimum-fix observable state. REMOVE or gate it (state-based, not
+elapsed-time; a route with LIVE retries is not stuck).
+
+CONVICTION 2 — RANK0 CLIENT-SLOT DUEL: sparkf's fleet_release_serve.py /
+fleet_view_serve.py holds a persistent connection to rank0's residentd
+(spark0:19560); the single-client slot + takeover means the monitor and the
+API evict each other → the API's rank-0 connection drops (peer eof) →
+rank-scoped failure → api_exit after retries. This killed 3+ canaries.
+FIX DIRECTIONS: the monitor should use the residentd's status/status port
+(or poll the API's /health), not the engine client slot; or the residentd
+serves status out-of-band. ALSO: leaked APIs from cancelled ssh starts
+(setsid survives cancellation) — always verify pgrep==1 after starting.
+
+FLEET: 333af59a 16/16 (sleep-free NCCL-style spin + ARRIVAL-DUMP
+diagnostics). The last chain degraded (35s, status 17) — no success this
+boot yet, so no ARRIVAL-DUMP line. NEXT: fix the reaper + the monitor slot
+duel, then the canary → arrival receipt (the 330ms/round relay-arrival
+conviction), then the ladder idle-GPU re-measure.
