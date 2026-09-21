@@ -1657,3 +1657,22 @@ trace the residentd's weightd-socket IPC during a chain (strace the
 send/recv pair) vs read the weightsd's working-set acquire handler — the
 request is either not sent (client-side early exit — check map->failure
 stickiness) or sent and lost (handler deadlock/queue). One of the two.
+
+## 09-22 08:00 TICK — resolver healthy (theory dead); the 15 = the weightsd SERVER reply; draft_bridge IPv4 hygiene
+
+RESOLVER TESTED LIVE on spark0: getent hosts = 0.00s for spark1/5/f, AAAA
+returns instantly (IPv4-mapped) — the getaddrinfo/ROUTE_NOT_FOUND theory is
+DEAD. draft_bridge.c's AF_UNSPEC fixed to AF_INET anyway (same hazard class,
+hygiene). ZERO ACQUIRE-STALL prints = the client acquire RPC RETURNS FAST
+(sub-10s) with an error; the chain's 30s = ITS retry loop over a
+fast-failing acquire. THEREFORE the 15 (ROUTE_NOT_FOUND) = THE WEIGHTSD'S
+SERVER-SIDE REPLY: its working-set resolve says 'no route' for the requested
+expert chunk — the weightsd-side chunk ROUTE REGISTRY (loaded from the pack
+dir at weightsd boot) lacks/loses entries.
+
+NEXT (tight server-side question): read the weightsd's acquire handler
+(node/weightd.c — the working-set path): (a) the registry load (which files,
+when, failure modes), (b) the route lookup's not-found conditions, (c) why
+EARLIER boots served fine with the same registry (what changed: many engine
+restarts? a registry refresh race?). The weightsd log silence on acquires =
+the observability gap to fix in the same pass.
