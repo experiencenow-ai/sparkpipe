@@ -751,3 +751,22 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   cursor past the skipped route). NEXT: audit/instrument the cursor — print
   skipped-while-active occurrences; the fix is likely to scan-for-work
   rather than rotate-blind.
+
+## 2026-09-21af tick — #30 path 2 FIXED: the frozen cursor; reap bounds split
+
+- ROOT (path 2, confirmed by measurement): the route cursor only advanced
+  when the adapter budget did work (ops!=0); on budget-REFUSED passes it
+  stayed frozen at the refusing index — with the single-chain adapter
+  refusing for the duration of every running chain, all routes behind the
+  refusal point starved. The fix's own print proved the scale: 120,196
+  refused passes in one boot. Fix (23fa164): the cursor advances every
+  visited index; the split-brain lifecycle (chain executing, route stuck in
+  RESERVED) was a starved route queueing behind a busy adapter.
+- SECOND-ORDER FIX (2bb2544): cold chains legitimately hold the single-
+  chain adapter for 250s+, so the uniform 120s reaper was killing merely-
+  QUEUED routes — reap bounds split: RESERVED (queued) at 600s, executing
+  states at 120s. Fairness print rate-limited to 1/s (the 120k-line flood
+  was itself a hazard).
+- Fleet: cold cycle + settle on the fixed stack; 1 route reaped this boot;
+  the request in the window died reaped-queued (status=3). The verdict
+  probe continues on the settled fleet next tick; floor 0.55ms/round.
