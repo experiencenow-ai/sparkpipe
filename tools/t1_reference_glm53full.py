@@ -1,9 +1,4 @@
-import os
-import threading
-
 import numpy as np
-
-from concurrent.futures import ThreadPoolExecutor
 
 from t1_reference_common import (Safetensors, _E4M3_LUT, bf16_round_f32,
                                  bf16_to_f32, define_float, define_uint,
@@ -11,6 +6,7 @@ from t1_reference_common import (Safetensors, _E4M3_LUT, bf16_round_f32,
                                  sigmoid)
 
 PREFIX = "model.layers."
+LINEAR_BLOCK_ROWS = 1024
 HIDDEN = 6144
 LAYERS = 78
 HEADS = 64
@@ -122,6 +118,7 @@ class Glm53FullEngine:
             raise Glm53FullConfigError(
                 f"expert payload {entry['dtype']} {entry['shape']} is not a "
                 f"known release shape ({INTERMEDIATE}, {HIDDEN})")
+        self._convert_u32 = np.empty(0, dtype=np.uint32)
 
     def tensor(self, name):
         raw = self.st.pread(name)
@@ -145,26 +142,61 @@ class Glm53FullEngine:
                 1, cols).reshape(-1))
         return raw.astype(np.float32).reshape(-1)
 
-    def expert_weight(self, name):
-        raw = self.st.pread(name)
-        if raw.dtype == np.uint16:
-            return bf16_to_f32(raw.reshape(raw.shape))
-        if raw.dtype != np.uint8:
-            raise ValueError(f"expert {name} is neither F8_E4M3 nor BF16")
-        scale = self.st.pread(name + "_scale_inv").astype(np.float32)
-        rows, cols = raw.shape
-        codes = _E4M3_LUT[raw.reshape(rows, cols)].astype(np.float32)
-        tiled = np.repeat(np.repeat(scale, 128, axis=0), 128, axis=1)
-        return codes * tiled[:rows, :cols]
+    def _bf16_matvec(self, slab, count, in_dim, x):
+        n = count * in_dim
+        if n > self._convert_u32.size:
+            self._convert_u32 = np.empty(n, dtype=np.uint32)
+        words = self._convert_u32[:n]
+        words[:] = slab.reshape(-1)
+        words <<= 16
+        return words.view(np.float32).reshape(count, in_dim) @ x
+
+    def _scale_group_rows(self, name, start, count):
+        grid = self.st.pread(name + "_scale_inv").astype(np.float32)
+        srow = (start + np.arange(count)) // 128
+        return grid[srow]
+
+    def _fp8_rows(self, name, slab, start, rounded):
+        rows, cols = slab.shape
+        codes = _E4M3_LUT[slab].astype(np.float32).reshape(
+            rows, cols // 128, 128)
+        scales = self._scale_group_rows(name, start, rows)
+        block = codes * scales[:, :, None]
+        flat = block.reshape(rows, cols)
+        if rounded:
+            return bf16_to_f32(f32_to_bf16_u16(flat))
+        return flat
+
+    def _matvec(self, x, name, rounded):
+        weight = name + ".weight"
+        entry = self.st.entry(weight)
+        rows, in_dim = entry["shape"]
+        if in_dim != x.shape[0]:
+            raise ValueError(f"weight {weight} shape {entry['shape']} "
+                             f"disagrees with activation width {x.shape[0]}")
+        out = np.empty(rows, dtype=np.float32)
+        for start in range(0, rows, LINEAR_BLOCK_ROWS):
+            count = min(LINEAR_BLOCK_ROWS, rows - start)
+            slab = self.st.raw_rows(weight, start, count)
+            if entry["dtype"] == "BF16":
+                out[start:start + count] = self._bf16_matvec(slab, count,
+                                                             in_dim, x)
+            elif entry["dtype"] == "F8_E4M3":
+                out[start:start + count] = self._fp8_rows(
+                    weight, slab, start, rounded) @ x
+            else:
+                raise ValueError(f"reference weight {weight} must be BF16 "
+                                 f"or F8_E4M3")
+        return out
 
     def linear(self, x, name):
         xf = bf16_to_f32(x) if x.dtype == np.uint16 else x
-        return f32_to_bf16_u16(self.tensor(name + ".weight") @ xf)
+        return f32_to_bf16_u16(self._matvec(xf, name, rounded=True))
 
     def linear_fused_gate_up(self, x, up_name, gate_name):
         xf = bf16_to_f32(x) if x.dtype == np.uint16 else x
-        up = self.tensor(up_name) @ xf
-        gate = self.tensor(gate_name) @ xf
+        up = self._matvec(xf, up_name[:-len(".weight")], rounded=True)
+        gate = self._matvec(xf, gate_name[:-len(".weight")], rounded=True)
         return np.concatenate(
             [f32_to_bf16_u16(up), f32_to_bf16_u16(gate)])
 
@@ -180,6 +212,16 @@ class Glm53FullEngine:
         normed = bf16_round_f32(rmsnorm(value, self.vector(weight_name),
                                         EPSILON))
         return f32_to_bf16_u16(value), normed
+
+    def _kvb_rows(self, prefix, first, count):
+        weight = prefix + "kv_b_proj.weight"
+        entry = self.st.entry(weight)
+        slab = self.st.raw_rows(weight, first, count)
+        if entry["dtype"] == "BF16":
+            return bf16_to_f32(slab)
+        if entry["dtype"] == "F8_E4M3":
+            return self._fp8_rows(weight, slab, first, rounded=True)
+        raise ValueError(f"reference weight {weight} must be BF16 or F8_E4M3")
 
     def attention(self, layer, normed, position, cache):
         prefix = f"{PREFIX}{layer}.self_attn."
@@ -199,11 +241,10 @@ class Glm53FullEngine:
         for head in range(HEADS):
             rope_apply(q_heads[head], QK_NOPE, position)
             q_rope[head] = q_heads[head][QK_NOPE:]
-        kv_b = self.tensor(prefix + "kv_b_proj.weight")
         per_head = QK_NOPE + V_DIM
         query_latent = np.empty((HEADS, LATENT), dtype=np.uint16)
         for head in range(HEADS):
-            block = kv_b[head * per_head:head * per_head + QK_NOPE, :]
+            block = self._kvb_rows(prefix, head * per_head, QK_NOPE)
             query_latent[head] = f32_to_bf16_u16(
                 bf16_to_f32(q_heads[head][:QK_NOPE]) @ block)
         cache.append(kv_slot.copy())
@@ -219,7 +260,7 @@ class Glm53FullEngine:
             attention_latent[head] = f32_to_bf16_u16(mixed)
         attention_value = np.empty(HEADS * V_DIM, dtype=np.uint16)
         for head in range(HEADS):
-            block = kv_b[head * per_head + QK_NOPE:(head + 1) * per_head, :]
+            block = self._kvb_rows(prefix, head * per_head + QK_NOPE, V_DIM)
             attention_value[head * V_DIM:(head + 1) * V_DIM] = \
                 f32_to_bf16_u16(block @ bf16_to_f32(attention_latent[head]))
         return self.linear(attention_value, prefix + "o_proj")
@@ -231,7 +272,8 @@ class Glm53FullEngine:
 
     def down_linear(self, x, name):
         xf = bf16_to_f32(x) if x.dtype == np.uint16 else x
-        return f32_to_bf16_u16(self.tensor(name) @ xf)
+        return f32_to_bf16_u16(self._matvec(xf, name[:-len(".weight")],
+                                            rounded=True))
 
     def dense_mlp(self, layer, normed):
         prefix = f"{PREFIX}{layer}.mlp."
@@ -240,16 +282,23 @@ class Glm53FullEngine:
             prefix + "gate_proj.weight")
         return self.down_linear(self.silu_mul(fused), prefix + "down_proj.weight")
 
+    def expert_linear(self, x, name):
+        xf = bf16_to_f32(x) if x.dtype == np.uint16 else x
+        entry = self.st.entry(name)
+        if entry["dtype"] not in ("F8_E4M3", "BF16"):
+            raise ValueError(f"expert {name} is neither F8_E4M3 nor BF16")
+        return self._matvec(xf, name[:-len(".weight")], rounded=False)
+
     def expert_mlp(self, layer, expert, normed_f32):
         base = f"{PREFIX}{layer}.mlp.experts.{expert}."
-        up = f32_to_bf16_u16(self.expert_weight(base + "up_proj.weight") @
-                             normed_f32)
-        gate = f32_to_bf16_u16(self.expert_weight(base + "gate_proj.weight") @
-                               normed_f32)
+        up = f32_to_bf16_u16(self.expert_linear(
+            normed_f32, base + "up_proj.weight"))
+        gate = f32_to_bf16_u16(self.expert_linear(
+            normed_f32, base + "gate_proj.weight"))
         intermediate = self.silu_mul(np.concatenate([up, gate]))
         return f32_to_bf16_u16(
-            self.expert_weight(base + "down_proj.weight") @
-            bf16_to_f32(intermediate))
+            self.expert_linear(bf16_to_f32(intermediate),
+                               base + "down_proj.weight"))
 
     def routed_mlp(self, layer, normed, sink):
         prefix = f"{PREFIX}{layer}.mlp."
@@ -303,7 +352,7 @@ class Glm53FullEngine:
                 capture[(position, i)] = sink
         return bf16_to_f32(residual) + bf16_to_f32(delta)
 
-    def logits(self, streams, chunk=8192):
+    def logits(self, streams, chunk=4096):
         value = streams if streams.dtype == np.float32 \
             else bf16_to_f32(streams)
         normed = bf16_round_f32(rmsnorm(value, self.tensor("model.norm.weight"),
@@ -325,122 +374,6 @@ class Glm53FullEngine:
         return best_token, best
 
 
-EXPERT_DEQUANT_WORKERS = int(os.environ.get("SPARK_T1_GFULL_WORKERS", "8"))
-EXPERT_CACHE_BYTES = int(os.environ.get(
-    "SPARK_T1_GFULL_EXPERT_CACHE_GB", "24")) << 30
-EXPERT_TAILS = ("up_proj.weight", "gate_proj.weight", "down_proj.weight")
 
 
-class Glm53FullFastEngine(Glm53FullEngine):
-    def __init__(self, checkpoint_dir, defines, config):
-        Glm53FullEngine.__init__(self, checkpoint_dir, defines, config)
-        self._dense = {}
-        self._expert = {}
-        self._expert_bytes = 0
-        self._lock = threading.Lock()
-        self._local = threading.local()
-        self._pool = ThreadPoolExecutor(max_workers=EXPERT_DEQUANT_WORKERS)
-
-    def _expert_st(self):
-        st = getattr(self._local, "st", None)
-        if st is None:
-            st = Safetensors(self.st.root)
-            self._local.st = st
-        return st
-
-    def _expert_dequant(self, name):
-        st = self._expert_st()
-        raw = st.pread(name)
-        if raw.dtype == np.uint16:
-            return bf16_to_f32(raw.reshape(raw.shape))
-        if raw.dtype != np.uint8:
-            raise ValueError(f"expert {name} is neither F8_E4M3 nor BF16")
-        scale = st.pread(name + "_scale_inv").astype(np.float32)
-        rows, cols = raw.shape
-        codes = _E4M3_LUT[raw.reshape(rows, cols)].astype(np.float32)
-        tiled = np.repeat(np.repeat(scale, 128, axis=0), 128, axis=1)
-        return codes * tiled[:rows, :cols]
-
-    def _expert_store(self, name, value):
-        with self._lock:
-            self._expert[name] = value
-            self._expert_bytes += value.nbytes
-            while self._expert_bytes > EXPERT_CACHE_BYTES \
-                    and len(self._expert) > 1:
-                victim = next(iter(self._expert))
-                self._expert_bytes -= self._expert[victim].nbytes
-                del self._expert[victim]
-
-    def _expert_fill(self, name):
-        if name in self._expert:
-            return
-        self._expert_store(name, self._expert_dequant(name))
-
-    def _expert_fill_all(self, layer, expert):
-        base = f"{PREFIX}{layer}.mlp.experts.{expert}."
-        for tail in EXPERT_TAILS:
-            self._expert_fill(base + tail)
-
-    def tensor(self, name):
-        packed = self._dense.get(name)
-        if packed is not None:
-            return bf16_to_f32(packed) if packed.dtype == np.uint16 else packed
-        raw = self.st.pread(name)
-        if raw.dtype == np.uint16:
-            value = bf16_to_f32(raw)
-            self._dense[name] = value
-            return value
-        if raw.dtype == np.uint8:
-            scale = self.st.pread(name + "_scale_inv").astype(np.float32)
-            rows, cols = raw.shape
-            packed = fp8_block_to_bf16(raw, scale, rows, cols)
-            self._dense[name] = packed
-            return bf16_to_f32(packed)
-        value = raw.astype(np.float32)
-        self._dense[name] = value
-        return value
-
-    def vector(self, name):
-        cached = self._dense.get(name)
-        if cached is not None:
-            return cached
-        value = Glm53FullEngine.vector(self, name)
-        self._dense[name] = value
-        return value
-
-    def expert_weight(self, name):
-        value = self._expert.get(name)
-        if value is not None:
-            return value
-        self._expert_fill(name)
-        return self._expert[name]
-
-    def routed_mlp(self, layer, normed, sink):
-        prefix = f"{PREFIX}{layer}.mlp."
-        normed_f32 = normed
-        logits = self.tensor(prefix + "gate.weight") @ normed_f32
-        scores = sigmoid(logits.astype(np.float32))
-        choice = scores + self.vector(prefix + "gate.e_score_correction_bias")
-        order = np.argsort(-choice, kind="stable")
-        selected = order[:TOP_K]
-        picked = scores[selected]
-        weights = picked / (picked.sum() + 1e-20) * np.float32(ROUTED_SCALE)
-        futures = [self._pool.submit(self._expert_fill_all, layer,
-                                     int(expert)) for expert in selected]
-        routed = np.zeros(HIDDEN, dtype=np.float32)
-        for index in range(TOP_K):
-            futures[index].result()
-            output = self.expert_mlp(layer, int(selected[index]), normed_f32)
-            routed += bf16_to_f32(output) * weights[index]
-        shared = prefix + "shared_experts."
-        shared_fused = self.linear_fused_gate_up(
-            normed_f32, shared + "up_proj.weight", shared + "gate_proj.weight")
-        shared_out = self.down_linear(
-            self.silu_mul(shared_fused), shared + "down_proj.weight")
-        sink.append(selected.astype(np.int32))
-        sink.append(weights.astype(np.float32))
-        return f32_to_bf16_u16(routed + bf16_to_f32(shared_out))
-
-
-ENGINE_CLASS = Glm53FullFastEngine \
-    if os.environ.get("SPARK_T1_GFULL_FAST") == "1" else Glm53FullEngine
+ENGINE_CLASS = Glm53FullEngine

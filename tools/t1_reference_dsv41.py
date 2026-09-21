@@ -4,7 +4,6 @@ import os
 import re
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -18,6 +17,7 @@ from t1_reference_common import (Safetensors, bf16_round_f32, bf16_to_f32,
                                  rmsnorm, sigmoid)
 
 PREFIX = "layers."
+LINEAR_BLOCK_ROWS = 4096
 ENGRAM_MAP_REPO_PATH = os.path.join("qualification", "t1_reference", "dsv41",
                                     "engram_token_map.npy")
 
@@ -453,13 +453,7 @@ class Dsv41FlashEngine:
         self.compress_freqs = self._freqs(self.compress_theta,
                                           self.yarn_original)
         self._engram_init(text, engram_ids)
-        self.expert_cache = {}
-        self.expert_cache_limit = int(os.environ.get(
-            "T1_REF_DSV41_EXPERT_CACHE", 48))
-        self.dequant_cache = {}
-        self.dequant_cache_bytes = 0
-        self.dequant_cache_limit = int(os.environ.get(
-            "T1_REF_DSV41_DEQUANT_CACHE_BYTES", 256 << 20))
+        self._convert_u32 = np.empty(0, dtype=np.uint32)
         self._head_input = None
 
     def _freqs(self, theta, original):
@@ -579,55 +573,65 @@ class Dsv41FlashEngine:
                 rolling[:, None] % self.engram_primes[:, i - 1]
         return out + self.engram_offsets
 
-    def _dequant_weight_u16(self, name):
-        cached = self.dequant_cache.get(name)
-        if cached is not None:
-            self.dequant_cache.pop(name)
-            self.dequant_cache[name] = cached
-            return cached
-        raw = self.st.pread(name)
-        if raw.dtype == np.uint16:
-            self._dequant_remember(name, raw)
-            return raw
-        if raw.dtype != np.uint8:
-            raise Dsv41ConfigError(
-                f"unsupported weight dtype for {name}: {raw.dtype}")
-        rows, cols = raw.shape
+    def _bf16_matvec(self, slab, count, in_dim, x):
+        n = count * in_dim
+        if n > self._convert_u32.size:
+            self._convert_u32 = np.empty(n, dtype=np.uint32)
+        words = self._convert_u32[:n]
+        words[:] = slab.reshape(-1)
+        words <<= 16
+        return words.view(np.float32).reshape(count, in_dim) @ x
+
+    def _scale_grid(self, name, rows):
         scale_name = name[:-len(".weight")] + ".scale"
         scale = self.st.pread(scale_name).astype(np.int32)
         row_blocks, col_blocks = scale.shape
-        if rows % row_blocks or cols % col_blocks:
+        if rows % row_blocks:
             raise Dsv41ConfigError(
-                f"{name} shape {(rows, cols)} does not pack into scale "
-                f"grid {scale.shape}")
-        rb_rows = rows // row_blocks
-        w = np.empty((rows, cols), dtype=np.uint16)
-        scales = _exp2_rows(scale - 127)
-        for rb0 in range(0, row_blocks, 8):
-            rb1 = min(rb0 + 8, row_blocks)
-            r0, r1 = rb0 * rb_rows, rb1 * rb_rows
-            block = _E4M3_F32[raw[r0:r1]].reshape(
-                rb1 - rb0, rb_rows, col_blocks, cols // col_blocks) \
-                * scales[rb0:rb1, None, :, None]
-            w[r0:r1] = f32_to_bf16_u16(block.reshape(r1 - r0, cols))
-        self._dequant_remember(name, w)
-        return w
+                f"{name} rows {rows} do not pack into scale grid "
+                f"{scale.shape}")
+        return scale, row_blocks, col_blocks
 
-    def _dequant_remember(self, name, array):
-        self.dequant_cache[name] = array
-        self.dequant_cache_bytes += array.nbytes
-        while self.dequant_cache_bytes > self.dequant_cache_limit \
-                and len(self.dequant_cache) > 1:
-            oldest = next(iter(self.dequant_cache))
-            victim = self.dequant_cache.pop(oldest)
-            self.dequant_cache_bytes -= victim.nbytes
+    def _fp8_block_rows(self, slab, start, rb_rows, scales, col_blocks):
+        rows, cols = slab.shape
+        srow = np.arange(start, start + rows) // rb_rows
+        block = _E4M3_F32[slab].reshape(rows, col_blocks,
+                                        cols // col_blocks) \
+            * scales[srow][:, :, None]
+        return bf16_to_f32(f32_to_bf16_u16(block.reshape(rows, cols)))
+
+    def _matvec_chunked(self, x, name, rows, in_dim, dtype):
+        out = np.empty(rows, dtype=np.float32)
+        if dtype == "BF16":
+            for start in range(0, rows, LINEAR_BLOCK_ROWS):
+                count = min(LINEAR_BLOCK_ROWS, rows - start)
+                slab = self.st.raw_rows(name, start, count)
+                out[start:start + count] = self._bf16_matvec(slab, count,
+                                                             in_dim, x)
+            return out
+        scale, row_blocks, col_blocks = self._scale_grid(name, rows)
+        rb_rows = rows // row_blocks
+        scales = _exp2_rows(scale - 127)
+        step = max(rb_rows, LINEAR_BLOCK_ROWS - LINEAR_BLOCK_ROWS % rb_rows)
+        for start in range(0, rows, step):
+            count = min(step, rows - start)
+            slab = self.st.raw_rows(name, start, count)
+            out[start:start + count] = self._fp8_block_rows(
+                slab, start, rb_rows, scales, col_blocks) @ x
+        return out
 
     def _linear(self, x, name):
-        raw = self.st.pread(name)
-        if raw.dtype == np.uint16:
-            return bf16_round_f32(bf16_to_f32(raw) @ x)
-        w = bf16_to_f32(self._dequant_weight_u16(name))
-        return bf16_round_f32(w @ x)
+        entry = self.st.entry(name)
+        rows, in_dim = entry["shape"]
+        if in_dim != x.shape[0]:
+            raise Dsv41ConfigError(
+                f"{name} shape {entry['shape']} disagrees with activation "
+                f"width {x.shape[0]}")
+        if entry["dtype"] not in ("BF16", "U8", "F8_E4M3"):
+            raise Dsv41ConfigError(
+                f"unsupported weight dtype for {name}: {entry['dtype']}")
+        return bf16_round_f32(self._matvec_chunked(x, name, rows, in_dim,
+                                                   entry["dtype"]))
 
     def _fp32_projector(self, name):
         raw = self.st.pread(name)
@@ -641,79 +645,50 @@ class Dsv41FlashEngine:
             raise Dsv41ConfigError(f"{name} must be BF16")
         return bf16_to_f32(raw.reshape(-1))
 
-    def _mxfp4(self, name, chunk_rows=256):
-        payload = self.st.read(name)
-        scale = self.st.read(name[:-len(".weight")] + ".scale")
-        rows, packed = payload.shape
+    def _mxfp4_matvec(self, x, name):
+        entry = self.st.entry(name)
+        rows, packed = entry["shape"]
         cols = packed * 2
-        if scale.shape != (rows, cols // 32):
+        if cols != x.shape[0]:
             raise Dsv41ConfigError(
-                f"{name}.scale {scale.shape} does not pack {rows}x{cols}")
-        exp_rows = scale.astype(np.int32).astype(np.float32) - 127
-        out = np.empty((rows, cols), dtype=np.float32)
-        for first in range(0, rows, chunk_rows):
-            last = min(first + chunk_rows, rows)
-            block = payload[first:last]
-            nib = np.empty((last - first, cols), dtype=np.int32)
-            nib[:, 0::2] = block & 0xF
-            nib[:, 1::2] = block >> 4
-            w = _E2M1_F32[nib].reshape(last - first, cols // 32, 32)
-            out[first:last] = (w * np.exp2(
-                exp_rows[first:last])[:, :, None]).reshape(
-                last - first, cols)
+                f"{name} width {cols} disagrees with activation width "
+                f"{x.shape[0]}")
+        scale_name = name[:-len(".weight")] + ".scale"
+        sentry = self.st.entry(scale_name)
+        if sentry["shape"] != [rows, cols // 32]:
+            raise Dsv41ConfigError(
+                f"{scale_name} {sentry['shape']} does not pack "
+                f"{rows}x{cols}")
+        out = np.empty(rows, dtype=np.float32)
+        for start in range(0, rows, LINEAR_BLOCK_ROWS):
+            count = min(LINEAR_BLOCK_ROWS, rows - start)
+            payload = self.st.raw_rows(name, start, count)
+            scale = self.st.raw_rows(scale_name, start, count)
+            exp_rows = scale.astype(np.int32).astype(np.float32) - 127
+            nib = np.empty((count, cols), dtype=np.int32)
+            nib[:, 0::2] = payload & 0xF
+            nib[:, 1::2] = payload >> 4
+            w = _E2M1_F32[nib].reshape(count, cols // 32, 32)
+            block = (w * np.exp2(exp_rows)[:, :, None]).reshape(count, cols)
+            out[start:start + count] = bf16_to_f32(
+                f32_to_bf16_u16(block)) @ x
         return out
 
-    def _expert_weights(self, name, pool=None):
-        cached = self.expert_cache.get(name)
-        if cached is not None:
-            self.expert_cache.pop(name)
-            self.expert_cache[name] = cached
-            return cached
-        if self.st.entry(name + "w1.weight")["dtype"] == "BF16":
-            weights = (bf16_to_f32(self.st.read(name + "w1.weight")),
-                       bf16_to_f32(self.st.read(name + "w2.weight")),
-                       bf16_to_f32(self.st.read(name + "w3.weight")))
-            self.expert_cache[name] = weights
-            return weights
-        if pool is not None:
-            specs = [(name + "w1.weight", name + "w1.scale"),
-                     (name + "w2.weight", name + "w2.scale"),
-                     (name + "w3.weight", name + "w3.scale")]
-            with ThreadPoolExecutor(6) as readers:
-                parts = list(readers.map(
-                    lambda spec: (self.st.pread(spec[0]),
-                                  self.st.pread(spec[1])), specs))
-            w1, w2, w3 = [f32_to_bf16_u16(self._mxfp4_arrays(pl, sc))
-                          for pl, sc in parts]
-        else:
-            w1 = f32_to_bf16_u16(self._mxfp4(name + "w1.weight"))
-            w2 = f32_to_bf16_u16(self._mxfp4(name + "w2.weight"))
-            w3 = f32_to_bf16_u16(self._mxfp4(name + "w3.weight"))
-        weights = (w1, w2, w3)
-        if len(self.expert_cache) >= self.expert_cache_limit:
-            self.expert_cache.pop(next(iter(self.expert_cache)))
-        self.expert_cache[name] = weights
-        return weights
-
-    def _mxfp4_arrays(self, payload, scale, chunk_rows=256):
-        rows, packed = payload.shape
-        cols = packed * 2
-        if scale.shape != (rows, cols // 32):
+    def _expert_linear(self, x, name):
+        entry = self.st.entry(name)
+        rows, in_dim = entry["shape"]
+        if entry["dtype"] == "BF16":
+            if in_dim != x.shape[0]:
+                raise Dsv41ConfigError(
+                    f"{name} shape {entry['shape']} disagrees with "
+                    f"activation width {x.shape[0]}")
+            return bf16_round_f32(self._matvec_chunked(x, name, rows, in_dim,
+                                                       "BF16"))
+        if entry["dtype"] not in ("U8", "I8"):
             raise Dsv41ConfigError(
-                f"scale {scale.shape} does not pack {rows}x{cols}")
-        exp_rows = scale.astype(np.int32).astype(np.float32) - 127
-        out = np.empty((rows, cols), dtype=np.float32)
-        for first in range(0, rows, chunk_rows):
-            last = min(first + chunk_rows, rows)
-            block = payload[first:last]
-            nib = np.empty((last - first, cols), dtype=np.int32)
-            nib[:, 0::2] = block & 0xF
-            nib[:, 1::2] = block >> 4
-            w = _E2M1_F32[nib].reshape(last - first, cols // 32, 32)
-            out[first:last] = (w * np.exp2(
-                exp_rows[first:last])[:, :, None]).reshape(
-                last - first, cols)
-        return out
+                f"unsupported expert weight dtype for {name}: "
+                f"{entry['dtype']}")
+        return bf16_round_f32(self._mxfp4_matvec(x, name))
 
     def _hc_mixes(self, layer, streams, kind):
         p = f"{PREFIX}{layer}.hc_{kind}_"
@@ -929,20 +904,34 @@ class Dsv41FlashEngine:
             o[:, -self.rope_dim:].copy(), table, position, inverse=True))
         o = bf16_round_f32(o)
         grouped = o.reshape(self.o_groups, -1)
-        w = bf16_to_f32(self._dequant_weight_u16(p + "wo_a.weight"))
-        w = w.reshape(self.o_groups, self.o_lora,
-                      self.heads_per_group * self.head_dim)
-        projected = (w @ grouped[:, :, None])[..., 0]
+        projected = np.empty((self.o_groups, self.o_lora), dtype=np.float32)
+        for g in range(self.o_groups):
+            projected[g] = self._wo_group_matvec(grouped[g],
+                                                 p + "wo_a.weight", g)
         out = bf16_round_f32(projected.reshape(-1))
         return self._linear(out, p + "wo_b.weight")
 
-    def _expert(self, expert_prefix, x):
-        w1, w2, w3 = self._expert_weights(expert_prefix)
-        gate = np.minimum(bf16_round_f32(bf16_to_f32(w1) @ x), self.limit)
-        up = np.clip(bf16_round_f32(bf16_to_f32(w3) @ x), -self.limit,
-                     self.limit)
-        activated = bf16_round_f32(_silu(gate) * up)
-        return bf16_round_f32(bf16_to_f32(w2) @ activated)
+    def _wo_group_matvec(self, x, name, group):
+        entry = self.st.entry(name)
+        rows, in_dim = entry["shape"]
+        if entry["dtype"] not in ("U8", "F8_E4M3"):
+            raise Dsv41ConfigError(f"{name} must be fp8-packed")
+        if in_dim != x.shape[0]:
+            raise Dsv41ConfigError(
+                f"{name} shape {entry['shape']} disagrees with activation "
+                f"width {x.shape[0]}")
+        scale, row_blocks, col_blocks = self._scale_grid(name, rows)
+        rb_rows = rows // row_blocks
+        scales = _exp2_rows(scale - 127)
+        step = max(rb_rows, LINEAR_BLOCK_ROWS - LINEAR_BLOCK_ROWS % rb_rows)
+        out = np.empty(self.o_lora, dtype=np.float32)
+        first = group * self.o_lora
+        for start in range(first, first + self.o_lora, step):
+            count = min(step, first + self.o_lora - start)
+            slab = self.st.raw_rows(name, start, count)
+            out[start - first:start - first + count] = self._fp8_block_rows(
+                slab, start, rb_rows, scales, col_blocks) @ x
+        return out
 
     def _shared_expert(self, layer, x):
         p = f"{PREFIX}{layer}.ffn.shared_experts."
@@ -966,20 +955,15 @@ class Dsv41FlashEngine:
         picked = routed[selected]
         weights = picked / (picked.sum() + 1e-20) * self.route_scale
         y = np.zeros(self.hidden, dtype=np.float32)
-        with ThreadPoolExecutor(min(6, self.topk)) as pool:
-            futures = [pool.submit(self._expert_weights,
-                                   p + f"experts.{int(expert)}.", pool)
-                       for expert in selected]
-            expert_sets = [f.result() for f in futures]
         for i in range(self.topk):
-            w1, w2, w3 = expert_sets[i]
             expert_prefix = p + f"experts.{int(selected[i])}."
-            gate = np.minimum(bf16_round_f32(bf16_to_f32(w1) @ x),
-                              self.limit)
-            up = np.clip(bf16_round_f32(bf16_to_f32(w3) @ x),
-                         -self.limit, self.limit)
+            gate = np.minimum(bf16_round_f32(self._expert_linear(
+                x, expert_prefix + "w1.weight")), self.limit)
+            up = np.clip(bf16_round_f32(self._expert_linear(
+                x, expert_prefix + "w3.weight")), -self.limit, self.limit)
             activated = bf16_round_f32(_silu(gate) * up)
-            y += weights[i] * bf16_round_f32(bf16_to_f32(w2) @ activated)
+            y += weights[i] * bf16_round_f32(self._expert_linear(
+                activated, expert_prefix + "w2.weight"))
         y += self._shared_expert(layer, x)
         if _DEBUG:
             print(f"  moe {time.perf_counter() - tm:.3f}s", flush=True)
