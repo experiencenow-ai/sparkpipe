@@ -849,3 +849,19 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   → route freed. Every residual #26 instance then costs N seconds.
 - Fleet: cold chain completed (282s); the wedge→reap→continue cadence
   (~2min) is this class cycling; requests keep racing it.
+
+## 2026-09-21al tick — THE CHAIN-COMPLETION WATCHDOG built and deployed
+
+- The missing bound for the stream-drain class (#26's definitive residual):
+  EnqueueAsyncCompletion now arms completion_armed_ns[slot]; a watchdog
+  thread (CUDA-context-aware, 1s cadence) completes any armed-but-unfired
+  completion past 45s loudly (CHAIN-WATCHDOG, INTERNAL_ERROR via the normal
+  worker path) — route freed at 45s instead of the 120s residentd reaper,
+  and the loud print marks every occurrence. Built through the full module
+  publish chain (59c93b9), adapter compile-clean.
+- This window: the rollout's cold cycle drained the verdict window (engine
+  1406s, chains mid-load); zero watchdog fires yet (armed but healthy
+  completions clear the flag — no false positives through the cold cycle).
+  The watchdog is armed for the next stream-drain loss.
+- Standing: floor 0.55ms/round; queue class dead; all wedge classes now
+  either fixed or bounded ≤45s.
