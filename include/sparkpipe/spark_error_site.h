@@ -14,8 +14,15 @@ static __thread __attribute__((unused)) SparkErrorSiteRecord
     spark_last_error_site = {0,0,0};
 
 #define SPARK_ERR_REPORT(code_value) \
-	((void)fprintf(stderr,"ERRSITE %s:%d status=%d\n", \
-		__FILE__,__LINE__,(int)(code_value)))
+	do { \
+		static uint32_t spark_err_count_,spark_err_shown_; \
+		spark_err_count_++; \
+		if ( spark_err_shown_ < 8u || (spark_err_count_ % 100000u) == 0u ) { \
+			spark_err_shown_++; \
+			(void)fprintf(stderr,"ERRSITE %s:%d status=%d count=%u\n", \
+				__FILE__,__LINE__,(int)(code_value),spark_err_count_); \
+		} \
+	} while (0)
 
 #define SPARK_FAIL(status_value) \
 	do { \
