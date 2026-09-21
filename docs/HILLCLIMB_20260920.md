@@ -1301,3 +1301,18 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   state=4 waiter class): with each cold chain 100-200s and slots war-
   ming sequentially, the queue drains slower than the probe's patience.
   This is pure throughput — S3's actual mandate.
+
+## 2026-09-21bg tick — chains green at scale; the request faces are churn-era
+
+- MEASURE: 30 chains completed per rank this window (74-97s each — the
+  cold class cycling through remaining expert sets), ZERO reaps, ZERO
+  watchdog fires. spark3 at 17 chains — ranks out of lockstep only by
+  which slot is warming. The mesh/allreduce layer: healthy throughout.
+- API census (577 served sessions): the request failures are status=4
+  (session churn — 213) and status=6 (schema — 121, the reaper-era
+  completions from BEFORE the triage stack settled) — mixed-boot faces.
+  The current stack's own contribution: the queue (throughput).
+- Assessment: recovery is DONE and silent; chains complete continuously
+  at 100% status=0. The remaining gap to a green canary is (a) the
+  cold-walk queue time and (b) api-session churn on engine recycles —
+  both throughput/steady-state items. S3 + module-sim are the mandate.
