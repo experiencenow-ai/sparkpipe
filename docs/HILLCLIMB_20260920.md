@@ -1676,3 +1676,24 @@ when, failure modes), (b) the route lookup's not-found conditions, (c) why
 EARLIER boots served fine with the same registry (what changed: many engine
 restarts? a registry refresh race?). The weightsd log silence on acquires =
 the observability gap to fix in the same pass.
+
+## 09-22 08:30 — OPERATOR QUESTION CONVICTED THE STICKY-FAILURE BUG
+
+"if weightd was not restarted, a new residentd should find all in memory
+already — handled properly?" — THE ARCHITECTURE: YES (the pool re-imports
+the resident chunks instantly at every boot — WD-MAP-POOL-BULK is fast;
+SparkWeightdServerCloseConnection releases a dead client's leases via
+LeaseReleaseOwner). THE BUG: map_release_locked (spark_weightd_map.c:341)
+stamps map->failure on ANY release-path error, and MapAcquire/MapBeginUse
+(452/521) return the cached failure FOREVER — silently, no IPC, no print.
+SIGNATURE MATCH: zero WD-LEASE-TRACE server lines (the acquire handler
+logs EVERY acquire — none arrived), zero ACQUIRE-STALL (the RPC never
+ran), fast-fail + the chain's 30s retry loop. A single failed release
+(a normal NOT_FOUND after a generation bump qualifies) poisons the map
+for the process lifetime — the sticky-silent-failure anti-pattern.
+FIX: scoped failure (release errors don't poison acquire; the failing
+operation reports, the map stays usable) + a loud one-time print naming
+the first sticky cause. ALSO next-session discriminator for chain1: the
+route_ready_event wait in LazyExperts (cudaEventSynchronize before any
+acquire — a poisoned slot stream from a prior failed graph chain would
+hang exactly here with all the same silence).
