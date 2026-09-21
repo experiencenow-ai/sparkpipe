@@ -736,3 +736,18 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   produces state-1 wedges without any takeover. Next evidence: the next
   stuck route's lifecycle with NO takeover in its log — that delta names
   path 2.
+
+## 2026-09-21ae tick — #30 path 2 captured: the split-brain route
+
+- The takeover-free stuck lifecycle: SUBMIT-ARRIVED → DECISION=1 (COMMIT,
+  the decision flow works) → CKEY writes → CHAIN slot=1 BEGINS EXECUTING
+  (stage/layer advancing, GRAPH-GATE prints) — while the ROUTE never leaves
+  state=1 (RESERVED). The adapter is running the work; the route bookkeep-
+  ing never advanced to WAIT_ADAPTER. Split brain: work without handshake.
+- The route advance runs in ProgressRoutes via a round-robin cursor
+  (next_adapter_route); a route the cursor skips never progresses no matter
+  what the adapter does. Suspect: the cursor advance under interleaving
+  (enqueue-while-iterating, or the RESOLVING-state early paths leave the
+  cursor past the skipped route). NEXT: audit/instrument the cursor — print
+  skipped-while-active occurrences; the fix is likely to scan-for-work
+  rather than rotate-blind.
