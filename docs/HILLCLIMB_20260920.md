@@ -1103,3 +1103,14 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   takeover overlap shapes), then the resident-sim and module-sim layers;
   deploy the self-healing pipeline to the fleet with the next driver
   release.
+
+## 2026-09-21ay tick — self-healing pipeline deployed; fault fuzzer at 9 kinds
+
+- Fault fuzzer expanded to 9 kinds (multi-rank disconnect storms + concur-
+  rent-submission overlap — the KV-takeover shape); 5 seeds × 300 rounds
+  ALL GREEN on the self-healing pipeline. The serving layer's wedge classes
+  are now fuzz-covered AND structurally fixed.
+- The self-healing pipeline deployed to the fleet (d387acc, full module
+  publish). Verdict window raced the rollout cold cycle (the recurring
+  seesaw); chains green where warm (181ms/91r reference). Fleet check next
+  tick after settle.
