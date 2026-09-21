@@ -1717,3 +1717,19 @@ adoption on these boots? (the rebase path with the wave-encoded watermark
 spin? the HC base-cell wait?) NEXT: instrument the HC collective's first
 round (a print at the HC ChainKey + at its first RunRound with
 cells/epoch/mirror state) — one deploy closes this.
+
+## 09-22 09:30 TICK — CHAIN1'S HANG IS GONE (rounds advance!); NEW: a 794K ERRSITE flood from the serving adapter
+
+DEPLOYED 8b7db925 (RH instrumentation + the accumulated fix set): THE FIRST
+CHAIN NOW RUNS — RH-TRACE/RH-ORDINAL show main-collective rounds advancing
+(op_index 7,8,9,10..., ordinals watermark-seeded, status=0). The printless
+window between ChainKey and the first round CLOSED (the accumulated fixes —
+scoped failures, warm gate, hello-close, IPv4 — in combination).
+
+NEW BLOCKER (why the request still times out): a 794,804-line ERRSITE FLOOD
+from spark_glm5_next_serving_adapter.c:1392 and :1420, all status=15 — the
+adapter's completion/route delivery path returning ROUTE_NOT_FOUND en masse
+(the loop hammers it; completions never deliver to the client). NEXT: read
+the adapter's 1392/1420 sites (what lookup returns 15 — the route map for
+completion delivery? the transaction id?), rate-limit the print (the flood
+itself is a hazard), fix the lookup.

@@ -258,6 +258,7 @@ struct SparkGlm5NextModuleState
 	uint32_t graph_fail_streak;
 	uint32_t graph_arrival_dumped;
 	uint32_t experts_warm;
+	uint32_t rh_trace;
 	uint32_t prefetch_started;
 	uint32_t prefetch_live;
 	uint64_t prefetch_layers_done;
@@ -2157,7 +2158,25 @@ static SparkStatus SparkGlm5NextModuleReduceHiddenWide(SparkGlm5NextTpChain *cha
 		collective = &state->tp_device_collective;
 		op_index = &chain->tp_op_index;
 	}
+	{
+		static uint32_t rh_trace;
+		if ( rh_trace < 12u )
+		{
+			rh_trace++;
+			fprintf(stderr,
+			    "RH-TRACE hc=%u op_index=%u stream=%p\n",
+			    (unsigned)hc_wide,(unsigned)*op_index,
+			    chain->slot->stream);
+		}
+	}
 	ordinal_status = SparkGlm5NextChainOrdinal(chain,hc_wide,*op_index,&ordinal);
+	if ( state->rh_trace < 12u )
+	{
+		state->rh_trace++;
+		fprintf(stderr,"RH-ORDINAL hc=%u ordinal=%llu status=%d\n",
+		    (unsigned)hc_wide,(unsigned long long)ordinal,
+		    (int)ordinal_status);
+	}
 	if ( ordinal_status != SPARK_STATUS_OK )
 		return(ordinal_status);
 	memset(&submission,0,sizeof(submission));
