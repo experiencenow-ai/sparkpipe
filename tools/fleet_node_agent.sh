@@ -457,18 +457,6 @@ janitor() {
             }
         done
     done
-    for q in $(pgrep -f "sparkpipe_weightd"); do
-        a=$(ps -o etimes= -p "$q" 2>/dev/null | tr -d ' ')
-        [ -n "$a" ] && [ "$a" -gt 1800 ] || continue
-        case "$(readlink /proc/$q/exe 2>/dev/null)" in
-            "$HOME/sparkdata/weightd/"*) ;;
-            *) continue ;;
-        esac
-        holder_exe=$(sudo -n fuser /tmp/spark_weightd.singleton 2>/dev/null | tr -s ' ' | cut -d: -f2 | tr -d ' ')
-        [ "$q" = "$holder_exe" ] && continue
-        echo "$(date +%T) janitor: killing stale weightd pid=$q age=${a}s (not the singleton holder)" >&2
-        kill -9 "$q" 2>/dev/null
-    done
 }
 
 ensure_weightd() {
