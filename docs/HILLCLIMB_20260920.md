@@ -899,3 +899,15 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   bounce is the racer.
 - Fleet: spark5's bounce cascaded the window's failures; both bounds armed;
   floor 0.55ms/round stands.
+
+## 2026-09-21ao tick — RECORD-PROPAGATION FIX deployed (the 52s window)
+
+- The agent now ships the fresh weightd's mesh record IMMEDIATELY after
+  starting it (shipped-marker clear + a deferred rendezvous 2s post-boot)
+  and pulls peers at 2s staleness (was 10s). A node bounce's unwired
+  window collapses from ~52s (the measured missing=5 racer) to a few
+  seconds. Agent self-updated fleet-wide (sha 7242f29d verified 16/16 via
+  core release + self-update).
+- This window: cold cycle (24 LAZYWORKs), request failed reaped-queued;
+  no fresh convergence failures to observe yet (the window needs a node
+  bounce to prove the fix). Floor 0.55ms/round stands.
