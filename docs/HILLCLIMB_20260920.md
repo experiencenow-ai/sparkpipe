@@ -1761,3 +1761,25 @@ deploy): prints inside SparkGlm5NextServingQuiesce (entry, the
 available-count, the snapshot status, exit) — the 15's producer gets named.
 ALSO NOTE: the request returned model status 9 (kv-admit, second-submit
 lease) — the canary cadence still needs the first-request-wins pattern.
+
+## 09-22 11:00 TICK — THE ENUM MISREAD: 15=BUSY (off-by-one in my awk decode); no paradox ever existed
+
+CORRECTION (raw-byte enum recount): 14=ROUTE_NOT_FOUND, 15=BUSY, 16=DUPLICATE,
+17=INTERNAL_ERROR, 11=TARGET_MISMATCH, 9=VALIDATION_FAILED. My earlier awk
+arithmetic anchored one line wrong and "decoded" 15 as ROUTE_NOT_FOUND —
+sending three hours down DNS→registry→server-side paths for what was BUSY
+all along. Evidence-law applies to MY OWN tooling output too.
+
+REINTERPRETATION (everything now consistent):
+- The 30s status=15 chains = BUSY retries through the cold lazy walk — the
+  known 74-280s class, ordinary retry behavior, NOT an error.
+- The adapter:1392/:1420 "flood" = the per-token reset's quiesce returning
+  BUSY while submissions were active — a retry loop at too-hot cadence
+  (the cadence is the only defect; now bounded by the rate limiter).
+- The prefetch's status=11 = TARGET_MISMATCH (not ABI) — remote-owned keys
+  still the ownership-filter conclusion.
+- The system state: chain1 = cold-walk BUSY retries then completes; the
+  deferred prefetch (post-warm) tops up later chains.
+NEXT: (a) re-verify a fresh canary end-to-end with the FIRST request (the
+cold walk is the wait); (b) once chain2 graphs: the ARRIVAL receipt; (c) the
+reset cadence (per-token quiesce) tuned; (d) ladder idle re-measure.
