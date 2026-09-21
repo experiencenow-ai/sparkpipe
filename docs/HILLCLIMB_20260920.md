@@ -1289,3 +1289,15 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - All 16 ranks progressing uniformly (lazy=210, chains=5 on every sampled
   rank). The request 500s this window: status=3/4 (reaped-waiter +
   session churn from the rollout). The stack is converging.
+
+## 2026-09-21bf tick — steady convergence on the triage stack
+
+- MEASURE: chains completing continuously (6 per rank this boot — two
+  97-129s cold-class, one 136ms warm, more loading at layer 24); ZERO
+  reaps, ZERO watchdog fires across the whole window. All 16 ranks in
+  lockstep (lazy=274 identical). The recovery machinery is SILENT —
+  the minimum-fix architecture holding.
+- The verdict probe still times out behind the cold-walk queue (the
+  state=4 waiter class): with each cold chain 100-200s and slots war-
+  ming sequentially, the queue drains slower than the probe's patience.
+  This is pure throughput — S3's actual mandate.
