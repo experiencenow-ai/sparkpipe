@@ -1114,3 +1114,15 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   publish). Verdict window raced the rollout cold cycle (the recurring
   seesaw); chains green where warm (181ms/91r reference). Fleet check next
   tick after settle.
+
+## 2026-09-21az tick — resident-sim layer covered: kv-lane fuzzer green
+
+- test_kv_lane_fuzz: direct randomized PREPARE/COMMIT/ABORT/RELEASE se-
+  quences on overlapping lanes against the real SparkKvLaneTransactions —
+  the #30 home (takeover-on-prepared, stuck claims). 6 seeds × 500-1000
+  rounds: the state machine HOLDS (the path-1 fix verified in simulation;
+  loud ERRSITEs are expected-status logs, not failures).
+- Layer coverage per the map: transport ✓, serving pipeline ✓ (9 fault
+  kinds, self-heal verified), kv-lane transactions ✓. REMAINING: the
+  module chain/completion layer (the S3 blocker's home) and the weightd
+  server lease path (host tests exist). Next build: module-sim.
