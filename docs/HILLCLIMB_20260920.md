@@ -828,3 +828,24 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   new print. Zero MESH-SPIN and zero kernel-timeout events — no silent
   waits occurred; the racer this window was the cold-cycle queue itself.
 - The instrument is armed: the NEXT round-1 30s failure prints its peers.
+
+## 2026-09-21ak tick — THE definitive #26 lifecycle: work complete, completion lost in the stream drain
+
+- The instruments delivered the complete story for stuck chain 1018975:
+  DECISION → CKEY → CHAIN advanced through EVERY stage (0..6) and EVERY
+  layer (0..45, final ordinal mi=91) — THE WORK RAN TO COMPLETION — and
+  then: no CHAIN-TIME, no completion, route stuck at state=5 until the
+  reaper. The loss is AFTER the last kernel: either the final stage's
+  device kernel never finished (a mesh wait inside the head stage waiting
+  on peers whose cells already retired → the stream never drains → the
+  completion callback never fires), or the callback enqueue itself was
+  lost. The queue-full path is already fixed; this is the stream-drain
+  class.
+- THE MISSING BOUND: no chain-level completion watchdog exists (the 30s
+  deadlines are per-ROUND; a hung final kernel is not a round). FIX SHAPE
+  (next build): a completion watchdog — the weightd worker (or a residentd
+  adapter hook) checks chains whose final stage advanced but whose
+  completion has not fired within N seconds → ChainFail(loud) → completion
+  → route freed. Every residual #26 instance then costs N seconds.
+- Fleet: cold chain completed (282s); the wedge→reap→continue cadence
+  (~2min) is this class cycling; requests keep racing it.
