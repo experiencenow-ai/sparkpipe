@@ -2836,7 +2836,14 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 	void *exec;
 	state = chain->state;
 	status = SPARK_STATUS_OK;
-	if ( state->tp_device_collective_initialized != 0u &&
+	if ( state->tp_device_collective_initialized != 0u )
+		SparkTpDeviceCollectiveClearGraphError(
+			&state->tp_device_collective);
+	if ( state->tp_device_collective_hc_initialized != 0u )
+		SparkTpDeviceCollectiveClearGraphError(
+			&state->tp_device_collective_hc);
+	if ( status == SPARK_STATUS_OK &&
+	     state->tp_device_collective_initialized != 0u &&
 	     SparkTpDeviceCollectiveGraphPreLaunch(
 	         &state->tp_device_collective,chain->slot->stream) !=
 	             SPARK_STATUS_OK )

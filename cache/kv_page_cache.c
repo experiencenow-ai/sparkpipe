@@ -1243,17 +1243,27 @@ static SparkStatus SparkKvLaneTransactionsPrepare(SparkKvLaneTransactions *trans
 		owner = &transactions->lanes[request->cache_lanes[index].resident_sequence_slot];
 		if ( (owner->phase == SPARK_KV_LANE_TRANSACTION_COMMITTED ||
 		       (owner->phase == SPARK_KV_LANE_TRANSACTION_EXECUTING &&
-		        owner->executing_since_ns != 0u && now_ns - owner->executing_since_ns > UINT64_C(60000000000))) &&
+		        owner->executing_since_ns != 0u && now_ns - owner->executing_since_ns > UINT64_C(60000000000)) ||
+		       (owner->phase == SPARK_KV_LANE_TRANSACTION_PREPARED &&
+		        owner->prepared_since_ns != 0u && now_ns - owner->prepared_since_ns > UINT64_C(60000000000))) &&
 		     request->request_id != owner->request.request_id )
 		{
 			SparkStatus takeover;
 			fprintf(stderr,
-			    "KV-TAKEOVER slot=%u new_req=%llu old_req=%llu seq=%llu\n",
+			    "KV-TAKEOVER slot=%u phase=%u new_req=%llu old_req=%llu seq=%llu\n",
 			    request->cache_lanes[index].resident_sequence_slot,
+			    (unsigned)owner->phase,
 			    (unsigned long long)request->request_id,
 			    (unsigned long long)owner->request.request_id,
 			    (unsigned long long)request->cache_lanes[index].sequence_id);
-			takeover = SparkKvLaneTransactionAbort(transactions,owner);
+			if ( owner->phase == SPARK_KV_LANE_TRANSACTION_PREPARED )
+			{
+				owner->phase = SPARK_KV_LANE_TRANSACTION_EMPTY;
+				owner->page_count = 0u;
+				takeover = SPARK_STATUS_OK;
+			}
+			else
+				takeover = SparkKvLaneTransactionAbort(transactions,owner);
 			if ( takeover != SPARK_STATUS_OK )
 				SPARK_RETURN(takeover);
 		}
@@ -1274,6 +1284,14 @@ static SparkStatus SparkKvLaneTransactionsPrepare(SparkKvLaneTransactions *trans
 		owner->request.cache_lanes = 0;
 		owner->lane = *lane;
 		owner->phase = SPARK_KV_LANE_TRANSACTION_PREPARED;
+		{
+			struct timespec prepared_ts;
+			owner->prepared_since_ns =
+			    clock_gettime(CLOCK_MONOTONIC,&prepared_ts) == 0 ?
+			    (uint64_t)prepared_ts.tv_sec *
+			        UINT64_C(1000000000) +
+			        (uint64_t)prepared_ts.tv_nsec : 0u;
+		}
 	}
 	if ( index == request->cache_lane_count )
 		return(SPARK_STATUS_OK);
