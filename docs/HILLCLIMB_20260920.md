@@ -1455,3 +1455,19 @@ FLEET STATE: driver 79aa97f1 (the merged #1075 era), engines healthy,
 serving eager fallback + graph retries per budget; hub release = same driver
 (the instrumented push never completed - publish_local correctly refused the
 failed compile).
+
+## 09-22 03:15 TICK — clean-clone rig FIXED the build; SECOND complete chain (repeatable); ring read back zero (one debug step left)
+
+- ~/g5pacing clean-cloned from origin hillclimb/graph-pacing: the unit
+  carries the symbol, driver+adapter built clean (48f6d21c / 0afc9250),
+  deployed 16/16. THE FRANKENSTEIN-TREE ANOMALY IS DEAD — clean clones only.
+- SECOND complete graph chain: CHAIN-TIME status=0, 91 rounds, 30.43s —
+  the success is REPEATABLE (2/2 post-ld.cv boots). Canary's own request
+  hit the kv-admit 9 again (second-submit vs the 60s PREPARED lease —
+  expected behavior, first request serves).
+- ARRIVAL dump printed ZERO lines: the wait kernel's ring write is correctly
+  placed (verified in the deployed source); the dump's memcpy read the ring
+  empty = pointer identity between the CAPTURED kernel arg and the dump's
+  implementation->arrival_ring is the remaining question. NEXT: print the
+  ring pointer at ArmCapture and at dump (one-line discriminators), or
+  debug the ring standalone in the ladder graph mode (single-node, fast).
