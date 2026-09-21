@@ -965,3 +965,19 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   rising).
 - Post-rollout: cold cycle on the recycled engines; the verdict probe
   continues on the settle. Floor 0.55ms/round stands.
+
+## 2026-09-21as tick — post-killer cleanup; the cold-era warmup serialization remains
+
+- spark0's stale engine recycled (0→4 weightd connections after), then a
+  UNIFORM fleet recycle for clean state. One cold chain completed (282s/91r,
+  215µs/round cold-contended) — the machinery works — but subsequent chains
+  on fresh engines show ALL-15-MISSING spins (peers mid-warmup: their
+  engines haven't reached the chain yet) → 30s BUSY cycles while slots warm
+  sequentially. The weightds now AGE STABLY past 30min (the killer is
+  verifiably gone: s0 weightd 1194s+, no janitor lines).
+- The remaining shape is pure cold-era serialization: ~4-6 minutes after
+  any full recycle before all slots are warm and requests flow; probe
+  windows keep landing mid-cycle. The steady-state verdict needs a quiet
+  settle (no recycles) — next tick opens with exactly that.
+- Floor 0.55ms/round stands; SYNC-TIMEOUT and the reaper both idle (no
+  wedges forming — only warmup waits).
