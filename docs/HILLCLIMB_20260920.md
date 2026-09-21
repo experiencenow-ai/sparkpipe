@@ -719,3 +719,20 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   the engine's surrounding log is the evidence path.
 - Chains complete throughout (384ms cold-warm mix this window). Warm floor
   reference 0.55ms/round stands.
+
+## 2026-09-21ad tick — #30 path 1 FIXED (KV-TAKEOVER on PREPARED owners); a second strand path exists
+
+- THE CAPTURED LIFECYCLE (the instruments earned their keep): SUBMIT-ARRIVED
+  1000007 → KV-TAKEOVER slot=0 by 1000008 WHILE 1000007's prepare was
+  resolving → the takeover ABORTED the prepared lane owner underneath its
+  route → route stranded in state=1, 838k BUSY rejects until the reaper.
+  FIX (02165f5): PREPARED lane owners are no longer takeable (committed or
+  60s-executing still are); a new request hitting a prepared lane gets
+  require-mismatch backpressure instead of stranding its predecessor.
+- DEPLOYED; first-order effect confirmed: ZERO KV-TAKEOVERs on the fresh
+  boot. BUT 2 state-1 wedges still formed and the request died reaped
+  (status=3 — the reaper's NOT_FOUND completions now validating cleanly,
+  the residency fix holding). CONCLUSION: at least one more strand path
+  produces state-1 wedges without any takeover. Next evidence: the next
+  stuck route's lifecycle with NO takeover in its log — that delta names
+  path 2.
