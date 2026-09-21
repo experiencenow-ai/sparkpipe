@@ -62,11 +62,13 @@ merged + #1057/#1054 ledger restores). Main GREEN at last verify.
    collapse SURVIVES sinks/rope/feed fixes.
 5. #1072 (qmax fix): root cause = the refs2-era dead 80GB cache + a 4GB
    single lm_head read; fixed engine 947MB plateau; awaiting CI + merge.
-6. #1075 (coredev): NO-GO verdict posted (title promised S3, diff is
-   serving-ledger work; zero graph code; stale pre-#1074 base);
-   coredev is iterating the fix list (cold-chain reaper bounds landed
-   mid-iteration). Poll for green + merge HIS state. Hands off his refs
-   (gate-conduct law).
+6. #1075: MERGED — coredev executed the full gate list (per-state
+   preallocated overflow pool, retitle/rescope to the serving-ledger
+   line, ledgers, the S2.5 payload-vs-control-plane distinction
+   documented, #1014 closed superseded) and landed the V6 MESH PROTOCOL
+   + THE FIRST COMPLETE 16-RANK GRAPH CHAIN (the S3-class delivery).
+   The allreduce ladder: S0 1910-2700 -> S1 1334 MEASURED -> the graph
+   chain landed; the <=100us GOAL receipts are the next climb.
 7. Emission relay: spark7 rank-7 stragglers (gemma-31b, lingfin,
    qwen27b-fp8 tp4pp4) building on sparkc ~/relay/wave1/ship_spark7.sh.
 
