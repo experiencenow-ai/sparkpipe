@@ -212,6 +212,7 @@ typedef struct SparkModelResidentdRuntime
 	uint8_t *route_messages;
 	uint32_t route_capacity;
 	uint64_t last_stuck_scan_ns;
+	uint64_t fairness_log_ns;
 	uint32_t route_message_capacity;
 	uint32_t next_adapter_route;
 	uint32_t committed_fifo_head;
@@ -2657,9 +2658,31 @@ static SparkStatus SparkModelResidentdProgressRoutes(
 		index = (start + offset) % runtime->route_capacity;
 		status = SparkModelResidentdProgressRoute(runtime,&runtime->routes[index],
 			allow_adapter != 0u ? &budget : 0);
+		if ( status != SPARK_STATUS_OK )
+		{
+			fprintf(stderr,
+			    "ROUTE-ERROR-CONTAINED index=%u status=%s — fencing route, engine stays up\n",
+			    (unsigned)index,SparkStatusToString(status));
+			pthread_mutex_lock(&runtime->mutex);
+			if ( runtime->routes[index].active != 0u )
+				(void)SparkModelResidentdFailContinuationLocked(
+					&runtime->routes[index],status);
+			pthread_mutex_unlock(&runtime->mutex);
+			status = SPARK_STATUS_OK;
+		}
 
-		if ( budget.ops != 0u )
-			runtime->next_adapter_route = (index + 1u) % runtime->route_capacity;
+		runtime->next_adapter_route = (index + 1u) % runtime->route_capacity;
+		if ( budget.refused != 0u && budget.ops == 0u )
+		{
+			uint64_t now_ns = SparkModelResidentdMonotonicTimeNs();
+			if ( runtime->fairness_log_ns == 0u ||
+			     now_ns - runtime->fairness_log_ns >= UINT64_C(1000000000) )
+			{
+				runtime->fairness_log_ns = now_ns;
+				fprintf(stderr,
+					"ROUTE-FAIRNESS adapter busy; routes queue fairly behind the active chain\n");
+			}
+		}
 	}
 	SPARK_RETURN(status);
 }
@@ -2693,7 +2716,11 @@ static void SparkModelResidentdReportStuckRoutes(
 				(unsigned long long)route->client_generation);
 			stuck++;
 		}
-		if ( now_ns - route->active_since_ns >= UINT64_C(120000000000) )
+		if ( now_ns - route->active_since_ns >=
+		     (route->state == SPARK_MODEL_RESIDENTD_ROUTE_RESERVED ?
+		      UINT64_C(600000000000) :
+		      route->state == SPARK_MODEL_RESIDENTD_ROUTE_WAIT_ADAPTER ?
+		      UINT64_C(400000000000) : UINT64_C(120000000000)) )
 		{
 			SparkModelServingCompletion failed;
 			memset(&failed,0,sizeof(failed));
@@ -2709,6 +2736,7 @@ static void SparkModelResidentdReportStuckRoutes(
 			failed.dispatch_generation = route->submission.dispatch_generation;
 			failed.request_generation = route->submission.request_generation;
 			failed.step_generation = route->submission.step_generation;
+			failed.residency = route->submission.residency;
 			fprintf(stderr,
 				"ROUTE-REAPED id=%llu state=%u — stuck past 120s; completing NOT_FOUND and releasing claims\n",
 				(unsigned long long)route->submission_id,
@@ -2839,10 +2867,10 @@ static SparkStatus SparkModelResidentdBuildPollFds(
 	memset(fds,0,capacity * sizeof(fds[0]));
 	fds[0].fd = runtime->listen_fd;
 	pthread_mutex_lock(&runtime->mutex);
-	fds[0].events = runtime->client.fd < 0 ? POLLIN : 0;
+	fds[0].events = POLLIN;
 	fds[1].fd = runtime->client.fd;
 	fds[1].events = runtime->client.fd >= 0 && runtime->client.close_after_output == 0u ? POLLIN : 0;
-	if ( runtime->client.fd >= 0 && runtime->client.close_after_output == 0u && runtime->client.output_count != 0u )
+	if ( runtime->client.fd >= 0 && runtime->client.output_count != 0u )
 		fds[1].events |= POLLOUT;
 	pthread_mutex_unlock(&runtime->mutex);
 	fds[2].fd = runtime->wake_read_fd;
@@ -2902,6 +2930,20 @@ static SparkStatus SparkModelResidentdRun(SparkModelResidentdRuntime *runtime)
 				continue;
 			}
 			status = progress_status;
+		}
+		if ( runtime->client.fd >= 0 && runtime->client.close_after_output != 0u )
+		{
+			uint32_t pending_output;
+			pthread_mutex_lock(&runtime->mutex);
+			pending_output = runtime->client.output_count;
+			pthread_mutex_unlock(&runtime->mutex);
+			if ( pending_output == 0u )
+			{
+				fprintf(stderr,
+				    "model_residentd close-after-output drained; closing fd=%d\n",
+				    runtime->client.fd);
+				SparkModelResidentdCloseClient(runtime);
+			}
 		}
 		poll_status = poll(fds,count,SparkModelResidentdPollTimeoutMs(runtime));
 		if ( runtime->client.fd >= 0 && runtime->client.hello_complete == 0u && runtime->client.last_activity_ns != 0u &&

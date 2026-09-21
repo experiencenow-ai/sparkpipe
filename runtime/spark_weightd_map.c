@@ -459,9 +459,18 @@ SparkStatus SparkWeightdMapAcquire(SparkWeightdMap *map,const SparkWeightdExpert
 	if ( timeout > (UINT64_MAX - now) )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	deadline = (now + timeout);
-	if ( map->client_lock_initialized == 0u ||
-	     pthread_mutex_lock(&map->client_lock) != 0 )
-		SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
+	{
+		uint64_t lock_wait_start = map_now();
+		if ( map->client_lock_initialized == 0u ||
+		     pthread_mutex_lock(&map->client_lock) != 0 )
+			SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
+		if ( map_now() - lock_wait_start >= UINT64_C(10000000000) )
+			fprintf(stderr,
+				"ACQUIRE-STALL mutex-wait %llu ms — another acquire holds the client; ITS exchange is the hang\n",
+				(unsigned long long)((map_now() - lock_wait_start) / 1000000ull));
+	}
+	{
+		uint64_t exchange_start = map_now();
 	for (slot=0u; slot<SPARK_WEIGHTD_LEASE_COUNT_MAX; slot++)
 		if ( map->slots[slot].state == MAP_EMPTY )
 			break;
@@ -471,6 +480,11 @@ SparkStatus SparkWeightdMapAcquire(SparkWeightdMap *map,const SparkWeightdExpert
 		SPARK_FAIL(SPARK_STATUS_BUSY);
 	}
 	status = SparkWeightdClientAcquire(map->client,map->generation,keys,count,&result,timeout);
+		if ( map_now() - exchange_start >= UINT64_C(10000000000) )
+			fprintf(stderr,
+				"ACQUIRE-STALL exchange %llu ms — the weightd round-trip itself hung (server-side lease/load)\n",
+				(unsigned long long)((map_now() - exchange_start) / 1000000ull));
+	}
 	if ( status != SPARK_STATUS_OK )
 	{
 		(void)pthread_mutex_unlock(&map->client_lock);

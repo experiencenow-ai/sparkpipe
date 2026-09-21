@@ -36,6 +36,7 @@ static volatile uint32_t g_shipper_hold;
 extern uint32_t cuda_stub_roundloop_launches;
 extern uint64_t cuda_stub_roundloop_rounds;
 extern uint32_t cuda_stub_mesh_publish_calls;
+extern uint32_t cuda_stub_mesh_seq_pad_calls;
 
 SparkStatus SparkWeightdClientConnect(const char *socket_path, SparkWeightdClient **client, SparkWeightdHelloResult *hello_out)
 {
@@ -636,6 +637,40 @@ static void FuzzS25S3(void)
 	    cuda_stub_mesh_publish_calls);
 }
 
+static void FuzzGraphPath(void)
+{
+	uint32_t run[FUZZ_MAX_RANKS];
+	uint32_t run_count = FuzzAllRanks(run);
+	uint64_t progress = 0ull;
+	uint32_t i;
+	uint32_t pad_calls = cuda_stub_mesh_seq_pad_calls;
+	CHECK( SparkTpDeviceCollectiveArmCapture(&g_ranks[0].collective) == SPARK_STATUS_OK,
+	    "arm capture on rank 0" );
+	CHECK( SparkTpDeviceCollectiveGraphPreLaunch(&g_ranks[0].collective,
+	    (void *)0x1) == SPARK_STATUS_OK, "graph pre-launch pads to capture parity" );
+	for ( i = 0u; i < 4u; i++ )
+	{
+		uint64_t ordinal = 16ull * (uint64_t)i + 1ull;
+		CHECK( FuzzRunSet(FuzzRoundMain, ordinal, run, run_count,
+		    "graph-round", i, -1) != 0u, "graph-path round completes" );
+	}
+	CHECK( cuda_stub_mesh_seq_pad_calls - pad_calls <= 1u,
+	    "pre-launch used at most one pad" );
+	progress = SparkTpDeviceCollectiveGraphProgress(&g_ranks[0].collective,0);
+	CHECK( progress != 0ull, "graph progress nonzero after capture-path rounds" );
+	CHECK( SparkTpDeviceCollectiveGraphError(&g_ranks[0].collective) == 0ull,
+	    "no graph error after capture-path rounds" );
+	SparkTpDeviceCollectiveDisarmCapture(&g_ranks[0].collective);
+	CHECK( SparkTpDeviceCollectiveDisarmCapture(&g_ranks[0].collective) == SPARK_STATUS_OK,
+	    "disarm after capture rounds" );
+	for ( i = 0u; i < run_count; i++ )
+	{
+		SparkTpDeviceCollectiveRoundStats(&g_ranks[i].collective,0,0,1u);
+		g_ranks[i].completion_count = 0u;
+	}
+	g_broadcast_count = 0u;
+}
+
 static void FuzzBasic(void)
 {
 	uint32_t run[FUZZ_MAX_RANKS];
@@ -1001,6 +1036,7 @@ int main(int argc, char **argv)
 		CHECK( FuzzCreateRank(rank) == SPARK_STATUS_OK, "rank create" );
 	for ( rank = 0u; rank < ranks; rank++ )
 		g_tasks[rank].rank = &g_ranks[rank];
+	FuzzGraphPath();
 	wedge = 0u;
 	if ( bench_rounds != 0u )
 		wedge = BenchRun(bench_rounds);

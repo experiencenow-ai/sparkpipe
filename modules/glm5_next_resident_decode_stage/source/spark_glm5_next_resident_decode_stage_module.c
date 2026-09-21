@@ -10,6 +10,8 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sched.h>
+#include <cuda.h>
 
 #include <cuda_runtime.h>
 #include "sparkpipe/spark_tp_chain_ordinal.h"
@@ -83,6 +85,19 @@ static uint64_t SparkGlm5NextNowNs(void)
 		return(0u);
 	return((uint64_t)now.tv_sec * UINT64_C(1000000000) + (uint64_t)now.tv_nsec);
 }
+
+typedef struct SparkGlm5NextCompletionOverflow
+{
+	struct SparkGlm5NextAsyncCompletion *async;
+	struct SparkGlm5NextCompletionOverflow *next;
+} SparkGlm5NextCompletionOverflow;
+
+#define SPARK_GLM5_NEXT_OVERFLOW_POOL 	(SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT * 2u)
+
+static void *SparkGlm5NextCompletionWatchdog(void *argument);
+static void SparkGlm5NextDrainParkedCompletions(
+	SparkGlm5NextModuleState *state);
+static int SparkGlm5NextBoundedStreamSync(void *stream,uint64_t timeout_ns);
 
 typedef struct SparkGlm5NextAsyncCompletion
 {
@@ -200,6 +215,15 @@ struct SparkGlm5NextModuleState
 	char kv_backing_default[256];
 	SparkGlm5NextExecutionSlot slots[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
 	SparkGlm5NextAsyncCompletion completions[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
+	uint64_t completion_armed_ns[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
+	uint64_t chain_started_ns[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
+	volatile uint64_t slot_alive_ns[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
+	SparkGlm5NextCompletionOverflow overflow_pool[SPARK_GLM5_NEXT_OVERFLOW_POOL];
+	uint32_t overflow_parked_count;
+	pthread_mutex_t completion_watch_lock;
+	pthread_t completion_watch_thread;
+	uint32_t completion_watch_live;
+	uint32_t completion_watch_stop;
 	atomic_uint slot_states[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
 	atomic_uint lane_states[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT];
 	atomic_uchar lane_bound[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT];
@@ -231,6 +255,7 @@ struct SparkGlm5NextModuleState
 	void *tp_hc_host_credit_receive_bf16;
 	atomic_ullong nccl_next_ordinal;
 	uint32_t graph_path_enabled;
+	uint32_t graph_fail_streak;
 	uint64_t degrade_graph_fallback;
 	uint64_t degrade_covered_abandon;
 	uint64_t degrade_graph_disabled;
@@ -1232,6 +1257,12 @@ static SparkStatus SparkGlm5NextKvInitialize(SparkGlm5NextModuleState *state)
 	uint64_t block_bytes,index_block_bytes,payload_bytes;
 	uint64_t lane_page_entries;
 	SparkStatus status;
+	if ( pthread_mutex_init(&state->completion_watch_lock,0) != 0 )
+	{
+	}
+	if ( pthread_create(&state->completion_watch_thread,0,
+		SparkGlm5NextCompletionWatchdog,state) == 0 )
+		state->completion_watch_live = 1u;
 	if ( pthread_mutex_init(&state->kv_mutex,0) != 0 )
 		SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
 	state->kv_mutex_initialized = 1u;
@@ -1680,6 +1711,9 @@ typedef enum SparkGlm5NextChainStage
 typedef struct SparkGlm5NextTpChain
 {
 	SparkGlm5NextModuleState *state;
+	uint64_t created_ns;
+	uint64_t last_advance_ns;
+	uint64_t last_heartbeat_stage;
 	SparkGlm5NextExecutionSlot *slot;
 	uint32_t slot_index;
 	SparkModelDriverFrame *frame;
@@ -2359,7 +2393,7 @@ static void SparkGlm5NextTpChainFail(SparkGlm5NextTpChain *chain,SparkStatus sta
 		SparkTpDeviceCollectiveBroadcastCancel(&state->tp_device_collective);
 		(void)SparkTpDeviceCollectiveChainRetire(&state->tp_device_collective);
 	}
-	if ( cudaStreamSynchronize((cudaStream_t)chain->slot->stream) != cudaSuccess )
+	if ( SparkGlm5NextBoundedStreamSync(chain->slot->stream,UINT64_C(35000000000)) != 0 )
 	{
 		chain->retained_status = status;
 		fprintf(stderr,"GLM chain drain failed; retaining slot %u and CUDA resources for teardown retry\n",chain->slot_index);
@@ -2391,7 +2425,7 @@ static SparkStatus SparkGlm5NextLazyRelease(SparkGlm5NextTpChain *chain)
 			chain->expert_lease_recorded = 1u;
 			chain->wave.expert_lease_base = 0;
 		}
-		if ( cudaStreamSynchronize((cudaStream_t)chain->slot->stream) != cudaSuccess )
+		if ( SparkGlm5NextBoundedStreamSync(chain->slot->stream,UINT64_C(35000000000)) != 0 )
 			SPARK_FAIL(SPARK_STATUS_IO_ERROR);
 	}
 	status = SparkWeightdMapRelease(map,chain->expert_lease,SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
@@ -2792,6 +2826,7 @@ static SparkStatus SparkGlm5NextGraphCoverEnsure(
 
 
 #define SPARK_GLM5_NEXT_GRAPH_REPLAY_WATCH_NS (35ull * 1000000000ull)
+#define SPARK_GLM5_NEXT_GRAPH_FAIL_BUDGET 3u
 
 static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
     SparkStatus *status_out)
@@ -2801,10 +2836,29 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 	void *exec;
 	state = chain->state;
 	status = SPARK_STATUS_OK;
-	if ( state->tp_device_collective_initialized != 0u &&
+	if ( state->tp_device_collective_initialized != 0u )
+		SparkTpDeviceCollectiveClearGraphError(
+			&state->tp_device_collective);
+	if ( state->tp_device_collective_hc_initialized != 0u )
+		SparkTpDeviceCollectiveClearGraphError(
+			&state->tp_device_collective_hc);
+	if ( status == SPARK_STATUS_OK &&
+	     state->tp_device_collective_initialized != 0u &&
+	     SparkTpDeviceCollectiveGraphPreLaunch(
+	         &state->tp_device_collective,chain->slot->stream) !=
+	             SPARK_STATUS_OK )
+		status = SPARK_STATUS_IO_ERROR;
+	if ( status == SPARK_STATUS_OK &&
+	     state->tp_device_collective_hc_initialized != 0u &&
+	     SparkTpDeviceCollectiveGraphPreLaunch(
+	         &state->tp_device_collective_hc,chain->slot->stream) !=
+	             SPARK_STATUS_OK )
+		status = SPARK_STATUS_IO_ERROR;
+	if ( status == SPARK_STATUS_OK &&
+	     state->tp_device_collective_initialized != 0u &&
 	     SparkTpDeviceCollectiveGraphCancelSeed(
 	         &state->tp_device_collective,chain->slot->stream) !=
-	         SPARK_STATUS_OK )
+	             SPARK_STATUS_OK )
 		status = SPARK_STATUS_IO_ERROR;
 	if ( status == SPARK_STATUS_OK &&
 	     state->tp_device_collective_hc_initialized != 0u &&
@@ -2875,6 +2929,16 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 					&state->tp_device_collective);
 				state->graph_path_enabled = 0u;
 				state->degrade_graph_stuck++;
+				state->graph_fail_streak++;
+				SparkTpDeviceCollectiveBroadcastCancel(
+					&state->tp_device_collective);
+				if ( state->tp_device_collective_hc_initialized != 0u )
+					SparkTpDeviceCollectiveBroadcastCancel(
+						&state->tp_device_collective_hc);
+				fprintf(stderr,
+					"GRAPH-CANCEL-BROADCAST slot=%u streak=%u\n",
+					chain->slot_index,
+					state->graph_fail_streak);
 				fprintf(stderr,
 					"DEGRADE graph-stuck slot=%u progress=%llu cell=%llu err=%llu diag_peer=%llu ring=%llu slotidx=%llu want=%llu got=%llu\n",
 					chain->slot_index,
@@ -2926,12 +2990,24 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 		{
 			state->graph_path_enabled = 0u;
 			state->degrade_graph_stuck++;
+			state->graph_fail_streak++;
+			SparkTpDeviceCollectiveBroadcastCancel(
+				&state->tp_device_collective);
+			if ( state->tp_device_collective_hc_initialized != 0u )
+				SparkTpDeviceCollectiveBroadcastCancel(
+					&state->tp_device_collective_hc);
+			fprintf(stderr,
+				"GRAPH-CANCEL-BROADCAST slot=%u streak=%u\n",
+				chain->slot_index,
+				state->graph_fail_streak);
 			fprintf(stderr,
 				"DEGRADE graph-wait-timeout slot=%u seq=%llu\n",
 				chain->slot_index,
 				(unsigned long long)graph_error);
 			status = SPARK_STATUS_INTERNAL_ERROR;
 		}
+		else
+			state->graph_fail_streak = 0u;
 	}
 	if ( status == SPARK_STATUS_OK && state->decode_miss_host != 0 &&
 	     state->decode_miss_host[0] != 0u )
@@ -3094,7 +3170,7 @@ static void SparkGlm5NextT1Streams(SparkGlm5NextTpChain *chain,uint32_t layer)
 	uint64_t bytes;
 	if ( SparkGlm5NextT1Enabled() == 0 || chain->wave.tp_rank != 0u )
 		return;
-	if ( cudaStreamSynchronize((cudaStream_t)chain->slot->stream) != cudaSuccess )
+	if ( SparkGlm5NextBoundedStreamSync(chain->slot->stream,UINT64_C(35000000000)) != 0 )
 		return;
 	flat = SPARK_GLM5_NEXT_MODEL_HC_MULT * SPARK_GLM5_NEXT_MODEL_HIDDEN_DIMENSION;
 	bytes = (uint64_t)chain->wave_rows * flat * sizeof(uint16_t);
@@ -3161,7 +3237,7 @@ static void SparkGlm5NextT1Head(SparkGlm5NextTpChain *chain)
 	if ( SparkGlm5NextT1Enabled() == 0 || chain->wave.tp_rank != 0u ||
 	    chain->state->owns_final_head == 0u )
 		return;
-	if ( cudaStreamSynchronize((cudaStream_t)chain->slot->stream) != cudaSuccess )
+	if ( SparkGlm5NextBoundedStreamSync(chain->slot->stream,UINT64_C(35000000000)) != 0 )
 		return;
 	if ( head_capacity < chain->wave_rows )
 	{
@@ -3191,6 +3267,26 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 	if ( chain == 0 || chain->active == 0u )
 		return;
 	state = chain->state;
+	{
+		uint64_t now_ns = SparkGlm5NextNowNs();
+		chain->last_advance_ns = now_ns;
+		state->slot_alive_ns[chain->slot_index] = now_ns;
+		if ( chain->created_ns == 0ull )
+			chain->created_ns = now_ns;
+		else if ( now_ns - chain->created_ns >= UINT64_C(30000000000) &&
+			chain->last_heartbeat_stage != (uint64_t)chain->stage + 1ull )
+		{
+			chain->last_heartbeat_stage = (uint64_t)chain->stage + 1ull;
+			fprintf(stderr,
+				"CHAIN-HEARTBEAT slot=%u stage=%u layer=%u age_ms=%llu lease=%llu begun=%u recorded=%u — chain still advancing (a SILENT gap between these = the lost-continuation site)\n",
+				chain->slot_index,(unsigned)chain->stage,
+				(unsigned)chain->next_layer,
+				(unsigned long long)((now_ns - chain->created_ns) / 1000000ull),
+				(unsigned long long)chain->expert_lease,
+				(unsigned)chain->expert_lease_begun,
+				(unsigned)chain->expert_lease_recorded);
+		}
+	}
 	if ( status != SPARK_STATUS_OK )
 	{
 		SparkGlm5NextTpChainFail(chain,status);
@@ -3221,6 +3317,17 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 	switch ( chain->stage )
 	{
 	case SPARK_GLM5_NEXT_CHAIN_STAGE_BEGIN:
+		if ( chain->tp_op_index == 0u && chain->tp_hc_op_index == 0u &&
+		     state->graph_path_enabled == 0u &&
+		     state->graph_fail_streak <
+		         SPARK_GLM5_NEXT_GRAPH_FAIL_BUDGET )
+		{
+			state->graph_path_enabled = 1u;
+			state->graph_gate_printed = 0u;
+			fprintf(stderr,"GRAPH-REARM streak=%u budget=%u\n",
+				(unsigned)state->graph_fail_streak,
+				(unsigned)SPARK_GLM5_NEXT_GRAPH_FAIL_BUDGET);
+		}
 		if ( state->graph_gate_printed < 3u )
 		{
 			state->graph_gate_printed++;
@@ -3313,7 +3420,7 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 			     chain->next_layer >= 900u )
 			{
 				if ( SparkGlm5NextLaunchCudaLayerMlpRoute(&chain->wave,chain->next_layer) != 0 ||
-				     cudaStreamSynchronize((cudaStream_t)chain->slot->stream) != cudaSuccess )
+				     SparkGlm5NextBoundedStreamSync(chain->slot->stream,UINT64_C(35000000000)) != 0 )
 				{
 					SparkGlm5NextTpChainFail(chain,SPARK_STATUS_INTERNAL_ERROR);
 					return;
@@ -3397,7 +3504,7 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 			error = cudaMemcpyAsync(chain->slot->host_output_token_ids + chain->first_row,chain->slot->output_token,(uint64_t)chain->wave_rows * sizeof(uint32_t),cudaMemcpyDeviceToHost,(cudaStream_t)chain->slot->stream);
 		launch_status = SparkStageModuleCudaStatus(SPARK_GLM5_NEXT_MODULE_TAG,error,"tp_head_unpack");
 		if ( (state->hbound_probes & (1u << 31u)) == 0u &&
-		     cudaStreamSynchronize((cudaStream_t)chain->slot->stream) == cudaSuccess )
+		     SparkGlm5NextBoundedStreamSync(chain->slot->stream,UINT64_C(35000000000)) == 0 )
 		{
 			state->hbound_probes |= 1u << 31u;
 			fprintf(stderr,"HEADFIN v=%u\n",
@@ -3605,6 +3712,11 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 	void *complete_context;
 	if ( state == 0 )
 		return;
+	pthread_mutex_lock(&state->completion_watch_lock);
+	state->completion_armed_ns[async->slot_index] = 0u;
+	state->chain_started_ns[async->slot_index] = 0u;
+	pthread_mutex_unlock(&state->completion_watch_lock);
+	SparkGlm5NextDrainParkedCompletions(state);
 	state->tp_chain_active = 0u;
 	if ( async->slot_index >= state->pipeline_slot_count )
 		return;
@@ -3681,6 +3793,53 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 	complete(complete_context,&completion);
 }
 
+static void SparkGlm5NextParkCompletionLocked(
+    SparkGlm5NextModuleState *state,SparkGlm5NextAsyncCompletion *async)
+{
+	uint32_t i;
+	for (i=0u; i<SPARK_GLM5_NEXT_OVERFLOW_POOL; i++)
+		if ( state->overflow_pool[i].async == 0 )
+		{
+			state->overflow_pool[i].async = async;
+			state->overflow_pool[i].next = 0;
+			state->overflow_parked_count++;
+			fprintf(stderr,
+			    "COMPLETION-PARKED slot=%u — worker queue full on the CUDA callback thread; parked for the worker (pool %u/%u)\n",
+			    (unsigned)async->slot_index,
+			    (unsigned)state->overflow_parked_count,
+			    (unsigned)SPARK_GLM5_NEXT_OVERFLOW_POOL);
+			return;
+		}
+	fprintf(stderr,
+	    "COMPLETION-PARK-FULL slot=%u — overflow pool exhausted (%u); retrying the worker submit once\n",
+	    (unsigned)async->slot_index,(unsigned)SPARK_GLM5_NEXT_OVERFLOW_POOL);
+	(void)SparkWeightdWorkerSubmit(state->completion_worker,
+	    SparkGlm5NextCompleteOnWorker,async);
+}
+
+static void SparkGlm5NextDrainParkedCompletions(SparkGlm5NextModuleState *state)
+{
+	uint32_t i;
+	uint32_t reparked = 0u;
+	if ( state == 0 || state->completion_worker == 0 )
+		return;
+	for (i=0u; i<SPARK_GLM5_NEXT_OVERFLOW_POOL; i++)
+	{
+		SparkGlm5NextAsyncCompletion *async = state->overflow_pool[i].async;
+		if ( async == 0 )
+			continue;
+		state->overflow_pool[i].async = 0;
+		state->overflow_parked_count--;
+		if ( SparkWeightdWorkerSubmit(state->completion_worker,
+		        SparkGlm5NextCompleteOnWorker,async) != SPARK_STATUS_OK )
+		{
+			SparkGlm5NextParkCompletionLocked(state,async);
+			reparked++;
+		}
+	}
+	(void)reparked;
+}
+
 static void CUDART_CB SparkGlm5NextCompleteAsync(void *context)
 {
 	SparkGlm5NextAsyncCompletion *async = (SparkGlm5NextAsyncCompletion *)context;
@@ -3690,8 +3849,106 @@ static void CUDART_CB SparkGlm5NextCompleteAsync(void *context)
 	status = SparkWeightdWorkerSubmit(async->state->completion_worker,SparkGlm5NextCompleteOnWorker,async);
 	if ( status != SPARK_STATUS_OK )
 	{
-		fprintf(stderr,"GLM completion handoff failed: status %d; completing inline\n",(int32_t)status);
-		SparkGlm5NextCompleteOnWorker(async);
+		pthread_mutex_lock(&async->state->completion_watch_lock);
+		SparkGlm5NextParkCompletionLocked(async->state,async);
+		pthread_mutex_unlock(&async->state->completion_watch_lock);
+	}
+}
+
+static void SparkGlm5NextCompleteOnWorker(void *context);
+
+static int SparkGlm5NextBoundedStreamSync(void *stream,uint64_t timeout_ns)
+{
+	uint64_t start_ns = SparkGlm5NextNowNs();
+	for (;;)
+	{
+		cudaError_t state = cudaStreamQuery((cudaStream_t)stream);
+		if ( state == cudaSuccess )
+			return(0);
+		if ( state != cudaErrorNotReady )
+			return(-1);
+		if ( SparkGlm5NextNowNs() - start_ns >= timeout_ns )
+		{
+			fprintf(stderr,
+				"SYNC-TIMEOUT — stream did not drain in %llu ms (a device kernel spins forever; failing the chain loudly)\n",
+				(unsigned long long)(timeout_ns / 1000000ull));
+			return(1);
+		}
+		sched_yield();
+	}
+}
+
+static void *SparkGlm5NextCompletionWatchdog(void *argument)
+{
+	SparkGlm5NextModuleState *state = (SparkGlm5NextModuleState *)argument;
+	uint32_t slot_index;
+	CUcontext watch_context = 0;
+	if ( state == 0 )
+		return(0);
+	(void)cuCtxGetCurrent(&watch_context);
+	if ( watch_context != 0 )
+		(void)cuCtxSetCurrent(watch_context);
+	for (;;)
+	{
+		uint64_t now_ns;
+		struct timespec pause;
+		pause.tv_sec = 1;
+		pause.tv_nsec = 0;
+		(void)nanosleep(&pause,0);
+		if ( state->completion_watch_stop != 0u )
+			return(0);
+		now_ns = SparkGlm5NextNowNs();
+		pthread_mutex_lock(&state->completion_watch_lock);
+		for (slot_index=0u;
+			slot_index<SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT;
+			slot_index++)
+		{
+			SparkGlm5NextAsyncCompletion *async;
+			uint64_t started = state->chain_started_ns[slot_index];
+			if ( started != 0u && now_ns - started >= UINT64_C(500000000000) )
+			{
+				SparkGlm5NextExecutionSlot *probe_slot =
+				    &state->slots[slot_index];
+				if ( probe_slot != 0 && probe_slot->stream != 0 &&
+				     cudaStreamQuery((cudaStream_t)probe_slot->stream) ==
+				        cudaErrorNotReady )
+					continue;
+				{
+				SparkGlm5NextAsyncCompletion *chain_async =
+				    &state->completions[slot_index];
+				state->chain_started_ns[slot_index] = 0u;
+				state->completion_armed_ns[slot_index] = 0u;
+				if ( chain_async->completion.status == SPARK_STATUS_OK )
+					chain_async->completion.status =
+					    SPARK_STATUS_INTERNAL_ERROR;
+				fprintf(stderr,
+					"CHAIN-WATCHDOG-START slot=%u — whole chain %.1fs without completing (lost before/at work); completing loudly\n",
+					(unsigned)slot_index,
+					(double)(now_ns - started) / 1000000000.0);
+				pthread_mutex_unlock(&state->completion_watch_lock);
+				SparkGlm5NextCompleteOnWorker(chain_async);
+				pthread_mutex_lock(&state->completion_watch_lock);
+				continue;
+				}
+			}
+			{
+				uint64_t armed = state->completion_armed_ns[slot_index];
+				if ( armed == 0u || now_ns - armed < UINT64_C(45000000000) )
+					continue;
+				state->completion_armed_ns[slot_index] = 0u;
+				async = &state->completions[slot_index];
+				if ( async->completion.status == SPARK_STATUS_OK )
+					async->completion.status = SPARK_STATUS_INTERNAL_ERROR;
+				fprintf(stderr,
+					"CHAIN-WATCHDOG slot=%u — completion armed %.1fs ago never fired (stream drain lost); completing loudly\n",
+					(unsigned)slot_index,
+					(double)(now_ns - armed) / 1000000000.0);
+				pthread_mutex_unlock(&state->completion_watch_lock);
+				SparkGlm5NextCompleteOnWorker(async);
+				pthread_mutex_lock(&state->completion_watch_lock);
+			}
+		}
+		pthread_mutex_unlock(&state->completion_watch_lock);
 	}
 }
 
@@ -3700,6 +3957,10 @@ static SparkStatus SparkGlm5NextEnqueueAsyncCompletion(
 	SparkGlm5NextExecutionSlot *slot,
 	uint32_t slot_index)
 {
+	pthread_mutex_lock(&state->completion_watch_lock);
+	state->completion_armed_ns[slot_index] = SparkGlm5NextNowNs();
+	pthread_mutex_unlock(&state->completion_watch_lock);
+
 	cudaStream_t stream;
 	cudaError_t error;
 	stream = (cudaStream_t)slot->stream;
@@ -3827,6 +4088,9 @@ static SparkStatus SparkGlm5NextStartClaimedBatch(SparkGlm5NextModuleState *stat
 	chain->active = 1u;
 	atomic_fetch_add_explicit(&state->submitted_count,1u,memory_order_relaxed);
 	state->tp_chain_active = 1u;
+	pthread_mutex_lock(&state->completion_watch_lock);
+	state->chain_started_ns[slot_index] = SparkGlm5NextNowNs();
+	pthread_mutex_unlock(&state->completion_watch_lock);
 	if ( state->tp_device_collective_initialized != 0u )
 		status = SparkTpDeviceCollectiveChainKey(&state->tp_device_collective,chain->frame->request_id & SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK);
 	if ( status == SPARK_STATUS_OK && state->tp_device_collective_hc_initialized != 0u )

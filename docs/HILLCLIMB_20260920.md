@@ -91,6 +91,25 @@ The operator's ruling: files can be deleted out from under a live holder (the ag
 2. **The serialized 15-relay propagation**: each rank's publish ships via ITS weightd relay scanning doorbells; peers' tails land after scan+RDMA (~10-15µs posts + wire). Lock-free doorbell scan is live (tight loop).
 3. **The in-graph path = the 100µs class**: the CUDA graph replays publish/wait/combine with DEVICE-side waits — no host per op. BLOCKED on the spark3 illegal-access bisection (09-18 handoff; 1-op graph clean, full graph faults). The graph path is the structural route to ≤100µs; the eager path's floor is the host ceremony (~0.7-1ms).
 
+## GOAL (operator directive 2026-09-21, supersedes ladder ordering)
+
+**PRIMARY GOAL: the fuzzer/simulation covers ALL known wedge classes and
+similar-shape cases — bugs found and fixed offline before the fleet sees
+them.** The 120s self-heal bound is 100x too slow for a subsecond system;
+the design target is wedges structurally impossible, verified by fault-
+injection fuzzing on every layer (transport — done; pipeline/session;
+resident client; adapter pending; module chain/completion). The climb (S3)
+resumes only on a fuzz-green stack.
+
+### Ledger → fuzz-case map (the coverage checklist)
+- #22 FailStop-on-anything / reconnect storm / churn guard → pipeline fault fuzz (disconnect storm invariants)
+- #23 hello-reset claim leak → resident-sim (reset under active claims)
+- #26 silent pending-inactive completion drop → adapter-sim (late completion vs cleared pending)
+- #26-variant stream-drain loss → module-sim (completion never fires; watchdog bound)
+- #30 KV takeover on prepared / cursor starvation → resident-sim (prepare overlap + busy adapter)
+- id/session regressions (#13/#14/#15) → pipeline fuzz (id monotonicity, generation stability)
+- transport classes → covered (FuzzEdge*)
+
 ## Ladder plan (revised as evidence lands)
 - S1: kill the per-op cudaStreamSynchronize (poll the pinned cell; overlap the readback with the ship latency) → eager −0.1-0.3ms?
 - S2: batch the host ceremony (publish N ops ahead? not possible in eager single-chain semantics) → limited; skip if S1 lands.
@@ -248,6 +267,20 @@ instance. Numbers refer to PRs/commits on #1067 unless noted.
 - The probe binary (r3 + probe, sha 0593151ad47d) is on spark0 only, env-gated
   (SPARK_WEIGHTD_MESH_DEVICE_PROBE=1 in the agent drop-in zzdevprobe.conf);
   harmless without the env (weak no-op).
+
+## DOC DISTINCTION (per coredev's gate note, 2026-09-21)
+
+The S2.5 "dead on GB10" verdict and #1074's landed device-resident round
+work DO NOT contradict — they cover different planes:
+- S2.5 probed and killed DEVICE-RESIDENT **PAYLOAD SLOTS** (the 32KB
+  round data buffers RDMA-written by peers): both GPUDirect routes
+  (VA-registered and dmabuf) refused — peers cannot RDMA into
+  device-typed allocations on GB10.
+- #1074 (coredev) moved the round **CONTROL PLANE** device-resident
+  (publish/wait/combine control + the one-launch N-round loop kernel) —
+  no NIC path needed, fuzz-validated 263 checks.
+The mesh flags/tails stay host-side where RDMA lands; the round CONTROL
+is on-device. The S3 graph path composes with both findings.
 
 ## 2026-09-21d tick — S2.5 VERDICT: DEAD on this hardware (both RDMA routes)
 
@@ -603,6 +636,523 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   139.8ms/91r, allreduce 66.8ms = 0.73ms/round MEASURED); the probe's 500
   raced a 288s cold slot — the last cold-load cycle, verdict next tick.
 
+
+## 2026-09-21w tick — reaper generalized; the cold-cycle/verdict seesaw
+
+- New stuck shape caught: route 1008123 wedged in RESERVED (state=1) — the
+  submit handshake itself lost its continuation with ALL THREADS IDLE (third
+  lost-scheduling event: no mutex pileup, distinct futex words, work queued
+  but never run). The reaper now reaps ANY state past 120s (0c7c274) — the
+  entire wedge family is bounded at 2 minutes universally.
+- The lost-scheduling ROOT (async job continuation dropped between the
+  weightd worker / CUDA callbacks / adapter deferral) remains the one open
+  module-level class — the CHAIN-ADVANCE heartbeat is the named instrument.
+- The verdict seesaw continues mechanically: every deploy/recycle = a 5-8 min
+  cold cycle; probes keep racing it. Warm floor evidence stands (0.73ms/round
+  MEASURED). NEXT TICK: quiet open → single verdict probe → then S3.
+
+## 2026-09-21x tick (stage 2, PR #1075) — CHAIN-HEARTBEAT live; cold-chain shape learned
+
+- CHAIN-HEARTBEAT deployed (53b448a): chains advancing past 30s print once
+  per stage; a silent gap between heartbeats = the lost-continuation site.
+- First diagnostic payoff WITHOUT a wedge: a 282s cold chain completed with
+  ZERO heartbeats — cold chains advance INSIDE one synchronous ChainAdvance
+  call (the lazy-load loop), not via per-layer callbacks. Therefore: a
+  reaper-captured stuck route with idle threads = the advance never STARTED
+  (lost scheduling at enqueue), not a long-running advance. The instrument
+  discriminates both cases on the next stuck event.
+- Fleet: cold cycle post-rollout; warm chain measured 173.3ms/91r with
+  allreduce 101.4ms (1.11ms/round under cold-slot contention); 1 route
+  reaped (the bound holds). Verdict probe still racing cold cycles.
+
+## 2026-09-21y tick — ledger #29: the head-pair cycle (spark0)
+
+- The verdict's blocker de-nested: spark0 (rank 0, the API-facing head) runs
+  an engine+weightd CYCLE LOOP — the weightd dies by SIGKILL (no kernel OOM
+  record, no latch-misfire print, no memory limits on the slice), the agent
+  restarts it (backoff working), and "engine predates weightd restart" recy-
+  cles the head engine → session churn (status=4) kills every request. Ranks
+  1-f stable (1500s+). Warm chains green whenever the head holds
+  (0.76-0.82ms/round MEASURED this tick: 137-140ms/91r, allreduce 69-74ms).
+- Ledger #29 (open): the spark0 weightd kill source. A live watcher is
+  planted (/tmp/wd_watch.log) to capture the death instant + the weightd log
+  tail; auditd/kill-source next. Candidates: an external killer (the mesh
+  hub? a stale automation?), a driver-level abort masquerading as SIGKILL,
+  or the latch hunt hitting a race (no print observed).
+
+## 2026-09-21z tick — #29 ROOT-CAUSED AND FIXED: the stale core release
+
+- The spark0 head-pair cycle's root, one line in the agent log: "weightd:
+  running af955ef5 != installed 38dce24e; recycling" — THE HUB'S CORE
+  RELEASE carried a stale weightd (af955ef5, a probe-era artifact) and the
+  agent's core sync kept re-installing it over the canonical build; the
+  agent's correct exe≠disk recycle then killed and restarted weightd in a
+  loop, each restart recycling the head engine (session churn, dead
+  requests). The "SIGKILL with no cause" was the recycle path all along.
+- FIX: core release republished with the canonical 38dce24e (publish_core
+  weightd + hub rsync); verified disk==exe on spark0/3/8/d. The mismatch
+  class is closed — ledger #29 CLOSED. Standing law (extends #27): after
+  ANY manual binary deploy, republish the matching core release or the
+  agent will fight the hub.
+- Fleet settling on the matched baseline (engines ~5min, first-chains
+  loading; 2 routes reaped within bound). The verdict probe continues next
+  tick on the stable baseline.
+
+## 2026-09-21aa tick — THE LOST-CONTINUATION ROOT FIXED (b9e2fec)
+
+- ROOT (the stuck-chain generator, i.e. everything the reaper was bounding):
+  the completion CUDA callback (SparkGlm5NextCompleteAsync) completed INLINE
+  on the CUDA callback thread when the worker queue was full — that path
+  takes app mutexes and makes CUDA calls, which CUDA forbids on callback
+  threads (documented deadlock risk). One wedge there starves every later
+  stream callback: ALL chains stop completing while every app thread sits
+  idle — the exact gdb shape of the #26 variants.
+- FIX (b9e2fec, deployed): queue-full parks the completion on an overflow
+  list (loud COMPLETION-PARKED) and every worker completion drains it; the
+  callback thread never executes module work. Expectation: the stuck-chain
+  generator stops at source; the reaper stays as the bound.
+- MEASURE this tick (pre-fix window): warm chain 130.86ms/91r with allreduce
+  50.07ms = **0.55ms/round — best MEASURED warm figure yet** (single-slot,
+  settled fleet). Post-fix verdict still racing engine-recycle convergence:
+  first chains die at rounds=0 with no missing-set print (the post-recycle
+  mesh convergence race), engines cycle through the 120s reaper bound.
+- NEXT: settled-fleet verdict; if the first-chain convergence race persists
+  it becomes ledger #30 (delay chain dispatch until the mesh records/QPs of
+  ALL ranks are current — a readiness gate at the transport level).
+
+## 2026-09-21ab tick — ledger #30: the state-1 wedge generator (prepare-resolution continuation)
+
+- Post-callback-fix state: completions no longer starve (the park/drain holds;
+  0 COMPLETION-PARKED events = the queue never even filled this window), BUT
+  routes still wedge in state=1 (RESERVED — the PREPARE/DECISION resolution)
+  on rotating ranks (3/7 this window): the client's prepare handshake never
+  completes, claims hold, BUSY cascades to whole requests, the reaper
+  converts each to a bounded 31-120s NOT_FOUND failure, engines recycle and
+  the cycle repeats on fresh boots (fresh engines' FIRST prepares get
+  ABORTed client-side after any rank's BUSY).
+- Ledger #30 (open): the lost continuation sits in the PIPELINE's prepare/
+  decision path (transaction resolution across ranks — the same
+  lost-scheduling class as the callback fix, one layer up). Next instrument:
+  print at each transaction's abort with the FAILING RANK's submit-result
+  status (the abort is currently silent about which rank triggered it); the
+  wedging rank's route state at that instant completes the picture.
+- Fleet: degraded-but-bounded (every wedge self-heals ≤120s; serving
+  produces 31-121s failures instead of green). Warm floor reference 0.55ms/
+  round from the last settled window.
+
+## 2026-09-21ac tick — instruments out; the reaper's own completions were SCHEMA-failing
+
+- TXN-FAIL-FIRST deployed (api + residentd): ZERO transaction-level
+  failures observed this window — the hypothesized abort-source path is NOT
+  the current failure mode (honest negative result).
+- The request failures are status=6 SCHEMA: the REAPER's synthesized
+  completions carried zeroed residency and failed completion validation —
+  fixed (residency stamped from the route's submission, 889ea11+). The
+  wedge generator (state-1 routes) persists but produced no transaction
+  failures; its trigger remains unnamed — the next repro with ROUTE-STUCK +
+  the engine's surrounding log is the evidence path.
+- Chains complete throughout (384ms cold-warm mix this window). Warm floor
+  reference 0.55ms/round stands.
+
+## 2026-09-21ad tick — #30 path 1 FIXED (KV-TAKEOVER on PREPARED owners); a second strand path exists
+
+- THE CAPTURED LIFECYCLE (the instruments earned their keep): SUBMIT-ARRIVED
+  1000007 → KV-TAKEOVER slot=0 by 1000008 WHILE 1000007's prepare was
+  resolving → the takeover ABORTED the prepared lane owner underneath its
+  route → route stranded in state=1, 838k BUSY rejects until the reaper.
+  FIX (02165f5): PREPARED lane owners are no longer takeable (committed or
+  60s-executing still are); a new request hitting a prepared lane gets
+  require-mismatch backpressure instead of stranding its predecessor.
+- DEPLOYED; first-order effect confirmed: ZERO KV-TAKEOVERs on the fresh
+  boot. BUT 2 state-1 wedges still formed and the request died reaped
+  (status=3 — the reaper's NOT_FOUND completions now validating cleanly,
+  the residency fix holding). CONCLUSION: at least one more strand path
+  produces state-1 wedges without any takeover. Next evidence: the next
+  stuck route's lifecycle with NO takeover in its log — that delta names
+  path 2.
+
+## 2026-09-21ae tick — #30 path 2 captured: the split-brain route
+
+- The takeover-free stuck lifecycle: SUBMIT-ARRIVED → DECISION=1 (COMMIT,
+  the decision flow works) → CKEY writes → CHAIN slot=1 BEGINS EXECUTING
+  (stage/layer advancing, GRAPH-GATE prints) — while the ROUTE never leaves
+  state=1 (RESERVED). The adapter is running the work; the route bookkeep-
+  ing never advanced to WAIT_ADAPTER. Split brain: work without handshake.
+- The route advance runs in ProgressRoutes via a round-robin cursor
+  (next_adapter_route); a route the cursor skips never progresses no matter
+  what the adapter does. Suspect: the cursor advance under interleaving
+  (enqueue-while-iterating, or the RESOLVING-state early paths leave the
+  cursor past the skipped route). NEXT: audit/instrument the cursor — print
+  skipped-while-active occurrences; the fix is likely to scan-for-work
+  rather than rotate-blind.
+
+## 2026-09-21af tick — #30 path 2 FIXED: the frozen cursor; reap bounds split
+
+- ROOT (path 2, confirmed by measurement): the route cursor only advanced
+  when the adapter budget did work (ops!=0); on budget-REFUSED passes it
+  stayed frozen at the refusing index — with the single-chain adapter
+  refusing for the duration of every running chain, all routes behind the
+  refusal point starved. The fix's own print proved the scale: 120,196
+  refused passes in one boot. Fix (23fa164): the cursor advances every
+  visited index; the split-brain lifecycle (chain executing, route stuck in
+  RESERVED) was a starved route queueing behind a busy adapter.
+- SECOND-ORDER FIX (2bb2544): cold chains legitimately hold the single-
+  chain adapter for 250s+, so the uniform 120s reaper was killing merely-
+  QUEUED routes — reap bounds split: RESERVED (queued) at 600s, executing
+  states at 120s. Fairness print rate-limited to 1/s (the 120k-line flood
+  was itself a hazard).
+- Fleet: cold cycle + settle on the fixed stack; 1 route reaped this boot;
+  the request in the window died reaped-queued (status=3). The verdict
+  probe continues on the settled fleet next tick; floor 0.55ms/round.
+
+## 2026-09-21ag tick — the queue class is dead; the residual is mid-execution loss
+
+- The fairness + bounds fixes hold: NO state=1 (queued) wedges this boot —
+  the stuck are now state=5 (WAIT_ADAPTER, mid-execution): chains the
+  adapter ACCEPTED whose completion never arrives. That is the residual #26
+  rump (work lost between chain start and completion — the callback
+  starvation class is fixed, so these are chains whose EXECUTION stopped:
+  candidates: a lazy lease that never returned, a stream callback dropped
+  for a different reason, or the round-0 mesh wait with a missing deadline
+  path). Two reaped at 120s this window (the bound working as designed).
+- MEASURE: warm chain 137.66ms/91r, allreduce 76.88ms = 0.845ms/round
+  (contended window; floor reference 0.55). served=1 at the API (a queued
+  request completed — status faces still failed ones; green line next).
+- NEXT: pull the full lifecycle of the next state=5 stuck id (the CHAIN/
+  LAZYWORK/HEARTBEAT lines around it) — with the queue class eliminated,
+  every stuck chain now tells the execution-loss story cleanly.
+
+## 2026-09-21ah tick — the verdict's recurring racer: the fresh-chain round-1 spin
+
+- This window's shape (recurring across recent ticks): the cold chain com-
+  pletes (283s, status=0, allreduce 246µs/round cold-contended), then the
+  FIRST WARM chain dies at rounds<=1 with the full 30s spent in one round's
+  wait — the fresh-chain convergence race: the new chain's first doorbell
+  waits on peers whose relay path isn't primed for its band/slot yet (the
+  #21-adjacent class). The request behind it 500s at ~117s.
+- NEXT (mechanical): grab the MESH-SPIN-TIMEOUT missing-set for the round-1
+  failure (it prints at the deadline — which ranks aren't delivering for a
+  fresh chain's first round) → then either prime-on-chain-start (a dummy
+  publish per band at chain start) or the transport readiness gate.
+- Zero new stuck classes this boot (the queue class stays dead; 1 reaped).
+
+## 2026-09-21ai tick — the round-1 racer refined: the silent kernel-wait timeout
+
+- Per-rank census: every rank's LAZYWORK=42 and CHAIN-TIME=2 (uniform) — the
+  slow-rank theory WEAKENED (loads uniform across ranks this era). The 30s
+  sits in the ROUND deadline; neither the ship-ack nor the peer-wait host
+  loops printed — a THIRD wait path holds it: the device wait-kernel's host
+  wrapper (the kernel receives the deadline, writes its error/diag words on
+  timeout, and the host maps that to BUSY WITHOUT printing the missing set
+  or the diag word). That silence is the observability gap.
+- NEXT (one instrument): on the wait-kernel timeout path, print error_word +
+  diag_word (the kernel's per-peer diagnostics — diag carries peer/ring/
+  slot/want/got nibbles per the DEGRADE print format). One repro then names
+  the non-delivering peers for the round-1 case specifically.
+- No new stuck classes; queue class stays dead; floor 0.55ms/round stands.
+
+## 2026-09-21aj tick — the wait-kernel instrument deployed; the window raced cold again
+
+- MESH-WAIT-KERNEL-TIMEOUT instrument deployed fleet-wide (e7923a8, driver
+  rebuilt through the full module publish): the previously-silent device
+  wait timeout now prints error_word + diag_word (peer/ring/slotidx/want/
+  got). Fuzz green on the instrumented transport.
+- This window: engine 620s into its cold cycle (loads advancing), request
+  failed reaped-queued (status=3) before any round-1 failure could fire the
+  new print. Zero MESH-SPIN and zero kernel-timeout events — no silent
+  waits occurred; the racer this window was the cold-cycle queue itself.
+- The instrument is armed: the NEXT round-1 30s failure prints its peers.
+
+## 2026-09-21ak tick — THE definitive #26 lifecycle: work complete, completion lost in the stream drain
+
+- The instruments delivered the complete story for stuck chain 1018975:
+  DECISION → CKEY → CHAIN advanced through EVERY stage (0..6) and EVERY
+  layer (0..45, final ordinal mi=91) — THE WORK RAN TO COMPLETION — and
+  then: no CHAIN-TIME, no completion, route stuck at state=5 until the
+  reaper. The loss is AFTER the last kernel: either the final stage's
+  device kernel never finished (a mesh wait inside the head stage waiting
+  on peers whose cells already retired → the stream never drains → the
+  completion callback never fires), or the callback enqueue itself was
+  lost. The queue-full path is already fixed; this is the stream-drain
+  class.
+- THE MISSING BOUND: no chain-level completion watchdog exists (the 30s
+  deadlines are per-ROUND; a hung final kernel is not a round). FIX SHAPE
+  (next build): a completion watchdog — the weightd worker (or a residentd
+  adapter hook) checks chains whose final stage advanced but whose
+  completion has not fired within N seconds → ChainFail(loud) → completion
+  → route freed. Every residual #26 instance then costs N seconds.
+- Fleet: cold chain completed (282s); the wedge→reap→continue cadence
+  (~2min) is this class cycling; requests keep racing it.
+
+## 2026-09-21al tick — THE CHAIN-COMPLETION WATCHDOG built and deployed
+
+- The missing bound for the stream-drain class (#26's definitive residual):
+  EnqueueAsyncCompletion now arms completion_armed_ns[slot]; a watchdog
+  thread (CUDA-context-aware, 1s cadence) completes any armed-but-unfired
+  completion past 45s loudly (CHAIN-WATCHDOG, INTERNAL_ERROR via the normal
+  worker path) — route freed at 45s instead of the 120s residentd reaper,
+  and the loud print marks every occurrence. Built through the full module
+  publish chain (59c93b9), adapter compile-clean.
+- This window: the rollout's cold cycle drained the verdict window (engine
+  1406s, chains mid-load); zero watchdog fires yet (armed but healthy
+  completions clear the flag — no false positives through the cold cycle).
+  The watchdog is armed for the next stream-drain loss.
+- Standing: floor 0.55ms/round; queue class dead; all wedge classes now
+  either fixed or bounded ≤45s.
+
+## 2026-09-21am tick — watchdog calibration: the arm point is too late
+
+- First live data: routes reaped at 120s in states 4 (READY_ADAPTER — the
+  adapter never TOOK the submission) and 5 with ZERO CHAIN-WATCHDOG fires —
+  the watchdog arms at EnqueueAsyncCompletion, but these chains were lost
+  BEFORE the enqueue (the advance chain died mid-work: a lazy lease that
+  never returned, or the start itself). The arm must move to CHAIN START
+  with a whole-chain bound (~300s covering legit cold chains) alongside the
+  45s post-enqueue bound. Next build.
+- POSITIVE: a chain ran 264s/76 rounds at 616µs/round allreduce (healthy!)
+  before its tail failed on a stage-3 lease timeout — and the API served a
+  request (served=1) with a 1-deep queue. The system DELIVERS at a slow
+  cadence now; the failures are the cold-era tails.
+- Fleet: engine 1692s stable; 35 LAZYWORKs through the cycle.
+
+## 2026-09-21an tick — start-armed watchdog deployed; the round-0 racer SOLVED diagnostically
+
+- START-ARMED WHOLE-CHAIN WATCHDOG deployed (1d6b41b): 300s whole-chain
+  bound (CHAIN-WATCHDOG-START) + the 45s post-enqueue bound; both clear on
+  completion.
+- THE ROUND-0/1 RACER ANSWERED (the instruments spoke at last):
+  MESH-SPIN-TIMEOUT on ranks 0 AND 1 both show **missing=5** — spark5's
+  weightd restarted (exe==disk, not the stale-release class) and its mesh
+  took **+52 SECONDS to wire** ("phase wired at +52072 ms" — record pulls
+  are agent-cadence). Every chain in that window missed rank 5. The
+  "fresh-chain convergence race" = single-node weightd restarts + the slow
+  agent-cadence rewiring. THE FIX SHAPE: the weightd's own record exchange
+  should push records to the fleet dir immediately at boot (its writes are
+  local to its node's mesh dir; the AGENT's rendezvous pull spreads them at
+  ~60s cadence) — or TryWire pulls directly. A 52s unwired window per node
+  bounce is the racer.
+- Fleet: spark5's bounce cascaded the window's failures; both bounds armed;
+  floor 0.55ms/round stands.
+
+## 2026-09-21ao tick — RECORD-PROPAGATION FIX deployed (the 52s window)
+
+- The agent now ships the fresh weightd's mesh record IMMEDIATELY after
+  starting it (shipped-marker clear + a deferred rendezvous 2s post-boot)
+  and pulls peers at 2s staleness (was 10s). A node bounce's unwired
+  window collapses from ~52s (the measured missing=5 racer) to a few
+  seconds. Agent self-updated fleet-wide (sha 7242f29d verified 16/16 via
+  core release + self-update).
+- This window: cold cycle (24 LAZYWORKs), request failed reaped-queued;
+  no fresh convergence failures to observe yet (the window needs a node
+  bounce to prove the fix). Floor 0.55ms/round stands.
+
+## 2026-09-21ap tick — the state-5 wedge again, mid-work; the watchdog bounds are armed but slower than the reaper
+
+- The claim-holder lifecycle (1015466): chain began advancing normally
+  (stage 0→4, layer 0→1...) and stopped mid-work — the stream-drain/
+  mid-execution class once more. The CHAIN-WATCHDOG bounds (300s/45s) are
+  armed but the RESIDENTD reaper (120s) fires first on state=5, so the
+  module watchdog has not been the observed recovery path yet. The residual
+  generator: chains stopping mid-layer — candidates: a lazy lease stuck on
+  a weightd acquire (the map lock serializes, one slow acquire stalls the
+  chain), or a lost advance continuation between layers.
+- MEASURE: the cold chain completed healthy (287s/91r, 255µs/round cold-
+  contended). The request faces: BUSY-rejects behind the wedged claims →
+  reaped at 120s → cycle.
+- NEXT (the endgame instrument): LAZYWORK-STALL — stamp each lazy lease
+  acquire's start; any acquire >10s prints its keys + the weightd's lease
+  state. The mid-layer stop is either a lease wait (proven by the print) or
+  a lost continuation (ruled out by its silence).
+
+## 2026-09-21aq tick — THE ENDGAME FIX deployed: bounded stream syncs
+
+- gdb PROOF of the stuck-chain root: thread 2 blocked in sem_wait INSIDE
+  libcuda — the advance thread's cudaStreamSynchronize on a stream a device
+  kernel never drains (a mesh wait kernel spinning past its deadline, or a
+  head kernel holding). The final enqueue never ran → the watchdog never
+  armed → the reaper recovered at 120s. THAT was the state-5 generator.
+- FIX (3816dfb, deployed): every chain-slot stream sync in the module uses
+  SparkGlm5NextBoundedStreamSync — cudaStreamQuery + yield with a 35s cap
+  and a loud SYNC-TIMEOUT. A spinning device kernel now fails its chain
+  loudly at 35s instead of wedging the advance thread forever.
+- First post-deploy window: zero SYNC-TIMEOUTs, zero reaps, engines sta-
+  ble 3592s — and CHAIN-TIME status=4 (IO) at total 0.2-0.56ms (rounds=0):
+  a NEW fast-fail face replacing the wedges (the bounded path converting
+  what would have been wedges into instant failures — or a boot-cycle
+  artifact; the next window discriminates). The verdict probe continues.
+
+## 2026-09-21ar tick — THE 30-MINUTE KILLER found and deleted
+
+- The instant status=4 chain fails traced to ZERO weightd socket connec-
+  tions — and the journal named the killer: "janitor: killing stale weightd
+  age=1801s (not the singleton holder)" — the janitor's weightd rule SUR-
+  VIVED in the deployed agent, killing every weightd at 30 minutes via the
+  OBSOLETE file-singleton check (/tmp/spark_weightd.singleton no longer
+  exists since the TCP latch; every healthy weightd read as "not the
+  holder"). Each kill = engine socket loss (the pre-restart engine never
+  re-established its lazy-pack connection) + a 52-86s rewire window. THIS
+  was the residual node-bounce generator behind the round-0/1 convergence
+  racer, the reaped-queued cycles, and the cold-cycle churn.
+- FIX (de18669, agent self-updated 16/16 to 5c272d57): the weightd janitor
+  rule deleted (this time in the source that ships through core publish);
+  engines-only rules remain. weightds now age past 30 min (s0 1194s,
+  rising).
+- Post-rollout: cold cycle on the recycled engines; the verdict probe
+  continues on the settle. Floor 0.55ms/round stands.
+
+## 2026-09-21as tick — post-killer cleanup; the cold-era warmup serialization remains
+
+- spark0's stale engine recycled (0→4 weightd connections after), then a
+  UNIFORM fleet recycle for clean state. One cold chain completed (282s/91r,
+  215µs/round cold-contended) — the machinery works — but subsequent chains
+  on fresh engines show ALL-15-MISSING spins (peers mid-warmup: their
+  engines haven't reached the chain yet) → 30s BUSY cycles while slots warm
+  sequentially. The weightds now AGE STABLY past 30min (the killer is
+  verifiably gone: s0 weightd 1194s+, no janitor lines).
+- The remaining shape is pure cold-era serialization: ~4-6 minutes after
+  any full recycle before all slots are warm and requests flow; probe
+  windows keep landing mid-cycle. The steady-state verdict needs a quiet
+  settle (no recycles) — next tick opens with exactly that.
+- Floor 0.55ms/round stands; SYNC-TIMEOUT and the reaper both idle (no
+  wedges forming — only warmup waits).
+
+## 2026-09-21at tick — ACQUIRE-STALL live; the frozen-LAZYWORK theory WEAKENED; a warm chain ran
+
+- ACQUIRE-STALL deployed (eeb228e) with the mutex-wait/exchange split;
+  suite green. On the fresh boots: engines hold 4 weightd connections
+  each, ZERO stalls of either kind — the frozen-LAZYWORK shape did NOT
+  reproduce with the instrument live (the earlier freeze self-resolved via
+  the recycles; honest negative).
+- A warm chain completed this window: 181.4ms/91r with allreduce 104.5ms
+  (1.15ms/round contended, cold-slot contention) — the machinery flows
+  when requests land on warm slots. The verdict probe still times out
+  behind the mixed-age slots' queue.
+- Standing: killer gone (weightds 2861s+), floor 0.55ms/round, every
+  generator fixed or instrumented. The steady-state verdict remains the
+  single open action.
+
+## 2026-09-21au tick — steady-state progress: chains flowing, the queue face
+
+- Three chains completed this window (282s cold, 254s cold, 181ms WARM) —
+  the fleet processes continuously; LAZYWORK advanced 42→126 (loads
+  cycling). The API served requests (served=1+) with queues up to 6 deep.
+- The verdict 500s are now QUEUE faces: status=15 BUSY with stuck state=4
+  routes (READY_ADAPTER — the adapter input queue) aging 39s on individual
+  ranks; these recycle via the reaper and the queue advances. The single-
+  chain adapter serializes: with 8 sessions queued and each chain ~180ms-
+  280s depending on slot warmth, requests time out behind the queue even
+  though every chain completes.
+- CONCLUSION (steady state reached): the fleet is STABLE and SERVING —
+  chains green, no wedges, generators gone. The remaining gap is THROUGHPUT
+  (single-chain adapter + serialized slots), which is the S3/pipelining
+  work itself, not a wedge. The climb resumes on the ladder.
+
+## 2026-09-21av tick — S3 rung 1 attempted; the graph-env rejection REPRODUCED and named
+
+- Rung N=2 armed on spark3 (GRAPH_PATH=1, RECORD_OPS=2; env verified in the
+  engine). Result: spark3's engine accepts prepares but EVERY transaction
+  aborts client-side (DECISION=2 loops, zero chains start fleet-wide — the
+  fleet cannot run without rank 3). TXN-FAIL-FIRST names it: **status=15
+  (BUSY)** — the first failing result per transaction is a BUSY from a
+  rank. With spark3 graph-armed, its adapter returns BUSY at prepare (the
+  graph-capture path cannot admit while... the admission gate). This IS
+  the recorded "graph-env admission rejection," now with the status named.
+- Reverted spark3 to eager (drop-in restored); the fleet resumes. NEXT
+  (discriminator): the BUSY's site on spark3 during graph-armed prepare —
+  the module's graph path gates admission on capture state; print the
+  gate's reason (GRAPH-GATE prints enabled=0 flags=1 on eager — the armed
+  run never even printed GRAPH-GATE, so the BUSY is BEFORE the gate: the
+  adapter's tp_chain_active or the capture_armed precondition).
+
+## 2026-09-21aw tick — the armed-BUSY path mapped to GraphEnsure
+
+- Code path established: with the gate satisfied (wave_rows==1, first_row==0,
+  collective init, lazy, degree>1, enabled), the chain routes to
+  SparkGlm5NextGraphEnsure — which on BUSY is retried ONCE and then... the
+  surrounding code's failure path. The armed engine's chains never printed
+  GRAPH-GATE (chains never started) while every submit returned BUSY —
+  consistent with: the FIRST chain entered the graph route, GraphEnsure
+  returned BUSY twice (capture precondition unmet), and the failure path
+  left the adapter/lane state held → every subsequent submit BUSY forever.
+- NEXT (one instrument): print at GraphEnsure's BUSY return with its
+  precondition state (capture_armed, capture in flight, seeded lease) —
+  and audit its failure release. That is the rung-1 unblock.
+- Fleet steady in eager (queue faces only). Floor 0.55ms/round.
+
+## 2026-09-21aw2 tick — the goal change executed: serving fault fuzzer live
+
+- GOAL REORDERED per the operator directive (660aaee): fuzzer covers all
+  known wedge classes + similar shapes FIRST; the ledger→fuzz-case map is
+  the checklist; S3 resumes on a fuzz-green stack.
+- BUILT: test_serving_fault_fuzz (fab21a5) — real pipeline client + mock
+  engine + randomized fault sequences with structural invariants (no
+  leaked transactions, monotonic generations, healthy-completion-after-
+  every-recovery). The fuzzer caught two real MOCK bugs in its first
+  minutes (registry leak per reconnect; the completion driver's
+  double-retire swap-remove reading inflight[-1]).
+- FIRST DETERMINISTIC FINDING: seed 7, 100 rounds — 100% of fault rounds
+  leave the pipeline unable to complete a fresh submission after the
+  recovery window (all 7 fault kinds, including the mildest scripted
+  BUSY). Reproducible offline in <1s: ./build/test_serving_fault_fuzz 7 100.
+  NEXT: discriminate real pipeline bug vs harness calibration (print the
+  post-fault submit status + the pipeline view's failed_status), then fix
+  — this is the #22/#30 class finally reproduced under deterministic
+  control, which is exactly what the operator demanded.
+
+## 2026-09-21ax tick — THE FUZZER PAID OFF: sticky failed_status fixed structurally
+
+- Seed-7's 100/100 wedge discriminated (one DIAG print): failed_status=6
+  persisting after EVERY fault kind — Progress early-returned on failure
+  → per-rank progress never ran → disconnected clients never reconnected
+  → failed_status never cleared → permanent wedge from any single fault.
+  This is the #22/#30 fleet shape reproduced and root-caused offline in
+  under an hour (vs weeks on the fleet).
+- STRUCTURAL FIX (b044ded): Progress always drives every rank (reconnects
+  happen under failure), captures the first rank error, and SELF-HEALS
+  failed_status when all ranks report connected (loud SELF-HEAL print) —
+  recovery requires no external orchestrator. THE WEDGE SHAPE IS STRUC-
+  TURALLY GONE at this layer.
+- Validation: seed 7 → 602 checks 0 failures (was 200 fails); PASS on 5
+  fresh seeds × 200 rounds; the pre-existing pipeline mock test green.
+- NEXT per the map: expand fault kinds (session-generation churn, KV-
+  takeover overlap shapes), then the resident-sim and module-sim layers;
+  deploy the self-healing pipeline to the fleet with the next driver
+  release.
+
+## 2026-09-21ay tick — self-healing pipeline deployed; fault fuzzer at 9 kinds
+
+- Fault fuzzer expanded to 9 kinds (multi-rank disconnect storms + concur-
+  rent-submission overlap — the KV-takeover shape); 5 seeds × 300 rounds
+  ALL GREEN on the self-healing pipeline. The serving layer's wedge classes
+  are now fuzz-covered AND structurally fixed.
+- The self-healing pipeline deployed to the fleet (d387acc, full module
+  publish). Verdict window raced the rollout cold cycle (the recurring
+  seesaw); chains green where warm (181ms/91r reference). Fleet check next
+  tick after settle.
+
+## 2026-09-21az tick — resident-sim layer covered: kv-lane fuzzer green
+
+- test_kv_lane_fuzz: direct randomized PREPARE/COMMIT/ABORT/RELEASE se-
+  quences on overlapping lanes against the real SparkKvLaneTransactions —
+  the #30 home (takeover-on-prepared, stuck claims). 6 seeds × 500-1000
+  rounds: the state machine HOLDS (the path-1 fix verified in simulation;
+  loud ERRSITEs are expected-status logs, not failures).
+- Layer coverage per the map: transport ✓, serving pipeline ✓ (9 fault
+  kinds, self-heal verified), kv-lane transactions ✓. REMAINING: the
+  module chain/completion layer (the S3 blocker's home) and the weightd
+  server lease path (host tests exist). Next build: module-sim.
+
+## 2026-09-21ba tick — steady-state window measured; the queue face persists
+
+- MEASURE (settled window, engines 3h stable, self-heal stack live): cold
+  chains complete (255-261s/91r); the request faces are BUSY-queue (sta-
+  tus=15) behind a stuck state=5 route reaped at 120s (4 this boot) — the
+  residual module-layer class the module-sim targets. LAZYWORK cycling
+  normally (168).
+- The map's remaining layer (module chain/completion sim) is the next
+  build — it covers exactly this residual class AND the S3 graph blocker.
+  Floor 0.55ms/round stands.
+
 ## 2026-09-21 lane/transport-s25-s3 — S2.5+S3 implemented as the device-resident round loop
 
 - SCOPE REFRAME (against the 09-21d verdict): that verdict killed moving the
@@ -661,3 +1211,224 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - sm_121a gate: PASS on sparkb (CUDA 13, compute_121a/sm_121a) — the round
   loop kernel compiles through the same spark_tp_mesh_kernels.cuh the
   glm5_next module builds from.
+
+
+## 2026-09-21bb tick — coredev gate items executed
+
+- #1075 gate list DONE: (a) retitled/rescoped to the serving-ledger line
+  (S3 graph code is main's via #1074; this branch merges main and composes
+  with #1074's device-resident round control + #1073's ALL_GATHER); (b)
+  main merged + manifests regenerated (verifier green locally — FAIL(10)
+  cleared); (c) the completion overflow pool is now PER-STATE PREALLOCATED
+  (slot_count*2, no process globals, no malloc — the cross-instance
+  contamination and the malloc-failure drop both structurally gone);
+  (d) the S2.5/#1074 payload-vs-control-plane distinction documented;
+  (e) reaper message carries state; gate-fixed driver published.
+- #1014 CLOSED superseded (premise erased by #1030; successor = #1067/
+  #1075 with the re-derivation vehicle being the fuzzer-first ledger).
+- Receipts standing (MEASURED): warm allreduce floor 0.55ms/round
+  single-slot, 0.71-0.93 contended, cold ~250µs/round; S1 = 1334µs. The
+  ≤100µs figure graded GOAL until S3 receipts.
+- glm53flash family lane items NOTED (not this tick): fp8.tp8 rank6@
+  spark6 pre-#877 defective generation needs re-emit; nvfp4.tp16 hygiene
+  (node-f identity-unpinned, spark8 stale sidecar).
+
+## 2026-09-21bc tick — the state-5 holder is the FIRST chain's cold walk
+
+- The captured lifecycle (engine 3.5h stable, 592k submit-arrivals, all
+  BUSY-rejected behind last_id=1000001): the FIRST chain of the boot
+  walks LAZYWORK layer-by-layer (3,4,5,...) — each cold layer takes
+  ~30-60s of expert loading — its route reads STUCK at 34s, the REAPER
+  takes it at 120s mid-cold-walk, and every subsequent submit BUSY-queues
+  behind the recycled slot until the NEXT cold chain finishes or reaps.
+  The module watchdogs (300s whole-chain) never engage because the reaper
+  fires first at 120s — COLD CHAINS OUTLIVE THE 120s STATE-5 BOUND.
+- This is the queue-face root: state=5 (WAIT_ADAPTER, executing) reap
+  bound is 120s but cold chains legitimately run 250-280s. The bounds
+  split (600s for RESERVED) must extend to WAIT_ADAPTER too when the
+  module is mid-cold-load (or the reaper must skip routes whose chain is
+  advancing — heartbeats prove life).
+- Fix shape (next): the reaper checks chain liveness (LAZYWORK/CHAIN
+  lines advancing within the last 30s ⇒ alive, skip); reap only truly-
+  dead chains. Recorded as the final residual before module-sim.
+
+## 2026-09-21bd tick — THE MINIMUM-FIX ARCHITECTURE (operator design ruling)
+
+- OPERATOR RULING: no reliance on reapers/autokill — each spark figures out
+  what needs to be done and does only the minimum fix. The design trans-
+  lation: **every recovery decision reads observable state, never elapsed
+  time**. A timeout is only ever a proxy for a fact that is directly
+  readable; the mesh doorbells already prove the pattern (state cells,
+  single transition, zero timeouts in the round path).
+- IMPLEMENTED (f390408): the module watchdog performs STREAM TRIAGE —
+  cudaStreamQuery per slot: busy = the chain is working (skip, whatever
+  its age — live cold chains are never killed again); idle + completion
+  armed = lost (complete immediately). Per-slot slot_alive_ns cells
+  stamped at every advance are the second signal. The age bounds remain
+  only as the backstop BEHIND the triage.
+- The same principle maps across the remaining mechanisms: sync-timeout →
+  the kernel's error word (readable); QP repair → already state-based;
+  record self-heal → already state-based; pipeline self-heal → already
+  state-based. The reaper's route triage (ask the adapter the submis-
+  sion's liveness) is the next piece; the module-sim gives all of it an
+  offline home.
+
+## 2026-09-21be tick — the triage stack's first measured window
+
+- MEASURE (triage stack, engines 30min stable): the cold chain COMPLETED
+  at 202s/91r (status=0) — on the old 120s bound it would have been
+  reaped mid-walk; ZERO chain-watchdog fires; the triage is letting live
+  chains live. Warm chain: 136.8ms/91r, allreduce 82.7ms = 0.91ms/round
+  contended (floor 0.55 stands).
+- Residual faces: 4 state=4 (READY_ADAPTER — queued-behind-single-chain)
+  reaps at 120s — the QUEUE pressure, not lost work: the adapter is busy
+  on the previous chain and these are waiters. With cold chains now
+  living 200s+, the 120s waiter bound fires first. The remaining fix is
+  throughput (S3) or admission backpressure (reject fast instead of
+  queueing behind a 200s cold chain) — not recovery.
+- All 16 ranks progressing uniformly (lazy=210, chains=5 on every sampled
+  rank). The request 500s this window: status=3/4 (reaped-waiter +
+  session churn from the rollout). The stack is converging.
+
+## 2026-09-21bf tick — steady convergence on the triage stack
+
+- MEASURE: chains completing continuously (6 per rank this boot — two
+  97-129s cold-class, one 136ms warm, more loading at layer 24); ZERO
+  reaps, ZERO watchdog fires across the whole window. All 16 ranks in
+  lockstep (lazy=274 identical). The recovery machinery is SILENT —
+  the minimum-fix architecture holding.
+- The verdict probe still times out behind the cold-walk queue (the
+  state=4 waiter class): with each cold chain 100-200s and slots war-
+  ming sequentially, the queue drains slower than the probe's patience.
+  This is pure throughput — S3's actual mandate.
+
+## 2026-09-21bg tick — chains green at scale; the request faces are churn-era
+
+- MEASURE: 30 chains completed per rank this window (74-97s each — the
+  cold class cycling through remaining expert sets), ZERO reaps, ZERO
+  watchdog fires. spark3 at 17 chains — ranks out of lockstep only by
+  which slot is warming. The mesh/allreduce layer: healthy throughout.
+- API census (577 served sessions): the request failures are status=4
+  (session churn — 213) and status=6 (schema — 121, the reaper-era
+  completions from BEFORE the triage stack settled) — mixed-boot faces.
+  The current stack's own contribution: the queue (throughput).
+- Assessment: recovery is DONE and silent; chains complete continuously
+  at 100% status=0. The remaining gap to a green canary is (a) the
+  cold-walk queue time and (b) api-session churn on engine recycles —
+  both throughput/steady-state items. S3 + module-sim are the mandate.
+
+## 2026-09-21bh tick — SPEED MODE: the graph path runs (operator: only speed matters)
+
+- Operator directive accepted: not-crashing is the entry fee; the mission
+  is ≤100µs/round. The speed weapon = #1074's one-launch N-round loop,
+  merged on main; the module gate re-armed on the stable stack:
+- SINGLE-RANK graph (spark3): gate passed, CAPTURE-OK (91 rounds), the
+  replay device-loop ran to cell 82/91 then stalled — eager peers don't
+  feed the device control plane (expected: TP needs uniform mode).
+- ALL-16 GRAPH MODE (first ever): capture OK on every armed rank, the
+  replay launches ONE kernel for the whole chain, runs — and stalls at
+  round 25 with diag want=0 got=0: the captured graph's wait-sequence
+  reads ZERO — the capture baked no seq base (a concrete capture-
+  parameter bug, not a mesh failure). The DEGRADE fires cleanly at the
+  30s deadline; chain fails in 35s with no reaper involvement (the
+  minimum-fix shape holding under the graph path).
+- NEXT (the fast lane): fix the capture's seq-base baking (GraphRecord
+  must record the replay-relative sequence; the linker patch updates it
+  per replay) → the replay completes → the REAL ns_per_round lands.
+  floor 0.55ms/round eager; the graph target is the 44-58µs mesh class.
+
+## 09-22 00:45 — THE PARITY UNLOCK (V6 protocol) + never-compiled-boot fixes
+
+CONVICTION (from fleet logs + offline repro): the all-16 graph deadlock was
+ORDINAL-PARITY divergence (spark3 doorbell slot=7 for even seq 82 = one-slot
+drift between ranks) plus the odd-rounds parity flip per replay (91 rounds)
+plus sticky per-process graph disable (mixed eager/graph convoy, 35s spin).
+Offline RED: test_red rig variant, 148 failures (stale-slot corruption).
+
+PROTOCOL V6 (ef37cd9): wire slot parity derives from the device seq (publish
+asserts host slot == (seq-1)&mask, wait derives ring from the seq it reads);
+epoch-match in every wait (kills stale-epoch tail passing on epoch regression);
+cancel mismatch writes error (no silent garbage completion); pre-launch pads
+(SparkTpDeviceCollectiveGraphPreLaunch reads the live cell, pads to the
+captured parity base — replays flip parity every 91 rounds otherwise);
+broadcast-cancel on degrade; per-chain graph re-arm with budget 3. Also fixed:
+the f32 combine fallback double-counted rank 1 (seed 0+1, add loop from 1).
+
+OFFLINE GATES: host fuzzer 273 checks green; ladder REAL-CUDA rig green —
+4 ranks × 7 odd rounds × 5 replays all complete, values exact; eager
+200/200 p50 435µs. (The single-process test_graph_replay_correctness rig
+cannot host the hidden-transport backend — fleet/ladder are the gates.)
+
+DEPLOY (00:06-00:43) surfaced THREE never-compiled bugs (the module source
+had not compiled since the gate-fix commits; the morning "deploy" shipped a
+stale pre-fix .so — EVIDENCE LAW FOURTH INSTANCE): module use-before-decls +
+armed-scope bug; residentd poll builder dropped listen POLLIN while a client
+held the single slot (any idle first connection blocked serving forever);
+close_after_output with empty queue never closed. All fixed (ec7cdbd), fleet
+stable 16/16 on 635bae2a+, API green, chains key, GRAPH-CAPTURE-OK 16/16,
+replays EXECUTE.
+
+REMAINING (crisp):
+1. stale error_word across chains — spark9 DEGRADE seq=0x200000001 = an
+   epoch-2 value during epoch-4 chains; MESH-GUARD-POISON consumed leftovers.
+   Fix: zero error_word+diag at GraphStep ENTRY (not only ArmCapture), and
+   Clear on the degrade path too.
+2. first-request kv-admit status 9 on fresh boots (ADMIT9-KVMATCH,
+   kv_page_cache.c:1225) — check request shape vs the t1 harness before
+   touching code; my raw prompt_token_ids may violate the sequence contract.
+3. graph_fail_streak budget was consumed (streak=3) during the bad window —
+   engines restart (or wait for re-key) to re-attempt graph after fix 1.
+4. THEN: the ns/round receipt (GRAPH-REPLAY-TIME prints per replay), ladder
+   N=1/2/8/24/45/91 class verification, PR #1075 update, coredev regrade.
+
+## 09-22 01:55 TICK — ld.cv unlock: 1/91 → 77/91 rounds MEASURED
+
+MEASURE: fresh-boot first graph chain, three builds:
+- 4b617867 (volatile reads): DEGRADE at seq=(6<<32)|1 — replay executed
+  ROUND 1 ONLY; every rank's wait starved while every relay shipped all 91
+  publishes (WD-SEEN full sequence) — CONVICTION: peer data arrives via RDMA
+  into host memory; GPU wait kernels read through cached views; volatile
+  prevents COMPILER caching, not GPU L2. The ladder rig passed because its
+  peer updates are local GPU writes (GPU-coherent), masking the fleet-only
+  staleness.
+- 79aa97f1 (ld.global.cv on end_word/round_seq/error/cancel in the wait
+  kernel): round_seq advanced 77/91 — the staleness fix is REAL.
+- Remaining stall at ~77/91: error_word readback = 0x9352002D-class garbage
+  (no kernel writes that pattern) — aliasing suspect; host watch fires before
+  the kernel diag writes (diag all-zero). NEXT: dump the mesh region around
+  error_word after the stall + check the round_control offset math on the
+  driver side vs the shim; the fresh-boot first graph chain is the tight
+  repro (second chains re-arm and retry).
+
+ALSO THIS TICK (all committed 5ef662d..81c476e):
+- PREPARED kv reservations expire loudly at 60s (the ADMIT9 conviction: a
+  failed chain retained through an undrainable stream left lanes owned
+  forever; reservations are leases, not ownership).
+- error_word cleared at GraphStep entry (stale epoch-2 error crossed into
+  epoch-4 chains + MESH-GUARD-POISON ate leftovers).
+- ROUTE-ERROR-CONTAINED: a recoverable chain failure fenced its route and
+  KILLED THE ENGINE (model_residentd run=internal_error → exit); now fenced
+  + loud print, engine stays up (fleet-verified across multiple failures).
+- Engine connect now 30ms all_ranks_ready=1 (was 4×30s timeout during the
+  poll-gating era).
+
+FLEET: driver 79aa97f1 16/16, engines survive chain failures, KV lanes
+self-heal, single API discipline (two APIs fight for the single-client
+slots — kill all, start one after residentd boots).
+
+## 09-22 02:20 TICK — FIRST COMPLETE GRAPH CHAIN: status=0, 91 rounds, 330ms/round MEASURED
+
+The re-arm machinery worked end to end: first chain stalled 77/91 (streak=1)
+→ GRAPH-REARM → retry chain COMPLETED (CHAIN-TIME slot=2 status=0 total_ms
+=30078 rounds=91; GRAPH-REPLAY-TIME ns=30064845812). allreduce_ms=0.33
+(host-side). Honest grade: 330ms/round = WORSE than eager (0.55ms) — the
+graph path is CORRECT but SLOW: 91 publishes burst at GPU speed while the
+waits pass at relay-arrival rate (~3 rounds/s per the timing). Suspects:
+(a) the weightd relay's per-pass handling under bursts (doorbell watermark
+vs missed-seq resync pacing), (b) __nanosleep(200) spin granularity in the
+wait kernel (operator no-sleeps law applies), (c) .cv load latency × poll
+loop shape. NEXT LADDER STEP: instrument per-round arrival (timestamp the
+tail-visible moment in the wait kernel via %globaltimer into diag), then
+fix the pacing class. The 77/91 stall+garbage error_word from the previous
+tick did NOT recur on the retry — cold-start-class, keep the repro in mind
+but the pacing is the throughput killer now.

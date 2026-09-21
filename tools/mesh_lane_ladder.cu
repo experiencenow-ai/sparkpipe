@@ -224,6 +224,52 @@ static int ladder_mesh_run(const char *socket_path,uint32_t rank,
             SparkStatusToString(status));
         return 2;
     }
+    {
+        static volatile uint32_t ship_stop;
+        pthread_t ship_thread;
+        uint8_t *mesh_bytes = (uint8_t *)shm_base;
+        uint32_t band = (uint32_t)((2u * (uint64_t)lane) &
+            (uint64_t)(SPARK_WEIGHTD_MESH_BANDS - 1u));
+        struct ShipArgs
+        {
+            uint8_t *mesh;
+            uint32_t band;
+            uint32_t degree;
+            volatile uint32_t *stop;
+        };
+        ShipArgs *ship_args = (ShipArgs *)malloc(sizeof(*ship_args));
+        ship_args->mesh = mesh_bytes;
+        ship_args->band = band;
+        ship_args->degree = degree;
+        ship_args->stop = &ship_stop;
+        pthread_create(&ship_thread,0,
+            [](void *raw) -> void *
+            {
+                ShipArgs *args = (ShipArgs *)raw;
+                while ( *args->stop == 0u )
+                {
+                    uint32_t peer;
+                    for ( peer = 0u; peer < args->degree; peer++ )
+                    {
+                        volatile uint64_t *entry = (volatile uint64_t *)
+                            (args->mesh + SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(
+                                args->band,peer));
+                        volatile uint32_t *shipped =
+                            (volatile uint32_t *)
+                            (args->mesh + SPARK_WEIGHTD_MESH_SHIPPED_ENTRY(
+                                args->band,peer));
+                        if ( entry[0] != 0ull &&
+                             *shipped != (uint32_t)entry[0] )
+                            *shipped = (uint32_t)entry[0];
+                    }
+                    usleep(50);
+                }
+                free(args);
+                return 0;
+            },
+            ship_args);
+        (void)ship_thread;
+    }
     pthread_mutex_init(&completion.lock,0);
     pthread_cond_init(&completion.wake,0);
     printf("LADDER-INIT lane=%u hold=0 rank=%u\n",lane,rank);
@@ -335,6 +381,164 @@ static int ladder_mesh_run(const char *socket_path,uint32_t rank,
         ladder_percentile(&timed,0.50),ladder_percentile(&timed,0.99),
         ladder_percentile(&timed,1.0));
     fflush(stdout);
+    {
+        const char *graph_rounds_env = getenv("LADDER_GRAPH_ROUNDS");
+        if (graph_rounds_env != 0 && iters != 0u)
+        {
+            uint32_t graph_rounds = (uint32_t)strtoul(graph_rounds_env,0,10);
+            uint32_t graph_replays = 5u;
+            const char *replays_env = getenv("LADDER_GRAPH_REPLAYS");
+            cudaGraph_t graph = 0;
+            cudaGraphExec_t exec = 0;
+            uint32_t replay_index;
+            if (replays_env != 0)
+                graph_replays = (uint32_t)strtoul(replays_env,0,10);
+            if (graph_rounds != 0u &&
+                 SparkTpDeviceCollectiveArmCapture(&collective) ==
+                    SPARK_STATUS_OK &&
+                 cudaStreamBeginCapture(stream,
+                    cudaStreamCaptureModeGlobal) == cudaSuccess)
+            {
+                SparkStatus record_status = SPARK_STATUS_OK;
+                for ( ordinal = 0u; ordinal < graph_rounds; ordinal++ )
+                {
+                    ladder_fill_bf16<<<(elements + 255u) / 256u,256u,0,
+                        stream>>>(local_device,(float)(rank + 1u),elements);
+                    memset(&submission,0,sizeof(submission));
+                    submission.abi_version =
+                        SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION;
+                    submission.descriptor_bytes = sizeof(submission);
+                    submission.slot_index = 0u;
+                    submission.active_sequence_count = rows;
+                    submission.logical_sequence_count = rows;
+                    submission.ordinal = ordinal;
+                    submission.local_device = local_device;
+                    submission.full_device = full_device;
+                    submission.cuda_stream = stream;
+                    submission.completion_function = 0;
+                    submission.completion_context = 0;
+                    record_status = SparkTpDeviceCollectiveSubmitBf16(
+                        &collective,&submission);
+                    if (record_status != SPARK_STATUS_OK)
+                        break;
+                }
+                if (cudaStreamEndCapture(stream,&graph) != cudaSuccess ||
+                     graph == 0 || record_status != SPARK_STATUS_OK)
+                {
+                    fprintf(stderr,
+                        "GRAPH-CAPTURE-FAIL rank=%u rounds=%u cuda=%s\n",
+                        rank,graph_rounds,
+                        cudaGetErrorString(cudaGetLastError()));
+                    graph = 0;
+                }
+            }
+            else if (graph_rounds != 0u)
+                fprintf(stderr,"GRAPH-ARM-FAIL rank=%u\n",rank);
+            if (graph != 0 &&
+                 cudaGraphInstantiate(&exec,graph,0) != cudaSuccess)
+            {
+                fprintf(stderr,"GRAPH-INSTANTIATE-FAIL rank=%u %s\n",rank,
+                    cudaGetErrorString(cudaGetLastError()));
+                exec = 0;
+            }
+            SparkTpDeviceCollectiveDisarmCapture(&collective);
+            for ( replay_index = 0u;
+                  replay_index < graph_replays && exec != 0;
+                  replay_index++ )
+            {
+                uint64_t graph_error;
+                uint64_t replay_t0;
+                uint64_t replay_t1;
+                uint64_t watch_deadline;
+                if (SparkTpDeviceCollectiveGraphCancelSeed(&collective,
+                        stream) != SPARK_STATUS_OK ||
+                     SparkTpDeviceCollectiveGraphPreLaunch(&collective,
+                        stream) != SPARK_STATUS_OK)
+                {
+                    fprintf(stderr,
+                        "GRAPH-PRELAUNCH-FAIL rank=%u replay=%u\n",
+                        rank,replay_index);
+                    bad_rounds++;
+                    break;
+                }
+                replay_t0 = ladder_now_ns();
+                if (cudaGraphLaunch(exec,stream) != cudaSuccess)
+                {
+                    fprintf(stderr,"GRAPH-LAUNCH-FAIL rank=%u replay=%u %s\n",
+                        rank,replay_index,
+                        cudaGetErrorString(cudaGetLastError()));
+                    bad_rounds++;
+                    break;
+                }
+                watch_deadline = replay_t0 + LADDER_WAIT_NS;
+                for ( ;; )
+                {
+                    cudaError_t poll = cudaStreamQuery(stream);
+                    if (poll == cudaSuccess)
+                        break;
+                    if (poll != cudaErrorNotReady)
+                    {
+                        fprintf(stderr,
+                            "GRAPH-STREAM-ERR rank=%u replay=%u %s\n",
+                            rank,replay_index,cudaGetErrorString(poll));
+                        bad_rounds++;
+                        break;
+                    }
+                    if (ladder_now_ns() >= watch_deadline)
+                    {
+                        fprintf(stderr,
+                            "GRAPH-REPLAY-HUNG rank=%u replay=%u\n",
+                            rank,replay_index);
+                        (void)SparkTpDeviceCollectiveGraphStuckDump(
+                            &collective);
+                        SparkTpDeviceCollectiveBroadcastCancel(&collective);
+                        bad_rounds++;
+                        break;
+                    }
+                    usleep(200);
+                }
+                replay_t1 = ladder_now_ns();
+                graph_error = SparkTpDeviceCollectiveGraphError(&collective);
+                SparkTpDeviceCollectiveClearGraphError(&collective);
+                if (graph_error != 0ull)
+                {
+                    fprintf(stderr,
+                        "GRAPH-ERROR rank=%u replay=%u error=%llu\n",
+                        rank,replay_index,(unsigned long long)graph_error);
+                    SparkTpDeviceCollectiveBroadcastCancel(&collective);
+                    bad_rounds++;
+                    break;
+                }
+                if (cudaMemcpy(verify_host,full_device,payload_bytes,
+                        cudaMemcpyDeviceToHost) != cudaSuccess)
+                {
+                    bad_rounds++;
+                    break;
+                }
+                bad_elements = 0u;
+                for (index = 0u; index < elements; index++)
+                    if (verify_host[index] != expected_bits)
+                        bad_elements++;
+                printf(
+                    "GRAPH-REPLAY rank=%u replay=%u rounds=%u total_us=%.1f per_round_us=%.1f bad_elements=%u\n",
+                    rank,replay_index,graph_rounds,
+                    (double)(replay_t1 - replay_t0) / 1000.0,
+                    (double)(replay_t1 - replay_t0) / 1000.0 /
+                        (double)graph_rounds,
+                    bad_elements);
+                fflush(stdout);
+                if (bad_elements != 0u)
+                {
+                    bad_rounds++;
+                    break;
+                }
+            }
+            if (exec != 0)
+                cudaGraphExecDestroy(exec);
+            if (graph != 0)
+                cudaGraphDestroy(graph);
+        }
+    }
     SparkTpDeviceCollectiveDestroy(&collective);
     (void)munmap(shm_base,LADDER_SHM_BYTES);
     (void)cudaFree(local_device);
