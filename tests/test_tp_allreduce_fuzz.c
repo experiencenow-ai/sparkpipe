@@ -530,6 +530,37 @@ static void FuzzEdgeGeometry(void)
 	    "mesh region at most 1GiB per daemon (right-sized 2026-09-21 ruling)" );
 }
 
+static void FuzzGraphPath(void)
+{
+	uint32_t run[FUZZ_MAX_RANKS];
+	uint32_t run_count = FuzzAllRanks(run);
+	uint64_t request = 5000u;
+	uint64_t progress = 0ull;
+	uint32_t i;
+	CHECK( SparkTpDeviceCollectiveArmCapture(&g_ranks[0].collective) == SPARK_STATUS_OK,
+	    "arm capture on rank 0" );
+	for ( i = 0u; i < 4u; i++ )
+	{
+		uint64_t ordinal = 16ull * (uint64_t)i + 1ull;
+		request++;
+		CHECK( FuzzRunSet(FuzzRoundMain, ordinal, run, run_count,
+		    "graph-round", i, -1) != 0u, "graph-path round completes" );
+	}
+	progress = SparkTpDeviceCollectiveGraphProgress(&g_ranks[0].collective,0);
+	CHECK( progress != 0ull, "graph progress nonzero after capture-path rounds" );
+	CHECK( SparkTpDeviceCollectiveGraphError(&g_ranks[0].collective) == 0ull,
+	    "no graph error after capture-path rounds" );
+	SparkTpDeviceCollectiveDisarmCapture(&g_ranks[0].collective);
+	CHECK( SparkTpDeviceCollectiveDisarmCapture(&g_ranks[0].collective) == SPARK_STATUS_OK,
+	    "disarm after capture rounds" );
+	for ( i = 0u; i < run_count; i++ )
+	{
+		SparkTpDeviceCollectiveRoundStats(&g_ranks[i].collective,0,0,1u);
+		g_ranks[i].completion_count = 0u;
+	}
+	g_broadcast_count = 0u;
+}
+
 static void FuzzBasic(void)
 {
 	uint32_t run[FUZZ_MAX_RANKS];
@@ -899,6 +930,7 @@ int main(int argc, char **argv)
 	FuzzEdgeGeometry();
 	for ( rank = 0u; rank < ranks; rank++ )
 		g_tasks[rank].rank = &g_ranks[rank];
+	FuzzGraphPath();
 	wedge = 0u;
 	if ( bench_rounds != 0u )
 		wedge = BenchRun(bench_rounds);
