@@ -210,6 +210,7 @@ struct SparkGlm5NextModuleState
 	SparkGlm5NextAsyncCompletion completions[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
 	uint64_t completion_armed_ns[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
 	uint64_t chain_started_ns[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
+	volatile uint64_t slot_alive_ns[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
 	SparkGlm5NextCompletionOverflow overflow_pool[SPARK_GLM5_NEXT_OVERFLOW_POOL];
 	uint32_t overflow_parked_count;
 	pthread_mutex_t completion_watch_lock;
@@ -3219,6 +3220,7 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 	{
 		uint64_t now_ns = SparkGlm5NextNowNs();
 		chain->last_advance_ns = now_ns;
+		state->slot_alive_ns[chain->slot_index] = now_ns;
 		if ( chain->created_ns == 0ull )
 			chain->created_ns = now_ns;
 		else if ( now_ns - chain->created_ns >= UINT64_C(30000000000) &&
@@ -3846,6 +3848,13 @@ static void *SparkGlm5NextCompletionWatchdog(void *argument)
 			uint64_t started = state->chain_started_ns[slot_index];
 			if ( started != 0u && now_ns - started >= UINT64_C(500000000000) )
 			{
+				SparkGlm5NextExecutionSlot *probe_slot =
+				    &state->slots[slot_index];
+				if ( probe_slot != 0 && probe_slot->stream != 0 &&
+				     cudaStreamQuery((cudaStream_t)probe_slot->stream) ==
+				        cudaErrorNotReady )
+					continue;
+				{
 				SparkGlm5NextAsyncCompletion *chain_async =
 				    &state->completions[slot_index];
 				state->chain_started_ns[slot_index] = 0u;
@@ -3861,6 +3870,7 @@ static void *SparkGlm5NextCompletionWatchdog(void *argument)
 				SparkGlm5NextCompleteOnWorker(chain_async);
 				pthread_mutex_lock(&state->completion_watch_lock);
 				continue;
+				}
 			}
 			{
 				uint64_t armed = state->completion_armed_ns[slot_index];
