@@ -16,6 +16,15 @@ __constant__ char SparkTpMeshKernelsBuildMarker[] =
 
 #define SPARK_TP_MESH_THREADS 256u
 
+static __device__ __forceinline__ unsigned long long SparkGlm5NextLdcvU64(
+    const volatile void *address)
+{
+	unsigned long long value;
+	asm volatile("ld.global.cv.u64 %0,[%1];"
+	    : "=l"(value) : "l"(address) : "memory");
+	return(value);
+}
+
 static __device__ __forceinline__ unsigned long long SparkGlm5NextGlobalTimerNs(void)
 {
 	unsigned long long ns;
@@ -100,7 +109,7 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 	unsigned long long stop_at;
 	if ( threadIdx.x != 0u || blockIdx.x != 0u )
 		return;
-	sequence = round_seq[0];
+	sequence = SparkGlm5NextLdcvU64(round_seq);
 	ring = (sequence - 1ull) & (slots_per_rank - 1ull);
 	stop_at = SparkGlm5NextGlobalTimerNs() + deadline_ns;
 	if ( cancel_cell != 0 && cancel_expected != 0 &&
@@ -124,14 +133,15 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 				((uint64_t)peer_rank * slots_per_rank +
 					ring) * slot_bytes +
 				slot_bytes - 8u);
-			while ( (peer_epoch = *end_word >> 32ull) !=
-			            (sequence >> 32ull) ||
-			        *end_word < sequence )
+			while ( (peer_epoch = SparkGlm5NextLdcvU64(end_word) >>
+			             32ull) != (sequence >> 32ull) ||
+			        SparkGlm5NextLdcvU64(end_word) < sequence )
 			{
-				if ( *error_word != 0ull )
+				if ( SparkGlm5NextLdcvU64(error_word) != 0ull )
 					return;
 				if ( cancel_cell != 0 && cancel_expected != 0 &&
-				     *cancel_cell != *cancel_expected )
+				     SparkGlm5NextLdcvU64(cancel_cell) !=
+				     SparkGlm5NextLdcvU64(cancel_expected) )
 				{
 					atomicExch((unsigned long long *)error_word,
 					    SPARK_TP_MESH_ERROR_CANCELLED | sequence);
@@ -144,7 +154,7 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 				{
 					unsigned long long off = (unsigned long long)
 						((uint8_t *)end_word - (uint8_t *)band_base);
-					unsigned long long got = *end_word;
+					unsigned long long got = SparkGlm5NextLdcvU64(end_word);
 					atomicExch((unsigned long long *)diag_word,
 						((unsigned long long)peer_rank << 56ull) |
 						((ring & 0xffull) << 48ull) |

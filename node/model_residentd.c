@@ -2658,6 +2658,18 @@ static SparkStatus SparkModelResidentdProgressRoutes(
 		index = (start + offset) % runtime->route_capacity;
 		status = SparkModelResidentdProgressRoute(runtime,&runtime->routes[index],
 			allow_adapter != 0u ? &budget : 0);
+		if ( status != SPARK_STATUS_OK )
+		{
+			fprintf(stderr,
+			    "ROUTE-ERROR-CONTAINED index=%u status=%s — fencing route, engine stays up\n",
+			    (unsigned)index,SparkStatusToString(status));
+			pthread_mutex_lock(&runtime->mutex);
+			if ( runtime->routes[index].active != 0u )
+				(void)SparkModelResidentdFailContinuationLocked(
+					&runtime->routes[index],status);
+			pthread_mutex_unlock(&runtime->mutex);
+			status = SPARK_STATUS_OK;
+		}
 
 		runtime->next_adapter_route = (index + 1u) % runtime->route_capacity;
 		if ( budget.refused != 0u && budget.ops == 0u )
