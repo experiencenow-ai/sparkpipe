@@ -1251,3 +1251,24 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - Fix shape (next): the reaper checks chain liveness (LAZYWORK/CHAIN
   lines advancing within the last 30s ⇒ alive, skip); reap only truly-
   dead chains. Recorded as the final residual before module-sim.
+
+## 2026-09-21bd tick — THE MINIMUM-FIX ARCHITECTURE (operator design ruling)
+
+- OPERATOR RULING: no reliance on reapers/autokill — each spark figures out
+  what needs to be done and does only the minimum fix. The design trans-
+  lation: **every recovery decision reads observable state, never elapsed
+  time**. A timeout is only ever a proxy for a fact that is directly
+  readable; the mesh doorbells already prove the pattern (state cells,
+  single transition, zero timeouts in the round path).
+- IMPLEMENTED (f390408): the module watchdog performs STREAM TRIAGE —
+  cudaStreamQuery per slot: busy = the chain is working (skip, whatever
+  its age — live cold chains are never killed again); idle + completion
+  armed = lost (complete immediately). Per-slot slot_alive_ns cells
+  stamped at every advance are the second signal. The age bounds remain
+  only as the backstop BEHIND the triage.
+- The same principle maps across the remaining mechanisms: sync-timeout →
+  the kernel's error word (readable); QP repair → already state-based;
+  record self-heal → already state-based; pipeline self-heal → already
+  state-based. The reaper's route triage (ask the adapter the submis-
+  sion's liveness) is the next piece; the module-sim gives all of it an
+  offline home.
