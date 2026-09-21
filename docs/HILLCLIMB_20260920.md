@@ -685,3 +685,23 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - NEXT: settled-fleet verdict; if the first-chain convergence race persists
   it becomes ledger #30 (delay chain dispatch until the mesh records/QPs of
   ALL ranks are current — a readiness gate at the transport level).
+
+## 2026-09-21ab tick — ledger #30: the state-1 wedge generator (prepare-resolution continuation)
+
+- Post-callback-fix state: completions no longer starve (the park/drain holds;
+  0 COMPLETION-PARKED events = the queue never even filled this window), BUT
+  routes still wedge in state=1 (RESERVED — the PREPARE/DECISION resolution)
+  on rotating ranks (3/7 this window): the client's prepare handshake never
+  completes, claims hold, BUSY cascades to whole requests, the reaper
+  converts each to a bounded 31-120s NOT_FOUND failure, engines recycle and
+  the cycle repeats on fresh boots (fresh engines' FIRST prepares get
+  ABORTed client-side after any rank's BUSY).
+- Ledger #30 (open): the lost continuation sits in the PIPELINE's prepare/
+  decision path (transaction resolution across ranks — the same
+  lost-scheduling class as the callback fix, one layer up). Next instrument:
+  print at each transaction's abort with the FAILING RANK's submit-result
+  status (the abort is currently silent about which rank triggered it); the
+  wedging rank's route state at that instant completes the picture.
+- Fleet: degraded-but-bounded (every wedge self-heals ≤120s; serving
+  produces 31-121s failures instead of green). Warm floor reference 0.55ms/
+  round from the last settled window.
