@@ -257,6 +257,7 @@ struct SparkGlm5NextModuleState
 	uint32_t graph_path_enabled;
 	uint32_t graph_fail_streak;
 	uint32_t graph_arrival_dumped;
+	uint32_t experts_warm;
 	uint64_t degrade_graph_fallback;
 	uint64_t degrade_covered_abandon;
 	uint64_t degrade_graph_disabled;
@@ -3350,10 +3351,16 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 			    (unsigned)state->graph_path_enabled,
 			    (unsigned)chain->context->flags);
 		}
+		if ( state->graph_path_enabled != 0u &&
+		     state->experts_warm == 0u &&
+		     state->graph_gate_printed < 3u )
+			fprintf(stderr,
+			    "GRAPH-GATE-COLD experts not warm; eager first\n");
 		if ( chain->wave_rows == 1u && chain->first_row == 0u &&
 		     state->tp_device_collective_initialized != 0u &&
 		     state->lazy_pack != 0 && state->tp_degree > 1u &&
-		     state->graph_path_enabled != 0u )
+		     state->graph_path_enabled != 0u &&
+		     state->experts_warm != 0u )
 		{
 			SparkStatus graph_status;
 			SparkGlm5NextBuildWave(chain);
@@ -3560,6 +3567,12 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 			chain->stage = SPARK_GLM5_NEXT_CHAIN_STAGE_BEGIN;
 			SparkGlm5NextTpChainAdvance(chain,SPARK_STATUS_OK);
 			return;
+		}
+		if ( state->experts_warm == 0u )
+		{
+			state->experts_warm = 1u;
+			fprintf(stderr,
+			    "GRAPH-WARM experts resident after first eager chain\n");
 		}
 		launch_status = SparkGlm5NextEnqueueAsyncCompletion(state,chain->slot,chain->slot_index);
 		if ( launch_status != SPARK_STATUS_OK )

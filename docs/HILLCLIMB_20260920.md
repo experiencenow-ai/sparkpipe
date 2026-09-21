@@ -1528,3 +1528,25 @@ decode_cover bitmap machinery already exists (GraphCoverEnsure); a chain
 whose routed experts are not covered takes the eager path FIRST (which
 warms them), the graph re-arm then succeeds on the next chain. Observable
 state, minimum fix, no time basing.
+
+## 09-22 05:00 TICK — the graph gate WORKS; the cold eager walk is now the front of the queue
+
+DEPLOYED 8d032bce 16/16: the warm gate (GRAPH-GATE-COLD print; experts_warm
+set only by a completed EAGER chain). VERIFIED LIVE: the cold chain took the
+eager path first (no graph capture on cold boots).
+
+NEW FRONT: the cold EAGER chain itself = CHAIN-TIME status=15 total_ms=30001
+rounds=0 allreduce_ms=0.00 — the lazy expert acquire inside the chain times
+out at the 30s round deadline (BUSY, retryable), i.e. the KNOWN 74-280s
+cold-walk class now sits in front of every cold boot's first decode; the kv
+PREPARED lease (60s expiry) serializes each follow-up request behind it.
+This is EXACTLY handoff lever 2: FULL-PACK PREFETCH AT ATTACH (the pool
+never evicts; prefetching the pack during attach removes the walk entirely).
+
+NEXT LADDER (in order): (1) lever-2 prefetch at attach — the pool is
+preallocated and never-evicting; stream the pack into it during/after lazy
+attach on a background stream; the first chain then starts warm and the
+graph gate opens immediately; (2) the first cold-boot canary then exercises
+chain1-eager-warm → chain2-GRAPH → the ARRIVAL-DUMP receipt; (3) the
+relay-arrival conviction at 330ms/round; (4) ladder idle re-measure; (5)
+the 0x9352 payload-write mystery (secondary).
