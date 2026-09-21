@@ -666,7 +666,26 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
                             (SPARK_WEIGHTD_MESH_SLOT_BYTES *
                              SPARK_WEIGHTD_MESH_SLOTS_PER_BAND)))),
                 implementation->cancel_expected) != 0 )
+        {
+            uint64_t kernel_error = 0ull;
+            uint64_t kernel_diag = 0ull;
+            (void)cudaMemcpy(&kernel_error,implementation->error_word,
+                sizeof(kernel_error),SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST);
+            (void)cudaMemcpy(&kernel_diag,implementation->diag_word,
+                sizeof(kernel_diag),SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST);
+            fprintf(stderr,
+                "MESH-WAIT-KERNEL-TIMEOUT rank=%u slot=%llu err=%llu diag_peer=%llu ring=%llu slotidx=%llu want=%llu got=%llu\n",
+                implementation->tp_rank,
+                (unsigned long long)slot_index,
+                (unsigned long long)kernel_error,
+                (unsigned long long)(kernel_diag >> 56),
+                (unsigned long long)((kernel_diag >> 48) & 0xffu),
+                (unsigned long long)((kernel_diag >> 32) & 0xffffu),
+                (unsigned long long)((kernel_diag >> 16) & 0xffffu),
+                (unsigned long long)(kernel_diag & 0xffffu));
             return SPARK_STATUS_IO_ERROR;
+        }
+
         goto combine;
     }
     deadline = SparkTpDeviceCollectiveTimeNs() +
