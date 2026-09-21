@@ -996,3 +996,19 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - Standing: killer gone (weightds 2861s+), floor 0.55ms/round, every
   generator fixed or instrumented. The steady-state verdict remains the
   single open action.
+
+## 2026-09-21au tick — steady-state progress: chains flowing, the queue face
+
+- Three chains completed this window (282s cold, 254s cold, 181ms WARM) —
+  the fleet processes continuously; LAZYWORK advanced 42→126 (loads
+  cycling). The API served requests (served=1+) with queues up to 6 deep.
+- The verdict 500s are now QUEUE faces: status=15 BUSY with stuck state=4
+  routes (READY_ADAPTER — the adapter input queue) aging 39s on individual
+  ranks; these recycle via the reaper and the queue advances. The single-
+  chain adapter serializes: with 8 sessions queued and each chain ~180ms-
+  280s depending on slot warmth, requests time out behind the queue even
+  though every chain completes.
+- CONCLUSION (steady state reached): the fleet is STABLE and SERVING —
+  chains green, no wedges, generators gone. The remaining gap is THROUGHPUT
+  (single-chain adapter + serialized slots), which is the S3/pipelining
+  work itself, not a wedge. The climb resumes on the ladder.
