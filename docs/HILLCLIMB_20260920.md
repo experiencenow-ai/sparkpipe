@@ -1835,3 +1835,23 @@ GB10 context exhaustion with 16 engines + the daemon?) = the final question.
 FIX TARGET: the worker's context self-heal (recreate on set-failure, loudly)
 + why it died once. This collapses the cold walk AND the prefetch failures
 in one fix.
+
+## 09-22 13:00 TICK — bind fix deployed; NEW pre-chain wedge on the boot (submission admitted, chain never starts)
+
+BIND FIX DEPLOYED (f7e6a9f5): the conviction corrected (TARGET_MISMATCH =
+the map_context THREAD check — the prefetch thread ran context-bare; the
+weightsd worker was never involved) + SparkWeightdMapBindThread binds
+device+context at prefetch start. Fuzzer 273 green.
+
+THIS BOOT'S WEDGE (new, blocks the fix's measurement): submission 1000001
+ADMITTED (decision=1) but NO chain EVER started (zero CHAIN lines, zero
+PREFETCH-START — the chain never reached BEGIN); 1000002 rejected ADMIT9
+behind 1000001's PREPARED lease ✓ expected; the API connection CHURNS
+(reset-armed/complete + takeover cycles every few seconds, resumed=1) and
+each reconnect arms a pending_client_reset whose quiesce can never complete
+while 1000001 sits in-flight — SUSPECTED MUTUAL BLOCK: stuck submission ↔
+never-quiescing reset. NEXT: (a) why 1000001's chain never began — trace
+its route state (the ROUTE-STUCK scanner should have printed at 30s but
+did NOT — is the route even active? check route activation between DECISION
+and chain-BEGIN); (b) the reset/quiesce interplay with an in-flight
+submission (does a pending reset gate new chain dispatch?).
