@@ -1083,3 +1083,23 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   post-fault submit status + the pipeline view's failed_status), then fix
   — this is the #22/#30 class finally reproduced under deterministic
   control, which is exactly what the operator demanded.
+
+## 2026-09-21ax tick — THE FUZZER PAID OFF: sticky failed_status fixed structurally
+
+- Seed-7's 100/100 wedge discriminated (one DIAG print): failed_status=6
+  persisting after EVERY fault kind — Progress early-returned on failure
+  → per-rank progress never ran → disconnected clients never reconnected
+  → failed_status never cleared → permanent wedge from any single fault.
+  This is the #22/#30 fleet shape reproduced and root-caused offline in
+  under an hour (vs weeks on the fleet).
+- STRUCTURAL FIX (b044ded): Progress always drives every rank (reconnects
+  happen under failure), captures the first rank error, and SELF-HEALS
+  failed_status when all ranks report connected (loud SELF-HEAL print) —
+  recovery requires no external orchestrator. THE WEDGE SHAPE IS STRUC-
+  TURALLY GONE at this layer.
+- Validation: seed 7 → 602 checks 0 failures (was 200 fails); PASS on 5
+  fresh seeds × 200 rounds; the pre-existing pipeline mock test green.
+- NEXT per the map: expand fault kinds (session-generation churn, KV-
+  takeover overlap shapes), then the resident-sim and module-sim layers;
+  deploy the self-healing pipeline to the fleet with the next driver
+  release.
