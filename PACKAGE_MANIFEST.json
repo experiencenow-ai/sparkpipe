@@ -1343,8 +1343,8 @@
     },
     {
       "path": "docs/HILLCLIMB_20260920.md",
-      "sha256": "e0e639f3b096a6dadf23e042a5af60bb3b0ec0879b2d85655b7e487814663a48",
-      "size_bytes": 61781
+      "sha256": "2a4c62322c08f2ec17710231febe6e01ff383378bb20e308f19feb03a7ed74f1",
+      "size_bytes": 60783
     },
     {
       "path": "docs/HILL_CLIMB_DEPLOY.md",
@@ -7658,8 +7658,8 @@
     },
     {
       "path": "ring/transport/tp_device_collective.c",
-      "sha256": "27e22d5ce5d8f629c120c3b38bdffbd98191b122de9d9db482ce4bb9c70a0beb",
-      "size_bytes": 75928
+      "sha256": "76d7e9901c84a8dbe65a26c1534aec0405e7d4ea2f9542dc2a1e6d70202ad553",
+      "size_bytes": 75746
     },
     {
       "path": "ring/transport/tp_device_collective_nccl.h",
@@ -10028,8 +10028,8 @@
     },
     {
       "path": "tests/test_tp_allreduce_fuzz.c",
-      "sha256": "14b734e189f570574499aae09fcb05b578139b21fad7d4ef3b18670690428d05",
-      "size_bytes": 38882
+      "sha256": "641313197beee2c7ca4c0dc35e47c6571f2fc93b1acb12b4b8069479b3c111e4",
+      "size_bytes": 31941
     },
     {
       "path": "tests/test_tp_collective.c",
@@ -16080,5 +16080,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 75559303
+  "total_bytes": 75551182
 }
