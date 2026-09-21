@@ -77,11 +77,14 @@ static int MockTraceEnabled(void)
 SparkModelResidentClient *MockResidentClientByRank(uint32_t stage_index)
 {
 	uint32_t i;
+	SparkModelResidentClient *found = 0;
 	for (i=0u; i<mock_registry_count; i++)
 		if ( mock_registry[i] != 0 &&
-		     mock_registry[i]->stage_index == stage_index )
-			return(mock_registry[i]);
-	return(0);
+		     mock_registry[i]->stage_index == stage_index &&
+		     (found == 0 || mock_registry[i]->client_generation >
+		        found->client_generation) )
+			found = mock_registry[i];
+	return(found);
 }
 
 uint32_t MockResidentClientCalls(uint32_t stage_index, uint32_t kind)
@@ -176,7 +179,8 @@ void MockResidentClientReset(void)
 {
 	uint32_t i;
 	for (i=0u; i<mock_registry_count; i++)
-		free(mock_registry[i]);
+		if ( mock_registry[i] != 0 )
+			free(mock_registry[i]);
 	mock_registry_count = 0u;
 	mock_auto_tokens = 0u;
 	mock_token_start = 11u;
@@ -208,13 +212,30 @@ SparkStatus SparkModelResidentClientConnect(
 	SparkModelResidentClient **client_out)
 {
 	SparkModelResidentClient *c;
+	uint32_t i;
 	if ( configuration == 0 || client_out == 0 )
 		return(SPARK_STATUS_INVALID_ARGUMENT);
-	if ( mock_registry_count >= MOCK_RESIDENT_MAX_RANKS )
-		return(SPARK_STATUS_CAPACITY_EXCEEDED);
-	c = (SparkModelResidentClient *)calloc(1u,sizeof(*c));
+	c = 0;
+	for (i=0u; i<mock_registry_count; i++)
+		if ( mock_registry[i] != 0 &&
+		     mock_registry[i]->stage_index == configuration->stage_index &&
+		     mock_registry[i]->connected == 0u )
+		{
+			free(mock_registry[i]);
+			mock_registry[i] = 0;
+			c = (SparkModelResidentClient *)calloc(1u,sizeof(*c));
+			mock_registry[i] = c;
+			break;
+		}
 	if ( c == 0 )
-		return(SPARK_STATUS_CAPACITY_EXCEEDED);
+	{
+		if ( mock_registry_count >= MOCK_RESIDENT_MAX_RANKS )
+			return(SPARK_STATUS_CAPACITY_EXCEEDED);
+		c = (SparkModelResidentClient *)calloc(1u,sizeof(*c));
+		if ( c == 0 )
+			return(SPARK_STATUS_CAPACITY_EXCEEDED);
+		mock_registry[mock_registry_count++] = c;
+	}
 	c->rank_index = configuration->rank_index;
 	c->stage_index = configuration->stage_index;
 	c->connected = 1u;
@@ -226,10 +247,6 @@ SparkStatus SparkModelResidentClientConnect(
 	c->completion_function = configuration->completion_function;
 	c->completion_context = configuration->completion_context;
 	c->scripted_submit_status = SPARK_STATUS_OK;
-	mock_registry[mock_registry_count++] = c;
-	if ( MockTraceEnabled() )
-		fprintf(stderr,"MOCK connect stage=%u registry=%u\n",
-			(unsigned)configuration->stage_index,(unsigned)mock_registry_count);
 	*client_out = c;
 	return(SPARK_STATUS_OK);
 }
@@ -498,12 +515,25 @@ uint32_t MockResidentClientDriveCompletions(void)
 			}
 			/* the delivered completion retires the submission on the
 			 * server — free the slot (swap-remove) so long runs with many
-			 * submissions don't fill the queue */
+			 * submissions don't fill the queue. The callback may retire
+			 * it synchronously (pipeline forwarding/abort); re-find by id
+			 * so an already-retired or shifted slot is never reused. */
 			{
-				uint32_t idx = (uint32_t)(slot - c->inflight);
-				c->inflight[idx] = c->inflight[c->inflight_count - 1u];
-				c->inflight_count--;
-				k--;
+				uint32_t idx;
+				uint32_t found = 0u;
+				for (idx=0u; idx<c->inflight_count; idx++)
+					if ( c->inflight[idx].submission_id == slot->submission_id )
+					{
+						found = 1u;
+						break;
+					}
+				if ( found != 0u )
+				{
+					c->inflight[idx] = c->inflight[c->inflight_count - 1u];
+					c->inflight_count--;
+					if ( idx <= k )
+						k--;
+				}
 			}
 			drove++;
 		}
