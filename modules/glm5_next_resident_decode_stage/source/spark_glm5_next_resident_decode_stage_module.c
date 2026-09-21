@@ -86,6 +86,12 @@ static uint64_t SparkGlm5NextNowNs(void)
 	return((uint64_t)now.tv_sec * UINT64_C(1000000000) + (uint64_t)now.tv_nsec);
 }
 
+typedef struct SparkGlm5NextCompletionOverflow
+{
+	struct SparkGlm5NextAsyncCompletion *async;
+	struct SparkGlm5NextCompletionOverflow *next;
+} SparkGlm5NextCompletionOverflow;
+
 typedef struct SparkGlm5NextAsyncCompletion
 {
 	SparkGlm5NextModuleState *state;
@@ -204,6 +210,8 @@ struct SparkGlm5NextModuleState
 	SparkGlm5NextAsyncCompletion completions[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
 	uint64_t completion_armed_ns[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
 	uint64_t chain_started_ns[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
+	SparkGlm5NextCompletionOverflow overflow_pool[SPARK_GLM5_NEXT_OVERFLOW_POOL];
+	uint32_t overflow_parked_count;
 	pthread_mutex_t completion_watch_lock;
 	pthread_t completion_watch_thread;
 	uint32_t completion_watch_live;
@@ -3722,56 +3730,53 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 	complete(complete_context,&completion);
 }
 
-typedef struct SparkGlm5NextCompletionOverflow
-{
-	SparkGlm5NextAsyncCompletion *async;
-	struct SparkGlm5NextCompletionOverflow *next;
-} SparkGlm5NextCompletionOverflow;
+#define SPARK_GLM5_NEXT_OVERFLOW_POOL 	(SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT * 2u)
 
-static pthread_mutex_t spark_glm5_next_overflow_lock = PTHREAD_MUTEX_INITIALIZER;
-static SparkGlm5NextCompletionOverflow *spark_glm5_next_overflow_head;
-static uint64_t spark_glm5_next_overflow_count;
-
-static void SparkGlm5NextParkCompletion(SparkGlm5NextAsyncCompletion *async)
+static void SparkGlm5NextParkCompletionLocked(
+    SparkGlm5NextModuleState *state,SparkGlm5NextAsyncCompletion *async)
 {
-	SparkGlm5NextCompletionOverflow *node =
-	    (SparkGlm5NextCompletionOverflow *)malloc(sizeof(*node));
-	if ( node == 0 )
-	{
-		fprintf(stderr,
-		    "COMPLETION-PARK-FAIL — overflow node exhausted, dropping loudly (route reaps in 120s)\n");
-		return;
-	}
-	node->async = async;
-	pthread_mutex_lock(&spark_glm5_next_overflow_lock);
-	node->next = spark_glm5_next_overflow_head;
-	spark_glm5_next_overflow_head = node;
-	spark_glm5_next_overflow_count++;
-	pthread_mutex_unlock(&spark_glm5_next_overflow_lock);
+	uint32_t i;
+	for (i=0u; i<SPARK_GLM5_NEXT_OVERFLOW_POOL; i++)
+		if ( state->overflow_pool[i].async == 0 )
+		{
+			state->overflow_pool[i].async = async;
+			state->overflow_pool[i].next = 0;
+			state->overflow_parked_count++;
+			fprintf(stderr,
+			    "COMPLETION-PARKED slot=%u — worker queue full on the CUDA callback thread; parked for the worker (pool %u/%u)\n",
+			    (unsigned)async->slot_index,
+			    (unsigned)state->overflow_parked_count,
+			    (unsigned)SPARK_GLM5_NEXT_OVERFLOW_POOL);
+			return;
+		}
 	fprintf(stderr,
-	    "COMPLETION-PARKED slot=%u — worker queue full on the CUDA callback thread; parked for the worker\n",
-	    (unsigned)async->slot_index);
+	    "COMPLETION-PARK-FULL slot=%u — overflow pool exhausted (%u); retrying the worker submit once\n",
+	    (unsigned)async->slot_index,(unsigned)SPARK_GLM5_NEXT_OVERFLOW_POOL);
+	(void)SparkWeightdWorkerSubmit(state->completion_worker,
+	    SparkGlm5NextCompleteOnWorker,async);
 }
 
 static void SparkGlm5NextDrainParkedCompletions(SparkGlm5NextModuleState *state)
 {
-	SparkGlm5NextCompletionOverflow *drain;
+	uint32_t i;
+	uint32_t reparked = 0u;
 	if ( state == 0 || state->completion_worker == 0 )
 		return;
-	pthread_mutex_lock(&spark_glm5_next_overflow_lock);
-	drain = spark_glm5_next_overflow_head;
-	spark_glm5_next_overflow_head = 0;
-	spark_glm5_next_overflow_count = 0u;
-	pthread_mutex_unlock(&spark_glm5_next_overflow_lock);
-	while ( drain != 0 )
+	for (i=0u; i<SPARK_GLM5_NEXT_OVERFLOW_POOL; i++)
 	{
-		SparkGlm5NextCompletionOverflow *next = drain->next;
+		SparkGlm5NextAsyncCompletion *async = state->overflow_pool[i].async;
+		if ( async == 0 )
+			continue;
+		state->overflow_pool[i].async = 0;
+		state->overflow_parked_count--;
 		if ( SparkWeightdWorkerSubmit(state->completion_worker,
-		        SparkGlm5NextCompleteOnWorker,drain->async) != SPARK_STATUS_OK )
-			SparkGlm5NextParkCompletion(drain->async);
-		free(drain);
-		drain = next;
+		        SparkGlm5NextCompleteOnWorker,async) != SPARK_STATUS_OK )
+		{
+			SparkGlm5NextParkCompletionLocked(state,async);
+			reparked++;
+		}
 	}
+	(void)reparked;
 }
 
 static void CUDART_CB SparkGlm5NextCompleteAsync(void *context)
@@ -3782,7 +3787,11 @@ static void CUDART_CB SparkGlm5NextCompleteAsync(void *context)
 		return;
 	status = SparkWeightdWorkerSubmit(async->state->completion_worker,SparkGlm5NextCompleteOnWorker,async);
 	if ( status != SPARK_STATUS_OK )
-		SparkGlm5NextParkCompletion(async);
+	{
+		pthread_mutex_lock(&async->state->completion_watch_lock);
+		SparkGlm5NextParkCompletionLocked(async->state,async);
+		pthread_mutex_unlock(&async->state->completion_watch_lock);
+	}
 }
 
 static void SparkGlm5NextCompleteOnWorker(void *context);

@@ -268,6 +268,20 @@ instance. Numbers refer to PRs/commits on #1067 unless noted.
   (SPARK_WEIGHTD_MESH_DEVICE_PROBE=1 in the agent drop-in zzdevprobe.conf);
   harmless without the env (weak no-op).
 
+## DOC DISTINCTION (per coredev's gate note, 2026-09-21)
+
+The S2.5 "dead on GB10" verdict and #1074's landed device-resident round
+work DO NOT contradict — they cover different planes:
+- S2.5 probed and killed DEVICE-RESIDENT **PAYLOAD SLOTS** (the 32KB
+  round data buffers RDMA-written by peers): both GPUDirect routes
+  (VA-registered and dmabuf) refused — peers cannot RDMA into
+  device-typed allocations on GB10.
+- #1074 (coredev) moved the round **CONTROL PLANE** device-resident
+  (publish/wait/combine control + the one-launch N-round loop kernel) —
+  no NIC path needed, fuzz-validated 263 checks.
+The mesh flags/tails stay host-side where RDMA lands; the round CONTROL
+is on-device. The S3 graph path composes with both findings.
+
 ## 2026-09-21d tick — S2.5 VERDICT: DEAD on this hardware (both RDMA routes)
 
 Probe v2 (same env gate): after VA registration fails (EFAULT), the dmabuf
