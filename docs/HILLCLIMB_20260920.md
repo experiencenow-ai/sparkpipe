@@ -1905,3 +1905,20 @@ peer-eof storm continues). NEXT (the final discriminator): API-side
 instrumentation — its read/dispatch path around the submit-result receipt
 (model_resident_client.c's Read + the batch engine's handling of the
 decision-required result; why it closes instead of sending DECISION).
+
+## 09-22 15:00 TICK — the invalidation amplifier found (any reconnect nukes the whole engine session mid-handshake)
+
+THE MECHANISM (model_batch_engine.c:2140-2152 + model_pipeline_client.c:810):
+the session fingerprint = Σ client_generation×(rank+1) over CONNECTED
+clients — ANY rank's disconnect OR reconnect changes it → "batch engine
+session changed ... invalidated" → ALL requests reset to QUEUED_PREFILL +
+SparkModelPipelineClientClearTransactions — the in-flight submission's
+pending DECISION is destroyed mid-handshake → the request restarts →
+races the next drop → the storm is self-sustaining at any drop rate. THE
+FRAGILITY: one rank's transient blip invalidates all 16 ranks' session
+state (prefix cache + transactions). REMAINING QUESTION: the FIRST drop's
+cause on rank 0 (the client Read's failure reason — parse/EOF/timeout —
+uninstrumented). NEXT: (a) instrument the client Read failure class;
+(b) harden the fingerprint (ignore generation bumps within a live session —
+invalidate only on HELLO-generation changes, not connection recycling);
+(c) then the payoff chain as queued.
