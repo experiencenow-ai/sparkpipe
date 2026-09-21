@@ -1567,3 +1567,21 @@ DEPLOYED d357a21 (driver 13d71be8 + residentd 4d97c07b) 16/16:
   acquire; if absent, it is admission/route-level — trace the BUSY source
   in the chain-begin path), plus the 3 budget-failed layers (raise the
   weightd device budget for the pack tail or split the prefetch).
+
+## 09-22 06:00 TICK — the prefetch's ownership bug found (status 11 decoded)
+
+THIS BOOT: prefetch failed from layer 3 onward (ERRSITE spark_weightd_map.c:451
+status=11 on the bulk acquire) — first boot managed 42 layers (it ran with no
+concurrent chain). ROOT: the prefetch bulk-acquires ALL 288 experts per layer,
+but a TP16 rank's PACK SHARD only owns a fraction of the experts — the
+remote-owned keys fail the acquire (the not-in-target class). FIX: filter the
+prefetch keys to the experts this rank's pack actually owns (the pack sidecar
+/ manifest carries the shard layout; or acquire per-layer key subsets matching
+the same ownership the chain's RouteKeys produces). The first-chain BUSY
+origin remains entangled with the prefetch noise — re-measure with the
+ownership-filtered prefetch before digging further (a chain acquiring layers
+concurrently with a failing bulk acquire contends the same map lock/budget).
+
+Sequence note: requests 1000002-1000005 arrived during the stall (API
+retries) and 1000005 hit ADMIT9 behind 1000004's PREPARED lease — the retry
+cadence + 60s lease serialization compounds any first-chain slowness.
