@@ -146,6 +146,7 @@ typedef struct SparkModelResidentdClient
 	uint64_t had_active_routes;
 	uint64_t generation;
 	uint64_t pending_client_reset;
+	uint64_t reset_attempt_ns;
 	uint64_t reset_done;
 	uint64_t last_message_id;
 	uint64_t last_activity_ns;
@@ -1765,6 +1766,7 @@ static SparkStatus SparkModelResidentdProcessHello(
 		runtime->client.hello_complete = 1u;
 		runtime->client.last_submission_id = 0u;
 		runtime->client.pending_client_reset = runtime->client.generation;
+		runtime->client.reset_attempt_ns = 0u;
 		{
 			uint32_t slot_index;
 			uint32_t released_claims = 0u;
@@ -2726,6 +2728,16 @@ static SparkStatus SparkModelResidentdProgress(SparkModelResidentdRuntime *runti
 	if ( runtime->client.pending_client_reset != 0u &&
 		runtime->adapter_library.adapter_interface.reset != 0 )
 	{
+		uint64_t reset_now = SparkModelResidentdMonotonicTimeNs();
+		if ( runtime->client.reset_attempt_ns == 0u )
+			runtime->client.reset_attempt_ns = reset_now;
+		else if ( reset_now - runtime->client.reset_attempt_ns <
+		     UINT64_C(250000000) )
+		{
+		}
+		else
+		{
+			runtime->client.reset_attempt_ns = reset_now;
 		fprintf(stderr,"model_residentd client reset attempt generation=%llu\n",
 			(unsigned long long)runtime->client.pending_client_reset);
 		status = runtime->adapter_library.adapter_interface.reset(
@@ -2743,6 +2755,7 @@ static SparkStatus SparkModelResidentdProgress(SparkModelResidentdRuntime *runti
 				(unsigned long long)runtime->client.pending_client_reset,
 				(unsigned)status);
 			runtime->client.pending_client_reset = 0u;
+		}
 		}
 	}
 	status = SparkModelResidentdProgressRoutes(runtime,0u);

@@ -3429,6 +3429,21 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 			    (unsigned)state->graph_path_enabled,
 			    (unsigned)chain->context->flags);
 		}
+		if ( state->prefetch_started == 0u &&
+		     state->lazy_pack != 0 &&
+		     state->lazy_pack->map != 0 )
+		{
+			pthread_t prefetch_thread;
+			state->prefetch_started = 1u;
+			state->prefetch_live = 1u;
+			fprintf(stderr,"PREFETCH-START immediate (parallel warm)\n");
+			if ( pthread_create(&prefetch_thread,0,
+			        SparkGlm5NextPrefetchMain,state) != 0 )
+			{
+				state->prefetch_live = 0u;
+				fprintf(stderr,"PREFETCH-THREAD-FAIL\n");
+			}
+		}
 		if ( state->graph_path_enabled != 0u &&
 		     state->experts_warm == 0u &&
 		     state->graph_gate_printed < 3u )
@@ -3651,20 +3666,6 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 			state->experts_warm = 1u;
 			fprintf(stderr,
 			    "GRAPH-WARM experts resident after first eager chain\n");
-			if ( state->prefetch_started == 0u &&
-			     state->lazy_pack != 0 &&
-			     state->lazy_pack->map != 0 )
-			{
-				pthread_t prefetch_thread;
-				state->prefetch_started = 1u;
-				state->prefetch_live = 1u;
-				if ( pthread_create(&prefetch_thread,0,
-				        SparkGlm5NextPrefetchMain,state) != 0 )
-				{
-					state->prefetch_live = 0u;
-					fprintf(stderr,"PREFETCH-THREAD-FAIL\n");
-				}
-			}
 		}
 		launch_status = SparkGlm5NextEnqueueAsyncCompletion(state,chain->slot,chain->slot_index);
 		if ( launch_status != SPARK_STATUS_OK )
