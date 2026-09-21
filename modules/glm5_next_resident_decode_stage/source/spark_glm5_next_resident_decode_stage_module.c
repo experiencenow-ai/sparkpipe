@@ -1680,6 +1680,9 @@ typedef enum SparkGlm5NextChainStage
 typedef struct SparkGlm5NextTpChain
 {
 	SparkGlm5NextModuleState *state;
+	uint64_t created_ns;
+	uint64_t last_advance_ns;
+	uint64_t last_heartbeat_stage;
 	SparkGlm5NextExecutionSlot *slot;
 	uint32_t slot_index;
 	SparkModelDriverFrame *frame;
@@ -3191,6 +3194,25 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 	if ( chain == 0 || chain->active == 0u )
 		return;
 	state = chain->state;
+	{
+		uint64_t now_ns = SparkGlm5NextNowNs();
+		chain->last_advance_ns = now_ns;
+		if ( chain->created_ns == 0ull )
+			chain->created_ns = now_ns;
+		else if ( now_ns - chain->created_ns >= UINT64_C(30000000000) &&
+			chain->last_heartbeat_stage != (uint64_t)chain->stage + 1ull )
+		{
+			chain->last_heartbeat_stage = (uint64_t)chain->stage + 1ull;
+			fprintf(stderr,
+				"CHAIN-HEARTBEAT slot=%u stage=%u layer=%u age_ms=%llu lease=%llu begun=%u recorded=%u — chain still advancing (a SILENT gap between these = the lost-continuation site)\n",
+				chain->slot_index,(unsigned)chain->stage,
+				(unsigned)chain->next_layer,
+				(unsigned long long)((now_ns - chain->created_ns) / 1000000ull),
+				(unsigned long long)chain->expert_lease,
+				(unsigned)chain->expert_lease_begun,
+				(unsigned)chain->expert_lease_recorded);
+		}
+	}
 	if ( status != SPARK_STATUS_OK )
 	{
 		SparkGlm5NextTpChainFail(chain,status);
