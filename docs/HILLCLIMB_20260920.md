@@ -787,3 +787,17 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - NEXT: pull the full lifecycle of the next state=5 stuck id (the CHAIN/
   LAZYWORK/HEARTBEAT lines around it) — with the queue class eliminated,
   every stuck chain now tells the execution-loss story cleanly.
+
+## 2026-09-21ah tick — the verdict's recurring racer: the fresh-chain round-1 spin
+
+- This window's shape (recurring across recent ticks): the cold chain com-
+  pletes (283s, status=0, allreduce 246µs/round cold-contended), then the
+  FIRST WARM chain dies at rounds<=1 with the full 30s spent in one round's
+  wait — the fresh-chain convergence race: the new chain's first doorbell
+  waits on peers whose relay path isn't primed for its band/slot yet (the
+  #21-adjacent class). The request behind it 500s at ~117s.
+- NEXT (mechanical): grab the MESH-SPIN-TIMEOUT missing-set for the round-1
+  failure (it prints at the deadline — which ranks aren't delivering for a
+  fresh chain's first round) → then either prime-on-chain-start (a dummy
+  publish per band at chain start) or the transport readiness gate.
+- Zero new stuck classes this boot (the queue class stays dead; 1 reaped).
