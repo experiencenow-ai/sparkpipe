@@ -2709,6 +2709,7 @@ static void SparkModelResidentdReportStuckRoutes(
 			failed.dispatch_generation = route->submission.dispatch_generation;
 			failed.request_generation = route->submission.request_generation;
 			failed.step_generation = route->submission.step_generation;
+			failed.residency = route->submission.residency;
 			fprintf(stderr,
 				"ROUTE-REAPED id=%llu state=%u — stuck past 120s; completing NOT_FOUND and releasing claims\n",
 				(unsigned long long)route->submission_id,
