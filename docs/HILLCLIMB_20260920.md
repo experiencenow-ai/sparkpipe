@@ -663,3 +663,25 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - Fleet settling on the matched baseline (engines ~5min, first-chains
   loading; 2 routes reaped within bound). The verdict probe continues next
   tick on the stable baseline.
+
+## 2026-09-21aa tick — THE LOST-CONTINUATION ROOT FIXED (b9e2fec)
+
+- ROOT (the stuck-chain generator, i.e. everything the reaper was bounding):
+  the completion CUDA callback (SparkGlm5NextCompleteAsync) completed INLINE
+  on the CUDA callback thread when the worker queue was full — that path
+  takes app mutexes and makes CUDA calls, which CUDA forbids on callback
+  threads (documented deadlock risk). One wedge there starves every later
+  stream callback: ALL chains stop completing while every app thread sits
+  idle — the exact gdb shape of the #26 variants.
+- FIX (b9e2fec, deployed): queue-full parks the completion on an overflow
+  list (loud COMPLETION-PARKED) and every worker completion drains it; the
+  callback thread never executes module work. Expectation: the stuck-chain
+  generator stops at source; the reaper stays as the bound.
+- MEASURE this tick (pre-fix window): warm chain 130.86ms/91r with allreduce
+  50.07ms = **0.55ms/round — best MEASURED warm figure yet** (single-slot,
+  settled fleet). Post-fix verdict still racing engine-recycle convergence:
+  first chains die at rounds=0 with no missing-set print (the post-recycle
+  mesh convergence race), engines cycle through the 120s reaper bound.
+- NEXT: settled-fleet verdict; if the first-chain convergence race persists
+  it becomes ledger #30 (delay chain dispatch until the mesh records/QPs of
+  ALL ranks are current — a readiness gate at the transport level).
