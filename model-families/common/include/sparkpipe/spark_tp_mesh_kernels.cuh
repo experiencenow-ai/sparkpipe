@@ -6,7 +6,9 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include "sparkpipe/spark_tp_mesh_round_control.h"
-#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V5-CANCELPOLL-ORDPARITY"
+#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V6-SEQRING-EPOCHMATCH-PREPAD"
+#define SPARK_TP_MESH_ERROR_PARITY_MISMATCH 0xFFFFFFFFFF000000ull
+#define SPARK_TP_MESH_ERROR_CANCELLED 0xFFFFFFFFFE000000ull
 #if defined(__CUDACC__)
 __constant__ char SparkTpMeshKernelsBuildMarker[] =
     SPARK_TP_MESH_KERNELS_MARKER;
@@ -23,19 +25,29 @@ static __device__ __forceinline__ unsigned long long SparkGlm5NextGlobalTimerNs(
 
 
 __global__ void SparkGlm5NextMeshPublishKernel(
-	volatile uint64_t *entry,
-	unsigned long long *seq_cell,
-	const unsigned long long *epoch_cell,
-	unsigned long long *round_seq,
-	uint64_t bytes,
-	uint64_t slot_index,
-	volatile uint64_t *slot_tail)
+    volatile uint64_t *entry,
+    unsigned long long *seq_cell,
+    const unsigned long long *epoch_cell,
+    unsigned long long *round_seq,
+    uint64_t bytes,
+    uint64_t slot_index,
+    uint64_t slots_per_rank,
+    volatile uint64_t *slot_tail,
+    unsigned long long *error_word)
 {
 	unsigned long long sequence;
 	unsigned long long tag;
+	uint64_t ring;
 	if ( threadIdx.x != 0u || blockIdx.x != 0u )
 		return;
 	sequence = 1ull + atomicAdd((unsigned long long *)seq_cell,1ull);
+	ring = (sequence - 1ull) & (slots_per_rank - 1ull);
+	if ( (slot_index & (slots_per_rank - 1ull)) != ring )
+	{
+		atomicExch((unsigned long long *)error_word,
+		    SPARK_TP_MESH_ERROR_PARITY_MISMATCH | sequence);
+		return;
+	}
 	tag = (epoch_cell[0] << 32ull) | (sequence & 0xffffffffull);
 	round_seq[0] = tag;
 	entry[2] = slot_index;
@@ -44,6 +56,14 @@ __global__ void SparkGlm5NextMeshPublishKernel(
 	*slot_tail = tag;
 	__threadfence_system();
 	entry[0] = tag;
+}
+
+__global__ void SparkGlm5NextMeshSeqPadKernel(
+    unsigned long long *seq_cell)
+{
+	if ( threadIdx.x != 0u || blockIdx.x != 0u )
+		return;
+	(void)atomicAdd((unsigned long long *)seq_cell,1ull);
 }
 
 __global__ void SparkGlm5NextMeshGuardKernel(
@@ -61,13 +81,12 @@ __global__ void SparkGlm5NextMeshGuardKernel(
 }
 
 __global__ void SparkGlm5NextMeshWaitKernel(
-	volatile uint64_t *band_base,
-	uint64_t slot_bytes,
-	const unsigned long long *round_seq,
-	uint64_t slots_per_rank,
-	uint64_t ring,
-	uint32_t rank,
-	uint32_t degree,
+    volatile uint64_t *band_base,
+    uint64_t slot_bytes,
+    const unsigned long long *round_seq,
+    uint64_t slots_per_rank,
+    uint32_t rank,
+    uint32_t degree,
     unsigned long long *error_word,
     unsigned long long deadline_ns,
     unsigned long long *diag_word,
@@ -77,14 +96,20 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 	uint32_t peer;
 	volatile uint64_t *end_word;
 	uint64_t sequence;
+	uint64_t ring;
 	unsigned long long stop_at;
 	if ( threadIdx.x != 0u || blockIdx.x != 0u )
 		return;
 	sequence = round_seq[0];
+	ring = (sequence - 1ull) & (slots_per_rank - 1ull);
 	stop_at = SparkGlm5NextGlobalTimerNs() + deadline_ns;
 	if ( cancel_cell != 0 && cancel_expected != 0 &&
 	     *cancel_cell != *cancel_expected )
+	{
+		atomicExch((unsigned long long *)error_word,
+		    SPARK_TP_MESH_ERROR_CANCELLED | sequence);
 		return;
+	}
 	{
 		unsigned long long spins = 0ull;
 		unsigned long long spin_cap = deadline_ns / 200ull;
@@ -93,18 +118,25 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 		for ( peer = 0u; peer < degree - 1u; peer++ )
 		{
 			uint32_t peer_rank = peer < rank ? peer : peer + 1u;
+			uint64_t peer_epoch;
 			end_word = (volatile uint64_t *)
 				((uint8_t *)band_base +
 				((uint64_t)peer_rank * slots_per_rank +
-					(ring & (slots_per_rank - 1ull))) * slot_bytes +
+					ring) * slot_bytes +
 				slot_bytes - 8u);
-			while ( *end_word < sequence )
+			while ( (peer_epoch = *end_word >> 32ull) !=
+			            (sequence >> 32ull) ||
+			        *end_word < sequence )
 			{
 				if ( *error_word != 0ull )
 					return;
 				if ( cancel_cell != 0 && cancel_expected != 0 &&
 				     *cancel_cell != *cancel_expected )
+				{
+					atomicExch((unsigned long long *)error_word,
+					    SPARK_TP_MESH_ERROR_CANCELLED | sequence);
 					return;
+				}
 				spins++;
 				if ( (spins & 4095ull) == 0ull &&
 				     ( spins >= spin_cap ||
@@ -269,7 +301,8 @@ __global__ void SparkGlm5NextMeshRoundLoopKernel(
 				    (((uint64_t)peer_rank * slots_per_rank +
 				      (cursor & (slots_per_rank - 1ull))) *
 					slot_bytes) + slot_bytes - 8ull);
-				while ( *end_word < s_tag )
+				while ( (*end_word >> 32ull) != (s_tag >> 32ull) ||
+				        *end_word < s_tag )
 				{
 					if ( *cancel_cell != control->cancel_expected )
 					{
@@ -556,32 +589,42 @@ extern "C" cudaError_t SparkGlm5NextLaunchMeshCopyDown(
 }
 
 extern "C" cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
-	volatile void *entry,void *seq_cell,const void *epoch_cell,
-	void *round_seq,uint64_t bytes,
-	uint64_t slot_index,volatile void *slot_tail)
+    volatile void *entry,void *seq_cell,const void *epoch_cell,
+    void *round_seq,uint64_t bytes,
+    uint64_t slot_index,uint64_t slots_per_rank,volatile void *slot_tail,
+    void *error_word)
 {
 	SparkGlm5NextMeshPublishKernel<<<1,32,0u,stream>>>(
 		(volatile uint64_t *)entry,(unsigned long long *)seq_cell,
 		(const unsigned long long *)epoch_cell,
-		(unsigned long long *)round_seq,bytes,slot_index,
-		(volatile uint64_t *)slot_tail);
-	return(cudaPeekAtLastError());
+		(unsigned long long *)round_seq,bytes,slot_index,slots_per_rank,
+		(volatile uint64_t *)slot_tail,
+		(unsigned long long *)error_word);
+	return cudaPeekAtLastError();
+}
+
+extern "C" cudaError_t SparkGlm5NextLaunchMeshSeqPad(cudaStream_t stream,
+    void *seq_cell)
+{
+	SparkGlm5NextMeshSeqPadKernel<<<1,32,0u,stream>>>(
+		(unsigned long long *)seq_cell);
+	return cudaPeekAtLastError();
 }
 
 extern "C" cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
-	volatile void *band_base,uint64_t slot_bytes,const void *round_seq,
-	uint64_t slots_per_rank,uint64_t ring,uint32_t rank,uint32_t degree,
-	void *error_word,unsigned long long deadline_ns,void *diag_word,
-	volatile void *cancel_cell,const void *cancel_expected)
+    volatile void *band_base,uint64_t slot_bytes,const void *round_seq,
+    uint64_t slots_per_rank,uint32_t rank,uint32_t degree,
+    void *error_word,unsigned long long deadline_ns,void *diag_word,
+    volatile void *cancel_cell,const void *cancel_expected)
 {
 	SparkGlm5NextMeshWaitKernel<<<1,32,0u,stream>>>(
 		(volatile uint64_t *)band_base,slot_bytes,
-		(const unsigned long long *)round_seq,slots_per_rank,ring,rank,
+		(const unsigned long long *)round_seq,slots_per_rank,rank,
 		degree,(unsigned long long *)error_word,deadline_ns,
 		(unsigned long long *)diag_word,
 		(volatile uint64_t *)cancel_cell,
 		(const unsigned long long *)cancel_expected);
-	return(cudaPeekAtLastError());
+	return cudaPeekAtLastError();
 }
 
 

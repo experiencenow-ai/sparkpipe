@@ -1124,10 +1124,11 @@ uint32_t cuda_stub_mesh_publish_null_epoch_cell = 0u;
 cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
     volatile void *entry,void *seq_cell,const void *epoch_cell,
     void *round_seq,uint64_t bytes,
-    uint64_t slot_index,volatile void *slot_tail)
+    uint64_t slot_index,uint64_t slots_per_rank,volatile void *slot_tail,
+    void *error_word)
 {
     (void)stream;(void)round_seq;(void)bytes;
-    (void)slot_index;(void)slot_tail;
+    (void)slots_per_rank;(void)error_word;
     cuda_stub_mesh_publish_calls++;
     if ( seq_cell == NULL )
         cuda_stub_mesh_publish_null_seq_cell++;
@@ -1147,14 +1148,26 @@ cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
     return cudaSuccess;
 }
 
+uint32_t cuda_stub_mesh_seq_pad_calls = 0u;
+
+cudaError_t SparkGlm5NextLaunchMeshSeqPad(cudaStream_t stream,
+    void *seq_cell)
+{
+    (void)stream;
+    cuda_stub_mesh_seq_pad_calls++;
+    if ( seq_cell != NULL )
+        *(uint64_t *)seq_cell = *(uint64_t *)seq_cell + 1u;
+    return cudaSuccess;
+}
+
 cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
     volatile void *band_base,uint64_t slot_bytes,const void *round_seq,
-    uint64_t parity,uint32_t rank,uint32_t degree,void *error_word,
+    uint64_t slots_per_rank,uint32_t rank,uint32_t degree,void *error_word,
     unsigned long long deadline_ns,void *diag_word,volatile void *cancel_cell,
     const void *cancel_expected)
 {
     (void)stream;(void)band_base;
-    (void)slot_bytes;(void)round_seq;(void)parity;(void)rank;(void)degree;
+    (void)slot_bytes;(void)round_seq;(void)slots_per_rank;(void)rank;(void)degree;
     (void)error_word;(void)deadline_ns;(void)diag_word;
     (void)cancel_cell;(void)cancel_expected;
     return cudaSuccess;

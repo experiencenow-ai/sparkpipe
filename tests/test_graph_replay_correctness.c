@@ -10,8 +10,9 @@
 #define TEST_DEGREE 4
 #define TEST_ROWS 1
 #define TEST_HIDDEN 512
-#define TEST_ROUNDS 8
+#define TEST_ROUNDS 7
 #define TEST_PAYLOAD_BYTES (TEST_ROWS * TEST_HIDDEN * 2)
+#define TEST_REPLAYS 5
 
 static int test_failures;
 
@@ -91,7 +92,7 @@ static int test_graph_capture_and_replay(
         sub.descriptor_bytes = sizeof(sub);
         sub.slot_index = 0;
         sub.active_sequence_count = TEST_ROWS;
-        sub.ordinal = round;
+        sub.ordinal = rank * 3u + round * 5u;
         sub.local_device = device_scratch;
         sub.full_device = device_scratch;
         sub.cuda_stream = stream;
@@ -125,7 +126,7 @@ static int test_graph_capture_and_replay(
         sub.descriptor_bytes = sizeof(sub);
         sub.slot_index = 0;
         sub.active_sequence_count = TEST_ROWS;
-        sub.ordinal = round;
+        sub.ordinal = rank * 7u + round * 3u;
         sub.local_device = device_scratch;
         sub.full_device = device_scratch;
         sub.cuda_stream = stream;
@@ -155,7 +156,7 @@ static int test_graph_capture_and_replay(
     SparkTpDeviceCollectiveDisarmCapture(collective);
 
     uint32_t replay;
-    for (replay = 0; replay < 3; replay++) {
+    for (replay = 0; replay < TEST_REPLAYS; replay++) {
         cudaError_t err;
         uint64_t watchdog_stop;
         struct timespec now;
@@ -165,6 +166,16 @@ static int test_graph_capture_and_replay(
         cudaEventCreate(&start_ev);
         cudaEventCreate(&stop_ev);
         cudaEventRecord(start_ev, stream);
+
+        if (SparkTpDeviceCollectiveGraphCancelSeed(collective, stream) !=
+                SPARK_STATUS_OK ||
+            SparkTpDeviceCollectiveGraphPreLaunch(collective, stream) !=
+                SPARK_STATUS_OK) {
+            fprintf(stderr, "FAIL: pre-launch rank=%u replay=%u\n",
+                rank, replay);
+            test_failures++;
+            goto cleanup;
+        }
 
         if (cudaGraphLaunch(exec, stream) != cudaSuccess) {
             fprintf(stderr, "FAIL: graph launch rank=%u replay=%u: %s\n",
@@ -216,6 +227,27 @@ static int test_graph_capture_and_replay(
             cudaMemcpyDeviceToHost);
         compare_bf16_sums(host_result, host_eager,
             TEST_PAYLOAD_BYTES / 2, "graph vs eager");
+
+        if (replay + 1u < TEST_REPLAYS) {
+            SparkTpDeviceCollectiveSubmission sub;
+            memset(&sub, 0, sizeof(sub));
+            sub.abi_version = SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION;
+            sub.descriptor_bytes = sizeof(sub);
+            sub.slot_index = 0;
+            sub.active_sequence_count = TEST_ROWS;
+            sub.ordinal = rank * 11u + replay * 2u;
+            sub.local_device = device_scratch;
+            sub.full_device = device_scratch;
+            sub.cuda_stream = stream;
+            sub.completion_function = test_completion;
+            sub.completion_context = 0;
+            status = SparkTpDeviceCollectiveEnqueue(collective, &sub,
+                SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_REDUCE_SUM_BF16);
+            CHECK(status == SPARK_STATUS_OK, "interleaved eager enqueue");
+            if (status != SPARK_STATUS_OK)
+                goto cleanup;
+            cudaStreamSynchronize(stream);
+        }
     }
 
     cudaGraphExecDestroy(exec);

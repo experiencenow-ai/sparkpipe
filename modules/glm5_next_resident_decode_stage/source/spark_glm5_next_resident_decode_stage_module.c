@@ -248,6 +248,7 @@ struct SparkGlm5NextModuleState
 	void *tp_hc_host_credit_receive_bf16;
 	atomic_ullong nccl_next_ordinal;
 	uint32_t graph_path_enabled;
+	uint32_t graph_fail_streak;
 	uint64_t degrade_graph_fallback;
 	uint64_t degrade_covered_abandon;
 	uint64_t degrade_graph_disabled;
@@ -2818,6 +2819,7 @@ static SparkStatus SparkGlm5NextGraphCoverEnsure(
 
 
 #define SPARK_GLM5_NEXT_GRAPH_REPLAY_WATCH_NS (35ull * 1000000000ull)
+#define SPARK_GLM5_NEXT_GRAPH_FAIL_BUDGET 3u
 
 static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
     SparkStatus *status_out)
@@ -2828,9 +2830,21 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 	state = chain->state;
 	status = SPARK_STATUS_OK;
 	if ( state->tp_device_collective_initialized != 0u &&
+	     SparkTpDeviceCollectiveGraphPreLaunch(
+	         &state->tp_device_collective,chain->slot->stream) !=
+	             SPARK_STATUS_OK )
+		status = SPARK_STATUS_IO_ERROR;
+	if ( status == SPARK_STATUS_OK &&
+	     state->tp_device_collective_hc_initialized != 0u &&
+	     SparkTpDeviceCollectiveGraphPreLaunch(
+	         &state->tp_device_collective_hc,chain->slot->stream) !=
+	             SPARK_STATUS_OK )
+		status = SPARK_STATUS_IO_ERROR;
+	if ( status == SPARK_STATUS_OK &&
+	     state->tp_device_collective_initialized != 0u &&
 	     SparkTpDeviceCollectiveGraphCancelSeed(
 	         &state->tp_device_collective,chain->slot->stream) !=
-	         SPARK_STATUS_OK )
+	             SPARK_STATUS_OK )
 		status = SPARK_STATUS_IO_ERROR;
 	if ( status == SPARK_STATUS_OK &&
 	     state->tp_device_collective_hc_initialized != 0u &&
@@ -2901,6 +2915,16 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 					&state->tp_device_collective);
 				state->graph_path_enabled = 0u;
 				state->degrade_graph_stuck++;
+				state->graph_fail_streak++;
+				SparkTpDeviceCollectiveBroadcastCancel(
+					&state->tp_device_collective);
+				if ( state->tp_device_collective_hc_initialized != 0u )
+					SparkTpDeviceCollectiveBroadcastCancel(
+						&state->tp_device_collective_hc);
+				fprintf(stderr,
+					"GRAPH-CANCEL-BROADCAST slot=%u streak=%u\n",
+					chain->slot_index,
+					state->graph_fail_streak);
 				fprintf(stderr,
 					"DEGRADE graph-stuck slot=%u progress=%llu cell=%llu err=%llu diag_peer=%llu ring=%llu slotidx=%llu want=%llu got=%llu\n",
 					chain->slot_index,
@@ -2952,12 +2976,24 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 		{
 			state->graph_path_enabled = 0u;
 			state->degrade_graph_stuck++;
+			state->graph_fail_streak++;
+			SparkTpDeviceCollectiveBroadcastCancel(
+				&state->tp_device_collective);
+			if ( state->tp_device_collective_hc_initialized != 0u )
+				SparkTpDeviceCollectiveBroadcastCancel(
+					&state->tp_device_collective_hc);
+			fprintf(stderr,
+				"GRAPH-CANCEL-BROADCAST slot=%u streak=%u\n",
+				chain->slot_index,
+				state->graph_fail_streak);
 			fprintf(stderr,
 				"DEGRADE graph-wait-timeout slot=%u seq=%llu\n",
 				chain->slot_index,
 				(unsigned long long)graph_error);
 			status = SPARK_STATUS_INTERNAL_ERROR;
 		}
+		else
+			state->graph_fail_streak = 0u;
 	}
 	if ( status == SPARK_STATUS_OK && state->decode_miss_host != 0 &&
 	     state->decode_miss_host[0] != 0u )
@@ -3267,6 +3303,17 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 	switch ( chain->stage )
 	{
 	case SPARK_GLM5_NEXT_CHAIN_STAGE_BEGIN:
+		if ( chain->tp_op_index == 0u && chain->tp_hc_op_index == 0u &&
+		     state->graph_path_enabled == 0u &&
+		     state->graph_fail_streak <
+		         SPARK_GLM5_NEXT_GRAPH_FAIL_BUDGET )
+		{
+			state->graph_path_enabled = 1u;
+			state->graph_gate_printed = 0u;
+			fprintf(stderr,"GRAPH-REARM streak=%u budget=%u\n",
+				(unsigned)state->graph_fail_streak,
+				(unsigned)SPARK_GLM5_NEXT_GRAPH_FAIL_BUDGET);
+		}
 		if ( state->graph_gate_printed < 3u )
 		{
 			state->graph_gate_printed++;

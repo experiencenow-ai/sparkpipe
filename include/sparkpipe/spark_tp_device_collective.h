@@ -364,6 +364,9 @@ SparkStatus SparkTpDeviceCollectiveArmCapture(
 SparkStatus SparkTpDeviceCollectiveGraphCancelSeed(
     SparkTpDeviceCollective *collective,void *stream);
 
+SparkStatus SparkTpDeviceCollectiveGraphPreLaunch(
+    SparkTpDeviceCollective *collective,void *stream);
+
 SparkStatus SparkTpDeviceCollectiveDisarmCapture(
     SparkTpDeviceCollective *collective);
 
