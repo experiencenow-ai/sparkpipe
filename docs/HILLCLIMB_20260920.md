@@ -1625,3 +1625,26 @@ eager chain completes (experts_warm via the chain; prefetch only tops up)
 honestly (DEADLINE/TIMEOUT status, loud print with the weightsd-side
 budget state); (c) the weightsd log at acquire time for the budget
 arithmetic (device_bytes_max vs pool+leases).
+
+## 09-22 07:30 TICK — prefetch deferred (theory dead); the weightsd starves the acquire SILENTLY; orphaned-lease class prime
+
+DEFERRED-PREFETCH DEPLOYED (9b004261): the prefetch now starts only after the
+first eager chain warms — YET the first chain STILL 30s-deadlines with ZERO
+prefetch running. The prefetch-poisoning theory is DEAD. The weightsd log at
+acquire time shows NO acquire/working-set activity AT ALL (only mesh CQ
+traffic) — the acquire starves SILENTLY inside the weightsd (an
+observability-law violation in its own right: no busy/no-progress logging).
+
+PRIME SUSPECT: THE ORPHANED-LEASE CLASS — tonight's MANY engine restarts each
+abandoned weightsd leases; if the lease table lacks owner-cleanup on client
+disconnect, generations of orphans exhaust it and every new acquire spins to
+the deadline. This is the 09-17 'weightd daemons accumulate state across
+lease generations' lineage (sparkf showed 214-221 maps/83-286GB vs a fresh
+daemon's 23 maps — same signature class).
+
+NEXT: (a) inspect the weightsd lease table state (its /proc footprint: maps
+count, VmSize — compare against the fresh-boot signature); (b) the owner
+cleanup path in node/weightd.c on client disconnect (does it release the
+owner's leases?); (c) if orphans convicted: fix the cleanup (owner-scoped
+release on disconnect) — NEVER restart the shared weightsd; (d) label the
+acquire deadline exit + add weightsd-side busy logging while there.
