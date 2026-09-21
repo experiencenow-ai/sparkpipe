@@ -705,3 +705,17 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - Fleet: degraded-but-bounded (every wedge self-heals ≤120s; serving
   produces 31-121s failures instead of green). Warm floor reference 0.55ms/
   round from the last settled window.
+
+## 2026-09-21ac tick — instruments out; the reaper's own completions were SCHEMA-failing
+
+- TXN-FAIL-FIRST deployed (api + residentd): ZERO transaction-level
+  failures observed this window — the hypothesized abort-source path is NOT
+  the current failure mode (honest negative result).
+- The request failures are status=6 SCHEMA: the REAPER's synthesized
+  completions carried zeroed residency and failed completion validation —
+  fixed (residency stamped from the route's submission, 889ea11+). The
+  wedge generator (state-1 routes) persists but produced no transaction
+  failures; its trigger remains unnamed — the next repro with ROUTE-STUCK +
+  the engine's surrounding log is the evidence path.
+- Chains complete throughout (384ms cold-warm mix this window). Warm floor
+  reference 0.55ms/round stands.
