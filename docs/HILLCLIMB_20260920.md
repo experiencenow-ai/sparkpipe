@@ -1029,3 +1029,18 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   gate's reason (GRAPH-GATE prints enabled=0 flags=1 on eager — the armed
   run never even printed GRAPH-GATE, so the BUSY is BEFORE the gate: the
   adapter's tp_chain_active or the capture_armed precondition).
+
+## 2026-09-21aw tick — the armed-BUSY path mapped to GraphEnsure
+
+- Code path established: with the gate satisfied (wave_rows==1, first_row==0,
+  collective init, lazy, degree>1, enabled), the chain routes to
+  SparkGlm5NextGraphEnsure — which on BUSY is retried ONCE and then... the
+  surrounding code's failure path. The armed engine's chains never printed
+  GRAPH-GATE (chains never started) while every submit returned BUSY —
+  consistent with: the FIRST chain entered the graph route, GraphEnsure
+  returned BUSY twice (capture precondition unmet), and the failure path
+  left the adapter/lane state held → every subsequent submit BUSY forever.
+- NEXT (one instrument): print at GraphEnsure's BUSY return with its
+  precondition state (capture_armed, capture in flight, seeded lease) —
+  and audit its failure release. That is the rung-1 unblock.
+- Fleet steady in eager (queue faces only). Floor 0.55ms/round.
