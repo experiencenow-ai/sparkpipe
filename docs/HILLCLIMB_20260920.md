@@ -1336,3 +1336,47 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   must record the replay-relative sequence; the linker patch updates it
   per replay) → the replay completes → the REAL ns_per_round lands.
   floor 0.55ms/round eager; the graph target is the 44-58µs mesh class.
+
+## 09-22 00:45 — THE PARITY UNLOCK (V6 protocol) + never-compiled-boot fixes
+
+CONVICTION (from fleet logs + offline repro): the all-16 graph deadlock was
+ORDINAL-PARITY divergence (spark3 doorbell slot=7 for even seq 82 = one-slot
+drift between ranks) plus the odd-rounds parity flip per replay (91 rounds)
+plus sticky per-process graph disable (mixed eager/graph convoy, 35s spin).
+Offline RED: test_red rig variant, 148 failures (stale-slot corruption).
+
+PROTOCOL V6 (ef37cd9): wire slot parity derives from the device seq (publish
+asserts host slot == (seq-1)&mask, wait derives ring from the seq it reads);
+epoch-match in every wait (kills stale-epoch tail passing on epoch regression);
+cancel mismatch writes error (no silent garbage completion); pre-launch pads
+(SparkTpDeviceCollectiveGraphPreLaunch reads the live cell, pads to the
+captured parity base — replays flip parity every 91 rounds otherwise);
+broadcast-cancel on degrade; per-chain graph re-arm with budget 3. Also fixed:
+the f32 combine fallback double-counted rank 1 (seed 0+1, add loop from 1).
+
+OFFLINE GATES: host fuzzer 273 checks green; ladder REAL-CUDA rig green —
+4 ranks × 7 odd rounds × 5 replays all complete, values exact; eager
+200/200 p50 435µs. (The single-process test_graph_replay_correctness rig
+cannot host the hidden-transport backend — fleet/ladder are the gates.)
+
+DEPLOY (00:06-00:43) surfaced THREE never-compiled bugs (the module source
+had not compiled since the gate-fix commits; the morning "deploy" shipped a
+stale pre-fix .so — EVIDENCE LAW FOURTH INSTANCE): module use-before-decls +
+armed-scope bug; residentd poll builder dropped listen POLLIN while a client
+held the single slot (any idle first connection blocked serving forever);
+close_after_output with empty queue never closed. All fixed (ec7cdbd), fleet
+stable 16/16 on 635bae2a+, API green, chains key, GRAPH-CAPTURE-OK 16/16,
+replays EXECUTE.
+
+REMAINING (crisp):
+1. stale error_word across chains — spark9 DEGRADE seq=0x200000001 = an
+   epoch-2 value during epoch-4 chains; MESH-GUARD-POISON consumed leftovers.
+   Fix: zero error_word+diag at GraphStep ENTRY (not only ArmCapture), and
+   Clear on the degrade path too.
+2. first-request kv-admit status 9 on fresh boots (ADMIT9-KVMATCH,
+   kv_page_cache.c:1225) — check request shape vs the t1 harness before
+   touching code; my raw prompt_token_ids may violate the sequence contract.
+3. graph_fail_streak budget was consumed (streak=3) during the bad window —
+   engines restart (or wait for re-key) to re-attempt graph after fix 1.
+4. THEN: the ns/round receipt (GRAPH-REPLAY-TIME prints per replay), ladder
+   N=1/2/8/24/45/91 class verification, PR #1075 update, coredev regrade.
