@@ -1892,3 +1892,16 @@ and at flush in WriteClient (residentd side) + the API's per-rank read-error
 context — whichever side is silent names the breaker. NOTE: this is the OLD
 "#22 reconnect storm" lineage — tonight's fixes exposed it as the remaining
 serving blocker.
+
+## 09-22 14:30 TICK — residentd EXONERATED (flush traces: 576/576 written); the breaker is API-side post-receipt
+
+THE TRACES (af291cf3): FLUSH-TRACE shows the submit-result fully written
+(576 of 576 bytes) on every attempt — the residentd's queue→flush path
+WORKS; SUBMIT-RESULT-TRACE confirms results queued (17 for 5 submissions =
+API retries). THE RESIDENTD IS EXONERATED: it receives, replies, and the
+bytes reach the socket. THE BREAKER IS API-SIDE, POST-RECEIPT: the API gets
+the decision-required result and its rank-0 connection still closes (the
+peer-eof storm continues). NEXT (the final discriminator): API-side
+instrumentation — its read/dispatch path around the submit-result receipt
+(model_resident_client.c's Read + the batch engine's handling of the
+decision-required result; why it closes instead of sending DECISION).

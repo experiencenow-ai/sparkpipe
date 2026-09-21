@@ -1832,6 +1832,19 @@ static SparkStatus SparkModelResidentdQueueSubmitResult(
 		status = SparkModelResidentdQueueRawLocked(runtime,&result,sizeof(result));
 	if ( route != 0 && submit_status == SPARK_STATUS_OK && status == SPARK_STATUS_OK )
 		route->result_queued = 1u;
+	{
+		static uint32_t submit_result_trace;
+		if ( submit_result_trace < 12u )
+		{
+			submit_result_trace++;
+			fprintf(stderr,
+			    "SUBMIT-RESULT-TRACE id=%llu status=%d queued=%u output_count=%u fd=%d\n",
+			    (unsigned long long)submission_id,(int)submit_status,
+			    (unsigned)(route != 0 ? route->result_queued : 2u),
+			    (unsigned)runtime->client.output_count,
+			    runtime->client.fd);
+		}
+	}
 	SPARK_RETURN(status);
 }
 
@@ -2229,6 +2242,19 @@ static SparkStatus SparkModelResidentdWriteClient(SparkModelResidentdRuntime *ru
 			return(bytes_written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) ? SPARK_STATUS_OK : SPARK_STATUS_IO_ERROR);
 		}
 		output->sent_bytes += (uint32_t)bytes_written;
+		{
+			static uint32_t flush_trace;
+			if ( flush_trace < 12u )
+			{
+				flush_trace++;
+				fprintf(stderr,
+				    "FLUSH-TRACE fd=%d wrote=%u of %u remaining=%u\n",
+				    runtime->client.fd,
+				    (unsigned)bytes_written,
+				    (unsigned)output->message_bytes,
+				    (unsigned)runtime->client.output_count);
+			}
+		}
 		if ( output->sent_bytes != output->message_bytes )
 			break;
 		runtime->client.output_head = (runtime->client.output_head + 1u) % runtime->client.output_capacity;
