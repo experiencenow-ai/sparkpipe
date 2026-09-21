@@ -1232,3 +1232,22 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - glm53flash family lane items NOTED (not this tick): fp8.tp8 rank6@
   spark6 pre-#877 defective generation needs re-emit; nvfp4.tp16 hygiene
   (node-f identity-unpinned, spark8 stale sidecar).
+
+## 2026-09-21bc tick — the state-5 holder is the FIRST chain's cold walk
+
+- The captured lifecycle (engine 3.5h stable, 592k submit-arrivals, all
+  BUSY-rejected behind last_id=1000001): the FIRST chain of the boot
+  walks LAZYWORK layer-by-layer (3,4,5,...) — each cold layer takes
+  ~30-60s of expert loading — its route reads STUCK at 34s, the REAPER
+  takes it at 120s mid-cold-walk, and every subsequent submit BUSY-queues
+  behind the recycled slot until the NEXT cold chain finishes or reaps.
+  The module watchdogs (300s whole-chain) never engage because the reaper
+  fires first at 120s — COLD CHAINS OUTLIVE THE 120s STATE-5 BOUND.
+- This is the queue-face root: state=5 (WAIT_ADAPTER, executing) reap
+  bound is 120s but cold chains legitimately run 250-280s. The bounds
+  split (600s for RESERVED) must extend to WAIT_ADAPTER too when the
+  module is mid-cold-load (or the reaper must skip routes whose chain is
+  advancing — heartbeats prove life).
+- Fix shape (next): the reaper checks chain liveness (LAZYWORK/CHAIN
+  lines advancing within the last 30s ⇒ alive, skip); reap only truly-
+  dead chains. Recorded as the final residual before module-sim.
