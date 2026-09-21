@@ -616,3 +616,17 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - The verdict seesaw continues mechanically: every deploy/recycle = a 5-8 min
   cold cycle; probes keep racing it. Warm floor evidence stands (0.73ms/round
   MEASURED). NEXT TICK: quiet open → single verdict probe → then S3.
+
+## 2026-09-21x tick (stage 2, PR #1075) — CHAIN-HEARTBEAT live; cold-chain shape learned
+
+- CHAIN-HEARTBEAT deployed (53b448a): chains advancing past 30s print once
+  per stage; a silent gap between heartbeats = the lost-continuation site.
+- First diagnostic payoff WITHOUT a wedge: a 282s cold chain completed with
+  ZERO heartbeats — cold chains advance INSIDE one synchronous ChainAdvance
+  call (the lazy-load loop), not via per-layer callbacks. Therefore: a
+  reaper-captured stuck route with idle threads = the advance never STARTED
+  (lost scheduling at enqueue), not a long-running advance. The instrument
+  discriminates both cases on the next stuck event.
+- Fleet: cold cycle post-rollout; warm chain measured 173.3ms/91r with
+  allreduce 101.4ms (1.11ms/round under cold-slot contention); 1 route
+  reaped (the bound holds). Verdict probe still racing cold cycles.
