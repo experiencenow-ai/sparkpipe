@@ -816,3 +816,15 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   slot/want/got nibbles per the DEGRADE print format). One repro then names
   the non-delivering peers for the round-1 case specifically.
 - No new stuck classes; queue class stays dead; floor 0.55ms/round stands.
+
+## 2026-09-21aj tick — the wait-kernel instrument deployed; the window raced cold again
+
+- MESH-WAIT-KERNEL-TIMEOUT instrument deployed fleet-wide (e7923a8, driver
+  rebuilt through the full module publish): the previously-silent device
+  wait timeout now prints error_word + diag_word (peer/ring/slotidx/want/
+  got). Fuzz green on the instrumented transport.
+- This window: engine 620s into its cold cycle (loads advancing), request
+  failed reaped-queued (status=3) before any round-1 failure could fire the
+  new print. Zero MESH-SPIN and zero kernel-timeout events — no silent
+  waits occurred; the racer this window was the cold-cycle queue itself.
+- The instrument is armed: the NEXT round-1 30s failure prints its peers.
