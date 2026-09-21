@@ -8,6 +8,9 @@ TREE="${SPARKPIPE_BUILD_TREE:-${SPARK_TREE:-$HOME/sparkpipe-build}}"
 RELEASE="$HOME/release/$ROOT_NAME"
 STAGING="$RELEASE/.staging"
 ADAPTER_SO="$TREE/build/modules/$FAMILY/$CODEC/lib${FAMILY}_serving_adapter_$CODEC.so"
+if [ ! -f "$ADAPTER_SO" ]; then
+    ADAPTER_SO="$TREE/build/modules/$FAMILY/$CODEC/lib$(echo "$FAMILY" | sed 's/_resident_decode_stage//')_serving_adapter_$CODEC.so"
+fi
 
 DEPLOY_JSON="$RELEASE/model_resident.json"
 if [ -f "$DEPLOY_JSON" ]; then

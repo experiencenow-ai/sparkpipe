@@ -2855,10 +2855,10 @@ static SparkStatus SparkModelResidentdBuildPollFds(
 	memset(fds,0,capacity * sizeof(fds[0]));
 	fds[0].fd = runtime->listen_fd;
 	pthread_mutex_lock(&runtime->mutex);
-	fds[0].events = runtime->client.fd < 0 ? POLLIN : 0;
+	fds[0].events = POLLIN;
 	fds[1].fd = runtime->client.fd;
 	fds[1].events = runtime->client.fd >= 0 && runtime->client.close_after_output == 0u ? POLLIN : 0;
-	if ( runtime->client.fd >= 0 && runtime->client.close_after_output == 0u && runtime->client.output_count != 0u )
+	if ( runtime->client.fd >= 0 && runtime->client.output_count != 0u )
 		fds[1].events |= POLLOUT;
 	pthread_mutex_unlock(&runtime->mutex);
 	fds[2].fd = runtime->wake_read_fd;
@@ -2918,6 +2918,20 @@ static SparkStatus SparkModelResidentdRun(SparkModelResidentdRuntime *runtime)
 				continue;
 			}
 			status = progress_status;
+		}
+		if ( runtime->client.fd >= 0 && runtime->client.close_after_output != 0u )
+		{
+			uint32_t pending_output;
+			pthread_mutex_lock(&runtime->mutex);
+			pending_output = runtime->client.output_count;
+			pthread_mutex_unlock(&runtime->mutex);
+			if ( pending_output == 0u )
+			{
+				fprintf(stderr,
+				    "model_residentd close-after-output drained; closing fd=%d\n",
+				    runtime->client.fd);
+				SparkModelResidentdCloseClient(runtime);
+			}
 		}
 		poll_status = poll(fds,count,SparkModelResidentdPollTimeoutMs(runtime));
 		if ( runtime->client.fd >= 0 && runtime->client.hello_complete == 0u && runtime->client.last_activity_ns != 0u &&

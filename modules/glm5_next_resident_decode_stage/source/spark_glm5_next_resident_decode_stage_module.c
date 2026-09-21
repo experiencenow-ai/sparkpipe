@@ -92,6 +92,13 @@ typedef struct SparkGlm5NextCompletionOverflow
 	struct SparkGlm5NextCompletionOverflow *next;
 } SparkGlm5NextCompletionOverflow;
 
+#define SPARK_GLM5_NEXT_OVERFLOW_POOL 	(SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT * 2u)
+
+static void *SparkGlm5NextCompletionWatchdog(void *argument);
+static void SparkGlm5NextDrainParkedCompletions(
+	SparkGlm5NextModuleState *state);
+static int SparkGlm5NextBoundedStreamSync(void *stream,uint64_t timeout_ns);
+
 typedef struct SparkGlm5NextAsyncCompletion
 {
 	SparkGlm5NextModuleState *state;
@@ -3779,8 +3786,6 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 	complete(complete_context,&completion);
 }
 
-#define SPARK_GLM5_NEXT_OVERFLOW_POOL 	(SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT * 2u)
-
 static void SparkGlm5NextParkCompletionLocked(
     SparkGlm5NextModuleState *state,SparkGlm5NextAsyncCompletion *async)
 {
@@ -3923,18 +3928,18 @@ static void *SparkGlm5NextCompletionWatchdog(void *argument)
 				uint64_t armed = state->completion_armed_ns[slot_index];
 				if ( armed == 0u || now_ns - armed < UINT64_C(45000000000) )
 					continue;
+				state->completion_armed_ns[slot_index] = 0u;
+				async = &state->completions[slot_index];
+				if ( async->completion.status == SPARK_STATUS_OK )
+					async->completion.status = SPARK_STATUS_INTERNAL_ERROR;
+				fprintf(stderr,
+					"CHAIN-WATCHDOG slot=%u — completion armed %.1fs ago never fired (stream drain lost); completing loudly\n",
+					(unsigned)slot_index,
+					(double)(now_ns - armed) / 1000000000.0);
+				pthread_mutex_unlock(&state->completion_watch_lock);
+				SparkGlm5NextCompleteOnWorker(async);
+				pthread_mutex_lock(&state->completion_watch_lock);
 			}
-			state->completion_armed_ns[slot_index] = 0u;
-			async = &state->completions[slot_index];
-			if ( async->completion.status == SPARK_STATUS_OK )
-				async->completion.status = SPARK_STATUS_INTERNAL_ERROR;
-			fprintf(stderr,
-				"CHAIN-WATCHDOG slot=%u — completion armed %.1fs ago never fired (stream drain lost); completing loudly\n",
-				(unsigned)slot_index,
-				(double)(now_ns - armed) / 1000000000.0);
-			pthread_mutex_unlock(&state->completion_watch_lock);
-			SparkGlm5NextCompleteOnWorker(async);
-			pthread_mutex_lock(&state->completion_watch_lock);
 		}
 		pthread_mutex_unlock(&state->completion_watch_lock);
 	}
