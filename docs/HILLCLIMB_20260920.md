@@ -1316,3 +1316,23 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   at 100% status=0. The remaining gap to a green canary is (a) the
   cold-walk queue time and (b) api-session churn on engine recycles —
   both throughput/steady-state items. S3 + module-sim are the mandate.
+
+## 2026-09-21bh tick — SPEED MODE: the graph path runs (operator: only speed matters)
+
+- Operator directive accepted: not-crashing is the entry fee; the mission
+  is ≤100µs/round. The speed weapon = #1074's one-launch N-round loop,
+  merged on main; the module gate re-armed on the stable stack:
+- SINGLE-RANK graph (spark3): gate passed, CAPTURE-OK (91 rounds), the
+  replay device-loop ran to cell 82/91 then stalled — eager peers don't
+  feed the device control plane (expected: TP needs uniform mode).
+- ALL-16 GRAPH MODE (first ever): capture OK on every armed rank, the
+  replay launches ONE kernel for the whole chain, runs — and stalls at
+  round 25 with diag want=0 got=0: the captured graph's wait-sequence
+  reads ZERO — the capture baked no seq base (a concrete capture-
+  parameter bug, not a mesh failure). The DEGRADE fires cleanly at the
+  30s deadline; chain fails in 35s with no reaper involvement (the
+  minimum-fix shape holding under the graph path).
+- NEXT (the fast lane): fix the capture's seq-base baking (GraphRecord
+  must record the replay-relative sequence; the linker patch updates it
+  per replay) → the replay completes → the REAL ns_per_round lands.
+  floor 0.55ms/round eager; the graph target is the 44-58µs mesh class.
