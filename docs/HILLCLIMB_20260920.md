@@ -929,3 +929,20 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   acquire's start; any acquire >10s prints its keys + the weightd's lease
   state. The mid-layer stop is either a lease wait (proven by the print) or
   a lost continuation (ruled out by its silence).
+
+## 2026-09-21aq tick — THE ENDGAME FIX deployed: bounded stream syncs
+
+- gdb PROOF of the stuck-chain root: thread 2 blocked in sem_wait INSIDE
+  libcuda — the advance thread's cudaStreamSynchronize on a stream a device
+  kernel never drains (a mesh wait kernel spinning past its deadline, or a
+  head kernel holding). The final enqueue never ran → the watchdog never
+  armed → the reaper recovered at 120s. THAT was the state-5 generator.
+- FIX (3816dfb, deployed): every chain-slot stream sync in the module uses
+  SparkGlm5NextBoundedStreamSync — cudaStreamQuery + yield with a 35s cap
+  and a loud SYNC-TIMEOUT. A spinning device kernel now fails its chain
+  loudly at 35s instead of wedging the advance thread forever.
+- First post-deploy window: zero SYNC-TIMEOUTs, zero reaps, engines sta-
+  ble 3592s — and CHAIN-TIME status=4 (IO) at total 0.2-0.56ms (rounds=0):
+  a NEW fast-fail face replacing the wedges (the bounded path converting
+  what would have been wedges into instant failures — or a boot-cycle
+  artifact; the next window discriminates). The verdict probe continues.
