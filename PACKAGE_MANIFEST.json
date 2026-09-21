@@ -1318,8 +1318,8 @@
     },
     {
       "path": "docs/HANDOFF_MGR2_2026-09-21.md",
-      "sha256": "2ba1c73dc69e3d6497b5b420656fc8bee046f86608793ab4c651395baccfa845",
-      "size_bytes": 10882
+      "sha256": "a280ad9887fceb74b3368c6cc72dca5fc02fe82adc3a943c49ee9137c98e5f52",
+      "size_bytes": 11236
     },
     {
       "path": "docs/HANDOFF_NEXT_SESSION.md",
@@ -16100,5 +16100,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 75670519
+  "total_bytes": 75670873
 }

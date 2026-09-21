@@ -67,8 +67,11 @@ merged + #1057/#1054 ledger restores). Main GREEN at last verify.
    line, ledgers, the S2.5 payload-vs-control-plane distinction
    documented, #1014 closed superseded) and landed the V6 MESH PROTOCOL
    + THE FIRST COMPLETE 16-RANK GRAPH CHAIN (the S3-class delivery).
-   The allreduce ladder: S0 1910-2700 -> S1 1334 MEASURED -> the graph
-   chain landed; the <=100us GOAL receipts are the next climb.
+   The allreduce ladder (MEASURED): S0 1910-2700 -> S1 1334 ->
+   **FIRST COMPLETE 16-RANK GRAPH CHAIN: status=0, 91 rounds,
+   330us/round MEASURED (4x over S1)** -> next = relay burst pacing;
+   the <=100us GOAL receipts follow. Coredev is landing continuously —
+   re-read main's log before every action.
 7. Emission relay: spark7 rank-7 stragglers (gemma-31b, lingfin,
    qwen27b-fp8 tp4pp4) building on sparkc ~/relay/wave1/ship_spark7.sh.
 
