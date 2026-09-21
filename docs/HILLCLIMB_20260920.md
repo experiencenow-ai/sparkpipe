@@ -1783,3 +1783,24 @@ REINTERPRETATION (everything now consistent):
 NEXT: (a) re-verify a fresh canary end-to-end with the FIRST request (the
 cold walk is the wait); (b) once chain2 graphs: the ARRIVAL receipt; (c) the
 reset cadence (per-token quiesce) tuned; (d) ladder idle re-measure.
+
+## 09-22 11:30 — FIRST FULL RUN RECEIPT: 411 rounds MEASURED; the cold walk = 498s; reset cadence = 400K
+
+THE 850s CANARY: CHAIN-TIME slot=2 status=17 total_ms=500496 rounds=411
+allreduce_ms=32217 (~78ms/round under cold-walk load) — the decode ADVANCED
+~4-5 tokens end-to-end before the curl window closed; stage_ms[3]=498150 =
+THE COLD WALK (expert loads) dominates the entire first request. The
+per-token quiesce BUSY count reached 400,000+ during it (the cadence defect,
+now MEASURED).
+
+DESIGN CORRECTION (the deferred-prefetch paradox): deferring the prefetch
+until after chain1 means chain1 alone eats the FULL cold walk. THE RIGHT
+DESIGN = the ORIGINAL immediate prefetch, but OWNERSHIP-FILTERED (only this
+rank's shard experts — kills the TARGET_MISMATCH failures) so warming runs
+in PARALLEL with the first chain instead of after it.
+
+NEXT LADDER: (1) ownership filter for the prefetch (the pack sidecar's
+shard layout; re-enable immediate start); (2) the per-token quiesce cadence
+(backoff or event-driven instead of hot-loop); (3) with warm boots: chain2
+graph → the ARRIVAL receipt → the 330ms/round relay conviction; (4) ladder
+idle re-measure.
