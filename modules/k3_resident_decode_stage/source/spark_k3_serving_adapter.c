@@ -13,6 +13,7 @@
 #include "sparkpipe/spark_speculation_seam.h"
 
 #include "spark_k3_dspark_format.h"
+#include "inference/llms/kimi_k3/spec_verify.h"
 
 #define SPARK_K3_SEAM_DRAFT_TIME_BUDGET_MS 20u
 #define SPARK_K3_SEAM_DRAFT_MAX_DEPTH 16u
@@ -20,6 +21,14 @@
 #define SPARK_K3_SEAM_CONNECT_TIMEOUT_MS 1000u
 #define SPARK_K3_SEAM_IO_TIMEOUT_MS 30000u
 #define SPARK_K3_SEAM_TARGET_MODEL "moonshotai/Kimi-K3-MXFP4"
+
+typedef struct SparkK3SpeculationKnobs
+{
+	uint32_t draft_depth;
+	uint32_t dynamic_draft_depth;
+	uint32_t dynamic_window;
+	uint32_t dynamic_minimum;
+} SparkK3SpeculationKnobs;
 
 typedef struct SparkK3ServingState
 {
@@ -33,6 +42,7 @@ typedef struct SparkK3ServingState
 	uint32_t max_rows;
 	SparkTpDeviceCollectiveConfig device_config;
 	SparkTpDeviceCollectiveTopology device_topology;
+	SparkK3SpeculationKnobs speculation;
 	char device_hosts[SPARK_TP_DEVICE_COLLECTIVE_MAX_DEGREE]
 		[SPARK_TP_DEVICE_COLLECTIVE_HOST_NAME_BYTES];
 	int device_collective_present;
@@ -59,6 +69,65 @@ static uint32_t K3ServingJsonU32(SparkJsonDocument *doc, int32_t root,
 	if ( token >= 0 && SparkJsonGetUInt32(doc, token, &value) == SPARK_STATUS_OK )
 		return value;
 	return fallback;
+}
+
+static uint32_t K3ServingEnvU32(const char *name, uint32_t fallback)
+{
+	const char *value = getenv(name);
+	char *end = 0;
+	unsigned long long parsed;
+	if ( value == 0 || *value == '\0' )
+		return fallback;
+	parsed = strtoull(value, &end, 10);
+	if ( end == value || parsed > 0xffffffffull )
+		return fallback;
+	return (uint32_t)parsed;
+}
+
+static SparkStatus K3ServingLoadSpeculation(SparkK3ServingState *state,
+	SparkJsonDocument *doc, int32_t root)
+{
+	int32_t spec = SparkJsonFindObjectMember(doc, root, "speculative");
+	uint32_t depth = SPARK_K3_DSPARK_MAX_DRAFT_TOKEN_COUNT;
+	uint32_t dynamic = 0u;
+	uint32_t window = K3_ADAPTIVE_DEPTH_WINDOW;
+	uint32_t minimum = K3_ADAPTIVE_DEPTH_MINIMUM;
+	if ( spec >= 0 )
+	{
+		depth = K3ServingJsonU32(doc, spec, "draft_depth", depth);
+		dynamic = K3ServingJsonU32(doc, spec, "dynamic_draft_depth", dynamic);
+		window = K3ServingJsonU32(doc, spec, "dynamic_draft_depth_window", window);
+		minimum = K3ServingJsonU32(doc, spec, "dynamic_draft_min_depth", minimum);
+	}
+	dynamic = K3ServingEnvU32("SPARK_K3_DYNAMIC_DRAFT_DEPTH", dynamic);
+	window = K3ServingEnvU32("SPARK_K3_DYNAMIC_DRAFT_DEPTH_WINDOW", window);
+	minimum = K3ServingEnvU32("SPARK_K3_DYNAMIC_MIN_DEPTH", minimum);
+	if ( depth == 0u || depth > SPARK_K3_DSPARK_MAX_DRAFT_TOKEN_COUNT )
+	{
+		fprintf(stderr, "k3_serving speculative.draft_depth %u outside "
+			"[1,%u]\n", depth, SPARK_K3_DSPARK_MAX_DRAFT_TOKEN_COUNT);
+		return SPARK_STATUS_SCHEMA_ERROR;
+	}
+	if ( dynamic > 1u )
+	{
+		fprintf(stderr, "k3_serving speculative.dynamic_draft_depth "
+			"must be 0 or 1\n");
+		return SPARK_STATUS_SCHEMA_ERROR;
+	}
+	if ( dynamic != 0u && (window == 0u ||
+		window > K3_ADAPTIVE_DEPTH_WINDOW || minimum == 0u ||
+		minimum > depth) )
+	{
+		fprintf(stderr, "k3_serving dynamic draft knobs invalid: "
+			"window=%u (max %u) minimum=%u depth=%u\n",
+			window, K3_ADAPTIVE_DEPTH_WINDOW, minimum, depth);
+		return SPARK_STATUS_SCHEMA_ERROR;
+	}
+	state->speculation.draft_depth = depth;
+	state->speculation.dynamic_draft_depth = dynamic;
+	state->speculation.dynamic_window = window;
+	state->speculation.dynamic_minimum = minimum;
+	return SPARK_STATUS_OK;
 }
 
 static SparkStatus K3ServingLoadConfiguration(SparkK3ServingState *state,
@@ -265,6 +334,9 @@ static SparkStatus K3ServingLoadConfiguration(SparkK3ServingState *state,
 			{ SparkJsonDocumentDestroy(&doc); return SPARK_STATUS_SCHEMA_ERROR; }
 		state->runner_config.device_collective = &state->device_config;
 	}
+	status = K3ServingLoadSpeculation(state, &doc, root);
+	if ( status != SPARK_STATUS_OK )
+		{ SparkJsonDocumentDestroy(&doc); return status; }
 	SparkJsonDocumentDestroy(&doc);
 	return SPARK_STATUS_OK;
 }
@@ -286,7 +358,14 @@ static SparkStatus K3ServingInitializeSpeculationSeam(SparkK3ServingState *state
 	seam_config.descriptor_bytes = SPARK_SPECULATION_SEAM_DESCRIPTOR_BYTES;
 	seam_config.available_source_mask = 0u;
 	seam_config.default_speculative_token_count =
-		SPARK_K3_DSPARK_MAX_DRAFT_TOKEN_COUNT;
+		state->speculation.draft_depth;
+	if ( state->speculation.dynamic_draft_depth != 0u )
+		fprintf(stderr, "k3_serving dynamic draft depth enabled: "
+			"ceiling=%u window=%u floor=%u (acceptance-driven; "
+			"policy core K3AdaptiveDepth)\n",
+			state->speculation.draft_depth,
+			state->speculation.dynamic_window,
+			state->speculation.dynamic_minimum);
 	seam_config.lane_count = state->runner_config.max_active_sequence_count;
 	seam_config.max_committed_token_count =
 		state->runner_config.kv_pages_per_sequence * K3_KV_PAGE_SLOTS;

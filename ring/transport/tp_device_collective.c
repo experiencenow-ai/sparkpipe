@@ -89,6 +89,7 @@ typedef struct SparkTpDeviceCollectiveImplementation
     SparkTpDeviceCollectiveCombineF32AddFunction combine_f32_add;
     SparkTpDeviceCollectiveRoundF32Function round_f32;
     SparkTpDeviceCollectiveCombineFusedBf16Function combine_fused_bf16;
+    SparkTpDeviceCollectiveCombineGatherBf16Function combine_gather_bf16;
     float *f32_scratch;
     uint64_t f32_scratch_bytes;
     void *combine_context;
@@ -592,7 +593,10 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
             implementation->combine_bf16 == 0) ||
          (operation_kind ==
                 SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_REDUCE_MAX_U64 &&
-            implementation->combine_u64_max == 0) )
+            implementation->combine_u64_max == 0) ||
+         (operation_kind ==
+                SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_GATHER &&
+            implementation->combine_gather_bf16 == 0) )
         return SPARK_STATUS_UNSUPPORTED;
     if ( implementation->chain_key != 0ull )
     {
@@ -889,6 +893,31 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
         }
     }
 combine:
+    if ( operation_kind ==
+            SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_GATHER )
+    {
+        const void *source_devices[SPARK_TP_DEVICE_COLLECTIVE_MAX_DEGREE];
+        SparkStatus gather_status;
+        for ( peer = 0;
+              peer < implementation->tp_degree;
+              peer++ )
+            source_devices[peer] = implementation->mesh_buffer +
+                implementation->band_base +
+                ((uint64_t)peer *
+                    SPARK_WEIGHTD_MESH_SLOTS_PER_RANK +
+                    (parity)) *
+                    slot_bytes;
+        gather_status = implementation->combine_gather_bf16(
+            implementation->combine_context,
+            submission->full_device,source_devices,
+            implementation->tp_degree,
+            submission->active_sequence_count,
+            implementation->local_hidden_dimension,
+            submission->cuda_stream);
+        if ( gather_status != SPARK_STATUS_OK )
+            return gather_status;
+        goto combine_done;
+    }
     if ( operation_kind !=
             SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_REDUCE_MAX_U64 &&
          implementation->combine_fused_bf16 != 0 )
@@ -1064,6 +1093,7 @@ SparkStatus SparkTpDeviceCollectiveCreate(
     implementation->combine_f32_add = config->combine_f32_add_function;
     implementation->round_f32 = config->round_f32_function;
     implementation->combine_fused_bf16 = config->combine_fused_bf16_function;
+    implementation->combine_gather_bf16 = config->combine_gather_bf16_function;
     implementation->combine_context = config->combine_context;
     if ( SparkWeightdClientConnect(socket,&implementation->client,0) !=
             SPARK_STATUS_OK )

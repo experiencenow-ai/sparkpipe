@@ -124,6 +124,32 @@ __global__ static void K3RunnerCombineTp4TreeKernel(const uint16_t *const *rank_
 	(void)tp_rank;
 }
 
+__global__ static void K3RunnerGatherStripesKernel(const uint16_t *const *sources,
+	uint16_t *destination,uint32_t rank_count,uint32_t elements_per_rank)
+{
+	uint32_t i = (blockIdx.x * blockDim.x) + threadIdx.x;
+	uint32_t total = rank_count * elements_per_rank;
+	if ( i >= total )
+		return;
+	destination[i] = sources[i / elements_per_rank][i % elements_per_rank];
+}
+
+static SparkStatus K3RunnerCombineGatherBf16(void *combine_context,
+	void *destination_device,const void *const *source_devices,
+	uint32_t source_count,uint32_t active_sequence_count,
+	uint32_t hidden_dimension,void *cuda_stream)
+{
+	uint32_t elements_per_rank = active_sequence_count * hidden_dimension;
+	(void)combine_context;
+	if ( source_count == 0u || elements_per_rank == 0u )
+		return SPARK_STATUS_INVALID_ARGUMENT;
+	K3RunnerGatherStripesKernel<<<(source_count * elements_per_rank + 255u) / 256u,
+		256u, 0, (cudaStream_t)cuda_stream>>>(
+		(const uint16_t *const *)source_devices,
+		(uint16_t *)destination_device,source_count,elements_per_rank);
+	return cudaGetLastError() == cudaSuccess ? SPARK_STATUS_OK : SPARK_STATUS_INTERNAL_ERROR;
+}
+
 static SparkStatus K3RunnerCombineBf16(void *combine_context,
 	void *destination_device,const void *source_device,
 	uint32_t active_sequence_count,uint32_t hidden_dimension,void *cuda_stream)
@@ -892,6 +918,7 @@ SparkStatus SparkK3StageRunnerInitialize(
 		{
 			device_config.combine_bf16_function = K3RunnerCombineBf16;
 			device_config.combine_tp4_bf16_function = K3RunnerCombineTp4Bf16;
+			device_config.combine_gather_bf16_function = K3RunnerCombineGatherBf16;
 			device_config.combine_context = state;
 		}
 		status = SparkTpDeviceCollectiveCreate(&device_config,

@@ -1113,6 +1113,7 @@ def copy_fp8_official_experts(source, ref: TensorRef, out) -> None:
         for e in range(expert_start, expert_start + expert_count):
             s_shard, s_meta, s_off = source.resolve(scale_base.replace("{e}", str(e)))
             sf = (source.root / s_shard).open("rb")
+            sf.seek(s_off)
             scale_fds.append((sf, s_off, s_meta["dtype"]))
         for sf, s_off, s_dtype in scale_fds:
             remaining = s_rows * s_cols * F32_BYTES

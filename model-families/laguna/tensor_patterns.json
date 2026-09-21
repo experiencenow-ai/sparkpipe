@@ -221,5 +221,496 @@
     12288
    ]
   }
+ },
+ "variants": {
+  "fp8": {
+   "tensor_pattern_count": 26,
+   "tensor_count": 69793,
+   "patterns": {
+    "model.embed_tokens.weight": {
+     "count": 1,
+     "dtype": "BF16",
+     "example": "model.embed_tokens.weight",
+     "shape": [
+      100352,
+      3072
+     ]
+    },
+    "lm_head.weight": {
+     "count": 1,
+     "dtype": "BF16",
+     "example": "lm_head.weight",
+     "shape": [
+      100352,
+      3072
+     ]
+    },
+    "model.norm.weight": {
+     "count": 1,
+     "dtype": "BF16",
+     "example": "model.norm.weight",
+     "shape": [
+      3072
+     ]
+    },
+    "model.layers.{layer}.input_layernorm.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.input_layernorm.weight",
+     "shape": [
+      3072
+     ]
+    },
+    "model.layers.{layer}.post_attention_layernorm.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.post_attention_layernorm.weight",
+     "shape": [
+      3072
+     ]
+    },
+    "model.layers.{layer}.self_attn.q_proj.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.self_attn.q_proj.weight",
+     "shape": [
+      6144,
+      3072
+     ],
+     "shape_sliding": [
+      9216,
+      3072
+     ],
+     "head_count_full": 48,
+     "head_count_sliding": 72
+    },
+    "model.layers.{layer}.self_attn.k_proj.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.self_attn.k_proj.weight",
+     "shape": [
+      1024,
+      3072
+     ]
+    },
+    "model.layers.{layer}.self_attn.v_proj.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.self_attn.v_proj.weight",
+     "shape": [
+      1024,
+      3072
+     ]
+    },
+    "model.layers.{layer}.self_attn.o_proj.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.self_attn.o_proj.weight",
+     "shape": [
+      3072,
+      6144
+     ],
+     "shape_sliding": [
+      3072,
+      9216
+     ]
+    },
+    "model.layers.{layer}.self_attn.g_proj.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.self_attn.g_proj.weight",
+     "shape": [
+      48,
+      3072
+     ],
+     "shape_sliding": [
+      72,
+      3072
+     ]
+    },
+    "model.layers.{layer}.self_attn.q_norm.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.self_attn.q_norm.weight",
+     "shape": [
+      128
+     ]
+    },
+    "model.layers.{layer}.self_attn.k_norm.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.self_attn.k_norm.weight",
+     "shape": [
+      128
+     ]
+    },
+    "model.layers.{layer}.mlp.gate.weight": {
+     "count": 47,
+     "dtype": "BF16",
+     "example": "model.layers.1.mlp.gate.weight",
+     "shape": [
+      256,
+      3072
+     ]
+    },
+    "model.layers.{layer}.mlp.experts.e_score_correction_bias": {
+     "count": 47,
+     "dtype": "BF16",
+     "example": "model.layers.1.mlp.experts.e_score_correction_bias",
+     "shape": [
+      256
+     ],
+     "dtype_alternate": "F32"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.gate_proj.weight": {
+     "count": 12032,
+     "dtype": "BF16",
+     "example": "model.layers.1.mlp.experts.0.gate_proj.weight",
+     "shape": [
+      1024,
+      3072
+     ]
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.up_proj.weight": {
+     "count": 12032,
+     "dtype": "BF16",
+     "example": "model.layers.1.mlp.experts.0.up_proj.weight",
+     "shape": [
+      1024,
+      3072
+     ]
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.down_proj.weight": {
+     "count": 12032,
+     "dtype": "BF16",
+     "example": "model.layers.1.mlp.experts.0.down_proj.weight",
+     "shape": [
+      3072,
+      1024
+     ]
+    },
+    "model.layers.{layer}.mlp.shared_expert.gate_proj.weight": {
+     "count": 47,
+     "dtype": "BF16",
+     "example": "model.layers.1.mlp.shared_expert.gate_proj.weight",
+     "shape": [
+      1024,
+      3072
+     ]
+    },
+    "model.layers.{layer}.mlp.shared_expert.up_proj.weight": {
+     "count": 47,
+     "dtype": "BF16",
+     "example": "model.layers.1.mlp.shared_expert.up_proj.weight",
+     "shape": [
+      1024,
+      3072
+     ]
+    },
+    "model.layers.{layer}.mlp.shared_expert.down_proj.weight": {
+     "count": 47,
+     "dtype": "BF16",
+     "example": "model.layers.1.mlp.shared_expert.down_proj.weight",
+     "shape": [
+      3072,
+      1024
+     ]
+    },
+    "model.layers.{layer}.mlp.gate_proj.weight": {
+     "count": 1,
+     "dtype": "BF16",
+     "example": "model.layers.0.mlp.gate_proj.weight",
+     "shape": [
+      12288,
+      3072
+     ]
+    },
+    "model.layers.{layer}.mlp.up_proj.weight": {
+     "count": 1,
+     "dtype": "BF16",
+     "example": "model.layers.0.mlp.up_proj.weight",
+     "shape": [
+      12288,
+      3072
+     ]
+    },
+    "model.layers.{layer}.mlp.down_proj.weight": {
+     "count": 1,
+     "dtype": "BF16",
+     "example": "model.layers.0.mlp.down_proj.weight",
+     "shape": [
+      3072,
+      12288
+     ]
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.gate_proj.weight_scale_inv": {
+     "count": 11008,
+     "note": "43 routed layers quantized (1..43); layers 44..47 keep BF16 experts"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.up_proj.weight_scale_inv": {
+     "count": 11008
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.down_proj.weight_scale_inv": {
+     "count": 11008
+    }
+   },
+   "source": "warm laguna-s-2.1-fp8 (measured 2026-09-20): 3745 BF16 + 33024 F8_E4M3 + 33024 F32 scale_inv; only the routed experts are quantized (layers 1..43; 44..47 stay BF16) and every non-expert tensor is the BF16 release's"
+  },
+  "nvfp4": {
+   "tensor_pattern_count": 35,
+   "tensor_count": 126625,
+   "patterns": {
+    "model.embed_tokens.weight": {
+     "count": 1,
+     "dtype": "BF16",
+     "example": "model.embed_tokens.weight",
+     "shape": [
+      100352,
+      3072
+     ]
+    },
+    "lm_head.weight": {
+     "count": 1,
+     "dtype": "BF16",
+     "example": "lm_head.weight",
+     "shape": [
+      100352,
+      3072
+     ]
+    },
+    "model.norm.weight": {
+     "count": 1,
+     "dtype": "BF16",
+     "example": "model.norm.weight",
+     "shape": [
+      3072
+     ]
+    },
+    "model.layers.{layer}.input_layernorm.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.input_layernorm.weight",
+     "shape": [
+      3072
+     ]
+    },
+    "model.layers.{layer}.post_attention_layernorm.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.post_attention_layernorm.weight",
+     "shape": [
+      3072
+     ]
+    },
+    "model.layers.{layer}.self_attn.q_proj.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.self_attn.q_proj.weight",
+     "shape": [
+      6144,
+      3072
+     ],
+     "shape_sliding": [
+      9216,
+      3072
+     ],
+     "head_count_full": 48,
+     "head_count_sliding": 72
+    },
+    "model.layers.{layer}.self_attn.k_proj.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.self_attn.k_proj.weight",
+     "shape": [
+      1024,
+      3072
+     ]
+    },
+    "model.layers.{layer}.self_attn.v_proj.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.self_attn.v_proj.weight",
+     "shape": [
+      1024,
+      3072
+     ]
+    },
+    "model.layers.{layer}.self_attn.o_proj.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.self_attn.o_proj.weight",
+     "shape": [
+      3072,
+      6144
+     ],
+     "shape_sliding": [
+      3072,
+      9216
+     ]
+    },
+    "model.layers.{layer}.self_attn.g_proj.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.self_attn.g_proj.weight",
+     "shape": [
+      48,
+      3072
+     ],
+     "shape_sliding": [
+      72,
+      3072
+     ]
+    },
+    "model.layers.{layer}.self_attn.q_norm.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.self_attn.q_norm.weight",
+     "shape": [
+      128
+     ]
+    },
+    "model.layers.{layer}.self_attn.k_norm.weight": {
+     "count": 48,
+     "dtype": "BF16",
+     "example": "model.layers.0.self_attn.k_norm.weight",
+     "shape": [
+      128
+     ]
+    },
+    "model.layers.{layer}.mlp.gate.weight": {
+     "count": 47,
+     "dtype": "BF16",
+     "example": "model.layers.1.mlp.gate.weight",
+     "shape": [
+      256,
+      3072
+     ]
+    },
+    "model.layers.{layer}.mlp.experts.e_score_correction_bias": {
+     "count": 47,
+     "dtype": "BF16",
+     "example": "model.layers.1.mlp.experts.e_score_correction_bias",
+     "shape": [
+      256
+     ],
+     "dtype_alternate": "F32"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.gate_proj.weight": {
+     "count": 2048,
+     "note": "8 routed layers (40..47) keep a native BF16 weight; layers 1..39 carry weight_packed instead"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.up_proj.weight": {
+     "count": 2048,
+     "note": "8 routed layers (40..47) keep a native BF16 weight; layers 1..39 carry weight_packed instead"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.down_proj.weight": {
+     "count": 2048,
+     "note": "8 routed layers (40..47) keep a native BF16 weight; layers 1..39 carry weight_packed instead"
+    },
+    "model.layers.{layer}.mlp.shared_expert.gate_proj.weight": {
+     "count": 47,
+     "dtype": "BF16",
+     "example": "model.layers.1.mlp.shared_expert.gate_proj.weight",
+     "shape": [
+      1024,
+      3072
+     ]
+    },
+    "model.layers.{layer}.mlp.shared_expert.up_proj.weight": {
+     "count": 47,
+     "dtype": "BF16",
+     "example": "model.layers.1.mlp.shared_expert.up_proj.weight",
+     "shape": [
+      1024,
+      3072
+     ]
+    },
+    "model.layers.{layer}.mlp.shared_expert.down_proj.weight": {
+     "count": 47,
+     "dtype": "BF16",
+     "example": "model.layers.1.mlp.shared_expert.down_proj.weight",
+     "shape": [
+      3072,
+      1024
+     ]
+    },
+    "model.layers.{layer}.mlp.gate_proj.weight": {
+     "count": 1,
+     "dtype": "BF16",
+     "example": "model.layers.0.mlp.gate_proj.weight",
+     "shape": [
+      12288,
+      3072
+     ]
+    },
+    "model.layers.{layer}.mlp.up_proj.weight": {
+     "count": 1,
+     "dtype": "BF16",
+     "example": "model.layers.0.mlp.up_proj.weight",
+     "shape": [
+      12288,
+      3072
+     ]
+    },
+    "model.layers.{layer}.mlp.down_proj.weight": {
+     "count": 1,
+     "dtype": "BF16",
+     "example": "model.layers.0.mlp.down_proj.weight",
+     "shape": [
+      3072,
+      12288
+     ]
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.gate_proj.weight_packed": {
+     "count": 9984,
+     "note": "39 routed layers (1..39) nvfp4: U8-packed e2m1 + per-16 e4m3 plane + F32 weight/input globals"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.gate_proj.weight_scale": {
+     "count": 9984,
+     "note": "39 routed layers (1..39) nvfp4: U8-packed e2m1 + per-16 e4m3 plane + F32 weight/input globals"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.gate_proj.weight_global_scale": {
+     "count": 9984,
+     "note": "39 routed layers (1..39) nvfp4: U8-packed e2m1 + per-16 e4m3 plane + F32 weight/input globals"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.gate_proj.input_global_scale": {
+     "count": 9984,
+     "note": "39 routed layers (1..39) nvfp4: U8-packed e2m1 + per-16 e4m3 plane + F32 weight/input globals"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.up_proj.weight_packed": {
+     "count": 9984,
+     "note": "39 routed layers (1..39) nvfp4: U8-packed e2m1 + per-16 e4m3 plane + F32 weight/input globals"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.up_proj.weight_scale": {
+     "count": 9984,
+     "note": "39 routed layers (1..39) nvfp4: U8-packed e2m1 + per-16 e4m3 plane + F32 weight/input globals"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.up_proj.weight_global_scale": {
+     "count": 9984,
+     "note": "39 routed layers (1..39) nvfp4: U8-packed e2m1 + per-16 e4m3 plane + F32 weight/input globals"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.up_proj.input_global_scale": {
+     "count": 9984,
+     "note": "39 routed layers (1..39) nvfp4: U8-packed e2m1 + per-16 e4m3 plane + F32 weight/input globals"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.down_proj.weight_packed": {
+     "count": 9984,
+     "note": "39 routed layers (1..39) nvfp4: U8-packed e2m1 + per-16 e4m3 plane + F32 weight/input globals"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.down_proj.weight_scale": {
+     "count": 9984,
+     "note": "39 routed layers (1..39) nvfp4: U8-packed e2m1 + per-16 e4m3 plane + F32 weight/input globals"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.down_proj.weight_global_scale": {
+     "count": 9984,
+     "note": "39 routed layers (1..39) nvfp4: U8-packed e2m1 + per-16 e4m3 plane + F32 weight/input globals"
+    },
+    "model.layers.{layer}.mlp.experts.{expert}.down_proj.input_global_scale": {
+     "count": 9984,
+     "note": "39 routed layers (1..39) nvfp4: U8-packed e2m1 + per-16 e4m3 plane + F32 weight/input globals"
+    }
+   },
+   "source": "warm laguna-s-2.1-nvfp4 (measured 2026-09-20): 6817 BF16 + 29952 U8 packed + 29952 F8_E4M3 + 59904 F32 globals; routed experts quantized on layers 1..39, 40..47 stay BF16-only"
+  }
  }
 }

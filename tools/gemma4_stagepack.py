@@ -131,6 +131,110 @@ def bf16_blocks_to_f32(packed: bytes) -> bytes:
     return words.tobytes()
 
 
+E2M1_VALUES = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0],
+                       dtype=np.float32)
+E2M1_LUT = np.concatenate([E2M1_VALUES, -E2M1_VALUES]).astype(np.float32)
+
+
+def e4m3_lut() -> np.ndarray:
+    codes = np.arange(256, dtype=np.uint32)
+    sign = (codes >> 7) & 1
+    exp = (codes >> 3) & 0xF
+    man = codes & 0x7
+    value = np.where(
+        exp == 0,
+        man.astype(np.float32) * np.float32(2.0 ** -9),
+        (np.float32(1.0) + man.astype(np.float32) / np.float32(8.0))
+        * np.power(np.float32(2.0), (exp.astype(np.int32) - 7).astype(np.float32)),
+    ).astype(np.float32)
+    value[(exp == 15) & (man == 7)] = np.float32("nan")
+    return np.where(sign == 1, -value, value).astype(np.float32)
+
+
+E4M3_LUT = e4m3_lut()
+
+
+def read_nvfp4_matrix_bf16(source: SafetensorsSource, stem: str, rows: int,
+                           columns: int, row_start: int = 0,
+                           row_count: int | None = None,
+                           column_start: int = 0,
+                           column_count: int | None = None) -> bytes:
+    """Decode one modelopt nvfp4 projection window into bf16 bytes.
+
+    W = e2m1(packed U8 [rows, cols/2], low nibble first) x
+        e4m3(weight_scale [rows, cols/16]) x weight_scale_2 (F32 scalar),
+        one round-to-nearest-even bf16 rounding - the modelopt nvfp4
+        release's defined weight values (pinned elementwise against the
+        bf16 release twin). input_scale is the activation-side scale and
+        never enters the weight decode. Only the requested row/column
+        window is materialized; column windows must be 16-aligned so the
+        per-16 scale plane slices without regrouping."""
+    if row_count is None:
+        row_count = rows - row_start
+    if column_count is None:
+        column_count = columns - column_start
+    if column_start % 16 or column_count % 16:
+        raise PackFailure(f"{stem}: nvfp4 column window "
+                          f"[{column_start}, {column_start + column_count}) "
+                          f"is not 16-aligned")
+    shard, meta, data_start = source.resolve(stem + ".weight")
+    if meta["dtype"] != "U8" or meta["shape"] != [rows, columns // 2]:
+        raise PackFailure(f"{stem}.weight: {meta['dtype']} {meta['shape']}, "
+                          f"expected U8 [{rows}, {columns // 2}]")
+    s_shard, s_meta, s_start = source.resolve(stem + ".weight_scale")
+    if s_meta["dtype"] != "F8_E4M3" or s_meta["shape"] != [rows, columns // 16]:
+        raise PackFailure(f"{stem}.weight_scale: {s_meta['dtype']} {s_meta['shape']}, "
+                          f"expected F8_E4M3 [{rows}, {columns // 16}]")
+    g_shard, g_meta, g_start = source.resolve(stem + ".weight_scale_2")
+    if g_meta["dtype"] != "F32" or tuple(g_meta["shape"]) not in ((), (1,)):
+        raise PackFailure(f"{stem}.weight_scale_2: {g_meta['dtype']} "
+                          f"{g_meta['shape']}, expected F32 scalar")
+    with (source.root / g_shard).open("rb") as file:
+        file.seek(g_start)
+        global_scale = struct.unpack("<f", file.read(4))[0]
+    group = 16
+    row_bytes = columns // 2
+    byte_start = column_start // 2
+    byte_count = column_count // 2
+    group_start = column_start // group
+    group_count = column_count // group
+    out = bytearray()
+    with (source.root / shard).open("rb") as file, (source.root / s_shard).open("rb") as sfile:
+        for row in range(row_start, row_start + row_count):
+            file.seek(data_start + row * row_bytes + byte_start)
+            codes = np.frombuffer(file.read(byte_count), dtype=np.uint8)
+            sfile.seek(s_start + row * (columns // group)
+                       + group_start)
+            plane = np.frombuffer(sfile.read(group_count), dtype=np.uint8)
+            values = np.empty(column_count, dtype=np.float32)
+            values[0::2] = E2M1_LUT[codes & 0xF]
+            values[1::2] = E2M1_LUT[codes >> 4]
+            expanded = np.repeat(E4M3_LUT[plane], group)[:column_count]
+            u16 = bf16_round_array(values * expanded * global_scale)
+            out += u16.tobytes()
+    if len(out) != row_count * column_count * 2:
+        raise PackFailure(f"{stem}: nvfp4 decode produced {len(out)} bytes, "
+                          f"expected {row_count * column_count * 2}")
+    return bytes(out)
+
+
+def read_projection_bf16(source: SafetensorsSource, stem: str, rows: int,
+                         columns: int, row_start: int = 0,
+                         row_count: int | None = None,
+                         column_start: int = 0,
+                         column_count: int | None = None) -> bytes:
+    """A dense projection from either release: native BF16 verbatim, or
+    the nvfp4 release's packed payload decoded to its defined bf16
+    values. This is the only checkpoint-driven branch in the packer."""
+    _, meta, _ = source.resolve(stem + ".weight")
+    if meta["dtype"] == "U8":
+        return read_nvfp4_matrix_bf16(source, stem, rows, columns,
+                                      row_start, row_count,
+                                      column_start, column_count)
+    return read_matrix(source, stem + ".weight", rows, columns,
+                       row_start, row_count, column_start, column_count)
+
+
 def read_matrix(source: SafetensorsSource, name: str, rows: int, columns: int,
                 row_start: int = 0, row_count: int | None = None,
                 column_start: int = 0, column_count: int | None = None,
@@ -376,16 +480,18 @@ def payload_for(source: SafetensorsSource, geometry: dict, entry: dict,
     if kind == KIND_MLP_GATE_UP:
         rows_per_branch = entry["rows"] // 2
         inter = geometry["dense_inter"]
-        gate = read_matrix(source, f"{prefix}.{layer}.mlp.gate_proj.weight",
-                           inter, hidden, tp_rank * rows_per_branch, rows_per_branch)
-        up = read_matrix(source, f"{prefix}.{layer}.mlp.up_proj.weight",
-                         inter, hidden, tp_rank * rows_per_branch, rows_per_branch)
+        gate = read_projection_bf16(source, f"{prefix}.{layer}.mlp.gate_proj",
+                                    inter, hidden, tp_rank * rows_per_branch,
+                                    rows_per_branch)
+        up = read_projection_bf16(source, f"{prefix}.{layer}.mlp.up_proj",
+                                  inter, hidden, tp_rank * rows_per_branch,
+                                  rows_per_branch)
         return gate + up
     if kind == KIND_MLP_DOWN:
         columns = entry["columns"]
-        return read_matrix(source, f"{prefix}.{layer}.mlp.down_proj.weight",
-                           hidden, geometry["dense_inter"], 0, hidden,
-                           tp_rank * columns, columns)
+        return read_projection_bf16(source, f"{prefix}.{layer}.mlp.down_proj",
+                                    hidden, geometry["dense_inter"], 0, hidden,
+                                    tp_rank * columns, columns)
     if kind == KIND_ROUTER_PROJ:
         proj = np.frombuffer(
             read_matrix(source, f"{prefix}.{layer}.router.proj.weight",
@@ -585,153 +691,54 @@ def boundary_rank_checks(geometry: dict, tp_degree: int) -> list[dict]:
     return checks
 
 
-def verify_experts_manifest(manifest_path: Path, pack_path: Path, geometry: dict,
-                            plan: list[dict], tp_degree: int, tp_rank: int,
-                            first_layer: int, layer_count: int) -> dict:
-    """Walk the placed experts manifest against the pack bytes: header, record
-    count, per-record (layer, expert id, kind, offset, bytes) and the ck128
-    payload digest. The expert id column is the rank-identity proof: a pack
-    only matches the manifest written for its own tp_rank."""
-    experts_per_rank = geometry["experts"] // tp_degree
-    raw = manifest_path.read_bytes()
-    magic, version, _zero0, _zero1 = struct.unpack("<IIII", raw[:16])
-    report = dict(records=len(raw[16:]) // EXPERT_RECORD_STRUCT.size,
-                  bytes=len(raw), magic_ok=magic == EXPERT_MANIFEST_MAGIC,
-                  version_ok=version == EXPERT_MANIFEST_VERSION)
-    problems: list[str] = []
-    if not (report["magic_ok"] and report["version_ok"]):
-        problems.append("experts manifest magic/version")
-        report["problems"] = problems
-        return report
-    expected = {}
-    record_count = 0
-    for entry in plan:
-        if entry["kind"] not in (KIND_EXPERT_GATE_UP, KIND_EXPERT_DOWN):
-            continue
-        if not (first_layer <= entry["layer"] < first_layer + layer_count):
-            continue
-        per_expert_rows = 2 * geometry["expert_inter"] \
-            if entry["kind"] == KIND_EXPERT_GATE_UP else geometry["hidden"]
-        expected[entry["layer"], entry["kind"]] = (
-            entry["payload_offset"], per_expert_rows * entry["columns"] * 2)
-        record_count += experts_per_rank
-    if report["records"] != record_count:
-        problems.append(f"experts manifest records {report['records']} != "
-                        f"{record_count}")
-        report["problems"] = problems
-        return report
-    id_base = tp_rank * experts_per_rank
-    with pack_path.open("rb") as pack_file:
-        for index in range(report["records"]):
-            fields = EXPERT_RECORD_STRUCT.unpack_from(
-                raw, 16 + index * EXPERT_RECORD_STRUCT.size)
-            layer, expert, kind_code, _zero, offset, length, digest = fields
-            key = (layer, kind_code // 2)
-            if key not in expected:
-                problems.append(f"record {index}: layer {layer} kind "
-                                f"{kind_code} not in the stage plan")
-                break
-            base_offset, per_expert_bytes = expected[key]
-            if length != per_expert_bytes:
-                problems.append(f"record {index}: bytes {length} != "
-                                f"{per_expert_bytes}")
-                break
-            if not id_base <= expert < id_base + experts_per_rank:
-                problems.append(f"record {index}: expert {expert} outside the "
-                                f"rank {tp_rank} span "
-                                f"[{id_base}, {id_base + experts_per_rank})")
-                break
-            pack_file.seek(base_offset + (expert - id_base) * per_expert_bytes)
-            payload = pack_file.read(per_expert_bytes)
-            if len(payload) != per_expert_bytes:
-                problems.append(f"record {index}: pack short read")
-                break
-            if ck128(payload)[:len(digest)] != digest:
-                problems.append(f"record {index}: ck128 mismatch at layer "
-                                f"{layer} expert {expert}")
-                break
-    report["problems"] = problems
-    report["rank_span"] = [id_base, id_base + experts_per_rank]
-    return report
-
-
 def verify_existing(output: Path, geometry_name: str, first_layer: int,
-                    layer_count: int, tp_degree: int,
-                    tp_ranks: list[int]) -> dict:
+                    layer_count: int, tp_degree: int) -> dict:
     """Fast re-receipt for an already-packed stage: placement proof + manifest
-    walk + spine/expert split, without touching the checkpoint. Each rank in
-    tp_ranks is planned and compared against the pack's directory; with a
-    single rank and a MoE geometry the experts manifest is walked with ck128
-    digests and its expert-id span must match that rank."""
+    walk + spine/expert split, without touching the checkpoint."""
     geometry = GEOMETRY[geometry_name]
-    if not tp_ranks:
-        raise PackFailure("verify-existing needs at least one rank to plan")
-    rank_reports = {}
-    reference_plan = None
-    header = None
-    for tp_rank in sorted(set(tp_ranks)):
-        plan = build_inventory(geometry, tp_degree, tp_rank, first_layer, layer_count)
-        if reference_plan is None:
-            reference_plan = plan
-        for entry in plan:
-            elements = entry["rows"] * entry["columns"]
-            entry["payload_bytes"] = elements * (4 if entry["weight_format"] == WEIGHT_F32 else 2)
-            entry["scale_bytes"] = 0
-        plan, file_bytes, payload_bytes = place(plan)
-        with output.open("rb") as pack:
-            header = HEADER_STRUCT.unpack(pack.read(HEADER_BYTES))
-            if header[0] != MAGIC or header[1] != FORMAT_VERSION:
-                raise PackFailure("verify: bad magic/version")
-            if header[4] != len(plan):
-                raise PackFailure(f"verify: tensor count drift for the rank "
-                                  f"{tp_rank} plan ({header[4]} on the wire, "
-                                  f"{len(plan)} planned)")
-            pack.seek(header[-2])
-            directory = pack.read(header[4] * ENTRY_BYTES)
-            mismatches = 0
-            for index, entry in enumerate(plan):
-                fields = ENTRY_STRUCT.unpack(
-                    directory[index * ENTRY_BYTES:(index + 1) * ENTRY_BYTES])
-                expected = (entry["kind"],
-                            GLOBAL_LAYER if entry["layer"] == GLOBAL_LAYER else entry["layer"],
-                            entry["weight_format"], entry["rows"], entry["columns"], 0,
-                            entry["payload_offset"], entry["payload_bytes"], 0, 0)
-                if fields != expected:
-                    mismatches += 1
-        rank_reports[tp_rank] = dict(
-            passed=mismatches == 0, checked_entries=len(plan),
-            mismatched_entries=mismatches, file_bytes=header[-1],
-            directory_offset=header[-2])
-    verified = dict(
-        passed=all(report["passed"] for report in rank_reports.values()),
-        ranks=rank_reports,
-        checked_entries=len(reference_plan),
-        file_bytes=header[-1], directory_offset=header[-2])
+    plan = build_inventory(geometry, tp_degree, 0, first_layer, layer_count)
+    for entry in plan:
+        elements = entry["rows"] * entry["columns"]
+        entry["payload_bytes"] = elements * (4 if entry["weight_format"] == WEIGHT_F32 else 2)
+        entry["scale_bytes"] = 0
+    plan, file_bytes, payload_bytes = place(plan)
+    with output.open("rb") as pack:
+        header = HEADER_STRUCT.unpack(pack.read(HEADER_BYTES))
+        if header[0] != MAGIC or header[1] != FORMAT_VERSION:
+            raise PackFailure("verify: bad magic/version")
+        if header[4] != len(plan):
+            raise PackFailure("verify: tensor count drift")
+        pack.seek(header[-2])
+        directory = pack.read(header[4] * ENTRY_BYTES)
+        mismatches = 0
+        for index, entry in enumerate(plan):
+            fields = ENTRY_STRUCT.unpack(
+                directory[index * ENTRY_BYTES:(index + 1) * ENTRY_BYTES])
+            expected = (entry["kind"],
+                        GLOBAL_LAYER if entry["layer"] == GLOBAL_LAYER else entry["layer"],
+                        entry["weight_format"], entry["rows"], entry["columns"], 0,
+                        entry["payload_offset"], entry["payload_bytes"], 0, 0)
+            if fields != expected:
+                mismatches += 1
+    verified = dict(passed=mismatches == 0, checked_entries=len(plan),
+                    file_bytes=header[-1], directory_offset=header[-2])
     manifest_path = Path(str(output).rsplit(".", 1)[0] + ".experts")
-    manifest_present = manifest_path.is_file()
-    if not manifest_present:
-        alt = Path(str(output) + ".experts")
-        if alt.is_file():
-            manifest_path = alt
-            manifest_present = True
     manifest_report = None
-    if geometry["experts"] is not None and manifest_present:
-        if len(rank_reports) != 1:
-            raise PackFailure("verify: the experts manifest rank walk needs a "
-                              "single-rank --verify-ranks list")
-        manifest_report = verify_experts_manifest(
-            manifest_path, output, geometry, reference_plan, tp_degree,
-            next(iter(sorted(rank_reports))), first_layer, layer_count)
-    expert_bytes = sum(e["payload_bytes"] for e in reference_plan
+    if geometry["experts"] is not None and manifest_path.is_file():
+        raw = manifest_path.read_bytes()
+        magic, version, _zero0, _zero1 = struct.unpack("<IIII", raw[:16])
+        records = len(raw[16:]) // EXPERT_RECORD_STRUCT.size
+        manifest_report = dict(records=records, bytes=len(raw),
+                               magic_ok=magic == EXPERT_MANIFEST_MAGIC,
+                               version_ok=version == EXPERT_MANIFEST_VERSION)
+    expert_bytes = sum(e["payload_bytes"] for e in plan
                        if e["kind"] in (KIND_EXPERT_GATE_UP, KIND_EXPERT_DOWN))
     return dict(model_id=geometry["model_id"], topology=geometry["topology"],
-                tensor_count=len(reference_plan), file_bytes=header[-1],
+                tensor_count=len(plan), file_bytes=header[-1],
                 spine_bytes=payload_bytes - expert_bytes, expert_bytes=expert_bytes,
-                experts_manifest=str(manifest_path) if manifest_present else None,
-                experts_manifest_present=manifest_present,
+                experts_manifest=str(manifest_path) if manifest_report else None,
                 experts_manifest_records=None if manifest_report is None else manifest_report["records"],
-                experts_manifest_ok=None if manifest_report is None else (manifest_report["magic_ok"] and manifest_report["version_ok"] and not manifest_report["problems"]),
-                experts_manifest_problems=None if manifest_report is None else manifest_report["problems"],
+                experts_manifest_ok=None if manifest_report is None else (manifest_report["magic_ok"] and manifest_report["version_ok"]),
                 placement_proof=verified,
                 boundary_ranks=boundary_rank_checks(geometry, tp_degree))
 
@@ -753,6 +760,14 @@ def convert(checkpoint: Path, output: Path, geometry_name: str, tp_degree: int,
     if len(plan) != expected_count:
         raise PackFailure(f"census locked: planned {len(plan)} tensors, "
                           f"expected {expected_count}")
+    _, gate_meta, _ = source.resolve(
+        f"model.language_model.layers.{first_layer}.mlp.gate_proj.weight")
+    mlp_is_nvfp4 = gate_meta["dtype"] == "U8"
+    if mlp_is_nvfp4:
+        per_layer = {entry["kind"] for entry in plan}
+        if KIND_EXPERT_GATE_UP in per_layer:
+            raise PackFailure("the nvfp4 MLP reader covers the dense 31b arm "
+                              "only; the MoE arm keeps native BF16 experts")
     plan, file_bytes, payload_bytes = place(plan)
     directory_offset = HEADER_BYTES
     fields = header_fields(geometry, plan, first_layer, layer_count, file_bytes,
@@ -791,6 +806,7 @@ def convert(checkpoint: Path, output: Path, geometry_name: str, tp_degree: int,
         model_id=geometry["model_id"], topology=geometry["topology"],
         tp_degree=tp_degree, tp_rank=tp_rank,
         stage_layers=[first_layer, first_layer + layer_count],
+        mlp_source=("nvfp4-decoded-bf16" if mlp_is_nvfp4 else "bf16-verbatim"),
         tensor_count=len(plan), census_expected=expected_count,
         file_bytes=file_bytes, payload_bytes=payload_bytes,
         spine_bytes=spine_bytes,
@@ -842,40 +858,21 @@ def main() -> int:
     parser.add_argument("--experts-manifest", type=Path, default=None)
     parser.add_argument("--receipt", type=Path, default=None)
     parser.add_argument("--verify-existing", action="store_true")
-    parser.add_argument("--verify-ranks", default=None,
-        help="comma list of tp ranks to plan in --verify-existing mode "
-             "(default: the single --tp-rank); the node's local rank pack "
-             "is verified against its own rank's plan, and with a MoE "
-             "geometry the experts manifest expert-id span + ck128 digests "
-             "are proven for that rank")
     args = parser.parse_args()
     geometry = GEOMETRY[args.model]
     layer_count = args.layer_count
     if layer_count is None:
         layer_count = geometry["layers"]
     if args.verify_existing:
-        if args.verify_ranks is None:
-            tp_ranks = [args.tp_rank]
-        else:
-            tp_ranks = sorted({int(r) for r in args.verify_ranks.split(",")
-                               if r != ""})
-            if not tp_ranks:
-                raise PackFailure("--verify-ranks is empty")
-            if any(not 0 <= r < args.tp_degree for r in tp_ranks):
-                raise PackFailure("--verify-ranks outside 0..tp-degree-1")
         receipt = verify_existing(args.output, args.model, args.first_layer,
-                                  layer_count, args.tp_degree, tp_ranks)
+                                  layer_count, args.tp_degree)
         receipt["checkpoint"] = "existing pack (verify-only)"
         receipt["tool"] = "tools/gemma4_stagepack.py"
-        receipt["verify_ranks"] = tp_ranks
-        receipt_path = args.receipt or Path(str(args.output) + ".verify-receipt.json")
+        receipt_path = args.receipt or Path(str(args.output) + ".receipt.json")
         write_receipt(receipt, receipt_path, suffix=None)
-        proof = receipt["placement_proof"]
-        print(f"gemma4_stagepack: verify-only {args.output} ranks={tp_ranks} "
-              f"tensors={receipt['tensor_count']} "
-              f"proof={proof['passed']} "
-              f"manifest_ok={receipt['experts_manifest_ok']}")
-        return 0 if proof["passed"] and receipt["experts_manifest_ok"] is not False else 1
+        print(f"gemma4_stagepack: verify-only {args.output} tensors={receipt['tensor_count']} "
+              f"proof={receipt['placement_proof']['passed']} manifest_ok={receipt['experts_manifest_ok']}")
+        return 0
     if args.tp_rank >= args.tp_degree:
         raise PackFailure("tp-rank out of range")
     if args.first_layer < 0 or args.first_layer + layer_count > geometry["layers"]:

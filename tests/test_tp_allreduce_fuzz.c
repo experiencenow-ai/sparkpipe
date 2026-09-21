@@ -124,8 +124,27 @@ typedef struct FuzzRank
 	uint32_t rank;
 	uint16_t partial[FUZZ_ELEMENTS];
 	uint16_t output[FUZZ_ELEMENTS];
+	uint16_t gather_output[FUZZ_MAX_RANKS * FUZZ_ELEMENTS];
 	volatile uint64_t completion_count;
 } FuzzRank;
+
+static SparkStatus FuzzCombineGatherBf16(void *combine_context,
+    void *destination_device, const void *const *source_devices,
+    uint32_t source_count, uint32_t active_sequence_count,
+    uint32_t hidden_dimension, void *cuda_stream)
+{
+	uint16_t *destination = (uint16_t *)destination_device;
+	uint32_t stripe_elements = active_sequence_count * hidden_dimension;
+	uint32_t stripe, index;
+	(void)combine_context; (void)cuda_stream;
+	for ( stripe = 0u; stripe < source_count; stripe++ )
+	{
+		const uint16_t *source = (const uint16_t *)source_devices[stripe];
+		for ( index = 0u; index < stripe_elements; index++ )
+			destination[stripe * stripe_elements + index] = source[index];
+	}
+	return(SPARK_STATUS_OK);
+}
 
 static FuzzRank g_ranks[FUZZ_MAX_RANKS];
 
@@ -271,6 +290,7 @@ static SparkStatus FuzzCreateRank(uint32_t rank)
 	config.operation_timeout_milli = FUZZ_ROUND_TIMEOUT_MS;
 	config.collective_identifier = 0u;
 	config.combine_bf16_function = FuzzCombineBf16;
+	config.combine_gather_bf16_function = FuzzCombineGatherBf16;
 	g_connect_rank_hint = rank;
 	status = SparkTpDeviceCollectiveCreate(&config, &g_ranks[rank].collective);
 	if ( status != SPARK_STATUS_OK )
@@ -332,6 +352,28 @@ static void *FuzzRoundMain(void *data)
 	submission.completion_context = task->rank;
 	task->status = SparkTpDeviceCollectiveEnqueue(&task->rank->collective,
 	    &submission, SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_REDUCE_SUM_BF16);
+	__sync_synchronize();
+	task->done = 1u;
+	return(0);
+}
+
+static void *FuzzGatherMain(void *data)
+{
+	FuzzTask *task = (FuzzTask *)data;
+	SparkTpDeviceCollectiveSubmission submission;
+	memset(&submission,0,sizeof(submission));
+	submission.abi_version = SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION;
+	submission.descriptor_bytes = sizeof(submission);
+	submission.slot_index = 0u;
+	submission.active_sequence_count = 1u;
+	submission.ordinal = task->argument;
+	submission.local_device = task->rank->partial;
+	submission.full_device = task->rank->gather_output;
+	submission.cuda_stream = (void *)0x1;
+	submission.completion_function = FuzzComplete;
+	submission.completion_context = task->rank;
+	task->status = SparkTpDeviceCollectiveEnqueue(&task->rank->collective,
+	    &submission, SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_GATHER);
 	__sync_synchronize();
 	task->done = 1u;
 	return(0);
@@ -666,9 +708,70 @@ static void FuzzBasic(void)
 		{
 			CHECK( g_tasks[rank].status == SPARK_STATUS_OK,
 			    "post-hold round status ok" );
-			CHECK( FuzzSumOk(rank, 15u) != 0u,
-			    "post-hold sum correct (nothing dropped)" );
+		CHECK( FuzzSumOk(rank, 15u) != 0u,
+		    "post-hold sum correct (nothing dropped)" );
 		}
+	}
+}
+
+static void FuzzGatherCheck(void)
+{
+	uint32_t run[FUZZ_MAX_RANKS];
+	uint32_t run_count = FuzzAllRanks(run);
+	uint32_t rank, stripe, index;
+	uint32_t bad;
+	uint64_t request = 5000u;
+	uint64_t base[FUZZ_MAX_RANKS];
+	uint64_t settled;
+	uint64_t deadline;
+	CHECK( FuzzRunSet(FuzzChainMain, request, run, run_count,
+	    "chain", 20u, -1) != 0u, "gather chain key completes" );
+	for ( rank = 0u; rank < run_count; rank++ )
+		CHECK( g_tasks[rank].status == SPARK_STATUS_OK,
+		    "gather chain key status ok" );
+	deadline = FuzzNowNs() + 8ull * 1000000000ull;
+	settled = 0ull;
+	for ( rank = 0u; rank < run_count; rank++ )
+		settled += g_ranks[rank].completion_count;
+	for ( ;; )
+	{
+		uint64_t now = 0ull;
+		usleep(2000);
+		for ( rank = 0u; rank < run_count; rank++ )
+			now += g_ranks[rank].completion_count;
+		if ( now == settled )
+			break;
+		settled = now;
+		CHECK( FuzzNowNs() < deadline, "completions settle before gather" );
+	}
+	for ( rank = 0u; rank < run_count; rank++ )
+		base[rank] = g_ranks[rank].completion_count;
+	for ( rank = 0u; rank < run_count; rank++ )
+		for ( index = 0u; index < FUZZ_ELEMENTS; index++ )
+			g_ranks[rank].partial[index] = FuzzBf16FromFloat((float)(rank + 1u));
+	CHECK( FuzzRunSet(FuzzGatherMain, 16ull * 13ull + 1ull, run, run_count,
+	    "gather", 21u, -1) != 0u, "gather round completes" );
+	for ( rank = 0u; rank < run_count; rank++ )
+	{
+		bad = 0u;
+		CHECK( g_tasks[rank].status == SPARK_STATUS_OK,
+		    "gather round status ok" );
+		for ( stripe = 0u; stripe < run_count; stripe++ )
+			for ( index = 0u; index < FUZZ_ELEMENTS; index++ )
+				if ( g_ranks[rank].gather_output[
+				        stripe * FUZZ_ELEMENTS + index] !=
+				    FuzzBf16FromFloat((float)(stripe + 1u)) )
+					bad++;
+		CHECK( bad == 0u, "every gathered stripe matches its rank shard" );
+	}
+	deadline = FuzzNowNs() + 2ull * 1000000000ull;
+	for ( rank = 0u; rank < run_count; rank++ )
+	{
+		while ( g_ranks[rank].completion_count != base[rank] + 1ull
+		    && FuzzNowNs() < deadline )
+			usleep(1000);
+		CHECK( g_ranks[rank].completion_count == base[rank] + 1ull,
+		    "gather round fires its completion" );
 	}
 }
 
@@ -903,7 +1006,10 @@ int main(int argc, char **argv)
 	if ( bench_rounds != 0u )
 		wedge = BenchRun(bench_rounds);
 	else if ( fuzz_rounds == 0u )
+	{
 		FuzzBasic();
+		FuzzGatherCheck();
+	}
 	else
 		wedge = FuzzRun(fuzz_rounds, seed, kill_percent);
 	g_shipper_stop = 1u;
