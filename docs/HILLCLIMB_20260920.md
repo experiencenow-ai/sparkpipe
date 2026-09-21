@@ -865,3 +865,18 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   The watchdog is armed for the next stream-drain loss.
 - Standing: floor 0.55ms/round; queue class dead; all wedge classes now
   either fixed or bounded ≤45s.
+
+## 2026-09-21am tick — watchdog calibration: the arm point is too late
+
+- First live data: routes reaped at 120s in states 4 (READY_ADAPTER — the
+  adapter never TOOK the submission) and 5 with ZERO CHAIN-WATCHDOG fires —
+  the watchdog arms at EnqueueAsyncCompletion, but these chains were lost
+  BEFORE the enqueue (the advance chain died mid-work: a lazy lease that
+  never returned, or the start itself). The arm must move to CHAIN START
+  with a whole-chain bound (~300s covering legit cold chains) alongside the
+  45s post-enqueue bound. Next build.
+- POSITIVE: a chain ran 264s/76 rounds at 616µs/round allreduce (healthy!)
+  before its tail failed on a stage-3 lease timeout — and the API served a
+  request (served=1) with a 1-deep queue. The system DELIVERS at a slow
+  cadence now; the failures are the cold-era tails.
+- Fleet: engine 1692s stable; 35 LAZYWORKs through the cycle.
