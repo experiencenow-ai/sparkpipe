@@ -340,6 +340,14 @@ SparkStatus SparkTpDeviceCollectiveEnqueue(
     const SparkTpDeviceCollectiveSubmission *submission,
     uint32_t operation_kind);
 
+SparkStatus SparkTpDeviceCollectiveEnqueueRounds(
+    SparkTpDeviceCollective *collective,
+    const SparkTpDeviceCollectiveSubmission *submission,
+    uint32_t round_count);
+
+uint64_t SparkTpDeviceCollectiveDeviceRoundsDone(
+    SparkTpDeviceCollective *collective);
+
 SparkStatus SparkTpDeviceCollectiveWaitAllRoutes(
     SparkTpDeviceCollective *collective,
     uint32_t timeout_milli);

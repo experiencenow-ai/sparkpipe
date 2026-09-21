@@ -5,6 +5,7 @@
 #if defined(__CUDACC__)
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include "sparkpipe/spark_tp_mesh_round_control.h"
 #define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V5-CANCELPOLL-ORDPARITY"
 #if defined(__CUDACC__)
 __constant__ char SparkTpMeshKernelsBuildMarker[] =
@@ -142,6 +143,216 @@ static __device__ __forceinline__ void SparkGlm5NextStoreBf16Pair(void *base,uin
 	uint32_t packed = ((uint32_t)(__float_as_int(y) & 0xffff0000u)) |
 	    (uint32_t)((__float_as_int(x) >> 16) & 0x0000ffffu);
 	((uint32_t *)base)[element] = packed;
+}
+
+static_assert(sizeof(SparkTpMeshRoundControl) ==
+    SPARK_TP_MESH_ROUND_CONTROL_BYTES,"round control layout drift");
+
+__global__ void SparkGlm5NextMeshRoundLoopKernel(
+	volatile uint64_t *band_base,
+	uint64_t slot_bytes,
+	uint64_t slots_per_rank,
+	volatile uint64_t *entry,
+	volatile uint32_t *shipped_cell,
+	volatile uint64_t *cancel_cell,
+	SparkTpMeshRoundControl *control,
+	uint32_t rank,
+	uint32_t degree,
+	const void *local_device,
+	void *full_device,
+	uint64_t bytes)
+{
+	__shared__ uint32_t s_active;
+	__shared__ uint32_t s_decision;
+	__shared__ uint64_t s_slot;
+	__shared__ uint64_t s_parity_slot;
+	__shared__ uint64_t s_tag;
+	uint32_t tid = threadIdx.x;
+	uint32_t nthreads = blockDim.x;
+	uint64_t cursor = 0ull;
+	uint64_t prev_tag = 0ull;
+	uint64_t stop_at = 0ull;
+	uint64_t spin_cap;
+	if ( tid == 0u )
+	{
+		uint64_t now = SparkGlm5NextGlobalTimerNs();
+		cursor = control->slot_cursor;
+		prev_tag = control->round_seq;
+		stop_at = now + control->deadline_ns;
+		spin_cap = control->deadline_ns / 200ull;
+		if ( spin_cap < 1000000ull )
+			spin_cap = 1000000ull;
+	}
+	for ( ;; )
+	{
+		if ( tid == 0u )
+		{
+			s_active = control->rounds_done < control->rounds_total ? 1u : 0u;
+			s_decision = SPARK_TP_MESH_ROUND_LOOP_DECISION_GO;
+		}
+		__syncthreads();
+		if ( s_active == 0u )
+			break;
+		if ( tid == 0u && prev_tag != 0ull )
+		{
+			uint64_t spins = 0ull;
+			while ( *shipped_cell != (uint32_t)prev_tag )
+			{
+				if ( *cancel_cell != control->cancel_expected )
+				{
+					s_decision = SPARK_TP_MESH_ROUND_LOOP_DECISION_CANCEL;
+					break;
+				}
+				spins++;
+				if ( (spins & 4095ull) == 0ull &&
+				     ( spins >= spin_cap ||
+				       SparkGlm5NextGlobalTimerNs() >= stop_at ) )
+				{
+					control->diag_word = (0xa5ull << 56ull) |
+					    ((prev_tag & 0xffffull) << 16ull) |
+					    (*shipped_cell & 0xffffull);
+					control->error_word = prev_tag;
+					printf("MESH-ROUNDLOOP-TIMEOUT rank=%u phase=ship-ack want=%u got=%u\\n",
+						rank,(uint32_t)prev_tag,*shipped_cell);
+					s_decision = SPARK_TP_MESH_ROUND_LOOP_DECISION_TIMEOUT;
+					break;
+				}
+				__nanosleep(200u);
+			}
+		}
+		__syncthreads();
+		if ( s_decision != SPARK_TP_MESH_ROUND_LOOP_DECISION_GO )
+			break;
+		if ( tid == 0u )
+		{
+			s_slot = ((uint64_t)rank * slots_per_rank +
+			    (cursor & (slots_per_rank - 1ull))) * slot_bytes;
+			s_parity_slot =
+			    (cursor & (slots_per_rank - 1ull)) * slot_bytes;
+			s_tag = (control->epoch << 32ull) |
+			    ((control->seq + 1ull) & 0xffffffffull);
+		}
+		__syncthreads();
+		{
+			volatile uint64_t *destination = (volatile uint64_t *)
+			    ((uint8_t *)band_base + s_slot);
+			const uint64_t *source = (const uint64_t *)local_device;
+			uint64_t quads = (bytes + 7ull) >> 3ull;
+			uint64_t quad;
+			for ( quad = tid; quad < quads; quad += nthreads )
+				destination[quad] = source[quad];
+			__threadfence_system();
+		}
+		__syncthreads();
+		if ( tid == 0u )
+		{
+			volatile uint64_t *tail = (volatile uint64_t *)
+			    ((uint8_t *)band_base + s_slot + slot_bytes - 8ull);
+			entry[2] = s_slot / slot_bytes;
+			entry[1] = bytes;
+			control->seq = control->seq + 1ull;
+			control->round_seq = s_tag;
+			__threadfence_system();
+			*tail = s_tag;
+			__threadfence_system();
+			entry[0] = s_tag;
+		}
+		if ( tid == 0u )
+		{
+			uint32_t peer;
+			uint64_t spins = 0ull;
+			for ( peer = 0u; peer < degree - 1u; peer++ )
+			{
+				uint32_t peer_rank = peer < rank ? peer : peer + 1u;
+				volatile uint64_t *end_word = (volatile uint64_t *)
+				    ((uint8_t *)band_base +
+				    (((uint64_t)peer_rank * slots_per_rank +
+				      (cursor & (slots_per_rank - 1ull))) *
+					slot_bytes) + slot_bytes - 8ull);
+				while ( *end_word < s_tag )
+				{
+					if ( *cancel_cell != control->cancel_expected )
+					{
+						s_decision =
+						    SPARK_TP_MESH_ROUND_LOOP_DECISION_CANCEL;
+						break;
+					}
+					spins++;
+					if ( (spins & 4095ull) == 0ull &&
+					     ( spins >= spin_cap ||
+					       SparkGlm5NextGlobalTimerNs() >= stop_at ) )
+					{
+						control->diag_word =
+						    ((unsigned long long)peer_rank << 56ull) |
+						    ((cursor & 0xffull) << 48ull) |
+						    ((unsigned long long)
+							(s_slot / slot_bytes) << 32ull) |
+						    ((s_tag & 0xffffull) << 16ull) |
+						    (*end_word & 0xffffull);
+						control->error_word = s_tag;
+						printf("MESH-ROUNDLOOP-TIMEOUT rank=%u phase=peer-wait peer=%u want=%u got=%u\\n",
+						    rank,peer_rank,
+						    (uint32_t)s_tag,
+						    (uint32_t)*end_word);
+						s_decision =
+						    SPARK_TP_MESH_ROUND_LOOP_DECISION_TIMEOUT;
+						break;
+					}
+					__nanosleep(200u);
+				}
+				if ( s_decision != SPARK_TP_MESH_ROUND_LOOP_DECISION_GO )
+					break;
+			}
+		}
+		__syncthreads();
+		if ( s_decision != SPARK_TP_MESH_ROUND_LOOP_DECISION_GO )
+			break;
+		__threadfence();
+		{
+			uint64_t pairs = bytes >> 2ull;
+			uint64_t pair;
+			uint32_t source;
+			for ( pair = tid; pair < pairs; pair += nthreads )
+			{
+				float acc_x = 0.0f;
+				float acc_y = 0.0f;
+				for ( source = 0u; source < degree; source++ )
+				{
+					float2 part = SparkGlm5NextLoadBf16Pair(
+					    (const void *)((uint8_t *)band_base +
+					    (uint64_t)source * slots_per_rank *
+					        slot_bytes + s_parity_slot),pair);
+					acc_x += part.x;
+					acc_y += part.y;
+				}
+				SparkGlm5NextStoreBf16Pair(full_device,pair,acc_x,acc_y);
+			}
+		}
+		__syncthreads();
+		if ( tid == 0u )
+		{
+			cursor = cursor + 1ull;
+			prev_tag = s_tag;
+			control->slot_cursor = cursor;
+			control->rounds_done = control->rounds_done + 1ull;
+		}
+		__syncthreads();
+	}
+}
+
+extern "C" cudaError_t SparkGlm5NextLaunchMeshRoundLoop(cudaStream_t stream,
+	volatile void *band_base,uint64_t slot_bytes,uint64_t slots_per_rank,
+	volatile void *entry,void *shipped_cell,volatile void *cancel_cell,
+	void *round_control,uint32_t rank,uint32_t degree,
+	const void *local_device,void *full_device,uint64_t bytes)
+{
+	SparkGlm5NextMeshRoundLoopKernel<<<1,SPARK_TP_MESH_THREADS,0u,stream>>>(
+		(volatile uint64_t *)band_base,slot_bytes,slots_per_rank,
+		(volatile uint64_t *)entry,(volatile uint32_t *)shipped_cell,
+		(volatile uint64_t *)cancel_cell,
+		(SparkTpMeshRoundControl *)round_control,rank,degree,
+		local_device,full_device,bytes);
+	return cudaPeekAtLastError();
 }
 
 
