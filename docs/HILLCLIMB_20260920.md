@@ -1585,3 +1585,22 @@ concurrently with a failing bulk acquire contends the same map lock/budget).
 Sequence note: requests 1000002-1000005 arrived during the stall (API
 retries) and 1000005 hit ADMIT9 behind 1000004's PREPARED lease — the retry
 cadence + 60s lease serialization compounds any first-chain slowness.
+
+## 09-22 06:30 TICK — RE-GRADE: status 15 = ROUTE_NOT_FOUND (not BUSY); mesh records ruled out
+
+ENUM DECODED (spark_status.h): 11 = ABI_MISMATCH (the prefetch's layer
+failures), 15 = ROUTE_NOT_FOUND (THE 30s/rounds=0 chains — re-graded, NOT
+busy!). The chain-begin 30s stall = the lazy acquire path getting
+ROUTE_NOT_FOUND from the weightsd working-set resolve for the requested
+expert chunks.
+
+WEDGE PLAYBOOK FIRST MOVE DONE: the mesh records are FRESH (16 × mesh-*.rec,
+04:25, binary rendezvous format ✓) — the mesh-record class is RULED OUT.
+
+NEXT: the weightsd-side route table for the failing expert chunks —
+(a) grep the weightsd log at acquire time for the resolve failures,
+(b) read the working-set handler's ROUTE_NOT_FOUND paths in
+    runtime/spark_weightd.c (which condition: chunk not in the registry vs
+    request-shape), (c) the prefetch's ABI_MISMATCH (status 11) at map.c:451
+    is the same acquire machinery failing differently on 288-key batches —
+    possibly one root (the request shape for large batches).
