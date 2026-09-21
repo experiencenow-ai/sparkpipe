@@ -602,3 +602,17 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - Verdict with the reaper live: 3 routes reaped, chains completing (warm
   139.8ms/91r, allreduce 66.8ms = 0.73ms/round MEASURED); the probe's 500
   raced a 288s cold slot — the last cold-load cycle, verdict next tick.
+
+## 2026-09-21w tick — reaper generalized; the cold-cycle/verdict seesaw
+
+- New stuck shape caught: route 1008123 wedged in RESERVED (state=1) — the
+  submit handshake itself lost its continuation with ALL THREADS IDLE (third
+  lost-scheduling event: no mutex pileup, distinct futex words, work queued
+  but never run). The reaper now reaps ANY state past 120s (0c7c274) — the
+  entire wedge family is bounded at 2 minutes universally.
+- The lost-scheduling ROOT (async job continuation dropped between the
+  weightd worker / CUDA callbacks / adapter deferral) remains the one open
+  module-level class — the CHAIN-ADVANCE heartbeat is the named instrument.
+- The verdict seesaw continues mechanically: every deploy/recycle = a 5-8 min
+  cold cycle; probes keep racing it. Warm floor evidence stands (0.73ms/round
+  MEASURED). NEXT TICK: quiet open → single verdict probe → then S3.
