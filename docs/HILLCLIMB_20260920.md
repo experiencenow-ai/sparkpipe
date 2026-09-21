@@ -645,3 +645,21 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   tail; auditd/kill-source next. Candidates: an external killer (the mesh
   hub? a stale automation?), a driver-level abort masquerading as SIGKILL,
   or the latch hunt hitting a race (no print observed).
+
+## 2026-09-21z tick — #29 ROOT-CAUSED AND FIXED: the stale core release
+
+- The spark0 head-pair cycle's root, one line in the agent log: "weightd:
+  running af955ef5 != installed 38dce24e; recycling" — THE HUB'S CORE
+  RELEASE carried a stale weightd (af955ef5, a probe-era artifact) and the
+  agent's core sync kept re-installing it over the canonical build; the
+  agent's correct exe≠disk recycle then killed and restarted weightd in a
+  loop, each restart recycling the head engine (session churn, dead
+  requests). The "SIGKILL with no cause" was the recycle path all along.
+- FIX: core release republished with the canonical 38dce24e (publish_core
+  weightd + hub rsync); verified disk==exe on spark0/3/8/d. The mismatch
+  class is closed — ledger #29 CLOSED. Standing law (extends #27): after
+  ANY manual binary deploy, republish the matching core release or the
+  agent will fight the hub.
+- Fleet settling on the matched baseline (engines ~5min, first-chains
+  loading; 2 routes reaped within bound). The verdict probe continues next
+  tick on the stable baseline.
