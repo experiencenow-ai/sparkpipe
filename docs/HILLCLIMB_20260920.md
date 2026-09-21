@@ -880,3 +880,22 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   request (served=1) with a 1-deep queue. The system DELIVERS at a slow
   cadence now; the failures are the cold-era tails.
 - Fleet: engine 1692s stable; 35 LAZYWORKs through the cycle.
+
+## 2026-09-21an tick — start-armed watchdog deployed; the round-0 racer SOLVED diagnostically
+
+- START-ARMED WHOLE-CHAIN WATCHDOG deployed (1d6b41b): 300s whole-chain
+  bound (CHAIN-WATCHDOG-START) + the 45s post-enqueue bound; both clear on
+  completion.
+- THE ROUND-0/1 RACER ANSWERED (the instruments spoke at last):
+  MESH-SPIN-TIMEOUT on ranks 0 AND 1 both show **missing=5** — spark5's
+  weightd restarted (exe==disk, not the stale-release class) and its mesh
+  took **+52 SECONDS to wire** ("phase wired at +52072 ms" — record pulls
+  are agent-cadence). Every chain in that window missed rank 5. The
+  "fresh-chain convergence race" = single-node weightd restarts + the slow
+  agent-cadence rewiring. THE FIX SHAPE: the weightd's own record exchange
+  should push records to the fleet dir immediately at boot (its writes are
+  local to its node's mesh dir; the AGENT's rendezvous pull spreads them at
+  ~60s cadence) — or TryWire pulls directly. A 52s unwired window per node
+  bounce is the racer.
+- Fleet: spark5's bounce cascaded the window's failures; both bounds armed;
+  floor 0.55ms/round stands.
