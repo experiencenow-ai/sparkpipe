@@ -377,6 +377,9 @@ uint64_t SparkTpDeviceCollectiveGraphProgress(
 uint64_t SparkTpDeviceCollectiveGraphStuckDump(
     SparkTpDeviceCollective *collective);
 
+SparkStatus SparkTpDeviceCollectiveGraphArrivalDump(
+    SparkTpDeviceCollective *collective,uint32_t rank);
+
 uint64_t SparkTpDeviceCollectiveGraphDiag(
     SparkTpDeviceCollective *collective);
 uint64_t SparkTpDeviceCollectiveGraphError(

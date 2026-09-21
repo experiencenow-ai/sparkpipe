@@ -17,6 +17,7 @@ extern int cudaGetLastError(void);
 extern const char *cudaGetErrorString(int error);
 extern int cudaMemsetAsync(void *destination,int value,size_t bytes,
     void *stream);
+extern int cudaMemset(void *destination,int value,size_t bytes);
 extern int cudaMalloc(void **pointer,size_t bytes);
 extern int cudaFree(void *pointer);
 extern int cudaMemcpyAsync(void *destination,const void *source,
@@ -41,7 +42,8 @@ extern int SparkGlm5NextLaunchMeshWait(void *stream,
     volatile void *band_base,uint64_t slot_bytes,const void *round_seq,
     uint64_t slots_per_rank,uint32_t rank,uint32_t degree,
     void *error_word,unsigned long long deadline_ns,void *diag_word,
-    volatile void *cancel_cell,const void *cancel_expected);
+    volatile void *cancel_cell,const void *cancel_expected,
+    void *arrival_ring);
 extern int SparkGlm5NextLaunchMeshRoundLoop(void *stream,
     volatile void *band_base,uint64_t slot_bytes,uint64_t slots_per_rank,
     volatile void *entry,void *shipped_cell,volatile void *cancel_cell,
@@ -108,6 +110,7 @@ typedef struct SparkTpDeviceCollectiveImplementation
     void *round_seq_device;
     void *error_word;
     void *diag_word;
+    void *arrival_ring;
     void *cancel_expected;
     volatile uint64_t *published_host_cell;
     uint32_t capture_armed;
@@ -722,7 +725,8 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
                         (uint32_t)(implementation->band_base /
                             (SPARK_WEIGHTD_MESH_SLOT_BYTES *
                              SPARK_WEIGHTD_MESH_SLOTS_PER_BAND)))),
-                implementation->cancel_expected) != 0 )
+                implementation->cancel_expected,
+                implementation->arrival_ring) != 0 )
         {
             uint64_t kernel_error = 0ull;
             uint64_t kernel_diag = 0ull;
@@ -1550,6 +1554,11 @@ static SparkStatus SparkTpDeviceCollectiveEnsureCells(
     uint64_t zero_epoch = 0ull;
     if ( implementation->round_control != 0 )
         return SPARK_STATUS_OK;
+    if ( cudaMalloc(&implementation->arrival_ring,
+             256u * sizeof(uint64_t)) != 0 ||
+         cudaMemset(implementation->arrival_ring,0,
+             256u * sizeof(uint64_t)) != 0 )
+        SPARK_FAIL(SPARK_STATUS_IO_ERROR);
     if ( cudaMalloc(&implementation->round_control,
              SPARK_TP_MESH_ROUND_CONTROL_BYTES) != 0 ||
          cudaMemsetAsync(implementation->round_control,0,
@@ -1634,6 +1643,9 @@ SparkStatus SparkTpDeviceCollectiveGraphPreLaunch(
     implementation = collective->implementation;
     if ( implementation->seq_cell == 0 )
         SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
+    if ( implementation->arrival_ring != 0 && stream != 0 )
+        (void)cudaMemsetAsync(implementation->arrival_ring,0,
+            256u * sizeof(uint64_t),stream);
     if ( stream != 0 )
     {
         uint64_t scratch = 0ull;
@@ -1820,6 +1832,38 @@ uint64_t SparkTpDeviceCollectiveGraphStuckDump(
     }
     fprintf(stderr,"\n");
     return(sequence);
+}
+
+SparkStatus SparkTpDeviceCollectiveGraphArrivalDump(
+    SparkTpDeviceCollective *collective,uint32_t rank)
+{
+    SparkTpDeviceCollectiveImplementation *implementation;
+    uint64_t ring[256u];
+    uint64_t previous = 0ull;
+    uint32_t index;
+    uint32_t printed = 0u;
+    if ( collective == 0 || collective->implementation == 0 )
+        SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+    implementation = collective->implementation;
+    if ( implementation->arrival_ring == 0 )
+        SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
+    if ( cudaMemcpy(ring,implementation->arrival_ring,
+            sizeof(ring),SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST) != 0 )
+        SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+    for ( index = 0u; index < 256u && printed < 96u; index++ )
+    {
+        if ( ring[index] == 0ull )
+            continue;
+        if ( previous != 0ull && ring[index] >= previous )
+            fprintf(stderr,
+                "ARRIVAL rank=%u slot_idx=%u gap_us=%llu tag_bits=%llx\n",
+                rank,index,
+                (unsigned long long)((ring[index] - previous) / 1000ull),
+                (unsigned long long)ring[index] & 0xffffffffull);
+        previous = ring[index];
+        printed++;
+    }
+    return(SPARK_STATUS_OK);
 }
 
 uint64_t SparkTpDeviceCollectiveGraphDiag(

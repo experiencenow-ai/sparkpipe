@@ -256,6 +256,7 @@ struct SparkGlm5NextModuleState
 	atomic_ullong nccl_next_ordinal;
 	uint32_t graph_path_enabled;
 	uint32_t graph_fail_streak;
+	uint32_t graph_arrival_dumped;
 	uint64_t degrade_graph_fallback;
 	uint64_t degrade_covered_abandon;
 	uint64_t degrade_graph_disabled;
@@ -3007,7 +3008,16 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 			status = SPARK_STATUS_INTERNAL_ERROR;
 		}
 		else
+		{
 			state->graph_fail_streak = 0u;
+			if ( state->graph_arrival_dumped == 0u )
+			{
+				state->graph_arrival_dumped = 1u;
+				(void)SparkTpDeviceCollectiveGraphArrivalDump(
+					&state->tp_device_collective,
+					state->tp_rank);
+			}
+		}
 	}
 	if ( status == SPARK_STATUS_OK && state->decode_miss_host != 0 &&
 	     state->decode_miss_host[0] != 0u )
