@@ -2706,7 +2706,9 @@ static void SparkModelResidentdReportStuckRoutes(
 		}
 		if ( now_ns - route->active_since_ns >=
 		     (route->state == SPARK_MODEL_RESIDENTD_ROUTE_RESERVED ?
-		      UINT64_C(600000000000) : UINT64_C(120000000000)) )
+		      UINT64_C(600000000000) :
+		      route->state == SPARK_MODEL_RESIDENTD_ROUTE_WAIT_ADAPTER ?
+		      UINT64_C(400000000000) : UINT64_C(120000000000)) )
 		{
 			SparkModelServingCompletion failed;
 			memset(&failed,0,sizeof(failed));

@@ -3844,7 +3844,7 @@ static void *SparkGlm5NextCompletionWatchdog(void *argument)
 		{
 			SparkGlm5NextAsyncCompletion *async;
 			uint64_t started = state->chain_started_ns[slot_index];
-			if ( started != 0u && now_ns - started >= UINT64_C(300000000000) )
+			if ( started != 0u && now_ns - started >= UINT64_C(500000000000) )
 			{
 				SparkGlm5NextAsyncCompletion *chain_async =
 				    &state->completions[slot_index];
