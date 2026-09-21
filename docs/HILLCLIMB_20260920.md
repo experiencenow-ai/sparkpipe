@@ -1648,3 +1648,12 @@ cleanup path in node/weightd.c on client disconnect (does it release the
 owner's leases?); (c) if orphans convicted: fix the cleanup (owner-scoped
 release on disconnect) — NEVER restart the shared weightsd; (d) label the
 acquire deadline exit + add weightsd-side busy logging while there.
+
+ADDENDUM 07:45 — ORPHAN THEORY REFUTED: spark0's weightsd = 23 maps / 19.9MB
+VmSize = the FRESH-DAEMON signature (not the 214-221/83-286GB leak class).
+The acquire's request never elicits a weightsd response at all (clean
+daemon, no budget pressure, no orphans, silent). NEXT DISCRIMINATOR:
+trace the residentd's weightd-socket IPC during a chain (strace the
+send/recv pair) vs read the weightsd's working-set acquire handler — the
+request is either not sent (client-side early exit — check map->failure
+stickiness) or sent and lost (handler deadlock/queue). One of the two.
