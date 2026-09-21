@@ -1804,3 +1804,18 @@ shard layout; re-enable immediate start); (2) the per-token quiesce cadence
 (backoff or event-driven instead of hot-loop); (3) with warm boots: chain2
 graph → the ARRIVAL receipt → the 330ms/round relay conviction; (4) ladder
 idle re-measure.
+
+## 09-22 12:00 TICK — CAUSAL CORRELATION: the 497s walk = the 6 unroutable layers; 768 rounds at 41ms/round
+
+IMMEDIATE PARALLEL PREFETCH + BOUNDED RESET deployed (e2c5f98b/b0f63dce).
+CANARY: the chain advanced 768 ROUNDS (~8.4 tokens) in 500s —
+allreduce_ms=31673 = 41ms/round under load (improved from 78); stage_ms[3]
+cold walk STILL 497.166s. THE CORRELATION IS CAUSAL-GRADE: the prefetch
+fails layers 39-44 with TARGET_MISMATCH and THE WALK'S 497s IS SPENT ON
+EXACTLY THOSE LAYERS (the chain's own acquires for them retry through the
+walk). The other 39 layers prefetched fine. NEXT = THE WEIGHTSD-SIDE
+QUESTION, NOW TIGHT: why do layers 39-44's chunks return TARGET_MISMATCH —
+the weightsd's chunk registry/working-set resolve for those keys (read the
+acquire handler's TARGET_MISMATCH conditions; compare a failing key vs a
+succeeding one; check the pack tail's chunk files). Reset cadence: bounded
+(250ms) — the reset-attempt prints now sparse ✓.
