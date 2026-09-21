@@ -1748,3 +1748,16 @@ status + which sub-lookup), and grep the lease/weightsd-client layers for
 the 15 source. The per-token reset loop (why resets fire continuously
 during decode) is the second half — the API pipeline's per-step control
 bump design.
+
+## 09-22 10:30 TICK — adapter verified CURRENT (not stale); the 15-at-quiesce paradox pinned
+
+The rate-limited build works (count=1 lines, log readable). The adapter .so
+force-rebuilt = IDENTICAL sha (deterministic) — NOT a stale artifact. THE
+PARADOX: per source, ResetControl's quiesce can only return INVALID(1) or
+BUSY(16) (its snapshot call chain — module snapshot + lifecycle wrapper —
+returns 1/OK only), yet the fleet logs status=15 at adapter:1392/:1420 on
+the CURRENT build. MY READING IS MISSING A PATH. NEXT INSTRUMENT (one
+deploy): prints inside SparkGlm5NextServingQuiesce (entry, the
+available-count, the snapshot status, exit) — the 15's producer gets named.
+ALSO NOTE: the request returned model status 9 (kv-admit, second-submit
+lease) — the canary cadence still needs the first-request-wins pattern.
