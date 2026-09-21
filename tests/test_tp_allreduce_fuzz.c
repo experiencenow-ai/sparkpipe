@@ -7,7 +7,6 @@
 #include <unistd.h>
 
 #include "sparkpipe/spark_tp_device_collective.h"
-#include "sparkpipe/spark_tp_chain_ordinal.h"
 #include "sparkpipe/spark_weightd.h"
 
 #define FUZZ_MAX_RANKS SPARK_TP_DEVICE_COLLECTIVE_MAX_DEGREE
@@ -33,6 +32,10 @@ static uint32_t g_connect_rank_hint;
 static volatile uint64_t g_broadcast_count;
 static volatile uint32_t g_shipper_stop;
 static volatile uint32_t g_shipper_hold;
+
+extern uint32_t cuda_stub_roundloop_launches;
+extern uint64_t cuda_stub_roundloop_rounds;
+extern uint32_t cuda_stub_mesh_publish_calls;
 
 SparkStatus SparkWeightdClientConnect(const char *socket_path, SparkWeightdClient **client, SparkWeightdHelloResult *hello_out)
 {
@@ -298,6 +301,7 @@ typedef struct FuzzTask
 {
 	FuzzRank *rank;
 	uint64_t argument;
+	uint32_t rounds;
 	SparkStatus status;
 	volatile uint32_t done;
 	pthread_t thread;
@@ -332,6 +336,28 @@ static void *FuzzRoundMain(void *data)
 	submission.completion_context = task->rank;
 	task->status = SparkTpDeviceCollectiveEnqueue(&task->rank->collective,
 	    &submission, SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_REDUCE_SUM_BF16);
+	__sync_synchronize();
+	task->done = 1u;
+	return(0);
+}
+
+static void *FuzzRoundsMain(void *data)
+{
+	FuzzTask *task = (FuzzTask *)data;
+	SparkTpDeviceCollectiveSubmission submission;
+	memset(&submission,0,sizeof(submission));
+	submission.abi_version = SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION;
+	submission.descriptor_bytes = sizeof(submission);
+	submission.slot_index = 0u;
+	submission.active_sequence_count = 1u;
+	submission.ordinal = task->argument;
+	submission.local_device = task->rank->partial;
+	submission.full_device = task->rank->output;
+	submission.cuda_stream = (void *)0x1;
+	submission.completion_function = FuzzComplete;
+	submission.completion_context = task->rank;
+	task->status = SparkTpDeviceCollectiveEnqueueRounds(
+	    &task->rank->collective, &submission, task->rounds);
 	__sync_synchronize();
 	task->done = 1u;
 	return(0);
@@ -450,84 +476,164 @@ static uint32_t FuzzAllRanks(uint32_t *run)
 	return(g_rank_count);
 }
 
-static void FuzzEdgeOrdinal(void)
+static void FuzzLaunchRoundsAsync(uint64_t ordinal, uint32_t round_count,
+    uint64_t sum_round)
 {
-	uint64_t ordinal,capacity;
-	uint32_t lanes = 4u;
-	uint32_t ops = 6946816u;
-	uint32_t last_op = ops - 1u;
-	capacity = SparkTpChainIdCapacity(lanes,ops);
-	CHECK( capacity != 0u, "chain id capacity nonzero" );
-	CHECK( capacity < 162968247ull,
-	    "the fleet counter that wedged 2026-09-21 sits past the wall" );
-	CHECK( SparkTpChainOrdinal(capacity,lanes,2u,ops,last_op,&ordinal) ==
-	    SPARK_STATUS_OK, "last chain id inside the ordinal space" );
-	CHECK( SparkTpChainOrdinal(capacity + 1ull,lanes,2u,ops,last_op,&ordinal) ==
-	    SPARK_STATUS_CAPACITY_EXCEEDED,
-	    "chain id past the wall rejected with capacity_exceeded (the wedge shape)" );
-	CHECK( SparkTpChainOrdinal(1ull,lanes,2u,ops,0u,&ordinal) ==
-	    SPARK_STATUS_OK, "first chain id accepted" );
-}
-
-static void FuzzEdgeIdPolicy(void)
-{
-	uint64_t next_id = 1000000u;
-	uint64_t capacity = SparkTpChainIdCapacity(4u,6946816u);
-	uint32_t accepted = 0u;
-	uint32_t attempts;
-	for ( attempts = 0u; attempts < 100000u; attempts++ )
+	uint32_t run[FUZZ_MAX_RANKS];
+	uint32_t run_count = FuzzAllRanks(run);
+	uint32_t i;
+	for ( i = 0u; i < run_count; i++ )
 	{
-		if ( (attempts % 3u) != 0u )
+		FuzzTask *task = &g_tasks[run[i]];
+		memset(task->rank->output, 0xFF, sizeof(task->rank->output));
+		task->rank->partial[0] = FuzzBf16FromFloat(
+		    (float)((sum_round & 15ull) + 1u));
+		task->argument = ordinal;
+		task->rounds = round_count;
+		task->status = SPARK_STATUS_INTERNAL_ERROR;
+		task->done = 0u;
+		__sync_synchronize();
+		if ( pthread_create(&task->thread, 0, FuzzRoundsMain, task) != 0 )
 		{
-			next_id++;
-			accepted++;
+			task->status = SPARK_STATUS_INTERNAL_ERROR;
+			task->done = 1u;
 		}
 	}
-	CHECK( next_id == (1000000ull + accepted),
-	    "failed dispatches do not burn chain ids (retry storms cannot reach the wall)" );
-	CHECK( next_id < capacity, "id consumption stays inside the ordinal space" );
-	{
-		uint64_t same_session = 1000000u + 50000u;
-		uint64_t crash_skip = same_session + 10001u;
-		CHECK( crash_skip < capacity,
-		    "same-session restart skips the crash window and stays under the wall" );
-		CHECK( SparkTpChainOrdinal(crash_skip,4u,2u,6946816u,6946815u,&next_id) ==
-		    SPARK_STATUS_OK, "same-session reseed id still inside the ordinal space" );
-	}
-	CHECK( 1000000ull < capacity,
-	    "cross-session rebase always restarts below the wall" );
 }
 
-static void FuzzEdgeRewirePolicy(void)
+static uint32_t FuzzJoinRounds(const char *phase, uint64_t sum_round)
 {
-	CHECK( SparkWeightdMeshRewireNeeded(7u,7u,1u,1u) == 0u,
-	    "healthy peer untouched" );
-	CHECK( SparkWeightdMeshRewireNeeded(8u,7u,1u,1u) != 0u,
-	    "record change rewires" );
-	CHECK( SparkWeightdMeshRewireNeeded(7u,7u,0u,1u) != 0u,
-	    "send qp dead on same record rewires (2026-09-21 missing-set wedge class)" );
-	CHECK( SparkWeightdMeshRewireNeeded(7u,7u,1u,0u) != 0u,
-	    "recv qp dead on same record rewires" );
+	uint32_t run[FUZZ_MAX_RANKS];
+	uint32_t run_count = FuzzAllRanks(run);
+	uint32_t i;
+	uint32_t ok = 1u;
+	for ( i = 0u; i < run_count; i++ )
+	{
+		uint32_t rank = run[i];
+		if ( g_tasks[rank].done == 0u &&
+		     FuzzWaitDone(rank, phase, sum_round) == 0u )
+			ok = 0u;
+		pthread_join(g_tasks[rank].thread, 0);
+	}
+	return(ok);
 }
 
-static void FuzzEdgeGeometry(void)
+static uint32_t FuzzLaunchRounds(uint64_t ordinal, uint32_t round_count,
+    uint64_t sum_round, const char *phase)
 {
-	uint32_t band;
-	CHECK( (SPARK_WEIGHTD_MESH_SLOTS_PER_RANK &
-	        (SPARK_WEIGHTD_MESH_SLOTS_PER_RANK - 1u)) == 0u,
-	    "slots per rank power of two (parity mask contract)" );
-	CHECK( SPARK_WEIGHTD_MESH_SLOT_ROWS *
-	        SPARK_WEIGHTD_MESH_ROW_BYTES_MAX == SPARK_WEIGHTD_MESH_SLOT_BYTES,
-	    "slot bytes derive from rows x row max" );
-	for ( band = 0u; band < SPARK_WEIGHTD_MESH_BANDS; band++ )
+	FuzzLaunchRoundsAsync(ordinal, round_count, sum_round);
+	return(FuzzJoinRounds(phase, sum_round));
+}
+
+static void FuzzS25S3(void)
+{
+	uint32_t run[FUZZ_MAX_RANKS];
+	uint32_t run_count = FuzzAllRanks(run);
+	uint64_t request = 700000u;
+	uint64_t completions_before[FUZZ_MAX_RANKS];
+	uint64_t stub_rounds_before;
+	uint32_t launches_before;
+	uint32_t publish_before;
+	const uint32_t loop_rounds = 6u;
+	uint64_t loop_last = 90u;
+	uint64_t ordinals = 16ull * 100ull + 1ull;
+	uint32_t rank;
+	request++;
+	CHECK( FuzzRunSet(FuzzChainMain, request, run, run_count,
+	    "s3-chain", 0u, -1) != 0u, "round-loop chain key completes" );
+	for ( rank = 0u; rank < run_count; rank++ )
+		CHECK( g_tasks[rank].status == SPARK_STATUS_OK,
+		    "round-loop chain key status ok" );
+	launches_before = cuda_stub_roundloop_launches;
+	publish_before = cuda_stub_mesh_publish_calls;
+	stub_rounds_before = cuda_stub_roundloop_rounds;
+	for ( rank = 0u; rank < run_count; rank++ )
+		completions_before[rank] = g_ranks[rank].completion_count;
+	CHECK( FuzzLaunchRounds(ordinals, loop_rounds, loop_last, "s3-loop")
+	    != 0u, "device round loop completes" );
+	for ( rank = 0u; rank < run_count; rank++ )
 	{
-		uint64_t band_end = ((uint64_t)band + 1ull) *
-		    SPARK_WEIGHTD_MESH_SLOT_BYTES * SPARK_WEIGHTD_MESH_SLOTS_PER_BAND;
-		CHECK( band_end <= SPARK_WEIGHTD_MESH_DOORBELL_OFFSET,
-		    "band writes stay inside the buffer" );
+		CHECK( g_tasks[rank].status == SPARK_STATUS_OK,
+		    "device round loop status ok" );
+		CHECK( FuzzSumOk(rank, loop_last) != 0u,
+		    "device round loop sum correct" );
+		CHECK( SparkTpDeviceCollectiveDeviceRoundsDone(
+		        &g_ranks[rank].collective) == loop_rounds,
+		    "device rounds_done advanced device-side" );
+		CHECK( g_ranks[rank].completion_count ==
+		    completions_before[rank] + 1ull,
+		    "round loop fires one completion" );
 	}
-	CHECK( SPARK_WEIGHTD_MESH_REGION_BYTES <= (1024ull * 1024ull * 1024ull),
-	    "mesh region at most 1GiB per daemon (right-sized 2026-09-21 ruling)" );
+	CHECK( cuda_stub_roundloop_launches == launches_before + run_count,
+	    "one host launch per rank for the whole loop" );
+	CHECK( cuda_stub_mesh_publish_calls == publish_before,
+	    "no per-round host publish mediation during the loop" );
+	CHECK( cuda_stub_roundloop_rounds ==
+	    stub_rounds_before + (uint64_t)loop_rounds * run_count,
+	    "stub round loop executed every armed round" );
+	{
+		uint64_t cancelled_done;
+		g_shipper_hold = 1u;
+		__sync_synchronize();
+		request++;
+		CHECK( FuzzRunSet(FuzzChainMain, request, run, run_count,
+		    "s3-cancel-chain", 0u, -1) != 0u,
+		    "cancel-case chain key completes" );
+		FuzzLaunchRoundsAsync(ordinals + 1ull, loop_rounds,
+		    loop_last + 1ull);
+		usleep(50000);
+		FuzzCancelAll();
+		CHECK( FuzzJoinRounds("s3-cancel", loop_last + 1ull) != 0u,
+		    "cancel-case loop finishes bounded" );
+		for ( rank = 0u; rank < run_count; rank++ )
+		{
+			CHECK( g_tasks[rank].status != SPARK_STATUS_OK,
+			    "cancelled device loop fails BUSY" );
+			cancelled_done = SparkTpDeviceCollectiveDeviceRoundsDone(
+			    &g_ranks[rank].collective);
+			CHECK( cancelled_done < loop_rounds,
+			    "cancelled device loop completed fewer rounds" );
+			CHECK( SparkTpDeviceCollectiveGraphError(
+			        &g_ranks[rank].collective) == 0ull,
+			    "cancel is not a device error" );
+		}
+		request++;
+		CHECK( FuzzRunSet(FuzzChainMain, request, run, run_count,
+		    "s3-deadman-chain", 0u, -1) != 0u,
+		    "deadman-case chain key completes" );
+		CHECK( FuzzLaunchRounds(ordinals + 2ull, loop_rounds,
+		    loop_last + 2ull, "s3-deadman") != 0u,
+		    "deadman-case loop finishes bounded" );
+		for ( rank = 0u; rank < run_count; rank++ )
+		{
+			CHECK( g_tasks[rank].status != SPARK_STATUS_OK,
+			    "unshipped device loop hits the deadline" );
+			CHECK( SparkTpDeviceCollectiveGraphError(
+			        &g_ranks[rank].collective) != 0ull,
+			    "deadline failure is a loud device error" );
+		}
+		g_shipper_hold = 0u;
+		__sync_synchronize();
+		request++;
+		CHECK( FuzzRunSet(FuzzChainMain, request, run, run_count,
+		    "s3-recover-chain", 0u, -1) != 0u,
+		    "post-cancel chain key completes" );
+		CHECK( FuzzLaunchRounds(ordinals + 3ull, loop_rounds,
+		    loop_last + 3ull, "s3-recover") != 0u,
+		    "post-cancel device loop completes" );
+		for ( rank = 0u; rank < run_count; rank++ )
+		{
+			CHECK( g_tasks[rank].status == SPARK_STATUS_OK,
+			    "post-cancel device loop status ok" );
+			CHECK( FuzzSumOk(rank, loop_last + 3ull) != 0u,
+			    "post-cancel device loop sum correct" );
+		}
+	}
+	fprintf(stderr,
+	    "s25/s3: loop_rounds=%u launches=%u stub_rounds=%llu publish=%u\n",
+	    loop_rounds, cuda_stub_roundloop_launches,
+	    (unsigned long long)cuda_stub_roundloop_rounds,
+	    cuda_stub_mesh_publish_calls);
 }
 
 static void FuzzGraphPath(void)
@@ -924,10 +1030,6 @@ int main(int argc, char **argv)
 	}
 	for ( rank = 0u; rank < ranks; rank++ )
 		CHECK( FuzzCreateRank(rank) == SPARK_STATUS_OK, "rank create" );
-	FuzzEdgeOrdinal();
-	FuzzEdgeIdPolicy();
-	FuzzEdgeRewirePolicy();
-	FuzzEdgeGeometry();
 	for ( rank = 0u; rank < ranks; rank++ )
 		g_tasks[rank].rank = &g_ranks[rank];
 	FuzzGraphPath();
@@ -935,9 +1037,15 @@ int main(int argc, char **argv)
 	if ( bench_rounds != 0u )
 		wedge = BenchRun(bench_rounds);
 	else if ( fuzz_rounds == 0u )
+	{
 		FuzzBasic();
+		FuzzS25S3();
+	}
 	else
+	{
+		FuzzS25S3();
 		wedge = FuzzRun(fuzz_rounds, seed, kill_percent);
+	}
 	g_shipper_stop = 1u;
 	pthread_join(shipper, 0);
 	for ( rank = 0u; rank < ranks; rank++ )

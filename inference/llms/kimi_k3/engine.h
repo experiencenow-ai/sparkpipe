@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "inference/llms/kimi_k3/spec_verify.h"
+
 #define K3_ENGINE_OK               0
 #define K3_ENGINE_ERR_NULL       -70
 #define K3_ENGINE_ERR_CAPACITY   -71
@@ -61,6 +63,7 @@ struct K3Engine
 	uint32_t *slot_request;
 	uint32_t plan_epoch;
 	uint32_t committed_epoch;
+	struct K3AdaptiveDepth *adaptive_depth;
 };
 
 static int32_t K3EngineInit(struct K3Engine *engine, struct K3EngineRequest *request_storage, uint32_t request_capacity, uint32_t *slot_storage, uint32_t slot_capacity, uint32_t row_budget)
@@ -97,6 +100,26 @@ static int32_t K3EngineSubmitDraft(struct K3Engine *engine, uint64_t id, const u
 			return(K3_ENGINE_OK);
 		}
 	return(K3_ENGINE_ERR_STATE);
+}
+
+static int32_t K3EngineEnableAdaptiveDepth(struct K3Engine *engine,
+	struct K3AdaptiveDepth *controller, uint32_t window, uint32_t minimum_depth)
+{
+	if ( engine == 0 || controller == 0 )
+		return(K3_ENGINE_ERR_NULL);
+	K3AdaptiveDepthInit(controller,window,minimum_depth,
+		K3_VERIFY_MAX_DRAFT,K3_VERIFY_MAX_DRAFT);
+	engine->adaptive_depth = controller;
+	return(K3_ENGINE_OK);
+}
+
+static uint32_t K3EngineDraftDepth(const struct K3Engine *engine)
+{
+	if ( engine == 0 )
+		return(0u);
+	if ( engine->adaptive_depth != 0 )
+		return(K3AdaptiveDepthDepth(engine->adaptive_depth));
+	return(K3_VERIFY_MAX_DRAFT);
 }
 
 static int64_t K3EngineSubmit(struct K3Engine *engine, const uint32_t *prompt, uint32_t prompt_length, uint32_t max_new, uint32_t *output)
@@ -319,6 +342,9 @@ static int32_t K3EngineCommitVerify(struct K3Engine *engine, const struct K3Engi
 			return(K3_ENGINE_ERR_STATE);
 		if ( request->state != K3_SEQ_DECODE || accepted[sequence] > request->draft_count )
 			return(K3_ENGINE_ERR_STATE);
+		if ( engine->adaptive_depth != 0 )
+			K3AdaptiveDepthObserve(engine->adaptive_depth,
+				request->draft_count,accepted[sequence]);
 		ended = 0u;
 		for (r = 0u; r < accepted[sequence] && request->generated < request->max_new; ++r)
 		{

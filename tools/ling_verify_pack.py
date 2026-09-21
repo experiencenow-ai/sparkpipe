@@ -27,10 +27,10 @@ from typing import Any, Dict, List, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ling_stagepack import (  # noqa: E402
-    ALIGNMENT, CODEC_BF16, ENTRY_BYTES, EXPERT_INTER, EXPERTS, GLOBAL_LAYER,
-    HIDDEN, KDA_HEADS, KDA_KEY, KDA_QK, KDA_V, LAYERS,
+    ALIGNMENT, CODEC_BF16, CODEC_FP8, ENTRY_BYTES, EXPERT_INTER, EXPERTS,
+    GLOBAL_LAYER, HIDDEN, KDA_HEADS, KDA_KEY, KDA_QK, KDA_V, LAYERS,
     LATENT, MAGIC, MLA_HEADS, NOPE, PAYLOAD_BF16, PAYLOAD_F32,
-    PAYLOAD_PACKED_WEIGHT, Q_ROWS, ROPE, VDIM, VOCAB,
+    PAYLOAD_PACKED_WEIGHT, Q_ROWS, ROPE, SCALE_F32, VDIM, VOCAB,
 )
 
 HEADER_BYTES = 264
@@ -122,7 +122,9 @@ def verify_pack(path: Path, tp_degree: int) -> Dict[str, Any]:
             fail("flags", f"{path.name}: flags {flags:#x}, MTP must be omitted")
         if (hidden, vocab, experts) != (HIDDEN, VOCAB, EXPERTS):
             fail("geometry", f"{path.name}: {hidden}x{vocab}x{experts}")
-        if (linear_codec, expert_codec, kv_codec) != (CODEC_BF16, CODEC_BF16, CODEC_BF16):
+        fp8_arm = expert_codec == CODEC_FP8
+        if (linear_codec, kv_codec) != (CODEC_BF16, CODEC_BF16) or \
+                expert_codec not in (CODEC_BF16, CODEC_FP8):
             fail("codecs", f"{path.name}: linear {linear_codec} expert "
                            f"{expert_codec} kv {kv_codec}")
         if (tp32, rank32) != (tp_degree, int(path.name.rsplit("rank", 1)[1].split(".")[0], 16)):
@@ -161,10 +163,19 @@ def verify_pack(path: Path, tp_degree: int) -> Dict[str, Any]:
             if entry["payload_type"] not in (PAYLOAD_BF16, PAYLOAD_F32, PAYLOAD_PACKED_WEIGHT):
                 fail("payload_type", f"{path.name}[{index}] {name}: {entry['payload_type']}")
             if entry["payload_type"] == PAYLOAD_PACKED_WEIGHT:
-                if entry["weight_codec"] != CODEC_BF16 or entry["scale_bytes"] != 0:
+                if fp8_arm and entry["kind"] in (16, 17):
+                    if entry["weight_codec"] != CODEC_FP8 or \
+                            entry["scale_encoding"] != SCALE_F32 or \
+                            entry["scale_bytes"] == 0:
+                        fail("codec", f"{path.name}[{index}] {name}: the fp8 "
+                                      f"arm packages verbatim fp8 codes with "
+                                      f"per-row F32 per-128-block scale planes")
+                    per_element = 1
+                elif entry["weight_codec"] != CODEC_BF16 or entry["scale_bytes"] != 0:
                     fail("codec", f"{path.name}[{index}] {name}: the bf16 arm "
                                   f"packages verbatim bf16 with no scale plane")
-                per_element = 2
+                else:
+                    per_element = 2
             elif entry["payload_type"] == PAYLOAD_BF16:
                 per_element = 2
             else:
@@ -173,6 +184,15 @@ def verify_pack(path: Path, tp_degree: int) -> Dict[str, Any]:
             if entry["payload_bytes"] != expected_total:
                 fail("entry_bytes", f"{path.name}[{index}] {name}: "
                                     f"{entry['payload_bytes']} != {expected_total}")
+            if fp8_arm and entry["kind"] in (16, 17):
+                want_scale = (entry["group_count"] * entry["rows"]
+                              * ((entry["columns"] + 127) // 128) * 4)
+                if entry["scale_bytes"] != want_scale:
+                    fail("scale_bytes", f"{path.name}[{index}] {name}: "
+                                        f"{entry['scale_bytes']} != {want_scale}")
+                if entry["scale_offset"] < entry["payload_offset"] + entry["payload_bytes"]:
+                    fail("scale_order", f"{path.name}[{index}] {name}: scale "
+                                        f"plane precedes the payload end")
             if entry["payload_offset"] % ALIGNMENT != 0:
                 fail("alignment", f"{path.name}[{index}] {name}: "
                                   f"payload at {entry['payload_offset']}")

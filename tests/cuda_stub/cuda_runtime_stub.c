@@ -1,14 +1,17 @@
 #include "cuda_runtime_api.h"
 #include "cuda.h"
+#include "sparkpipe/spark_tp_mesh_round_control.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 static uint32_t cuda_capture_depth;
@@ -1154,5 +1157,170 @@ cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
     (void)slot_bytes;(void)round_seq;(void)parity;(void)rank;(void)degree;
     (void)error_word;(void)deadline_ns;(void)diag_word;
     (void)cancel_cell;(void)cancel_expected;
+    return cudaSuccess;
+}
+
+uint32_t cuda_stub_roundloop_launches = 0u;
+uint64_t cuda_stub_roundloop_rounds = 0u;
+
+static uint64_t cuda_stub_roundloop_now_ns(void)
+{
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        return 0ull;
+    return (uint64_t)now.tv_sec * UINT64_C(1000000000) +
+        (uint64_t)now.tv_nsec;
+}
+
+static uint16_t cuda_stub_roundloop_bf16_rne(float value)
+{
+    uint32_t bits;
+    uint32_t lsb;
+    memcpy(&bits, &value, 4u);
+    lsb = (bits >> 16) & 1u;
+    bits += 0x7fffu + lsb;
+    return (uint16_t)(bits >> 16);
+}
+
+static float cuda_stub_roundloop_bf16_load(uint32_t packed, uint32_t high)
+{
+    uint32_t bits = (high != 0u ? packed & UINT32_C(0xffff0000)
+        : (packed & UINT32_C(0x0000ffff)) << 16);
+    float out;
+    memcpy(&out, &bits, 4u);
+    return out;
+}
+
+cudaError_t SparkGlm5NextLaunchMeshRoundLoop(cudaStream_t stream,
+    volatile void *band_base,uint64_t slot_bytes,uint64_t slots_per_rank,
+    volatile void *entry,void *shipped_cell,volatile void *cancel_cell,
+    void *round_control,uint32_t rank,uint32_t degree,
+    const void *local_device,void *full_device,uint64_t bytes)
+{
+    SparkTpMeshRoundControl *control =
+        (SparkTpMeshRoundControl *)round_control;
+    uint8_t *band = (uint8_t *)band_base;
+    volatile uint64_t *entry_words = (volatile uint64_t *)entry;
+    volatile uint32_t *shipped = (volatile uint32_t *)shipped_cell;
+    volatile uint64_t *cancel = (volatile uint64_t *)cancel_cell;
+    uint64_t cursor, prev_tag, stop_at, parity;
+    uint32_t failed = 0u;
+    (void)stream;
+    (void)__sync_add_and_fetch(&cuda_stub_roundloop_launches, 1u);
+    cursor = control->slot_cursor;
+    prev_tag = control->round_seq;
+    stop_at = cuda_stub_roundloop_now_ns() + control->deadline_ns;
+    while (control->rounds_done < control->rounds_total)
+    {
+        uint64_t slot;
+        uint64_t tag;
+        uint32_t peer;
+        if (prev_tag != 0ull)
+        {
+            while (*shipped != (uint32_t)prev_tag)
+            {
+                if (*cancel != control->cancel_expected)
+                {
+                    failed = 1u;
+                    break;
+                }
+                if (cuda_stub_roundloop_now_ns() >= stop_at)
+                {
+                    control->diag_word = (UINT64_C(0xa5) << 56) |
+                        ((prev_tag & 0xffffull) << 16) |
+                        (*shipped & 0xffffull);
+                    control->error_word = prev_tag;
+                    fprintf(stderr,
+                        "MESH-ROUNDLOOP-TIMEOUT rank=%u phase=ship-ack want=%u got=%u\n",
+                        rank, (uint32_t)prev_tag, *shipped);
+                    failed = 1u;
+                    break;
+                }
+                sched_yield();
+            }
+            if (failed != 0u)
+                break;
+        }
+        slot = (uint64_t)rank * slots_per_rank +
+            (cursor & (slots_per_rank - 1ull));
+        parity = cursor & (slots_per_rank - 1ull);
+        tag = (control->epoch << 32) |
+            ((control->seq + 1ull) & UINT64_C(0xffffffff));
+        memcpy(band + slot * slot_bytes, local_device, (size_t)bytes);
+        entry_words[2] = slot;
+        entry_words[1] = bytes;
+        control->seq = control->seq + 1ull;
+        control->round_seq = tag;
+        __sync_synchronize();
+        *(volatile uint64_t *)(band + slot * slot_bytes +
+            slot_bytes - 8ull) = tag;
+        __sync_synchronize();
+        entry_words[0] = tag;
+        for (peer = 0u; peer < degree - 1u; peer++)
+        {
+            uint32_t peer_rank = peer < rank ? peer : peer + 1u;
+            volatile uint64_t *end_word = (volatile uint64_t *)
+                (band + ((uint64_t)peer_rank * slots_per_rank + parity) *
+                    slot_bytes + slot_bytes - 8ull);
+            while (*end_word < tag)
+            {
+                if (*cancel != control->cancel_expected)
+                {
+                    failed = 1u;
+                    break;
+                }
+                if (cuda_stub_roundloop_now_ns() >= stop_at)
+                {
+                    control->diag_word = ((uint64_t)peer_rank << 56) |
+                        ((cursor & 0xffull) << 48) |
+                        (parity << 32) |
+                        ((tag & 0xffffull) << 16) |
+                        (*end_word & 0xffffull);
+                    control->error_word = tag;
+                    fprintf(stderr,
+                        "MESH-ROUNDLOOP-TIMEOUT rank=%u phase=peer-wait peer=%u want=%u got=%u\n",
+                        rank, peer_rank, (uint32_t)tag, (uint32_t)*end_word);
+                    failed = 1u;
+                    break;
+                }
+                sched_yield();
+            }
+            if (failed != 0u)
+                break;
+        }
+        if (failed != 0u)
+            break;
+        __sync_synchronize();
+        {
+            const uint32_t *sources = (const uint32_t *)
+                (band + parity * slot_bytes);
+            uint32_t *destination = (uint32_t *)full_device;
+            uint64_t pairs = bytes >> 2;
+            uint64_t pair;
+            uint32_t source;
+            for (pair = 0ull; pair < pairs; pair++)
+            {
+                float acc_x = 0.0f;
+                float acc_y = 0.0f;
+                uint32_t packed;
+                for (source = 0u; source < degree; source++)
+                {
+                    packed = sources[source * slots_per_rank *
+                        (slot_bytes / 4ull) + pair];
+                    acc_x += cuda_stub_roundloop_bf16_load(packed, 0u);
+                    acc_y += cuda_stub_roundloop_bf16_load(packed, 1u);
+                }
+                packed = (uint32_t)cuda_stub_roundloop_bf16_rne(acc_x) |
+                    ((uint32_t)cuda_stub_roundloop_bf16_rne(acc_y) << 16);
+                destination[pair] = packed;
+            }
+        }
+        __sync_synchronize();
+        cursor = cursor + 1ull;
+        prev_tag = tag;
+        control->slot_cursor = cursor;
+        control->rounds_done = control->rounds_done + 1ull;
+        (void)__sync_add_and_fetch(&cuda_stub_roundloop_rounds, 1ull);
+    }
     return cudaSuccess;
 }

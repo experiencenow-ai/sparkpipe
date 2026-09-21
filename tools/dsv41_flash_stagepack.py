@@ -8,6 +8,9 @@ subcommands:
       validate the checkpoint against the kind map, write pack skeletons + plan.json
   copy HEADERS_JSON PLAN_JSON OUT_DIR WARM_DIR LO HI
       copy payload contributed by source shards [LO,HI] into every rank pack
+  validate-nvidia WARM_DIR INDEX_JSON
+      prove the nvidia nvfp4 expert convention reader consumes the
+      release; emission stays BLOCKED-MODULE (see the tool output)
 Exit 0 = step complete; nonzero = the failure is named on stderr.
 """
 
@@ -393,6 +396,101 @@ def expert_scale_shape(shape: list) -> list:
     return [shape[0], shape[1] * 2 // 32]
 
 
+CODEC_NVFP4 = 6
+SCALE_UE4M3_F32_GLOBAL = 4
+
+
+def nvidia_expert_spec(kind: int, layer: int, expert: int) -> dict:
+    """The modelopt 'dsv4-nvfp4-experts' release convention (#1049's T1
+    engine measured the same wire): per expert projection a U8-packed
+    e2m1 payload [rows, cols/2] (same byte layout as the DSpark I8
+    plane), an F8_E4M3 per-16 scale plane [rows, cols/16], and two F32
+    scalars (input_scale, weight_scale_2). The pack wire for this
+    convention is the nvfp4 codec: payload verbatim, per-16 plane
+    verbatim, weight_scale_2 as the per-expert 4-byte global."""
+    w = "w2" if kind == K_EXP_W2 else "w1" if kind == K_EXP_W1 else "w3"
+    shape = [5120, EXPERT_WIDTH // 2] if kind == K_EXP_W2 else [EXPERT_WIDTH, HIDDEN // 2]
+    cols = shape[1] * 2
+    return {
+        "payload": f"layers.{layer}.ffn.experts.{expert}.{w}.weight",
+        "scale": f"layers.{layer}.ffn.experts.{expert}.{w}.weight_scale",
+        "input_scale": f"layers.{layer}.ffn.experts.{expert}.{w}.input_scale",
+        "global": f"layers.{layer}.ffn.experts.{expert}.{w}.weight_scale_2",
+        "payload_dtype": "U8", "payload_shape": shape,
+        "scale_dtype": "F8_E4M3", "scale_shape": [shape[0], cols // 16],
+    }
+
+
+def cmd_validate_nvidia(warm: str, index_path: str) -> int:
+    """Read-only proof that the nvidia-convention expert reader consumes
+    the release: every routed-expert tensor is checked against the
+    measured convention and the checkpoint is fully accounted. Emits no
+    pack: the dsv41_flash module build rejects nvfp4 experts
+    (SparkDsv41FlashStagePackExpectedShape accepts MXFP4_E2M1 and
+    FP8_E4M3 only), so emission stays blocked at the module gate."""
+    import os
+    with open(index_path, encoding="utf-8") as handle:
+        weight_map = json.load(handle)["weight_map"]
+    shard_cache = {}
+
+    def meta_of(name):
+        shard = weight_map[name]
+        if shard not in shard_cache:
+            path = os.path.join(warm, shard)
+            if not os.path.isfile(path):
+                fail(f"missing shard file: {shard}")
+            fd = os.open(path, os.O_RDONLY)
+            try:
+                header_len = struct.unpack("<Q", os.pread(fd, 8, 0))[0]
+                shard_cache[shard] = json.loads(os.pread(fd, header_len, 8))
+            finally:
+                os.close(fd)
+        item = shard_cache[shard].get(name)
+        if item is None:
+            fail(f"{name} not in shard {shard}")
+        return item
+
+    missing = []
+    for layer in range(LAYER_COUNT):
+        for kind in EXPERT_KINDS:
+            for expert in range(ROUTED_EXPERTS):
+                spec = nvidia_expert_spec(kind, layer, expert)
+                for key in ("payload", "scale", "input_scale", "global"):
+                    if spec[key] not in weight_map:
+                        missing.append(spec[key])
+    if missing:
+        fail(f"nvidia release is missing {len(missing)} expert tensors "
+             f"(e.g. {missing[:4]})")
+    checked = 0
+    dtypes = {}
+    for layer in range(LAYER_COUNT):
+        for kind in EXPERT_KINDS:
+            for expert in range(ROUTED_EXPERTS):
+                spec = nvidia_expert_spec(kind, layer, expert)
+                for key in ("payload", "scale", "input_scale", "global"):
+                    meta = meta_of(spec[key])
+                    want_dtype = {"payload": "U8", "scale": "F8_E4M3",
+                                  "input_scale": "F32", "global": "F32"}[key]
+                    if meta["dtype"] != want_dtype:
+                        fail(f"{spec[key]}: {meta['dtype']}, expected {want_dtype}")
+                    if key == "payload" and meta["shape"] != spec["payload_shape"]:
+                        fail(f"{spec[key]}: shape {meta['shape']}, expected {spec['payload_shape']}")
+                    if key == "scale" and meta["shape"] != spec["scale_shape"]:
+                        fail(f"{spec[key]}: shape {meta['shape']}, expected {spec['scale_shape']}")
+                    if key in ("input_scale", "global") and meta["shape"] not in ([], [1]):
+                        fail(f"{spec[key]}: expected F32 scalar, got {meta['shape']}")
+                    dtypes[meta["dtype"]] = dtypes.get(meta["dtype"], 0) + 1
+                    checked += 1
+    print(f"nvidia expert convention ok: {checked} tensors verified "
+          f"(40 layers x 384 experts x 3 projections x 4 tensors), dtypes {dtypes}")
+    print("EMISSION BLOCKED-MODULE: the dsv41_flash module accepts expert "
+          "codecs mxfp4_e2m1 and fp8_e4m3 only "
+          "(SparkDsv41FlashStagePackExpectedShape); a nvfp4 pack would fail "
+          "the entry check at load, so the nvfp4 wire requires the module "
+          "format bump first")
+    return 0
+
+
 def rank_window(mode: str, rank: int, tp: int, rows: int, cols: int):
     if mode == "repl":
         return 0, rows, 0, cols
@@ -637,6 +735,8 @@ def main(argv: list) -> int:
     try:
         if argv[1] == "headers" and len(argv) == 5:
             cmd_headers(argv[2], argv[3], argv[4])
+        elif argv[1] == "validate-nvidia" and len(argv) == 4:
+            return cmd_validate_nvidia(argv[2], argv[3])
         elif argv[1] == "plan" and len(argv) == 9:
             cmd_plan(argv[2], argv[3], int(argv[4]), argv[5], argv[6], argv[7], argv[8])
         elif argv[1] == "copy" and len(argv) == 8:

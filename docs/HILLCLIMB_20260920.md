@@ -636,6 +636,7 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   139.8ms/91r, allreduce 66.8ms = 0.73ms/round MEASURED); the probe's 500
   raced a 288s cold slot — the last cold-load cycle, verdict next tick.
 
+
 ## 2026-09-21w tick — reaper generalized; the cold-cycle/verdict seesaw
 
 - New stuck shape caught: route 1008123 wedged in RESERVED (state=1) — the
@@ -1151,3 +1152,63 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
 - The map's remaining layer (module chain/completion sim) is the next
   build — it covers exactly this residual class AND the S3 graph blocker.
   Floor 0.55ms/round stands.
+
+## 2026-09-21 lane/transport-s25-s3 — S2.5+S3 implemented as the device-resident round loop
+
+- SCOPE REFRAME (against the 09-21d verdict): that verdict killed moving the
+  RDMA-LANDED SLOT PAYLOADS into device memory (both GPUDirect routes dead on
+  GB10); it did NOT touch the control plane. S2.5 here = the per-round
+  CONTROL STATE (slot cursor, sequence, epoch, round tag, cancel expected,
+  error/diag, round counters, deadline) lives in ONE device-resident control
+  block the kernels read/write directly; the mesh flags stay in the host
+  memfd where RDMA lands (exactly the 09-21d holding pattern).
+- The block (SparkTpMeshRoundControl, 10 u64 words) is also the storage
+  behind the existing seq_cell/epoch_cell/round_seq_device/error_word/
+  diag_word/cancel_expected pointers — one cudaMalloc, zero ABI change to
+  the existing publish/wait kernels; EnsureCells now allocates it once.
+- S3 = SparkGlm5NextMeshRoundLoopKernel (+ its launcher): ONE launch runs N
+  allreduce rounds device-side — per round: SHIPPED-cell publish-ack spin
+  (#1063 contract, device-side now), payload copydown, doorbell+tail
+  publish (flat slot = rank*SLOTS_PER_RANK + parity from the DEVICE cursor;
+  the weightd shipper needs no host parity), peer-tail wait, in-kernel bf16
+  f32-accumulated combine, rounds_done++. Escapes: cancel-cell poll every
+  spin (#1056 family — BroadcastCancel breaks device waits, cancel is NOT
+  an error, rounds_done < total), deadline deadman (control.deadline_ns,
+  min(round_timeout, 30s) — loud error_word+diag+printf, no infinite spin),
+  diag encodes phase/peer/slot/want/got.
+- Host side: SparkTpDeviceCollectiveEnqueueRounds(collective, submission,
+  round_count) arms the block with ONE memcpy (words 0-5) + zeroes
+  error/diag, launches the loop once, syncs the stream ONCE, reads the
+  block back ONCE, updates publish_ack_prev/round_seq mirrors, classifies
+  OK / cancel-BUSY / timeout-BUSY, queues one completion.
+  SparkTpDeviceCollectiveDeviceRoundsDone observes rounds_done. The loop
+  kernel is graph-capturable: rearm is a stream-ordered H2D of words 0-5
+  (the GraphCancelSeed pattern), so graph replay = zero host round-trips
+  per round.
+- FUZZ RECEIPTS (tests/test_tp_allreduce_fuzz.c, CPU + cuda_stub, measured):
+  default mode 263 checks / 0 failures (was 204 — the S2.5/S3 scenarios add
+  59); --fuzz 60: 751/0, 0 unrecovered; --fuzz 200 seed 777: 2408/0;
+  --fuzz 100 kill-percent 70: 1187/0. New scenarios: (1) multi-round
+  device loop — 6 rounds, all ranks, sums exact, rounds_done advanced
+  device-side, ONE host launch per rank, ZERO per-round publish launches
+  (stub hook), one completion per loop; (2) cancel-during-device-wait —
+  shipper held, loop parked mid-chain, BroadcastCancel breaks it in ~50ms,
+  BUSY, error_word stays 0, next chain recovers with exact sums; (3)
+  deadman — held loop fails loud at the deadline with error_word+diag set;
+  (4) post-cancel/post-deadman recovery loop completes with exact sums.
+- Eager-path numbers unchanged (bench p50 1538us for 200 rounds — the S1
+  host path is untouched). DERIVED win (from the S1 receipts' cost
+  structure): per round the loop removes 3 kernel launches, the D2H
+  readback + full stream sync (the ~50-200us class item), the ship-ack
+  host spin, the 15-peer host spin, and the combine launch — replaced by
+  one launch + one arm + one readback per N rounds (amortized to ~0 host
+  round-trips per round under graph replay). Against the measured S1
+  1334us/round and the measured pure-mesh in-chain floor 136us/round
+  (09-21 verdict tick), the round loop is the structural route to the
+  <=100us class; fleet measurement is the next ladder rung (needs the
+  graph-env blockers #4/#5 cleared or the eager EnqueueRounds path
+  deployed).
+- sm_121a gate: PASS on sparkb (CUDA 13, compute_121a/sm_121a) — the round
+  loop kernel compiles through the same spark_tp_mesh_kernels.cuh the
+  glm5_next module builds from.
+

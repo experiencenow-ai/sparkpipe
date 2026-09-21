@@ -61,8 +61,10 @@ PAYLOAD_PACKED_WEIGHT = 4
 
 CODEC_NONE = 0
 CODEC_BF16 = 1
+CODEC_FP8 = 5
 SCALE_NONE = 0
 SCALE_F32 = 1
+FP8_BLOCK = 128
 
 K_EMBEDDING, K_FINAL_NORM, K_LM_HEAD = 0, 1, 2
 K_ATTN_NORM, K_Q, K_KV_A, K_KV_A_NORM = 3, 4, 5, 6
@@ -101,6 +103,24 @@ def f32_to_bf16_u16(f32: np.ndarray) -> np.ndarray:
     rounded = ((bits + np.uint32(0x7FFF) + ((bits >> np.uint32(16)) & np.uint32(1)))
                >> np.uint32(16)).astype(np.uint16)
     return rounded
+
+
+def fp8_e4m3_lut() -> np.ndarray:
+    codes = np.arange(256, dtype=np.uint32)
+    sign = (codes >> 7) & 1
+    exp = (codes >> 3) & 0xF
+    man = codes & 0x7
+    value = np.where(
+        exp == 0,
+        man.astype(np.float32) * np.float32(2.0 ** -9),
+        (np.float32(1.0) + man.astype(np.float32) / np.float32(8.0))
+        * np.power(np.float32(2.0), (exp.astype(np.int32) - 7).astype(np.float32)),
+    ).astype(np.float32)
+    value[(exp == 15) & (man == 7)] = np.float32("nan")
+    return np.where(sign == 1, -value, value).astype(np.float32)
+
+
+FP8_LUT = fp8_e4m3_lut()
 
 
 class SourceReader:
@@ -164,7 +184,11 @@ class SourceReader:
 
     def matrix2d(self, name: str) -> np.ndarray:
         """[rows, cols] uint16 view of a BF16 checkpoint matrix (conv1d's
-        [dim, 1, kernel] squeezes to [dim, kernel])."""
+        [dim, 1, kernel] squeezes to [dim, kernel]). F8_E4M3 spines
+        dequantize through their [rows/128, cols/128] F32
+        weight_scale_inv plane (W = code x scale_inv, modelopt fp8
+        scheme) with one round-to-nearest-even bf16 rounding - the
+        defined value of the fp8 release, never a requantization."""
         dtype, shape, = self.meta(name)
         if len(shape) == 3 and shape[1] == 1:
             shape = (shape[0], shape[2])
@@ -180,6 +204,19 @@ class SourceReader:
             rounding = (u32 >> np.uint32(16)) & np.uint32(1)
             return ((u32 + np.uint32(0x7FFF) + rounding)
                     >> np.uint32(16)).astype(np.uint16)
+        elif dtype == "F8_E4M3":
+            scale_name = name + "_scale_inv"
+            _dt, scale_shape = self.meta(scale_name)
+            expected = ((rows + 127) // 128, (cols + 127) // 128)
+            if tuple(scale_shape) != expected:
+                raise PackFailure(f"{scale_name}: shape {tuple(scale_shape)}, "
+                                  f"expected {expected}")
+            codes = self.raw(name).reshape(rows, cols)
+            scale = self.raw(scale_name).view(np.float32).reshape(scale_shape)
+            expanded = np.repeat(scale, 128, axis=0)[:rows]
+            expanded = np.repeat(expanded, 128, axis=1)[:, :cols]
+            matrix = f32_to_bf16_u16(FP8_LUT[codes] * expanded)
+            del expanded
         else:
             raise PackFailure(f"{name}: unsupported spine dtype {dtype}")
         if name not in self._cache:
@@ -296,9 +333,13 @@ class Entry:
 
 
 class PlanItem:
-    def __init__(self, entry: Entry, produce_payload: Callable[[], Iterator[bytes]]):
+    def __init__(self, entry: Entry, produce_payload: Callable[[], Iterator[bytes]],
+                 produce_scale: Optional[Callable[[], Iterator[bytes]]] = None):
         self.entry = entry
         self.produce_payload = produce_payload
+        self.produce_scale = produce_scale
+        self.expert_digests: Optional[List[bytes]] = None
+        self.expert_scale_digests: Optional[List[bytes]] = None
 
 
 class Packer:
@@ -326,7 +367,7 @@ class Packer:
             shape = (1, shape[0])
         if tuple(shape) != (rows, columns):
             raise PackFailure(f"{name}: shape {tuple(shape)}, expected {(rows, columns)}")
-        if dtype not in ("BF16", "F32"):
+        if dtype not in ("BF16", "F32", "F8_E4M3"):
             raise PackFailure(f"{name}: spine dtype {dtype}")
         entry = Entry(kind, layer, PAYLOAD_BF16, CODEC_BF16, SCALE_NONE, 1, rows, columns)
         entry.payload_bytes = rows * columns * 2
@@ -345,7 +386,7 @@ class Packer:
             shape = (shape[0], shape[2])
         if tuple(shape) != (rows, columns):
             raise PackFailure(f"{name}: shape {tuple(shape)}, expected {(rows, columns)}")
-        if dtype not in ("BF16", "F32"):
+        if dtype not in ("BF16", "F32", "F8_E4M3"):
             raise PackFailure(f"{name}: spine dtype {dtype}")
         start, count = self._slice_rows(rows)
         entry = Entry(kind, layer, PAYLOAD_BF16, CODEC_BF16, SCALE_NONE, 1, count, columns)
@@ -363,7 +404,7 @@ class Packer:
         dtype, shape = self.s.meta(name)
         if tuple(shape) != (rows, columns):
             raise PackFailure(f"{name}: shape {tuple(shape)}, expected {(rows, columns)}")
-        if dtype not in ("BF16", "F32"):
+        if dtype not in ("BF16", "F32", "F8_E4M3"):
             raise PackFailure(f"{name}: spine dtype {dtype}")
         start, count = self._slice_rows(columns)
         entry = Entry(kind, layer, PAYLOAD_BF16, CODEC_BF16, SCALE_NONE, 1, rows, count)
@@ -497,7 +538,7 @@ class Packer:
         dtype, shape = self.s.meta(name)
         if len(shape) == 3 and shape[1] == 1:
             shape = (shape[0], shape[2])
-        if dtype not in ("BF16", "F32") or len(shape) != 2 or \
+        if dtype not in ("BF16", "F32", "F8_E4M3") or len(shape) != 2 or \
                 tuple(shape) != (channels, KDA_CONV):
             raise PackFailure(f"{name}: conv layout {dtype} {tuple(shape)}, expected "
                               f"[{channels}, {KDA_CONV}] (or [channels, 1, kernel])")
@@ -514,17 +555,26 @@ class Packer:
         self.plan.append(PlanItem(entry, produce))
 
     def add_experts(self, layer: int, prefix: str):
-        if self.expert_codec != CODEC_BF16:
-            raise PackFailure("only the bf16 expert pass-through arm is wired; "
-                              "compressed sources need their own receipt set")
+        if self.expert_codec not in (CODEC_BF16, CODEC_FP8):
+            raise PackFailure("only the bf16 and fp8 expert arms are wired; "
+                              "other codecs need their own receipt set")
         inter0, inter_count = self._slice_rows(EXPERT_INTER)
         w1_rows = 2 * inter_count
-        w1 = Entry(K_EXPERT_UP_GATE, layer, PAYLOAD_PACKED_WEIGHT, CODEC_BF16,
-                   SCALE_NONE, EXPERTS, w1_rows, HIDDEN)
-        w1.payload_bytes = EXPERTS * w1_rows * HIDDEN * 2
-        w2 = Entry(K_EXPERT_DOWN, layer, PAYLOAD_PACKED_WEIGHT, CODEC_BF16,
-                   SCALE_NONE, EXPERTS, HIDDEN, inter_count)
-        w2.payload_bytes = EXPERTS * HIDDEN * inter_count * 2
+        is_fp8 = self.expert_codec == CODEC_FP8
+        payload_type = PAYLOAD_PACKED_WEIGHT
+        weight_codec = self.expert_codec
+        scale_encoding = SCALE_F32 if is_fp8 else SCALE_NONE
+        w1 = Entry(K_EXPERT_UP_GATE, layer, payload_type, weight_codec,
+                   scale_encoding, EXPERTS, w1_rows, HIDDEN)
+        w1.payload_bytes = EXPERTS * w1_rows * HIDDEN * (1 if is_fp8 else 2)
+        w2 = Entry(K_EXPERT_DOWN, layer, payload_type, weight_codec,
+                   scale_encoding, EXPERTS, HIDDEN, inter_count)
+        w2.payload_bytes = EXPERTS * HIDDEN * inter_count * (1 if is_fp8 else 2)
+        if is_fp8:
+            w1_blocks = (HIDDEN + FP8_BLOCK - 1) // FP8_BLOCK
+            w1.scale_bytes = EXPERTS * w1_rows * w1_blocks * 4
+            w2_blocks = (inter_count + FP8_BLOCK - 1) // FP8_BLOCK
+            w2.scale_bytes = EXPERTS * HIDDEN * w2_blocks * 4
         source = self.s
 
         for expert in range(EXPERTS):
@@ -532,38 +582,93 @@ class Packer:
                         f"{prefix}.{expert}.gate_proj.weight",
                         f"{prefix}.{expert}.down_proj.weight")
 
-        def expert_ok(name: str, rows: int, columns: int) -> np.ndarray:
+        def expert_payload(name: str, rows: int, columns: int) -> np.ndarray:
             dtype, shape = source.meta(name)
+            if is_fp8:
+                if dtype != "F8_E4M3" or tuple(shape) != (rows, columns):
+                    raise PackFailure(f"{name}: expected F8_E4M3 {(rows, columns)}, "
+                                      f"got {dtype} {tuple(shape)}")
+                return source.raw(name).reshape(rows, columns)
             if dtype != "BF16" or tuple(shape) != (rows, columns):
                 raise PackFailure(f"{name}: expected BF16 {(rows, columns)}, "
                                   f"got {dtype} {tuple(shape)}")
             return source.matrix2d(name)
 
+        def expert_scale_rows(name: str, global_rows: range, blocks: int) -> np.ndarray:
+            """Per-output-row scale rows gathered from the per-128-block
+            weight_scale_inv plane: payload row r carries block row
+            (global row r)//128 across all column blocks."""
+            scale_name = name + "_scale_inv"
+            _dt, scale_shape = source.meta(scale_name)
+            plane = source.raw(scale_name).view(np.float32).reshape(scale_shape)
+            if plane.shape[1] != blocks:
+                raise PackFailure(f"{scale_name}: {plane.shape[1]} column blocks, "
+                                  f"expected {blocks}")
+            picked = plane[[g // FP8_BLOCK for g in global_rows], :]
+            if picked.shape[0] != global_rows.stop - global_rows.start:
+                raise PackFailure(f"{scale_name}: gather produced {picked.shape}")
+            return picked
+
         def produce_w1() -> Iterator[bytes]:
             for expert in range(EXPERTS):
-                up = expert_ok(f"{prefix}.{expert}.up_proj.weight",
-                               EXPERT_INTER, HIDDEN)
-                gate = expert_ok(f"{prefix}.{expert}.gate_proj.weight",
-                                 EXPERT_INTER, HIDDEN)
+                up = expert_payload(f"{prefix}.{expert}.up_proj.weight",
+                                    EXPERT_INTER, HIDDEN)
+                gate = expert_payload(f"{prefix}.{expert}.gate_proj.weight",
+                                      EXPERT_INTER, HIDDEN)
                 fused = np.concatenate(
                     (up[inter0:inter0 + inter_count, :],
                      gate[inter0:inter0 + inter_count, :]), axis=0)
                 yield to_bytes(fused)
 
+        def produce_w1_scale() -> Iterator[bytes]:
+            blocks = (HIDDEN + FP8_BLOCK - 1) // FP8_BLOCK
+            up_rows = range(inter0, inter0 + inter_count)
+            gate_rows = range(inter0, inter0 + inter_count)
+            for expert in range(EXPERTS):
+                up = expert_scale_rows(f"{prefix}.{expert}.up_proj.weight",
+                                       up_rows, blocks)
+                gate = expert_scale_rows(f"{prefix}.{expert}.gate_proj.weight",
+                                         gate_rows, blocks)
+                plane = np.concatenate((up, gate), axis=0)
+                if plane.shape != (w1_rows, blocks):
+                    raise PackFailure(f"{prefix}.{expert}: w1 scale plane "
+                                      f"{plane.shape}, expected {(w1_rows, blocks)}")
+                yield to_bytes(plane)
+
         def produce_w2() -> Iterator[bytes]:
             for expert in range(EXPERTS):
-                down = expert_ok(f"{prefix}.{expert}.down_proj.weight",
-                                 HIDDEN, EXPERT_INTER)
+                down = expert_payload(f"{prefix}.{expert}.down_proj.weight",
+                                      HIDDEN, EXPERT_INTER)
                 yield to_bytes(down[:, inter0:inter0 + inter_count])
 
-        self.plan.append(PlanItem(w1, produce_w1))
-        self.plan.append(PlanItem(w2, produce_w2))
+        def produce_w2_scale() -> Iterator[bytes]:
+            blocks = (inter_count + FP8_BLOCK - 1) // FP8_BLOCK
+            rows = range(HIDDEN)
+            for expert in range(EXPERTS):
+                scale_name = f"{prefix}.{expert}.down_proj.weight_scale_inv"
+                _dt, scale_shape = source.meta(scale_name)
+                plane = source.raw(scale_name).view(np.float32).reshape(scale_shape)
+                out = np.empty((HIDDEN, blocks), dtype=np.float32)
+                col_blocks = [((inter0 + b * FP8_BLOCK) // FP8_BLOCK)
+                              for b in range(blocks)]
+                for b in range(blocks):
+                    out[:, b] = plane[[r // FP8_BLOCK for r in rows], col_blocks[b]]
+                yield to_bytes(out)
+
+        if is_fp8:
+            self.plan.append(PlanItem(w1, produce_w1, produce_w1_scale))
+            self.plan.append(PlanItem(w2, produce_w2, produce_w2_scale))
+        else:
+            self.plan.append(PlanItem(w1, produce_w1))
+            self.plan.append(PlanItem(w2, produce_w2))
 
     def build(self, source_revision: str) -> None:
         s = self.s
-        if s.config.get("quantization_config"):
-            raise PackFailure("source carries quantization_config; the bf16 arm "
-                              "requires the official BF16 release")
+        quant = s.config.get("quantization_config")
+        if quant is not None:
+            if self.expert_codec != CODEC_FP8 or quant.get("quant_method") != "fp8":
+                raise PackFailure("source carries quantization_config; the bf16 arm "
+                                  "requires the official BF16 release")
         torch_dtype = s.config.get("torch_dtype")
         if torch_dtype is not None and str(torch_dtype) not in ("bfloat16", "torch.bfloat16"):
             raise PackFailure(f"torch_dtype {torch_dtype} contradicts the bf16 arm")
@@ -697,6 +802,9 @@ def emit(packer: Packer, path: Path, revision: str, contract_sha: bytes) -> int:
         e = item.entry
         e.payload_offset = (cursor + ALIGNMENT - 1) & ~(ALIGNMENT - 1)
         cursor = e.payload_offset + e.payload_bytes
+        if e.scale_bytes:
+            e.scale_offset = (cursor + ALIGNMENT - 1) & ~(ALIGNMENT - 1)
+            cursor = e.scale_offset + e.scale_bytes
     file_bytes = cursor
     header = assemble_header(packer.plan, packer.tp_degree, packer.tp_rank,
                              packer.expert_codec, directory_offset, file_bytes,
@@ -722,6 +830,19 @@ def emit(packer: Packer, path: Path, revision: str, contract_sha: bytes) -> int:
                         raise PackFailure(f"{entry.kind}: slab digests "
                                           f"{len(sink.digests)} != {EXPERTS}")
                     item.expert_digests = sink.digests
+                if entry.scale_bytes:
+                    if item.produce_scale is None:
+                        raise PackFailure(f"{entry.kind}: scale segment has no producer")
+                    scale_sink = None
+                    if entry.kind in (K_EXPERT_UP_GATE, K_EXPERT_DOWN):
+                        scale_sink = SlabDigestSink(entry.scale_bytes // EXPERTS)
+                    emit_region(out, entry.scale_offset, entry.scale_bytes,
+                                item.produce_scale(), scale_sink)
+                    if scale_sink is not None:
+                        if len(scale_sink.digests) != EXPERTS:
+                            raise PackFailure(f"{entry.kind}: scale slab digests "
+                                              f"{len(scale_sink.digests)} != {EXPERTS}")
+                        item.expert_scale_digests = scale_sink.digests
             out.flush()
             os.fsync(out.fileno())
         os.link(temporary, path)
@@ -736,12 +857,16 @@ def emit(packer: Packer, path: Path, revision: str, contract_sha: bytes) -> int:
 
 
 def census_check(weight_map: Dict[str, str], packed: List[str],
-                 mtp_names: List[str]) -> Dict[str, Any]:
+                 mtp_names: List[str], source: Optional[SourceReader] = None) -> Dict[str, Any]:
     packed_set = set(packed)
+    duplicated = len(packed) - len(packed_set)
+    if source is not None:
+        for name in sorted(packed_set):
+            if source.meta(name)[0] == "F8_E4M3":
+                packed_set.add(name + "_scale_inv")
     known = set(weight_map)
     unexplained = sorted(known - packed_set - set(mtp_names))
     missing = sorted(packed_set - known)
-    duplicated = len(packed) - len(packed_set)
     if unexplained or missing or duplicated:
         raise PackFailure(
             f"census does not close: {len(unexplained)} unexplained "
@@ -759,10 +884,10 @@ def write_expert_manifest(pack_path: Path, plan: List[PlanItem]) -> int:
 
     16-byte header (magic 0x58504557, version 2, range count, reserved 0)
     then one 48-byte record per expert plane: layer, expert, kind
-    (tensor kind * 2 + plane, payload plane only - the bf16 arm has no
-    scale planes), reserved 0, offset, bytes, ck128 digest. Ranges are
-    emitted in offset order; SparkWeightdManifestLoad re-sorts and
-    re-checks overlap anyway."""
+    (tensor kind * 2 + plane, plane 0 = payload and plane 1 = scale, the
+    glm52 fp8 convention - the bf16 arm has no scale planes), reserved 0,
+    offset, bytes, ck128 digest. Ranges are emitted in offset order;
+    SparkWeightdManifestLoad re-sorts and re-checks overlap anyway."""
     ranges = []
     for item in plan:
         entry = item.entry
@@ -775,13 +900,24 @@ def write_expert_manifest(pack_path: Path, plan: List[PlanItem]) -> int:
         for expert in range(EXPERTS):
             ranges.append((entry.payload_offset + expert * per, per,
                            entry.layer, expert, entry.kind * 2,
-                           item, expert))
+                           item, expert, "payload"))
+        if entry.scale_bytes:
+            per_scale = entry.scale_bytes // EXPERTS
+            if per_scale == 0 or per_scale > EXPERT_RANGE_BYTES_MAX:
+                raise PackFailure(f"{entry.kind}: per-expert scale slab "
+                                  f"{per_scale} bytes outside the contract")
+            for expert in range(EXPERTS):
+                ranges.append((entry.scale_offset + expert * per_scale, per_scale,
+                               entry.layer, expert, entry.kind * 2 + 1,
+                               item, expert, "scale"))
     ranges.sort()
     with pack_path.open("rb") as pack:
         records = bytearray()
-        for offset, length, layer, expert, kind, item, expert_index in ranges:
-            if getattr(item, "expert_digests", None) is not None:
+        for offset, length, layer, expert, kind, item, expert_index, plane in ranges:
+            if plane == "payload" and getattr(item, "expert_digests", None) is not None:
                 digest = item.expert_digests[expert_index]
+            elif plane == "scale" and getattr(item, "expert_scale_digests", None) is not None:
+                digest = item.expert_scale_digests[expert_index]
             else:
                 pack.seek(offset)
                 digest = ck128(pack.read(length))
@@ -807,7 +943,7 @@ def main() -> int:
     parser.add_argument("--tp-rank", type=int, default=0)
     parser.add_argument("--tp-all", type=int, default=0,
                         help="emit all N rank packs in one process")
-    parser.add_argument("--expert-codec", default="bf16", choices=["bf16"])
+    parser.add_argument("--expert-codec", default="bf16", choices=["bf16", "fp8"])
     parser.add_argument("--model", default="ling", choices=["ling", "lingfin"])
     parser.add_argument("--dry-plan", action="store_true")
     args = parser.parse_args()
@@ -821,8 +957,16 @@ def main() -> int:
                      REPO_ROOT / "model_contracts" / f"{args.model}_authoritative.json")
     contract_sha = (sha256_bytes(contract_file.read_bytes())
                     if contract_file.is_file() else bytes(32))
-    codec_ids = {"bf16": CODEC_BF16}
+    codec_ids = {"bf16": CODEC_BF16, "fp8": CODEC_FP8}
     expert_codec = codec_ids[args.expert_codec]
+    if expert_codec == CODEC_FP8:
+        name_map_path = family_dir / "name_map_fp8.json"
+        if not name_map_path.is_file():
+            raise PackFailure(f"the fp8 arm requires {name_map_path} "
+                              f"(the fp8 release's census pin)")
+        name_map = json.loads(name_map_path.read_text())
+        source_revision = name_map["source_revision"]
+        expected_census = name_map["checkpoint_census"]["tensor_count"]
 
     source = SourceReader(Path(args.source))
     if len(source.weight_map) != expected_census:
@@ -837,7 +981,8 @@ def main() -> int:
     for rank in ranks:
         packer = Packer(source, args.tp_all or args.tp_degree, rank, expert_codec)
         packer.build(source_revision)
-        census = census_check(source.weight_map, packer.packed_names, mtp_names)
+        census = census_check(source.weight_map, packer.packed_names, mtp_names,
+                              source if expert_codec == CODEC_FP8 else None)
         if args.dry_plan:
             print(f"rank {rank}: {len(packer.plan)} pack tensors planned, "
                   f"census {census}")

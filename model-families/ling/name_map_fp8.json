@@ -1,0 +1,20 @@
+{
+ "schema_version": 1,
+ "family": "ling-fp8",
+ "contract": "model_contracts/ling_authoritative.json",
+ "source_revision": "ling-3.0-flash-fp8 (modelopt fp8 e4m3 dynamic activation scheme); config.json sha256 621969ccadf2cf1f5575f82baeadccc841221922ba0dd265b6da329781738b74; model.safetensors.index.json sha256 c5b0212d2f4af850363f3b0a1ce76c5b5809c4d4a3a1f9f20db9c57e6e72fea6",
+ "checkpoint_census": {
+  "tensor_count": 127115,
+  "source": "model.safetensors.index.json @ warm mount (measured 2026-09-20); 63332 F8_E4M3 expert weights + 63332 F32 weight_scale_inv planes + 340 BF16 (kv_a/kv_b/lm_head/embed/router/norms/conv1d/b_proj/o_norm + MLA g_proj) + F32 A_log/dt_bias/expert_bias/scale_inv planes",
+  "witnesses": "61440 routed-expert weights (40 moe layers x 512 experts x 3), 63332 weight_scale_inv (61440 expert + 1892 linear/shared/dense/mtp), modules_to_not_convert pins q_a/q_b/kv_a/kv_b/lm_head/word_embeddings/b_proj/mlp.gate and MLA-layer g_proj"
+ },
+ "expert_wire": {
+  "codec": "fp8_e4m3 (SparkWeightCodec 5)",
+  "payload": "per-expert up|gate fused rows (rank inter slice) verbatim F8_E4M3 codes; down columns verbatim",
+  "scale_plane": "per output row x per 128-column-block F32 gathered from the [rows/128, cols/128] weight_scale_inv (row r carries block row r//128)",
+  "spine": "all non-routed-expert F8_E4M3 tensors (attention projections, dense MLP, shared experts) dequantize to BF16 through weight_scale_inv with one RNE bf16 rounding - the module pins linear_weight_codec BF16"
+ },
+ "entries": [],
+ "tensor_pattern_count": 0,
+ "note": "entries stay in name_map.json (the tensor vocabulary is unchanged); this pin only re-binds the census and the source identity for the fp8 expert arm"
+}

@@ -51,13 +51,17 @@ FAMILIES = {
         "mtp_layer_range": None, "sentinel_mtp": True,   # layer == 0xFFFFFFFE
     },
     # qwen36sp (qwen38_27b packer): 120-byte header (26I2Q), 56-byte
-    # entries (<6I4Q) — same layout as qwen4_flash. MTP tensors ride the
+    # entries (<6I4Q). NOT the qwen4_flash layout: the 27b header has no
+    # expert fields and carries mtp_layer_count at u32[23] with
+    # tp_degree at u32[24] and tp_rank at u32[25] (the flash v1 header
+    # ends ...vocab, mxfp4_group, mtp at 25). MTP tensors ride the
     # 0xFFFFFFFE layer marker with kinds 23..26 (MTP_FC + three norms);
     # the 0xffffffff GLOBAL entries (kinds 0..2) are the embedding/head
     # and are NOT MTP.
     "qwen36sp": {
         "magic": 0x50533651, "header_bytes": 120,
-        "u32_count": 26, "count_index": 4, "mtp_index": 25,
+        "u32_count": 26, "count_index": 4, "mtp_index": 23,
+        "tp_degree_index": 24, "tp_rank_index": 25,
         "u64_count_index": 0,
         "entry_bytes": 56,
         "payload_off_at": 24, "scale_off_at": 40,
@@ -122,9 +126,12 @@ def chattr(path: Path, flag: str) -> bool:
     # by a shell, and "--" ends option parsing so a --pack path that
     # starts with "-" can never be read as a chattr flag.
     for prefix in ([], ["sudo"]):
-        result = subprocess.run(prefix + ["chattr", flag, "--", str(path)],
-                                shell=False,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            result = subprocess.run(prefix + ["chattr", flag, "--", str(path)],
+                                    shell=False,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (FileNotFoundError, PermissionError, OSError):
+            continue
         if result.returncode == 0:
             return True
     return False
@@ -162,9 +169,125 @@ def update_receipt(receipt: Path, digest: str, kept_end, dropped, reclaim, prior
 
 
 def is_immutable(pack: Path) -> bool:
-    result = subprocess.run(["lsattr", str(pack)], stdout=subprocess.PIPE,
-                            stderr=subprocess.DEVNULL, text=True)
+    try:
+        result = subprocess.run(["lsattr", str(pack)], stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True)
+    except (FileNotFoundError, PermissionError, OSError):
+        return False
     return "i" in (result.stdout.split()[0] if result.stdout else "")
+
+
+def repair_header(pack: Path, family: dict, receipt: Path, args) -> int:
+    """Undo the 2026-09-05 mis-indexed strip on a rank != 0 pack: the old
+    qwen36sp map zeroed tp_rank (u32[25]) instead of mtp_layer_count
+    (u32[23]), so every stripped pack declares rank 0 and claims an MTP
+    layer it no longer carries. The repair swaps the two fields back
+    (mtp=0, tp_rank=<expected rank>), re-shas, and re-receipts.
+
+    Fail-closed on any state that does not match the exact corruption
+    signature: right magic/header size, mtp field nonzero, tp_rank field
+    zero, tp_degree field == --expect-tp-degree, --expect-tp-rank != 0,
+    and a directory that carries no MTP entries (the strip already
+    removed them)."""
+    mtp_index = family["mtp_index"]
+    degree_index = family.get("tp_degree_index")
+    rank_index = family.get("tp_rank_index")
+    if degree_index is None or rank_index is None:
+        print(f"FAIL {pack}: family {args.family} has no tp field map; "
+              f"repair is not defined", file=sys.stderr)
+        return 1
+    if args.expect_tp_rank is None or args.expect_tp_degree is None:
+        print(f"FAIL {pack}: --repair-header requires --expect-tp-degree "
+              f"and --expect-tp-rank", file=sys.stderr)
+        return 1
+    size = pack.stat().st_size
+    with pack.open("rb") as file:
+        raw = file.read(family["header_bytes"])
+    if len(raw) != family["header_bytes"]:
+        print(f"FAIL {pack}: short header", file=sys.stderr)
+        return 1
+    u32s = list(struct.unpack_from(f"<{family['u32_count']}I", raw, 0))
+    if u32s[0] != family["magic"] or u32s[2] != family["header_bytes"]:
+        print(f"FAIL {pack}: format fingerprint mismatch "
+              f"(magic={u32s[0]:#x} header_bytes={u32s[2]})", file=sys.stderr)
+        return 1
+    before_mtp = u32s[mtp_index]
+    before_degree = u32s[degree_index]
+    before_rank = u32s[rank_index]
+    if before_mtp == 0 and before_rank == args.expect_tp_rank:
+        print(f"PASS {pack}: header already reads mtp=0 tpdeg={before_degree} "
+              f"tprank={before_rank} - nothing to repair")
+        return 0
+    if before_mtp == 0:
+        print(f"FAIL {pack}: mtp field is already 0 but tp_rank reads "
+              f"{before_rank} != expected {args.expect_tp_rank}; refusing to "
+              f"patch an unrecognized state", file=sys.stderr)
+        return 1
+    if before_rank != 0:
+        print(f"FAIL {pack}: tp_rank field reads {before_rank}, expected the "
+              f"corruption signature tprank=0", file=sys.stderr)
+        return 1
+    if before_degree != args.expect_tp_degree:
+        print(f"FAIL {pack}: tp_degree field reads {before_degree}, expected "
+              f"{args.expect_tp_degree}", file=sys.stderr)
+        return 1
+    tensor_count = u32s[family["count_index"]]
+    u64s = list(struct.unpack_from("<2Q", raw, family["u32_count"] * 4))
+    with pack.open("rb") as file:
+        file.seek(u64s[family["u64_count_index"]])
+        raw_dir = file.read(tensor_count * family["entry_bytes"])
+    if len(raw_dir) != tensor_count * family["entry_bytes"]:
+        print(f"FAIL {pack}: short directory", file=sys.stderr)
+        return 1
+    mtp_entries = 0
+    for i in range(tensor_count):
+        block = raw_dir[i * family["entry_bytes"]:(i + 1) * family["entry_bytes"]]
+        kind, layer = struct.unpack_from("<2I", block, 0)
+        if is_mtp({"kind": kind, "layer": layer}, family):
+            mtp_entries += 1
+    if mtp_entries:
+        print(f"FAIL {pack}: directory still carries {mtp_entries} MTP "
+              f"entries; zeroing mtp_layer_count would lie about the "
+              f"payload - run the strip first", file=sys.stderr)
+        return 1
+    print(f"REPAIR {pack}: header u32[{mtp_index}]={before_mtp} -> 0, "
+          f"u32[{rank_index}]={before_rank} -> {args.expect_tp_rank} "
+          f"(u32[{degree_index}]={before_degree} unchanged)")
+    if args.dry_run:
+        return 0
+    if not chattr(pack, "-i") and is_immutable(pack):
+        print(f"FAIL {pack}: immutable and cannot clear the flag (need root)", file=sys.stderr)
+        return 2
+    u32s[mtp_index] = 0
+    u32s[rank_index] = args.expect_tp_rank
+    with pack.open("r+b") as file:
+        file.seek(0)
+        file.write(struct.pack(f"<{family['u32_count']}I", *u32s))
+        file.flush()
+        os.fsync(file.fileno())
+    digest = sha256_chunked(pack)
+    prior = read_receipt(receipt).get("output_sha256")
+    receipt_data = read_receipt(receipt)
+    receipt_data.update({
+        "output_sha256": digest,
+        "header_repair": {
+            "family": args.family,
+            "before": {f"u32[{mtp_index}]": before_mtp,
+                       f"u32[{degree_index}]": before_degree,
+                       f"u32[{rank_index}]": before_rank},
+            "after": {f"u32[{mtp_index}]": 0,
+                      f"u32[{degree_index}]": before_degree,
+                      f"u32[{rank_index}]": args.expect_tp_rank},
+            "mtp_entries_in_directory": 0,
+        },
+    })
+    if prior is not None:
+        receipt_data["prior_sha256"] = prior
+    locked = chattr(pack, "+i")
+    receipt_data["locked"] = locked
+    receipt.write_text(json.dumps(receipt_data, indent=2, sort_keys=True) + "\n")
+    print(f"DONE {pack}: sha {digest[:16]}... locked={locked}")
+    return 0 if locked else 3
 
 
 
@@ -542,6 +665,12 @@ def main() -> int:
                         help="re-compact a g5nsp pack even when flags=0 (re-offsets regions onto 256 boundaries)")
     parser.add_argument("--compact", action="store_true",
                         help="rewrite the pack keeping only non-MTP regions (for layouts where MTP is not the file tail)")
+    parser.add_argument("--repair-header", action="store_true",
+                        help="repair a mis-indexed strip: swap mtp_layer_count and tp_rank back to (0, --expect-tp-rank)")
+    parser.add_argument("--expect-tp-degree", type=int,
+                        help="required tp_degree header value for --repair-header")
+    parser.add_argument("--expect-tp-rank", type=int,
+                        help="the pack's true tp_rank for --repair-header")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     pack: Path = args.pack
@@ -554,6 +683,8 @@ def main() -> int:
             return compact_g5nsp(pack, receipt, args)
         return result
     family = FAMILIES[args.family]
+    if args.repair_header:
+        return repair_header(pack, family, receipt, args)
 
     actual_bytes = pack.stat().st_size
     with pack.open("rb") as file:
