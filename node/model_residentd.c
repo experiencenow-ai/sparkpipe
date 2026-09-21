@@ -2658,8 +2658,11 @@ static SparkStatus SparkModelResidentdProgressRoutes(
 		status = SparkModelResidentdProgressRoute(runtime,&runtime->routes[index],
 			allow_adapter != 0u ? &budget : 0);
 
-		if ( budget.ops != 0u )
-			runtime->next_adapter_route = (index + 1u) % runtime->route_capacity;
+		runtime->next_adapter_route = (index + 1u) % runtime->route_capacity;
+		if ( budget.refused != 0u && budget.ops == 0u )
+			fprintf(stderr,
+				"ROUTE-FAIRNESS pass refused at index=%u state=%u — cursor advancing past it so later routes are not starved behind a busy adapter\n",
+				(unsigned)index,(unsigned)runtime->routes[index].state);
 	}
 	SPARK_RETURN(status);
 }
