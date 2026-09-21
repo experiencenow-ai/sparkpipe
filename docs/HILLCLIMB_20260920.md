@@ -1855,3 +1855,23 @@ its route state (the ROUTE-STUCK scanner should have printed at 30s but
 did NOT — is the route even active? check route activation between DECISION
 and chain-BEGIN); (b) the reset/quiesce interplay with an in-flight
 submission (does a pending reset gate new chain dispatch?).
+
+## 09-22 13:30 TICK — my immediate-close created the churn (fixed); submissions still not chaining
+
+THE RECONNECT CHURN CONVICTED AS MY OWN: the immediate close-after-output
+block I added fired when a path sets the flag with NO output queued —
+closing healthy sessions per message (prompt close where the pre-fix code
+hung). Block REMOVED (the drain-close in WriteClient + POLLOUT-follows-
+pending handles the real case); deployed 44ed57b1. Churn now +13/min (was
+~1000x that during the 400K era) — residual churn = the API's own reconnect
+backoff cycle.
+
+REMAINING (the pre-chain wedge persists): submissions ADMITTED (5+ arrived,
+decision=1) but NO chain, NO PREFETCH-START, ZERO ROUTE-STUCK prints — the
+routes never age 30s (something recycles them) or never activate past
+EnqueueCommitted. NEXT DISCRIMINATORS: (a) print the route state at
+EnqueueCommitted + its ready_state (one instrument names the parking state);
+(b) the hidden-transport input path (WAIT_INPUT delivery) vs the session
+resets — each reconnect may invalidate the transport session carrying the
+request payload; (c) whether the per-reconnect pending reset fences the
+routes (cleaning them before the 30s scanner).
