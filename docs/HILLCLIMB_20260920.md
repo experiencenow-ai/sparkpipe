@@ -1380,3 +1380,38 @@ REMAINING (crisp):
    engines restart (or wait for re-key) to re-attempt graph after fix 1.
 4. THEN: the ns/round receipt (GRAPH-REPLAY-TIME prints per replay), ladder
    N=1/2/8/24/45/91 class verification, PR #1075 update, coredev regrade.
+
+## 09-22 01:55 TICK — ld.cv unlock: 1/91 → 77/91 rounds MEASURED
+
+MEASURE: fresh-boot first graph chain, three builds:
+- 4b617867 (volatile reads): DEGRADE at seq=(6<<32)|1 — replay executed
+  ROUND 1 ONLY; every rank's wait starved while every relay shipped all 91
+  publishes (WD-SEEN full sequence) — CONVICTION: peer data arrives via RDMA
+  into host memory; GPU wait kernels read through cached views; volatile
+  prevents COMPILER caching, not GPU L2. The ladder rig passed because its
+  peer updates are local GPU writes (GPU-coherent), masking the fleet-only
+  staleness.
+- 79aa97f1 (ld.global.cv on end_word/round_seq/error/cancel in the wait
+  kernel): round_seq advanced 77/91 — the staleness fix is REAL.
+- Remaining stall at ~77/91: error_word readback = 0x9352002D-class garbage
+  (no kernel writes that pattern) — aliasing suspect; host watch fires before
+  the kernel diag writes (diag all-zero). NEXT: dump the mesh region around
+  error_word after the stall + check the round_control offset math on the
+  driver side vs the shim; the fresh-boot first graph chain is the tight
+  repro (second chains re-arm and retry).
+
+ALSO THIS TICK (all committed 5ef662d..81c476e):
+- PREPARED kv reservations expire loudly at 60s (the ADMIT9 conviction: a
+  failed chain retained through an undrainable stream left lanes owned
+  forever; reservations are leases, not ownership).
+- error_word cleared at GraphStep entry (stale epoch-2 error crossed into
+  epoch-4 chains + MESH-GUARD-POISON ate leftovers).
+- ROUTE-ERROR-CONTAINED: a recoverable chain failure fenced its route and
+  KILLED THE ENGINE (model_residentd run=internal_error → exit); now fenced
+  + loud print, engine stays up (fleet-verified across multiple failures).
+- Engine connect now 30ms all_ranks_ready=1 (was 4×30s timeout during the
+  poll-gating era).
+
+FLEET: driver 79aa97f1 16/16, engines survive chain failures, KV lanes
+self-heal, single API discipline (two APIs fight for the single-client
+slots — kill all, start one after residentd boots).
