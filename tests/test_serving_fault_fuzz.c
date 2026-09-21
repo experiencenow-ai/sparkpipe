@@ -274,6 +274,8 @@ enum
 	FAULT_LATE_COMPLETION,
 	FAULT_ABORT_DECISION,
 	FAULT_RESULT_ERROR,
+	FAULT_MULTI_DISCONNECT,
+	FAULT_CONCURRENT_SUBMIT,
 	FAULT_KIND_COUNT
 };
 
@@ -376,6 +378,26 @@ int main(int argc, char **argv)
 			MockResidentClientFireResult(victim,id,SPARK_STATUS_IO_ERROR);
 			FaultDriveProgress(pipeline,3u);
 			break;
+		case FAULT_MULTI_DISCONNECT:
+		{
+			uint32_t extra = (uint32_t)(FuzzRand() % TEST_RANKS);
+			FaultDriveProgress(pipeline,1u);
+			MockResidentClientDisconnect(victim);
+			MockResidentClientDisconnect(extra);
+			FaultDriveProgress(pipeline,3u);
+			MockResidentClientRevive(extra);
+			break;
+		}
+		case FAULT_CONCURRENT_SUBMIT:
+		{
+			SparkModelServingSubmission extra_submission;
+			SparkModelServingLane extra_lanes[2];
+			uint64_t extra_id = next_id++;
+			FaultBuildSubmission(&extra_submission,extra_lanes,extra_id);
+			(void)SparkModelPipelineClientSubmit(pipeline,&extra_submission);
+			FaultDriveProgress(pipeline,4u);
+			break;
+		}
 		default:
 			break;
 		}
