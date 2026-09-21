@@ -2565,6 +2565,12 @@ static void *SparkGlm5NextPrefetchMain(void *argument)
 		state->prefetch_live = 0u;
 		return(0);
 	}
+	if ( SparkWeightdMapBindThread(map) != SPARK_STATUS_OK )
+	{
+		fprintf(stderr,"PREFETCH-ABORT context bind failed\n");
+		state->prefetch_live = 0u;
+		return(0);
+	}
 	for ( layer = SPARK_GLM5_NEXT_MODEL_FIRST_ROUTED_LAYER;
 	      layer < SPARK_GLM5_NEXT_MODEL_LAYER_COUNT;
 	      layer++ )

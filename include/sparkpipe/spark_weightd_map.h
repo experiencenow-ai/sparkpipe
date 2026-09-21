@@ -21,6 +21,7 @@ SparkStatus SparkWeightdMapDestroy(SparkWeightdMap *map);
 // One deadline covers request/import batches; elapsed time returns BUSY. CUDA
 // calls cannot be preempted. Expiry retains a nonzero identifier for cleanup.
 SparkStatus SparkWeightdMapAcquire(SparkWeightdMap *map,const SparkWeightdExpertKey *keys,uint32_t count,uint64_t *identifier,uint64_t timeout);
+SparkStatus SparkWeightdMapBindThread(SparkWeightdMap *map);
 SparkStatus SparkWeightdMapBeginUse(SparkWeightdMap *map,uint64_t identifier,void **address);
 // The map's stable virtual base: a consumer address for any pack offset is
 // base + offset while its covering chunk is committed. Constant after Create.

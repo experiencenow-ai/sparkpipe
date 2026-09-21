@@ -63,6 +63,17 @@ static SparkStatus map_remaining(uint64_t deadline,uint64_t *remaining)
 	return(SPARK_STATUS_OK);
 }
 
+SparkStatus SparkWeightdMapBindThread(SparkWeightdMap *map)
+{
+	if ( map == 0 )
+		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	if ( cudaSetDevice(map->device) != cudaSuccess )
+		SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+	if ( map->context != 0 && cuCtxSetCurrent(map->context) != CUDA_SUCCESS )
+		SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+	return(SPARK_STATUS_OK);
+}
+
 static SparkStatus map_context(const SparkWeightdMap *map)
 {
 	CUcontext context;
