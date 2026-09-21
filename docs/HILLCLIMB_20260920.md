@@ -91,6 +91,25 @@ The operator's ruling: files can be deleted out from under a live holder (the ag
 2. **The serialized 15-relay propagation**: each rank's publish ships via ITS weightd relay scanning doorbells; peers' tails land after scan+RDMA (~10-15µs posts + wire). Lock-free doorbell scan is live (tight loop).
 3. **The in-graph path = the 100µs class**: the CUDA graph replays publish/wait/combine with DEVICE-side waits — no host per op. BLOCKED on the spark3 illegal-access bisection (09-18 handoff; 1-op graph clean, full graph faults). The graph path is the structural route to ≤100µs; the eager path's floor is the host ceremony (~0.7-1ms).
 
+## GOAL (operator directive 2026-09-21, supersedes ladder ordering)
+
+**PRIMARY GOAL: the fuzzer/simulation covers ALL known wedge classes and
+similar-shape cases — bugs found and fixed offline before the fleet sees
+them.** The 120s self-heal bound is 100x too slow for a subsecond system;
+the design target is wedges structurally impossible, verified by fault-
+injection fuzzing on every layer (transport — done; pipeline/session;
+resident client; adapter pending; module chain/completion). The climb (S3)
+resumes only on a fuzz-green stack.
+
+### Ledger → fuzz-case map (the coverage checklist)
+- #22 FailStop-on-anything / reconnect storm / churn guard → pipeline fault fuzz (disconnect storm invariants)
+- #23 hello-reset claim leak → resident-sim (reset under active claims)
+- #26 silent pending-inactive completion drop → adapter-sim (late completion vs cleared pending)
+- #26-variant stream-drain loss → module-sim (completion never fires; watchdog bound)
+- #30 KV takeover on prepared / cursor starvation → resident-sim (prepare overlap + busy adapter)
+- id/session regressions (#13/#14/#15) → pipeline fuzz (id monotonicity, generation stability)
+- transport classes → covered (FuzzEdge*)
+
 ## Ladder plan (revised as evidence lands)
 - S1: kill the per-op cudaStreamSynchronize (poll the pinned cell; overlap the readback with the ship latency) → eager −0.1-0.3ms?
 - S2: batch the host ceremony (publish N ops ahead? not possible in eager single-chain semantics) → limited; skip if S1 lands.
