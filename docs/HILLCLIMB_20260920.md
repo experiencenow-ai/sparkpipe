@@ -1697,3 +1697,23 @@ the first sticky cause. ALSO next-session discriminator for chain1: the
 route_ready_event wait in LazyExperts (cudaEventSynchronize before any
 acquire — a poisoned slot stream from a prior failed graph chain would
 hang exactly here with all the same silence).
+
+## 09-22 09:00 TICK — sticky theory DEAD (fix live+silent); chain1 hangs between HC ChainKey and its first round
+
+SCOPED-FAILURE FIX DEPLOYED (driver 4913fc1c): release errors no longer
+poison the map (the only remaining sticky = the intentional Destroy); a
+one-time MAP-STICKY-FAILURE print added. RESULT: the print NEVER FIRED and
+chain1 still 30s/fails — map->failure was never set on these boots. The
+sticky theory is DEAD for chain1 (the fix stays: correct hygiene).
+
+THE PRECISE HANG WINDOW (zero diagnostics anywhere): CKEY-WRITE/ADOPT for
+the chain RUNS (spark0's logs show it) — the HC collective's key adopted —
+then 30s of nothing: no LAZYWORK (LazyExperts never ran), no WD-LEASE (no
+acquire reached the weightsd), no ERRSITE, rounds=0/mi=0 (the MAIN
+collective never started). THE HANG = THE HC COLLECTIVE'S FIRST ROUND —
+between its ChainKey success and its first mesh publish/wait. PRIME
+SUSPECT: the HC's cell/epoch state — the HC never gets its own ChainKey
+adoption on these boots? (the rebase path with the wave-encoded watermark
+spin? the HC base-cell wait?) NEXT: instrument the HC collective's first
+round (a print at the HC ChainKey + at its first RunRound with
+cells/epoch/mirror state) — one deploy closes this.

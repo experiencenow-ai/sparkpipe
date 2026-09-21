@@ -338,7 +338,9 @@ static SparkStatus map_release_locked(SparkWeightdMap *map,uint64_t identifier,u
 	status = map_drop_slot(map,(uint32_t)(slot - map->slots));
 	if ( status != SPARK_STATUS_OK )
 	{
-		map->failure = status;
+		fprintf(stderr,
+		    "MAP-RELEASE-SLOT-ERROR id=%llu status=%d — scoped, map stays usable\n",
+		    (unsigned long long)identifier,(int)status);
 		SPARK_RETURN(status);
 	}
 	status = SparkWeightdClientRelease(map->client,map->generation,identifier,&result,timeout);
@@ -450,7 +452,17 @@ SparkStatus SparkWeightdMapAcquire(SparkWeightdMap *map,const SparkWeightdExpert
 	if ( status != SPARK_STATUS_OK )
 		SPARK_RETURN(status);
 	if ( map->failure != SPARK_STATUS_OK )
+	{
+		static uint32_t sticky_reported;
+		if ( sticky_reported == 0u )
+		{
+			sticky_reported = 1u;
+			fprintf(stderr,
+			    "MAP-STICKY-FAILURE cached=%d — every acquire fast-fails until process restart\n",
+			    (int)map->failure);
+		}
 		return(map->failure);
+	}
 	now = map_now();
 	if ( now == 0u )
 		SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
