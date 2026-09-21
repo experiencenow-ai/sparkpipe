@@ -2693,8 +2693,7 @@ static void SparkModelResidentdReportStuckRoutes(
 				(unsigned long long)route->client_generation);
 			stuck++;
 		}
-		if ( now_ns - route->active_since_ns >= UINT64_C(120000000000) &&
-		     route->state == SPARK_MODEL_RESIDENTD_ROUTE_WAIT_ADAPTER )
+		if ( now_ns - route->active_since_ns >= UINT64_C(120000000000) )
 		{
 			SparkModelServingCompletion failed;
 			memset(&failed,0,sizeof(failed));
@@ -2711,8 +2710,9 @@ static void SparkModelResidentdReportStuckRoutes(
 			failed.request_generation = route->submission.request_generation;
 			failed.step_generation = route->submission.step_generation;
 			fprintf(stderr,
-				"ROUTE-REAPED id=%llu — WAIT_ADAPTER past 120s; completing NOT_FOUND and releasing claims\n",
-				(unsigned long long)route->submission_id);
+				"ROUTE-REAPED id=%llu state=%u — stuck past 120s; completing NOT_FOUND and releasing claims\n",
+				(unsigned long long)route->submission_id,
+				(unsigned)route->state);
 			route->completion = failed;
 			route->state = SPARK_MODEL_RESIDENTD_ROUTE_READY_COMPLETION;
 		}
