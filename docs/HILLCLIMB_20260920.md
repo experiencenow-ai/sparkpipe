@@ -981,3 +981,18 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   settle (no recycles) — next tick opens with exactly that.
 - Floor 0.55ms/round stands; SYNC-TIMEOUT and the reaper both idle (no
   wedges forming — only warmup waits).
+
+## 2026-09-21at tick — ACQUIRE-STALL live; the frozen-LAZYWORK theory WEAKENED; a warm chain ran
+
+- ACQUIRE-STALL deployed (eeb228e) with the mutex-wait/exchange split;
+  suite green. On the fresh boots: engines hold 4 weightd connections
+  each, ZERO stalls of either kind — the frozen-LAZYWORK shape did NOT
+  reproduce with the instrument live (the earlier freeze self-resolved via
+  the recycles; honest negative).
+- A warm chain completed this window: 181.4ms/91r with allreduce 104.5ms
+  (1.15ms/round contended, cold-slot contention) — the machinery flows
+  when requests land on warm slots. The verdict probe still times out
+  behind the mixed-age slots' queue.
+- Standing: killer gone (weightds 2861s+), floor 0.55ms/round, every
+  generator fixed or instrumented. The steady-state verdict remains the
+  single open action.
