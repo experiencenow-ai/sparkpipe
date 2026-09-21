@@ -801,3 +801,18 @@ full-replay illegal access (#4) and the graph-env admission rejection (#5).
   fresh chain's first round) → then either prime-on-chain-start (a dummy
   publish per band at chain start) or the transport readiness gate.
 - Zero new stuck classes this boot (the queue class stays dead; 1 reaped).
+
+## 2026-09-21ai tick — the round-1 racer refined: the silent kernel-wait timeout
+
+- Per-rank census: every rank's LAZYWORK=42 and CHAIN-TIME=2 (uniform) — the
+  slow-rank theory WEAKENED (loads uniform across ranks this era). The 30s
+  sits in the ROUND deadline; neither the ship-ack nor the peer-wait host
+  loops printed — a THIRD wait path holds it: the device wait-kernel's host
+  wrapper (the kernel receives the deadline, writes its error/diag words on
+  timeout, and the host maps that to BUSY WITHOUT printing the missing set
+  or the diag word). That silence is the observability gap.
+- NEXT (one instrument): on the wait-kernel timeout path, print error_word +
+  diag_word (the kernel's per-peer diagnostics — diag carries peer/ring/
+  slot/want/got nibbles per the DEGRADE print format). One repro then names
+  the non-delivering peers for the round-1 case specifically.
+- No new stuck classes; queue class stays dead; floor 0.55ms/round stands.
