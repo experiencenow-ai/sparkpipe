@@ -1733,3 +1733,18 @@ adapter's completion/route delivery path returning ROUTE_NOT_FOUND en masse
 the adapter's 1392/1420 sites (what lookup returns 15 — the route map for
 completion delivery? the transaction id?), rate-limit the print (the flood
 itself is a hazard), fix the lookup.
+
+## 09-22 10:00 — the flood's 15s traced to the QUIESCE snapshot path
+
+The flood sites (adapter 1392/1420) = ResetControl/Reset; ZERO
+ADMIT9-MODULE lines carry status=15 → the 15 does NOT come through the
+admit — the only other failing call in ResetControl = SparkGlm5NextServing-
+Quiesce's driver SNAPSHOT (SPARK_RETURN at the 1392 site). No literal
+SPARK_STATUS_ROUTE_NOT_FOUND anywhere in the module/adapter/kv/map layers
+→ the 15 is a PASSTHROUGH from deeper (the weightsd client IPC result, the
+lease layer, or the residentd's route table lookup invoked by snapshot).
+NEXT: instrument the module snapshot's failure (one print with the inner
+status + which sub-lookup), and grep the lease/weightsd-client layers for
+the 15 source. The per-token reset loop (why resets fire continuously
+during decode) is the second half — the API pipeline's per-step control
+bump design.
