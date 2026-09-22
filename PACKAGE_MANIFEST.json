@@ -1,5 +1,5 @@
 {
-  "file_count": 3268,
+  "file_count": 3271,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -4387,6 +4387,11 @@
       "size_bytes": 6855
     },
     {
+      "path": "model-families/glm5_next/glm53flash.fp8.tp16.smoke.wset",
+      "sha256": "fbd8e8a4bff8ec99840b9bd1be5039d7ca73d305bb92ee0bafd5552bbbfcd06b",
+      "size_bytes": 2688
+    },
+    {
       "path": "model-families/glm5_next/include/sparkpipe/llm_defines.h",
       "sha256": "1a7f4b06f303eda6dabc0a0c66245334261f26be2095c1d5c08301db96710895",
       "size_bytes": 2884
@@ -4405,6 +4410,11 @@
       "path": "model-families/glm5_next/name_map.json",
       "sha256": "a1915eb3b1f7238b99ea57fd8784322981cad0471d25d8a36a4eb2f7c86e93df",
       "size_bytes": 27091
+    },
+    {
+      "path": "model-families/glm5_next/smoke_experts.json",
+      "sha256": "b54505bd84ecff17a1098e82ef46a7eebf1380f4dbf42bf4736936b55c922b84",
+      "size_bytes": 30946
     },
     {
       "path": "model-families/glm5_next/tensor_patterns.json",
@@ -11417,6 +11427,11 @@
       "size_bytes": 49162
     },
     {
+      "path": "tools/glm5_next_smoke_experts.py",
+      "sha256": "165401b539c53f871670ebfb9fbfde08ce2bb70f9249705bad2a78ccf095582e",
+      "size_bytes": 11586
+    },
+    {
       "path": "tools/hardware/generate_runner_configs.py",
       "sha256": "b1faa060a5c770012a278bdd0cdee335fada6c2f01bc2f122d4961eb2251705b",
       "size_bytes": 10494
@@ -16345,5 +16360,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78079000
+  "total_bytes": 78124220
 }
