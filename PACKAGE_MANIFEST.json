@@ -12503,8 +12503,8 @@
     },
     {
       "path": "tools/module_build_release.sh",
-      "sha256": "ede1735a4e7c459f6e8ce4781b14a3efd64d89aba1f83f821403d116625351af",
-      "size_bytes": 4769
+      "sha256": "011581415a39c4e0a6738e6859c3c3eba18224d20a95622a003450a95f0dc1d1",
+      "size_bytes": 5256
     },
     {
       "path": "tools/mtp_strip_audit.py",
@@ -16820,5 +16820,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80133794
+  "total_bytes": 80134281
 }
