@@ -275,19 +275,19 @@ extern "C" const SparkHiddenTransportInterface *SparkHiddenTransportGetInterface
         sizeof(SparkHiddenTransportInterface);
     spark_hidden_spark_host_rdma_interface.capability_flags =
 #if SPARK_HIDDEN_SPARK_RDMA_DEVICE_DIRECT
-        /* gpudirect variant: production caps + GPUDIRECT_RDMA */
-        SPARK_HIDDEN_TRANSPORT_REQUIRED_SPARK_GPUDIRECT_RDMA_CAPS |
+        SPARK_HIDDEN_TRANSPORT_RECOMMENDED_SPARK_GPUDIRECT_RDMA_CAPS |
         SPARK_HIDDEN_TRANSPORT_CAP_PERSISTENT_RECEIVE_CREDITS;
 #else
-        /* host variant: the weightd-mesh send path — synchronous sends
-         * on a persistent client connection, payload written straight
-         * into the pinned CUDA-mapped mesh buffer the daemon RDMA-reads
-         * (no intermediate userspace bounce, no cudaMemcpy, no file or
-         * shell channel) — is exactly the REQUIRED_SPARK_HOST_RDMA_CAPS
-         * contract for this module id. Declaring only
-         * PERSISTENT_RECEIVE_CREDITS (the old form) fails residentd's
-         * required-caps check at interface load. */
-        SPARK_HIDDEN_TRANSPORT_REQUIRED_SPARK_HOST_RDMA_CAPS |
+        /* residentd's host-rdma contract requires the FULL RECOMMENDED
+         * cap set (it passes RECOMMENDED_* as the required mask): the
+         * weightd-mesh path must claim batched submission (the loop
+         * forms), poll descriptors, multi-lane (the shared daemon's
+         * lane bands) and the remote-completion doorbell (the mesh
+         * doorbell entries) alongside the production/pinned/mapped
+         * basics. Declaring a subset fails the load-time
+         * (declared & required) != required check — twice found the
+         * hard way. */
+        SPARK_HIDDEN_TRANSPORT_RECOMMENDED_SPARK_HOST_RDMA_CAPS |
         SPARK_HIDDEN_TRANSPORT_CAP_PERSISTENT_RECEIVE_CREDITS;
 #endif
     spark_hidden_spark_host_rdma_interface.initialize =
