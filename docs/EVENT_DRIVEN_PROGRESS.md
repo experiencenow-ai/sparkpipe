@@ -42,7 +42,10 @@ The common CUDA receipt uses one host callback and a monotonic condition deadlin
 for an owned stream. Timeout retains the receipt until the callback has actually
 arrived; destruction and rearm cannot recycle its context early. The callback
 only signals host state and calls no CUDA API. GLM graph completion uses this
-receipt. Eager expert-boundary waits are being migrated separately.
+receipt. All seven GLM eager, failure and diagnostic waits use it as well;
+there are no remaining GLM host query-poll loops. The MTP CUDA callback submits
+to the existing completion worker, which performs CUDA work outside the callback.
+Submit-or-park is protected by the existing queue lock to prevent lost work.
 
 Mesh tests execute the actual daemon and client paths with mocked verbs, including
 multiple owners, the final queued doorbell, pending NIC completion, socket loss
@@ -74,9 +77,17 @@ and require rearming and draining without a lost-wakeup race. A plain incoming
 RDMA write does not produce the receiver completion event needed for that design;
 GPU writes to a shared host doorbell do not themselves wake a CPU file descriptor.
 
+Mesh registration is owned per exact mapping, shared by main and hidden-channel
+collectives and released only after the final owner drains. Distinct mappings
+register independently. Registration failure is explicit; it cannot silently
+continue with pageable memory. Failed unregister retains a cleanup-only owner.
+
 Active mesh intervals still poll GPU-produced doorbells and send completions.
 B1 and B2+ device waits still use GPU polling kernels. Removing those loops requires
 a completion gate separate from real peer counters, error-before-wake ordering,
 valid mapped device pointers and graph wait-value updates. Cancellation must not
 forge peer completion. CUDA memory-operation support and a successful compile
 alone do not prove that design works on GB10.
+
+The [hardware wait probe](TP_STREAM_MEMOP_QUALIFICATION.md) is a standalone
+qualification artifact. Compilation creates no CUDA context; execution is explicit.

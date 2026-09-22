@@ -36,7 +36,8 @@ Implemented and host-tested:
 - Common collective activity owns the weightd interval through terminal stream
   completion. The daemon sleeps only after active owners, queued doorbells and
   pending NIC writes drain. Lost owners fail explicitly. CUDA graph completion
-  uses bounded callback receipts instead of a host spin loop.
+  uses bounded callback receipts instead of a host spin loop; GLM eager waits
+  use the same primitive. MTP callbacks hand CUDA work to the existing worker.
 - The API and CLI wake on sockets, queued work and explicit retry deadlines.
   They no longer depend on a fixed 5/10 ms progress cadence. Token events flush
   before waiting. HTTP cancellation is serialized through the engine worker.
@@ -47,7 +48,7 @@ Selected evidence:
 - Queue: 46 tests; legacy receipt rejection: 3; real smoke runner: 12.
 - Cache fuzz: 13 scenarios, seed73/2000 produced 659645 checks; additional
   seed1337, sanitizer runs and rollback/copy failure negative controls passed.
-- Collectives: all TP2..TP16 host configurations pass 33 mandatory cases;
+- Collectives: all TP2..TP16 host configurations pass the direct/tree mandatory cases (35 after registration coverage);
   TP4 sanitizer and mesh sanitizer pass. FP32-rounding and premature source
   release mutations are rejected. These simulate transport/device behavior.
 - GLM temporal module and CUDA sources compile with real CUDA 13.0.88 for sm121a.
@@ -65,6 +66,10 @@ Still required:
 
 - Finish qualification of GPU cancellation/drain and event-driven mesh activity.
   GPU wait rearming and normal completion cannot cancel unrelated rank work.
+- Complete lazy segmented graphs. Whole-chain graph capture now rejects missing
+  expert leases explicitly; a mapped arena or eager warm-up does not prove that
+  all experts are owned. The existing explicit resident pin mode now has correct
+  Acquire/BeginUse/completion/release lifecycle and PP layer enumeration.
 - Enforce complete device allocation budgets before shared GPU rollout. GB10
   MemoryMax does not contain all CUDA allocations. The driver ledger omits some
   direct allocations and CUDA graph/context overhead; declarations alone do not
@@ -73,8 +78,11 @@ Still required:
   simultaneous different-model inference and sustained matched performance.
 - Rerun the complete host campaign after the latest repairs. PR1081's historical
   receipt remains 114 PASS, 8 FAIL, 4 SETUP_FAIL. The PR1082 checkpoint 816160d2
-  recorded 120 PASS, 8 FAIL, 1 SETUP_FAIL, 0 TIMEOUT. Its build/fixture failures,
-  API fuzzer wake-pipe setup and generated configuration drift have focused fixes;
+  recorded 120 PASS, 8 FAIL, 1 SETUP_FAIL, 0 TIMEOUT. Checkpoint ec340d3a recorded
+  128 PASS, 1 FAIL, 0 SETUP_FAIL, 0 TIMEOUT. Its sole failure exposed two cache
+  fixture workers outliving stack storage; ASan reproduced the use-after-scope,
+  and checked shutdown plus an atomic gate fixed it (74 checks, clean ASan/UBSan).
+  Earlier build/fixture failures, API fuzzer setup and configuration drift passed;
   those fixes do not rewrite either complete-campaign receipt. K3/GLM committed
   deployments now match the current generators, including mesh session tables,
   GLM pack names, EOS tokens and configured cache geometry.
