@@ -30,7 +30,8 @@
 set -euo pipefail
 
 ARM="${ARM:-A}"
-HOST="$(printf 'spark%x' "${SPARK_QUEUE_RANK:-0}")"
+HOST="$(hostname)"
+EXEC_ROOT="${SPARK_EXEC_ROOT:-/home/$HOST/sparkpipe/shared-serving-20260922}"
 FAMILY_ROOT="${SPARK_FAMILY_ROOT:-/home/$HOST/sparkdata/glm53flash.fp8.tp16}"
 SHARED_SOCKET="${SPARK_WEIGHTD_SOCKET:-/run/sparkpipe-weightd-shared/weightd.sock}"
 LANE=0
@@ -104,9 +105,10 @@ receipt_set attempt "$ATTEMPT"
 receipt_set smoke_set_raw_bytes_per_node 544997376
 receipt_set smoke_set_chunked_bytes_per_node 2818572288
 receipt_set chunk_basis "2 MiB ceil per expert span; GLM per-rank spans are all sub-2MiB (5.17x raw)"
-receipt_set residentd_sha256 "$(sha_of "$FAMILY_ROOT/bin/sparkpipe_model_residentd")"
-receipt_set weightd_warm_sha256 "$(sha_of "$FAMILY_ROOT/bin/weightd_warm")"
-receipt_set model_batch_sha256 "$(sha_of "$FAMILY_ROOT/bin/sparkpipe_model_batch")"
+receipt_set residentd_sha256 "$(sha_of "$EXEC_ROOT/bin/sparkpipe_model_residentd")"
+receipt_set weightd_warm_sha256 "$(sha_of "$EXEC_ROOT/bin/weightd_warm")"
+receipt_set model_batch_sha256 "$(sha_of "$EXEC_ROOT/bin/sparkpipe_model_batch")"
+receipt_set exec_bundle_source_commit "$(cat "$EXEC_ROOT/SOURCE_COMMIT" 2>/dev/null || echo unknown)"
 receipt_set wset_sha256 "$(sha_of "$WSET")"
 receipt_set daemon_census_before "$(census)"
 
@@ -114,12 +116,12 @@ receipt_set daemon_census_before "$(census)"
 # Template-derived (tools/devcycle/templates/run-family-job.sh.template) with
 # the qualified smoke runtime limits (B1, context 512, 128 pages, 2 GiB cap).
 python3 - "$ROOT" "$RANK" "$CONTROL_BASE" "$COLLECTIVE_BASE" "$TRANSPORT_BASE" \
-         "$SESSION_BASE" "$ATTEMPT" "$LANE" "$DEPLOYMENT_SOURCE" "$FAMILY_ROOT" <<'PYEOF'
+         "$SESSION_BASE" "$ATTEMPT" "$LANE" "$DEPLOYMENT_SOURCE" "$FAMILY_ROOT" "$EXEC_ROOT" <<'PYEOF'
 import json, sys
 from pathlib import Path
 root, rank = Path(sys.argv[1]), int(sys.argv[2])
 control_base, collective_base, transport_base, session_base = (int(a) for a in sys.argv[3:7])
-attempt, lane, deployment_source, family_root = sys.argv[7], int(sys.argv[8]), sys.argv[9], sys.argv[10]
+attempt, lane, deployment_source, family_root, exec_root = sys.argv[7], int(sys.argv[8]), sys.argv[9], sys.argv[10], sys.argv[11]
 
 def fail(msg):
     raise SystemExit("coldlaunch prep: FAIL: " + msg)
@@ -205,7 +207,9 @@ backend = config.get("tp_collective", {}).get("backend_module_path")
 if backend:
     assets.add(backend)
 for relative in sorted(assets):
-    source = Path(family_root) / relative
+    source = Path(exec_root) / relative
+    if not source.is_file():
+        source = Path(family_root) / relative
     if not source.is_file():
         fail(f"runtime asset missing on the family root: {relative}")
     target = runtime / relative
@@ -227,7 +231,7 @@ if [ "$ARM" = "B" ]; then
   PACK="$ROOT/runtime/$pack_rel"
   SHA="$(cut -d' ' -f1 "$PACK.sha256")"
   t0=$(date +%s.%N)
-  "$FAMILY_ROOT/bin/weightd_warm" "$SHARED_SOCKET" "$PACK" "$SHA" "$revision" 16 \
+  "$EXEC_ROOT/bin/weightd_warm" "$SHARED_SOCKET" "$PACK" "$SHA" "$revision" 16 \
     --wset "$WSET" 300 >"$ROOT/warm.log" 2>&1
   t1=$(date +%s.%N)
   grep -q "WSET-WARM keys=" "$ROOT/warm.log" || { echo "wset warm failed"; cat "$ROOT/warm.log" >&2; exit 2; }
@@ -255,7 +259,7 @@ export SPARK_WEIGHTD_SPINE_BUDGET_BYTES=4294967296
 export SPARK_WEIGHTD_KV_RESERVE_BYTES=0
 
 t0=$(date +%s.%N)
-setsid "$FAMILY_ROOT/bin/sparkpipe_model_residentd" \
+setsid "$EXEC_ROOT/bin/sparkpipe_model_residentd" \
   --deployment "$ROOT/deployment.json" --rank-index "$RANK" \
   >"$ROOT/residentd.log" 2>&1 &
 RESIDENTD_PID=$!
@@ -295,7 +299,7 @@ if [ "$RANK" -eq 0 ]; then
   else
     t2=$(date +%s.%N)
     python3 "$CHECKOUT/tools/glm5_next_bench_wrap.py" --timeout 120 -- \
-      "$FAMILY_ROOT/bin/sparkpipe_model_batch" --deployment "$ROOT/deployment.json" \
+      "$EXEC_ROOT/bin/sparkpipe_model_batch" --deployment "$ROOT/deployment.json" \
       --runtime-root "$ROOT/runtime" --batch "$BATCH" >"$ROOT/bench.json" 2>"$ROOT/bench.stderr" || true
     t3=$(date +%s.%N)
     receipt_set request_seconds "$(elapsed "$t3" "$t2")"
