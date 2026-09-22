@@ -249,6 +249,14 @@ struct Probe
             SparkTpMeshRoundControl control={};std::vector<uint8_t> output(expected.size());
             CUDA(cudaMemcpy(&control,ranks[rank].control,sizeof(control),cudaMemcpyDeviceToHost));
             CUDA(cudaMemcpy(output.data(),ranks[rank].output,output.size(),cudaMemcpyDeviceToHost));
+            if ((control.error_word!=0u)!=failed)
+            {
+                SparkWeightdMeshWaitRequest *gate=Gate(rank);
+                std::fprintf(stderr,"CONTROL rank=%u op=%u rows=%u seq=%llu round_seq=%llx error=%llx diag=%llx done=%llu expected_error=%u gate_id=%llu kind=%llu tag=%llx mask=%llx ready=%llu gate_error=%llx shipped=%llx transfers=%llu\n",rank,operation,rows,
+                    (unsigned long long)control.seq,(unsigned long long)control.round_seq,(unsigned long long)control.error_word,(unsigned long long)control.diag_word,(unsigned long long)control.rounds_done,failed,
+                    (unsigned long long)Load(&gate->request_id),(unsigned long long)Load(&gate->kind),(unsigned long long)Load(&gate->tag),(unsigned long long)Load(&gate->peer_mask),(unsigned long long)Load(&gate->ready),(unsigned long long)Load(&gate->error),
+                    (unsigned long long)Load(reinterpret_cast<uint64_t *>(host+SPARK_WEIGHTD_MESH_SHIPPED_ENTRY(rank,rank))),(unsigned long long)transfers.load());
+            }
             REQUIRE((control.error_word!=0u)==failed);
             REQUIRE(control.rounds_done==(failed ? 0u : rounds));
             if (!failed)
