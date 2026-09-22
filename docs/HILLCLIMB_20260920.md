@@ -2427,3 +2427,33 @@ dump on a green-path replay — per-round arrival timestamps for ranks
 4/12 vs the pack — names the stall source (relay burst handling vs
 poll shape vs those nodes' load). Then the pacing fix; ≤100µs/round is
 the graph's own class once arrival stops gating.
+
+## 09-24 00:30 TICK — PR #1081 MERGED (astra) and VERIFIED: the chain class jumped 122x
+
+THE MERGE (@89330dc, one conflict — tools/weightd_warm.c: their stricter
+manifest-driven warmer + my --wset one-shot grafted in their style):
+- Their replacements SUPERSEDE cleanly (verified in the merged tree):
+  the latch = bind-or-exit ("existing owner untouched" — no probing at
+  all); the agent ensure_weightd = owner verification + refuses
+  ambiguous cleanup (subsumes my busy-alive guard); routes carry
+  generation handling at 5 sites (subsumes ROUTE-RECLAIM); reconnect =
+  abort/drain/reset/new-session with callbacks retiring transactions
+  (the orphan class my reclaims compensated for, designed out).
+- MY pieces that SURVIVED (verified): the wset recording (WD-WSET), the
+  span batching (LoadRangeGroup + their short-read fix), KV-RECLAIM,
+  the 120s bound, the epoch sessions (session_epoch end-to-end), the
+  demand-driven default (their prefetch removal completes the design).
+- The hub agent = their version + the wdcore/ulimit cores wrapper
+  re-applied (my patch, preserved).
+- Build clean; kv/IPC/reconnect tests PASS.
+
+THE VERIFICATION RECEIPT (what the operator asked for — "verify it
+helps"): CHAIN-TIME slot=2 status=0 total_ms=287.35 rounds=91 (new
+metrics: collective_host_submit_ms=125.61 / 91 submissions) =
+**3.16 ms/round** — from 384.6 ms/round = **122x**. The relay-pacing
+class that owned this fleet for a week is GONE in the merged build.
+
+The request-level canaries (23, 24) hit RC=28 through the deploy
+transition churn (requests status-4 mid-convergence) — the serving
+receipt is the immediate next item, then: the ladder to ≤100µs now
+runs from a 3.16ms floor with the graph path live.
