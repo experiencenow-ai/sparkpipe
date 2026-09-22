@@ -1895,50 +1895,85 @@ SparkStatus SparkTpDeviceCollectivePrepareReceiveBf16(
     return SPARK_STATUS_OK;
 }
 
+static SparkStatus SparkTpDeviceCollectiveDiscardUnreadyCells(
+    SparkTpDeviceCollectiveImplementation *implementation)
+{
+    void **allocations[2] = {&implementation->round_control,&implementation->arrival_ring};
+    const char *phases[2] = {"free-control","free-arrival"};
+    SparkStatus status = SPARK_STATUS_OK;
+    uint32_t index;
+    for ( index = 0u; index < 2u; index++ )
+    {
+        int result;
+        if ( *allocations[index] == 0 ) continue;
+        result = cudaFree(*allocations[index]);
+        if ( result == 0 ) *allocations[index] = 0;
+        else
+        {
+            fprintf(stderr,"[MESH-CELLS-FAIL] rank=%u phase=%s cuda=%d (%s)\n",
+                implementation->tp_rank,phases[index],result,cudaGetErrorString(result));
+            status = SPARK_STATUS_IO_ERROR;
+        }
+    }
+    return status;
+}
+
 static SparkStatus SparkTpDeviceCollectiveEnsureCells(
     SparkTpDeviceCollectiveImplementation *implementation)
 {
-    uint64_t seed;
+    const char *phase;
+    int result;
+    uint64_t seed = implementation->round_seq;
     uint64_t zero_epoch = 0ull;
-    if ( implementation->round_control != 0 )
+    uint8_t *control;
+    if ( implementation->published_host_cell != 0 )
         return SPARK_STATUS_OK;
-    if ( cudaMalloc(&implementation->arrival_ring,
-             256u * sizeof(uint64_t)) != 0 ||
-         cudaMemset(implementation->arrival_ring,0,
-             256u * sizeof(uint64_t)) != 0 )
-        SPARK_FAIL(SPARK_STATUS_IO_ERROR);
-    if ( cudaMalloc(&implementation->round_control,
-             SPARK_TP_MESH_ROUND_CONTROL_BYTES) != 0 ||
-         cudaMemsetAsync(implementation->round_control,0,
-             SPARK_TP_MESH_ROUND_CONTROL_BYTES,0) != 0 )
-    {
-        implementation->round_control = 0;
-        SPARK_FAIL(SPARK_STATUS_IO_ERROR);
-    }
-    implementation->round_seq_device = (uint8_t *)implementation->round_control +
+    if ( SparkTpDeviceCollectiveDiscardUnreadyCells(implementation) != SPARK_STATUS_OK )
+        return SPARK_STATUS_IO_ERROR;
+    phase = "alloc-arrival";
+    result = cudaMalloc(&implementation->arrival_ring,256u * sizeof(uint64_t));
+    if ( result != 0 ) goto failed;
+    phase = "zero-arrival";
+    result = cudaMemset(implementation->arrival_ring,0,256u * sizeof(uint64_t));
+    if ( result != 0 ) goto failed;
+    phase = "alloc-control";
+    result = cudaMalloc(&implementation->round_control,SPARK_TP_MESH_ROUND_CONTROL_BYTES);
+    if ( result != 0 ) goto failed;
+    control = implementation->round_control;
+    phase = "zero-control";
+    result = cudaMemsetAsync(control,0,SPARK_TP_MESH_ROUND_CONTROL_BYTES,0);
+    if ( result != 0 ) goto failed;
+    phase = "seed-round-tag";
+    result = cudaMemcpy(control + SPARK_TP_MESH_ROUND_CONTROL_WORD_ROUND_SEQ * sizeof(uint64_t),
+        &implementation->publish_ack_prev,sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE);
+    if ( result != 0 ) goto failed;
+    phase = "seed-sequence";
+    result = cudaMemcpy(control + SPARK_TP_MESH_ROUND_CONTROL_WORD_SEQ * sizeof(uint64_t),
+        &seed,sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE);
+    if ( result != 0 ) goto failed;
+    phase = "seed-epoch";
+    result = cudaMemcpy(control + SPARK_TP_MESH_ROUND_CONTROL_WORD_EPOCH * sizeof(uint64_t),
+        &zero_epoch,sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE);
+    if ( result != 0 ) goto failed;
+    phase = "alloc-readback";
+    result = cudaHostAlloc((void **)&implementation->published_host_cell,
+        SPARK_TP_MESH_ROUND_CONTROL_BYTES,0u);
+    if ( result != 0 ) goto failed;
+    implementation->round_seq_device = control +
         SPARK_TP_MESH_ROUND_CONTROL_WORD_ROUND_SEQ * sizeof(uint64_t);
-    implementation->cancel_expected = (uint8_t *)implementation->round_control +
+    implementation->cancel_expected = control +
         SPARK_TP_MESH_ROUND_CONTROL_WORD_CANCEL_EXPECTED * sizeof(uint64_t);
-    implementation->seq_cell = (uint8_t *)implementation->round_control +
-        SPARK_TP_MESH_ROUND_CONTROL_WORD_SEQ * sizeof(uint64_t);
-    implementation->epoch_cell = (uint8_t *)implementation->round_control +
-        SPARK_TP_MESH_ROUND_CONTROL_WORD_EPOCH * sizeof(uint64_t);
-    implementation->error_word = (uint8_t *)implementation->round_control +
-        SPARK_TP_MESH_ROUND_CONTROL_WORD_ERROR * sizeof(uint64_t);
-    implementation->diag_word = (uint8_t *)implementation->round_control +
-        SPARK_TP_MESH_ROUND_CONTROL_WORD_DIAG * sizeof(uint64_t);
-    seed = implementation->round_seq;
-    if ( cudaMemcpy(implementation->round_seq_device,&implementation->publish_ack_prev,
-            sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
-         cudaMemcpy(implementation->seq_cell,&seed,
-            sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
-         cudaMemcpy(implementation->epoch_cell,&zero_epoch,
-            sizeof(uint64_t),SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE) != 0 ||
-         cudaHostAlloc((void **)&implementation->published_host_cell,
-             SPARK_TP_MESH_ROUND_CONTROL_BYTES,0u) != 0 )
-        SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+    implementation->seq_cell = control + SPARK_TP_MESH_ROUND_CONTROL_WORD_SEQ * sizeof(uint64_t);
+    implementation->epoch_cell = control + SPARK_TP_MESH_ROUND_CONTROL_WORD_EPOCH * sizeof(uint64_t);
+    implementation->error_word = control + SPARK_TP_MESH_ROUND_CONTROL_WORD_ERROR * sizeof(uint64_t);
+    implementation->diag_word = control + SPARK_TP_MESH_ROUND_CONTROL_WORD_DIAG * sizeof(uint64_t);
     implementation->cell_mirror = seed;
-    return(SPARK_STATUS_OK);
+    return SPARK_STATUS_OK;
+failed:
+    fprintf(stderr,"[MESH-CELLS-FAIL] rank=%u phase=%s cuda=%d (%s)\n",
+        implementation->tp_rank,phase,result,cudaGetErrorString(result));
+    (void)SparkTpDeviceCollectiveDiscardUnreadyCells(implementation);
+    return SPARK_STATUS_IO_ERROR;
 }
 
 SparkStatus SparkTpDeviceCollectiveArmCapture(
@@ -1970,11 +2005,14 @@ SparkStatus SparkTpDeviceCollectiveArmCapture(
          implementation->slot_bytes != 0u )
     {
         uint64_t pre_bytes = 2ull * implementation->slot_bytes;
-        if ( cudaMalloc((void **)&implementation->f32_scratch,
-                 (size_t)pre_bytes) == 0 )
-            implementation->f32_scratch_bytes = pre_bytes;
-        else
-            implementation->f32_scratch = 0;
+        int result = cudaMalloc((void **)&implementation->f32_scratch,(size_t)pre_bytes);
+        if ( result != 0 )
+        {
+            fprintf(stderr,"[MESH-CAPTURE-FAIL] rank=%u phase=alloc-scratch bytes=%llu cuda=%d (%s)\n",
+                implementation->tp_rank,(unsigned long long)pre_bytes,result,cudaGetErrorString(result));
+            return result == 2 ? SPARK_STATUS_CAPACITY_EXCEEDED : SPARK_STATUS_IO_ERROR;
+        }
+        implementation->f32_scratch_bytes = pre_bytes;
     }
     implementation->capture_rounds = 0u;
     implementation->capture_parity = (uint32_t)(

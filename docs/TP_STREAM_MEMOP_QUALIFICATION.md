@@ -2,8 +2,8 @@
 
 This is an isolated qualification tool, not an enabled production collective.
 The prototype compiles with CUDA 13.0.88 for GB10 `sm_121a`; it has not been run.
-The original compile receipt is
-`spark0:/tmp/sparkpipe-glm-c29823be/build/qualification/stream-memop-prototype.log`.
+The committed wrapper/source compile receipt is
+`spark0:/tmp/sparkpipe-glm-c29823be/build/qualification/tp_stream_memop_probe.log`.
 Compilation does not measure update latency, memory visibility or GPU wait behavior.
 
 ## Safe invocation
@@ -77,8 +77,8 @@ read from another host. The proposed change removes SM-resident waiting.
    stream ownership; CQ-qualified source ownership must independently drain.
 
 NVIDIA documents mapped-device-pointer requirements and CUDA-visible ordering
-for [stream memory operations](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEMOP.html).
-[Graph parameter updates](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__GRAPH.html)
+for [stream memory operations](https://docs.nvidia.com/cuda/cuda-driver-api/cuda_driver_api/group__CUDA__MEMOP.html).
+[Graph parameter updates](https://docs.nvidia.com/cuda/cuda-driver-api/cuda_driver_api/group__CUDA__GRAPH.html)
 affect future launches and require the original node to remain in its graph.
 CUDA 13 [capture inspection and dependency APIs](https://docs.nvidia.com/cuda/archive/13.0.2/cuda-driver-api/group__CUDA__STREAM.html)
 include edge data; the prototype uses those current signatures.

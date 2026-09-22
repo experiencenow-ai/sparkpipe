@@ -1157,6 +1157,7 @@ static void FuzzRejections(void)
 }
 
 static void FuzzSourceLifetime(void);
+static void FuzzCellInitialization(void);
 
 static void FuzzCompletionCapacity(void)
 {
@@ -1828,6 +1829,7 @@ int main(int argc, char **argv)
 		}
 	}
     FuzzRegistrationOwnership();
+    FuzzCellInitialization();
 	if ( pthread_create(&shipper, 0, FuzzShipperMain, 0) != 0 )
 	{
 		fprintf(stderr,"shipper start failed\n");
@@ -1900,9 +1902,178 @@ static void *FuzzCollectiveCalloc(size_t count, size_t size)
     return calloc(count,size);
 }
 
+extern int cudaMalloc(void **pointer,size_t bytes);
+extern int cudaFree(void *pointer);
+extern int cudaMemset(void *pointer,int value,size_t bytes);
+extern int cudaMemsetAsync(void *pointer,int value,size_t bytes,void *stream);
+extern int cudaMemcpy(void *destination,const void *source,size_t bytes,int kind);
+extern int cudaHostAlloc(void **pointer,size_t bytes,unsigned int flags);
+extern uint32_t spark_stub_cuda_outstanding_allocs(void);
+
+static uint32_t g_init_fail_at,g_init_calls,g_init_free_mask,g_init_free_calls;
+
+static int FuzzCudaInitFailure(void)
+{
+    return g_init_fail_at != 0u && ++g_init_calls == g_init_fail_at;
+}
+
+static int FuzzCudaMalloc(void **pointer,size_t bytes)
+{
+    int result;
+    if ( FuzzCudaInitFailure() ) return 2;
+    result = cudaMalloc(pointer,bytes);
+    if ( result == 0 && g_init_fail_at != 0u ) memset(*pointer,0xa5,bytes);
+    return result;
+}
+
+static int FuzzCudaFree(void *pointer)
+{
+    if ( g_init_free_mask != 0u && ++g_init_free_calls <= 2u &&
+        (g_init_free_mask & (1u << (g_init_free_calls - 1u))) != 0u ) return 1;
+    return cudaFree(pointer);
+}
+
+static int FuzzCudaMemset(void *pointer,int value,size_t bytes)
+{
+    if ( FuzzCudaInitFailure() ) return 2;
+    return cudaMemset(pointer,value,bytes);
+}
+
+static int FuzzCudaMemsetAsync(void *pointer,int value,size_t bytes,void *stream)
+{
+    if ( FuzzCudaInitFailure() ) return 2;
+    return cudaMemsetAsync(pointer,value,bytes,stream);
+}
+
+static int FuzzCudaMemcpy(void *destination,const void *source,size_t bytes,int kind)
+{
+    if ( FuzzCudaInitFailure() ) return 2;
+    return cudaMemcpy(destination,source,bytes,kind);
+}
+
+static int FuzzCudaHostAlloc(void **pointer,size_t bytes,unsigned int flags)
+{
+    if ( FuzzCudaInitFailure() ) return 2;
+    return cudaHostAlloc(pointer,bytes,flags);
+}
+
 #define calloc FuzzCollectiveCalloc
+#define cudaMalloc FuzzCudaMalloc
+#define cudaFree FuzzCudaFree
+#define cudaMemset FuzzCudaMemset
+#define cudaMemsetAsync FuzzCudaMemsetAsync
+#define cudaMemcpy FuzzCudaMemcpy
+#define cudaHostAlloc FuzzCudaHostAlloc
 #include "../ring/transport/tp_device_collective.c"
 #undef calloc
+#undef cudaMalloc
+#undef cudaFree
+#undef cudaMemset
+#undef cudaMemsetAsync
+#undef cudaMemcpy
+#undef cudaHostAlloc
+
+static void FuzzCellInitialization(void)
+{
+    SparkTpDeviceCollectiveConfig config;
+    uint32_t trial;
+    uint64_t empty_arrival[256] = {0u};
+    memset(&config,0,sizeof(config));
+    config.abi_version = SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION;
+    config.tp_degree = g_rank_count;
+    config.local_hidden_dimension = FUZZ_HIDDEN;
+    config.max_active_sequence_count = 1u;
+    config.operation_timeout_milli = FUZZ_ROUND_TIMEOUT_MS;
+    g_connect_rank_hint = 0u;
+    for ( trial = 1u; trial <= 11u; trial++ )
+    {
+        SparkTpDeviceCollective collective = {0};
+        SparkTpDeviceCollectiveImplementation *implementation;
+        SparkTpMeshRoundControl expected;
+        uint32_t baseline = spark_stub_cuda_outstanding_allocs();
+        FuzzCase(trial <= 8u ? "cell-initialization-rollback-and-retry" :
+            trial <= 10u ? "cell-cleanup-failure-retains-retryable-allocation" :
+            "capture-scratch-allocation-fails-before-arming");
+        g_round = trial;
+        CHECK(SparkTpDeviceCollectiveCreate(&config,&collective) == SPARK_STATUS_OK,
+            "initialization fixture creates");
+        if ( collective.implementation == 0 ) _Exit(2);
+        implementation = collective.implementation;
+        CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&collective,g_regions[0],1u,
+            FUZZ_HIDDEN,0u,0) == SPARK_STATUS_OK,"initialization fixture prepares mapping");
+        implementation->round_seq = 0x1234u;
+        implementation->publish_ack_prev = (UINT64_C(37) << 32u) | 19u;
+        g_init_fail_at = trial <= 8u ? trial : trial <= 10u ? 5u : UINT32_MAX;
+        g_init_calls = 0u;
+        g_init_free_calls = 0u;
+        g_init_free_mask = trial == 9u ? 1u : trial == 10u ? 2u : 0u;
+        if ( trial <= 10u )
+        {
+            CHECK(SparkTpDeviceCollectiveEnsureCells(implementation) == SPARK_STATUS_IO_ERROR &&
+                g_init_calls == g_init_fail_at,"each CUDA initialization failure rejects at its exact phase");
+            CHECK(implementation->published_host_cell == 0 && implementation->seq_cell == 0 &&
+                implementation->epoch_cell == 0 && implementation->round_seq_device == 0 &&
+                implementation->cancel_expected == 0 && implementation->error_word == 0 &&
+                implementation->diag_word == 0,"failed initialization never publishes ready aliases");
+            CHECK(spark_stub_cuda_outstanding_allocs() == baseline + (trial > 8u ? 1u : 0u),
+                "rollback frees all allocations except an explicitly failed free");
+            if ( trial > 8u )
+            {
+                void *retained = trial == 9u ? implementation->round_control : implementation->arrival_ring;
+                CHECK(retained != 0,"failed free retains its exact allocation for retry");
+                g_init_free_mask = 1u;
+                g_init_free_calls = 0u;
+                g_init_calls = 0u;
+                g_init_fail_at = UINT32_MAX;
+                CHECK(SparkTpDeviceCollectiveEnsureCells(implementation) == SPARK_STATUS_IO_ERROR &&
+                    g_init_calls == 0u && spark_stub_cuda_outstanding_allocs() == baseline + 1u,
+                    "repeated cleanup failure cannot allocate replacements or report ready");
+                CHECK(retained == (trial == 9u ? implementation->round_control : implementation->arrival_ring),
+                    "cleanup retry cannot lose the retained allocation identity");
+            }
+        }
+        g_init_free_mask = 0u;
+        g_init_calls = 0u;
+        g_init_fail_at = UINT32_MAX;
+        CHECK(SparkTpDeviceCollectiveEnsureCells(implementation) == SPARK_STATUS_OK &&
+            g_init_calls == 8u && spark_stub_cuda_outstanding_allocs() == baseline + 3u,
+            "successful retry completes all initialization operations with exactly three allocations");
+        memset(&expected,0,sizeof(expected));
+        expected.seq = 0x1234u;
+        expected.round_seq = (UINT64_C(37) << 32u) | 19u;
+        CHECK(implementation->round_control != 0 && implementation->arrival_ring != 0 &&
+            implementation->published_host_cell != 0 &&
+            memcmp(implementation->round_control,&expected,sizeof(expected)) == 0 &&
+            memcmp(implementation->arrival_ring,empty_arrival,sizeof(empty_arrival)) == 0 &&
+            implementation->cell_mirror == expected.seq,
+            "retry initializes poisoned allocations to complete control and arrival values");
+        CHECK(SparkTpDeviceCollectiveEnsureCells(implementation) == SPARK_STATUS_OK &&
+            g_init_calls == 8u && spark_stub_cuda_outstanding_allocs() == baseline + 3u,
+            "fully initialized cells are reused without new CUDA operations");
+        if ( trial == 11u )
+        {
+            g_init_calls = 0u;
+            g_init_fail_at = 3u;
+            CHECK(SparkTpDeviceCollectiveArmCapture(&collective) == SPARK_STATUS_CAPACITY_EXCEEDED &&
+                g_init_calls == 3u && implementation->capture_armed == 0u &&
+                implementation->f32_scratch == 0 && implementation->f32_scratch_bytes == 0u &&
+                spark_stub_cuda_outstanding_allocs() == baseline + 3u,
+                "capture scratch OOM leaves capture unarmed and preserves ready cells");
+            g_init_fail_at = 0u;
+            CHECK(SparkTpDeviceCollectiveArmCapture(&collective) == SPARK_STATUS_OK &&
+                implementation->capture_armed != 0u && implementation->f32_scratch != 0 &&
+                implementation->f32_scratch_bytes == 2u * implementation->slot_bytes,
+                "capture retries successfully once scratch allocation is available");
+            CHECK(SparkTpDeviceCollectiveDisarmCapture(&collective) == SPARK_STATUS_OK,
+                "successful capture preparation can disarm");
+        }
+        g_init_fail_at = 0u;
+        SparkTpDeviceCollectiveDestroy(&collective);
+        CHECK(collective.implementation == 0 && spark_stub_cuda_outstanding_allocs() == baseline &&
+            spark_stub_cuda_host_registered(g_regions[0]) == 0u,
+            "initialization and capture retries release every allocation and mapping on destruction");
+    }
+}
 
 static void FuzzSourceLifetime(void)
 {
