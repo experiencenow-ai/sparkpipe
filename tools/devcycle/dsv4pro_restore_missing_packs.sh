@@ -20,6 +20,10 @@
 #   RESTORE_STAGE    0 (ranks 1,2,3) or 1 (rank 6)          (required)
 #   RESTORE_MODEL    GA model dir on Ceph                    (required)
 #   RESTORE_WORKDIR  NVMe workdir for slice + rank packs     (required)
+#   RESTORE_RANKS    tp ranks to shard this run, overriding the stage
+#                    default (disk-pipelined windows: shard one rank,
+#                    ship + verify + delete, repeat; the slice pack is
+#                    reused across runs)
 #   RESTORE_PLACE    "1" to place verified packs into the
 #                    runtime packs/ dir (default: verify only)
 set -euo pipefail
@@ -47,10 +51,18 @@ expected_sha() {
 }
 
 case "$STAGE" in
-0) FIRST=0; COUNT=16; RANKS="1,2,3"; WORLD_RANKS="1 2 3" ;;
-1) FIRST=16; COUNT=15; RANKS="2"; WORLD_RANKS="6" ;;
+0) FIRST=0; COUNT=16; RANKS="${RESTORE_RANKS:-1,2,3}" ;;
+1) FIRST=16; COUNT=15; RANKS="${RESTORE_RANKS:-2}" ;;
 *) echo "RESTORE_STAGE must be 0 or 1" >&2; exit 2 ;;
 esac
+WORLD_RANKS=""
+for R in ${RANKS//,/ }; do
+  case "$STAGE.$R" in
+  0.1|0.2|0.3|1.2) WORLD_RANKS="$WORLD_RANKS $((STAGE * 4 + R))" ;;
+  *) echo "tp rank $R does not belong to stage $STAGE" >&2; exit 2 ;;
+  esac
+done
+WORLD_RANKS="${WORLD_RANKS# }"
 
 mkdir -p "$WORK"
 SLICE="$WORK/dsv4_pro.slice${FIRST}.spstage"

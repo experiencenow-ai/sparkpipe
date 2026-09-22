@@ -10843,8 +10843,8 @@
     },
     {
       "path": "tools/devcycle/dsv4pro_restore_missing_packs.sh",
-      "sha256": "8afa065b440abb4ae726ccbcf8fe27f15135d78916dbc76320247a6a81e4493d",
-      "size_bytes": 4903
+      "sha256": "485454b55ae08008cbc716d1f6d375729cef76ac67101b0d5523b00e8cf19b28",
+      "size_bytes": 5398
     },
     {
       "path": "tools/devcycle/dsv4pro_restore_ranks.py",
@@ -16730,5 +16730,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79695828
+  "total_bytes": 79696323
 }
