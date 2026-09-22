@@ -9813,7 +9813,7 @@
     },
     {
       "path": "tests/test_mimo26_stagepack.py",
-      "sha256": "82ba4b57021643cc827cc20f4bc3db8e8f48727c80368e7ee80f45f6e8d27350",
+      "sha256": "9ce0e9a11c9dc9f004f8a4293bd2e1828c80bbfec0a7e8b461313c9f18926ba5",
       "size_bytes": 12270
     },
     {
@@ -12428,8 +12428,8 @@
     },
     {
       "path": "tools/mimo26_emit_rank.sh",
-      "sha256": "08e622c4a3ced13f1c553a4a8387f3c41a98602784d7527b47912008f135ab00",
-      "size_bytes": 3440
+      "sha256": "2626005381b6ecdf37131513b7f7098a4b7ee3074585e0339571cf1089d30557",
+      "size_bytes": 3449
     },
     {
       "path": "tools/mimo26_param_budget.py",
@@ -12438,8 +12438,8 @@
     },
     {
       "path": "tools/mimo26_stagepack.py",
-      "sha256": "2f0dfe15adfc7841ef9cf2e0f9e1913c5ec8095652c8ae459099f4440b6f79da",
-      "size_bytes": 37874
+      "sha256": "240924df0fe7f3f7eca8d7a78c2a47b91d2491d49be44abde3c2b5fc2d92a601",
+      "size_bytes": 42258
     },
     {
       "path": "tools/minimax_stagepack.py",
@@ -16770,5 +16770,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79873263
+  "total_bytes": 79877656
 }
