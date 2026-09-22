@@ -2029,3 +2029,40 @@ HYGIENE LEDGER (pre-existing, verified failing at 781b61d too):
 test_steploop_admission + test_model_pipeline_client (a 100ms weightsd-
 attach race in the fixture); the gemma4 test fixture bitrot
 (SPARK_GEMMA4_MODEL_MODULE_TARGET undefined) blocks full `make test`.
+
+## 09-22 19:00 TICK — the abort loop is DEAD; the frontier = 6 cold layers + a wall-clock deadline
+
+CLIMB STEPS LANDED (all in PR #1077 @3c9f373):
+- KV-RECLAIM (cache/kv_page_cache.c): lane admission reclaims slots whose
+  owner's OWN declared deadline precedes the live request's — the abort
+  that frees them is routinely eaten client-side (ClearTransactions drops
+  pending decisions). CONVICTED LIVE: sparkc slot 1 owned by a dead
+  hammer-era request (owner_req=1024868, phase 0), BUSY-failing EVERY
+  admission for hours (sparkc = the lone BUSY rank; 6 decisions vs 17888
+  on all other nodes). Post-fix: submissions COMMIT (decision=1) — the
+  abort-every-submission loop is dead.
+- WEIGHTD-STACK REVIVE (module): the agent recycles the weightd on
+  binary-sha changes; the transport's client dead-stickied (WEIGHTD-DEAD
+  → every reduce IO-fails until a residentd restart). The module now
+  detects the dead lane client at round-submit and re-creates the WHOLE
+  stack (lane acquire + both collectives) via the stored node context.
+- KV tests green (test_kv_cache, test_kv_lane_fuzz).
+
+MEASURED: the HTTP pipeline delivers cleanly end-to-end (RC=0 round
+trips, well-formed responses AND errors). Chains: 7 rounds at 1.7ms/round
+allreduce under FULL cold load (11.83ms/7r); committed submissions flow
+on all ranks. Requests still fail status=17: chains legitimately walk
+~190s cold while the chain deadline is 30s.
+
+THE FRONTIER (exact):
+1. PREFETCH still fails layers 39-44 (status=4, 42/45) — the weightsd-
+   side chunk class for the tail layers (chunk CREATION era; the map-bind
+   fix did not cure these). Those 6 layers = the entire 190s walk.
+2. The chain deadline (30s → status=17 degrade) fires during legitimate
+   cold walks — the same elapsed-time-vs-observable-state violation the
+   reaper fix settled; the chain degrade must read liveness (ordinals/
+   layers advancing) per the 09-21bd minimum-fix architecture.
+NEXT: (a) the weightsd-side question for layers 39-44 (why do their
+chunks fail the exchange while 42 layers succeed), (b) liveness-based
+chain deadline, (c) then the warm canary → chain2 GRAPH → ARRIVAL
+receipt → the clean µs/round.
