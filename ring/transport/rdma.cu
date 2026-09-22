@@ -275,18 +275,16 @@ extern "C" const SparkHiddenTransportInterface *SparkHiddenTransportGetInterface
         sizeof(SparkHiddenTransportInterface);
     spark_hidden_spark_host_rdma_interface.capability_flags =
 #if SPARK_HIDDEN_SPARK_RDMA_DEVICE_DIRECT
-        /* gpudirect variant: production caps + GPUDIRECT_RDMA */
         SPARK_HIDDEN_TRANSPORT_REQUIRED_SPARK_GPUDIRECT_RDMA_CAPS |
         SPARK_HIDDEN_TRANSPORT_CAP_PERSISTENT_RECEIVE_CREDITS;
 #else
-        /* host variant: the weightd-mesh send path — synchronous sends
-         * on a persistent client connection, payload written straight
-         * into the pinned CUDA-mapped mesh buffer the daemon RDMA-reads
-         * (no intermediate userspace bounce, no cudaMemcpy, no file or
-         * shell channel) — is exactly the REQUIRED_SPARK_HOST_RDMA_CAPS
-         * contract for this module id. Declaring only
-         * PERSISTENT_RECEIVE_CREDITS (the old form) fails residentd's
-         * required-caps check at interface load. */
+        /* The honest contract (manager ruling on laguna's measurement):
+         * REQUIRED_SPARK_HOST_RDMA_CAPS is what this backend implements
+         * — synchronous singles plus batch loops over them. Poll
+         * descriptors, multi-lane and the remote-completion doorbell
+         * are NOT implemented here; declaring them to satisfy a
+         * mis-wired required mask would be a lie. The mask bug is fixed
+         * at the contract site instead (node/model_residentd.c). */
         SPARK_HIDDEN_TRANSPORT_REQUIRED_SPARK_HOST_RDMA_CAPS |
         SPARK_HIDDEN_TRANSPORT_CAP_PERSISTENT_RECEIVE_CREDITS;
 #endif
