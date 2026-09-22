@@ -147,6 +147,7 @@ def run_wrapper(checkout: Path, temporary: Path, rank: int) -> subprocess.Comple
     environment.update({
         "SPARK_QUEUE_RANK": str(rank),
         "SPARK_QUEUE_SIZE": str(RANKS),
+        "SPARK_QUEUE_MEMORY_MIB": "9792",
         "SPARK_QUEUE_RUNTIME_ROOT": str(temporary / f"runtime-{rank}"),
         "GEMMA4_RELEASE_DIR": "build/gemma4_31b_tp16",
         "GEMMA4_DEPLOYMENT_TREE": "deployment/gemma4_31b_tp16_lane6",
@@ -187,6 +188,16 @@ def test_wrapper(deployment_tree: Path, temporary: Path) -> None:
     # fail-closed: rank out of range
     result = run_wrapper(checkout, temporary, 16)
     check(result.returncode != 0, "rank 16 must fail closed")
+    # fail-closed: unbounded memory (the hard rule - refuse queue-less runs)
+    environment = dict(os.environ)
+    environment.update({
+        "SPARK_QUEUE_RANK": "0", "SPARK_QUEUE_RUNTIME_ROOT": str(temporary / "runtime-unbounded"),
+        "GEMMA4_RELEASE_DIR": "build/gemma4_31b_tp16", "GEMMA4_PACK_DIR": str(checkout / "packs"),
+    })
+    environment.pop("SPARK_QUEUE_MEMORY_MIB", None)
+    result = subprocess.run(["bash", str(WRAPPER), "--dry-run"], cwd=checkout, env=environment,
+                            capture_output=True, text=True)
+    check(result.returncode != 0, "missing SPARK_QUEUE_MEMORY_MIB must fail closed (hard rule)")
     # fail-closed: missing release artifacts
     environment = dict(os.environ)
     environment.update({

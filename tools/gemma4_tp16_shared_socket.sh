@@ -48,6 +48,16 @@ fi
 
 fail() { printf 'gemma4_tp16_shared_socket: FAIL: %s\n' "$1" >&2; exit 1; }
 
+# Hard rule (fleet ruling, issue #1125 class): refuse to run without a finite
+# queue-provided memory bound - an unbounded unit fences all co-admission on
+# its node until exit. The queue exports SPARK_QUEUE_MEMORY_MIB on every
+# properly submitted job; missing/zero means unbounded.
+if [ -z "${SPARK_QUEUE_MEMORY_MIB:-}" ] || [ "${SPARK_QUEUE_MEMORY_MIB}" = "0" ]; then
+    printf '%s
+' "gemma4_tp16_shared_socket: FAIL: SPARK_QUEUE_MEMORY_MIB is unset/zero - submit through the queue with --memory-mib (finite MemoryMax is a hard requirement)" >&2
+    exit 2
+fi
+
 [ -n "${SPARK_QUEUE_RANK:-}" ] || fail "SPARK_QUEUE_RANK is not set (run inside a spark_queue job)"
 RANK="$SPARK_QUEUE_RANK"
 case "$RANK" in (*[!0-9]*|'') fail "SPARK_QUEUE_RANK is not a rank: $RANK";; esac

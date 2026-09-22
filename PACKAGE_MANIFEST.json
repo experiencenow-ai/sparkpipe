@@ -3163,8 +3163,8 @@
     },
     {
       "path": "examples/model_descriptions/gemma4_26b_resident_decode_stage_firmware.json",
-      "sha256": "9f2b381a6ff5471859c3e57285a8a816a1bcc0caa4c089e8c9fac4019c6cb692",
-      "size_bytes": 3728
+      "sha256": "19fdbbd9156e54eb2a24b56c4a3c512f45d7ecb0cff52a52988e039707e373e8",
+      "size_bytes": 3942
     },
     {
       "path": "examples/model_descriptions/gemma4_resident_decode_stage_bf16_firmware.json",
@@ -9148,8 +9148,8 @@
     },
     {
       "path": "tests/test_gemma4_tp16_shared_socket.py",
-      "sha256": "8bcaf05aa6fdf146ac67847709e9e70c4f576f94f80e52d0a1146f5ffd986c13",
-      "size_bytes": 10526
+      "sha256": "ef6095661b83f0414c2fd712d11425c1c7e2f3a5e3855e99777e134a8c1ed55e",
+      "size_bytes": 11215
     },
     {
       "path": "tests/test_gemma4_verify_existing.py",
@@ -11378,8 +11378,8 @@
     },
     {
       "path": "tools/gemma4_build_release.sh",
-      "sha256": "573640fbe6ce036135fa60758e35caee8c012a014c01570a767d4e6bdd714699",
-      "size_bytes": 1591
+      "sha256": "dd6dcdc42eb3cf217757df79d62def82feb184964af68f58bc58e877f7e53477",
+      "size_bytes": 2133
     },
     {
       "path": "tools/gemma4_decode_roofline.py",
@@ -11423,8 +11423,8 @@
     },
     {
       "path": "tools/gemma4_tp16_shared_socket.sh",
-      "sha256": "ee9676a3a6d497604d1c827e2f36943d50d52096f8c5e5d19e36bc64c745962e",
-      "size_bytes": 7066
+      "sha256": "dd5607cb1381181aeabbdfcc4f0f741409fa5cf268d90365f60f6f6d0c7989b8",
+      "size_bytes": 7631
     },
     {
       "path": "tools/gen_geometry_header.py",
@@ -16730,5 +16730,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79693818
+  "total_bytes": 79695828
 }

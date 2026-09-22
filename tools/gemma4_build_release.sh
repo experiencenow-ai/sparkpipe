@@ -10,6 +10,16 @@
 # queue's systemd embedding expands $-syntax in the job command itself, so
 # queue cmd files must stay dollar-free - keep that resolution HERE.
 set -euo pipefail
+
+# Hard rule (fleet ruling, issue #1125 class): refuse to run without a finite
+# queue-provided memory bound - an unbounded unit fences all co-admission on
+# its node until exit. The queue exports SPARK_QUEUE_MEMORY_MIB on every
+# properly submitted job; missing/zero means unbounded.
+if [ -z "${SPARK_QUEUE_MEMORY_MIB:-}" ] || [ "${SPARK_QUEUE_MEMORY_MIB}" = "0" ]; then
+    printf '%s
+' "$0: FAIL: SPARK_QUEUE_MEMORY_MIB is unset/zero - submit through the queue with --memory-mib (finite MemoryMax is a hard requirement)" >&2
+    exit 2
+fi
 if [ "$#" -ne 0 ]; then
     printf '%s\n' 'gemma4_build_release.sh takes no arguments' >&2
     exit 2
