@@ -261,19 +261,33 @@ def budgets(source: str, rank: int, pack: str = None) -> int:
     return 0
 
 
-def emit_wset(source: str, output: str) -> int:
+def emit_wset(source: str, output: str, rank: int = None) -> int:
     """Materialize the smoke-expert working set as a .wset binary.
 
     Raw little-endian (layer u32, expert u32) pairs, deduplicated and
     sorted - the format tools/weightd_warm.c --wset validates against the
     pack manifest. Source: model-families/qwen38_max/smoke_experts.json
     (machine-generated; PR #1085 census receipt).
+
+    --rank N keeps only THIS rank's shard of the census: the packs are
+    TP16 rank shards (global expert windows of 512/16), and weightd_warm
+    rejects keys absent from the node's own pack manifest - the whole-
+    census wset spans all 16 packs and is valid on none. Rank 0 filters
+    to 104 keys (the pools manifest's per_rank_experts count for rank 0).
     """
     document = json.load(open(source, encoding="utf-8"))
     if document.get("family") != "qwen38_max":
         raise SystemExit("wset source is not the qwen38_max manifest")
+    nodes = int(document.get("nodes") or 0)
     pairs = sorted({(int(e["layer"]), int(e["expert"]))
                     for e in document["experts"]})
+    if rank is not None:
+        if nodes < 1:
+            raise SystemExit("wset rank filter needs a sharded manifest")
+        routed = int(document.get("routed_expert_count") or 512)
+        window = max(1, routed // nodes)
+        pairs = [(layer, expert) for layer, expert in pairs
+                 if expert // window == rank]
     with open(output, "wb") as handle:
         for layer, expert in pairs:
             handle.write(layer.to_bytes(4, "little"))
@@ -312,7 +326,7 @@ def main() -> int:
     if arguments.budgets:
         return budgets(arguments.budgets, arguments.rank, arguments.pack)
     if arguments.emit_wset:
-        return emit_wset(arguments.wset_source, arguments.emit_wset)
+        return emit_wset(arguments.wset_source, arguments.emit_wset, arguments.rank)
 
     missing = [name for name, value in (
         ("--runtime-root", arguments.runtime_root),

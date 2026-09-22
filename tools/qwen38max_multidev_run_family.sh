@@ -306,7 +306,9 @@ esac
 
 if [ "$WARM_LEG" -eq 1 ]; then
   WSET="$ROOT/smoke.wset"
-  python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" --emit-wset "$WSET"
+  # rank-filtered: weightd_warm validates keys against THIS node's pack
+  # manifest; the census spans all 16 packs (104 keys on rank 0).
+  python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" --emit-wset "$WSET" --rank "$RANK"
   REVISION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["model_revision"])' "$ROOT/config/adapter.json")"
   # weightd_warm fail-closes without finite pool/spine envs (it attaches
   # through the same identity path); the resident-launch exports below
