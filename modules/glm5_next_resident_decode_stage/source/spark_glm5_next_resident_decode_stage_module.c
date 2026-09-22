@@ -235,7 +235,7 @@ struct SparkGlm5NextModuleState
 	SparkTpDeviceCollective tp_device_collective_hc;
 	uint32_t tp_device_collective_hc_initialized;
 	uint32_t tp_device_collective_initialized;
-	uint32_t tp_chain_active;
+	_Atomic(uint32_t) tp_chain_active;
 	uint32_t tp_lane;
 	SparkWeightdClient *lane_client;
 	atomic_uint terminal_status;
@@ -2373,6 +2373,7 @@ static SparkStatus SparkGlm5NextMtpStashHidden(
 	return(SPARK_STATUS_OK);
 }
 
+static SparkStatus SparkGlm5NextLazyRelease(SparkGlm5NextTpChain *chain);
 static void SparkGlm5NextLazyReleaseQuiet(SparkGlm5NextTpChain *chain);
 
 static void CUDART_CB SparkGlm5NextMtpResolveHost(void *context)
@@ -2462,7 +2463,13 @@ static void SparkGlm5NextTpChainFail(SparkGlm5NextTpChain *chain,SparkStatus sta
 	{
 		chain->retained_status = status;
 		fprintf(stderr,"GLM chain drain failed; retaining slot %u and CUDA resources for teardown retry\n",chain->slot_index);
-		state->tp_chain_active = 0u;
+		atomic_store_explicit(&state->lazy_retained[chain->slot_index],chain,memory_order_release);
+		SparkGlm5NextScheduleRetainedRetry(state);
+		return;
+	}
+	if ( chain->expert_lease != 0u && SparkGlm5NextLazyRelease(chain) != SPARK_STATUS_OK )
+	{
+		chain->retained_status = status;
 		atomic_store_explicit(&state->lazy_retained[chain->slot_index],chain,memory_order_release);
 		SparkGlm5NextScheduleRetainedRetry(state);
 		return;
@@ -2470,7 +2477,6 @@ static void SparkGlm5NextTpChainFail(SparkGlm5NextTpChain *chain,SparkStatus sta
 	async = &state->completions[chain->slot_index];
 	async->completion.status = status;
 	SparkGlm5NextCompleteAsync(async);
-	SparkGlm5NextLazyReleaseQuiet(chain);
 	free(chain);
 }
 
@@ -2683,7 +2689,6 @@ static void SparkGlm5NextLazyWork(void *context)
 	{
 		chain->retained_status = status != SPARK_STATUS_OK ? status : cleanup;
 		fprintf(stderr,"GLM expert cleanup failed: slot=%u lease=%llu status=%d; retaining slot and lease for teardown retry\n",chain->slot_index,(unsigned long long)chain->expert_lease,(int32_t)cleanup);
-		chain->state->tp_chain_active = 0u;
 		atomic_store_explicit(&chain->state->lazy_retained[chain->slot_index],chain,memory_order_release);
 		SparkGlm5NextScheduleRetainedRetry(chain->state);
 		return;
@@ -3852,14 +3857,22 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 	pthread_mutex_lock(&state->completion_queue_lock);
 	SparkGlm5NextDrainParkedCompletions(state);
 	pthread_mutex_unlock(&state->completion_queue_lock);
-	state->tp_chain_active = 0u;
-	SparkTpDeviceCollectiveBroadcastCancel(&state->tp_device_collective);
-	if ( state->tp_device_collective_hc_initialized != 0u )
-		SparkTpDeviceCollectiveBroadcastCancel(
-			&state->tp_device_collective_hc);
 	if ( async->slot_index >= state->pipeline_slot_count )
 		return;
 	slot = &state->slots[async->slot_index];
+	if ( async->completion.status != SPARK_STATUS_OK )
+	{
+		if ( state->tp_device_collective_initialized != 0u )
+			SparkTpDeviceCollectiveBroadcastCancel(&state->tp_device_collective);
+		if ( state->tp_device_collective_hc_initialized != 0u )
+			SparkTpDeviceCollectiveBroadcastCancel(&state->tp_device_collective_hc);
+	}
+	if ( SparkGlm5NextBoundedStreamSync(state->execution_stream,UINT64_C(35000000000)) != 0 )
+	{
+		(void)SparkGlm5NextTerminalFailure(state,SPARK_STATUS_IO_ERROR);
+		fprintf(stderr,"GLM completion drain failed; retaining slot %u and chain ownership\n",async->slot_index);
+		return;
+	}
 	if ( slot->host_kv_access_error[0] != 0u )
 	{
 		fprintf(stderr,"GLM cache access failed: code %u row %u slot %u\n",slot->host_kv_access_error[0],slot->host_kv_access_error[2],async->slot_index);
@@ -3867,6 +3880,7 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 	}
 	async->completion.status = SparkGlm5NextCompletionStatus(async,slot);
 	async->completion.status = SparkGlm5NextFinishCacheLanes(async);
+
 	{
 		uint64_t round_count = 0u,round_ns = 0u,chain_ns = SparkGlm5NextNowNs();
 		SparkTpDeviceCollectiveRoundStats(&state->tp_device_collective,&round_count,&round_ns,1u);
@@ -3926,6 +3940,7 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 	complete = async->completion_function;
 	complete_context = async->completion_context;
 	SparkStageModuleIndexSetRelease(state->lane_states,state->resident_sequence_capacity,async->lane_indices,async->lane_count);
+	atomic_store_explicit(&state->tp_chain_active,0u,memory_order_release);
 	SparkStageModuleSlotRelease(state->slot_states,async->slot_index);
 	complete(complete_context,&completion);
 }
@@ -4116,6 +4131,19 @@ static SparkStatus SparkGlm5NextRestoreCacheLanes(SparkGlm5NextModuleState *stat
 	SPARK_RETURN(status);
 }
 
+static SparkStatus SparkGlm5NextClaimTpChain(SparkGlm5NextModuleState *state)
+{
+	uint32_t expected = 0u;
+	cudaError_t error;
+	if ( !atomic_compare_exchange_strong_explicit(&state->tp_chain_active,&expected,1u,memory_order_acq_rel,memory_order_acquire) )
+		return(SPARK_STATUS_BUSY);
+	error = cudaStreamQuery((cudaStream_t)state->execution_stream);
+	if ( error == cudaSuccess )
+		return(SPARK_STATUS_OK);
+	atomic_store_explicit(&state->tp_chain_active,0u,memory_order_release);
+	return(error == cudaErrorNotReady ? SPARK_STATUS_BUSY : SparkGlm5NextTerminalFailure(state,SPARK_STATUS_IO_ERROR));
+}
+
 static SparkStatus SparkGlm5NextStartClaimedBatch(SparkGlm5NextModuleState *state,SparkModelDriverFrame *frame,const SparkGlm5NextResidentDecodeStageFrameContext *context,uint32_t slot_index)
 {
 	SparkGlm5NextExecutionSlot *slot = &state->slots[slot_index];
@@ -4123,20 +4151,25 @@ static SparkStatus SparkGlm5NextStartClaimedBatch(SparkGlm5NextModuleState *stat
 	SparkStatus status;
 	cudaError_t error;
 	uint32_t retained_index;
-	if ( state->tp_chain_active != 0u )
-		SPARK_FAIL(SPARK_STATUS_BUSY);
 	for ( retained_index = 0u; retained_index < state->pipeline_slot_count; retained_index++ )
 		if ( atomic_load_explicit(&state->lazy_retained[retained_index],memory_order_acquire) != 0 )
 		{
 			SparkGlm5NextScheduleRetainedRetry(state);
-			break;
+			SPARK_FAIL(SPARK_STATUS_BUSY);
 		}
+	status = SparkGlm5NextClaimTpChain(state);
+	if ( status != SPARK_STATUS_OK )
+		SPARK_RETURN(status);
 	chain = (SparkGlm5NextTpChain *)calloc(1u,sizeof(*chain));
 	if ( chain == 0 )
+	{
+		atomic_store_explicit(&state->tp_chain_active,0u,memory_order_release);
 		SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
+	}
 	status = SparkGlm5NextClaimCacheFrame(state,frame,context->batch,state->completions[slot_index].lane_next_positions);
 	if ( status != SPARK_STATUS_OK )
 	{
+		atomic_store_explicit(&state->tp_chain_active,0u,memory_order_release);
 		free(chain);
 		SPARK_RETURN(status);
 	}
@@ -4151,7 +4184,6 @@ static SparkStatus SparkGlm5NextStartClaimedBatch(SparkGlm5NextModuleState *stat
 	chain->stage = SPARK_GLM5_NEXT_CHAIN_STAGE_BEGIN;
 	chain->active = 1u;
 	atomic_fetch_add_explicit(&state->submitted_count,1u,memory_order_relaxed);
-	state->tp_chain_active = 1u;
 	if ( state->tp_device_collective_initialized != 0u )
 		status = SparkTpDeviceCollectiveChainKey(&state->tp_device_collective,chain->frame->request_id & SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK);
 	if ( status == SPARK_STATUS_OK && state->tp_device_collective_hc_initialized != 0u )
@@ -4658,6 +4690,7 @@ static SparkStatus SparkGlm5NextInitializeState(
 		SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
 	state->ledger.module_tag = SPARK_GLM5_NEXT_MODULE_TAG;
 	atomic_init(&state->terminal_status,SPARK_STATUS_OK);
+	atomic_init(&state->tp_chain_active,0u);
 	status = SparkGlm5NextConfigureExecution(state);
 	if ( status != SPARK_STATUS_OK )
 	{
