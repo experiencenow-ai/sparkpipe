@@ -900,8 +900,15 @@ typedef struct SparkQwen38MaxValModule
 	uint32_t head_stage;
 	uint32_t host_blocks[SPARK_QWEN38_MAX_VALIDATION_KV_LANES];
 	uint32_t host_counts[SPARK_QWEN38_MAX_VALIDATION_KV_LANES];
+	uint32_t host_lanes[SPARK_QWEN38_MAX_VALIDATION_KV_LANES];
+	uint64_t host_positions[SPARK_QWEN38_MAX_VALIDATION_KV_LANES];
+	uint64_t host_sequence_ids[SPARK_QWEN38_MAX_VALIDATION_KV_LANES];
 	uint32_t *device_blocks;
 	uint32_t *device_counts;
+	uint32_t *device_lanes;
+	uint64_t *device_positions;
+	uint64_t *device_sequence_ids;
+	SparkQwen38MaxDecodeBatchView decode_batch;
 	SparkQwen38MaxKvBlockTableView table;
 	SparkQwen38MaxResidentDecodeStageFrameContext context;
 	SparkModelDriverBuffer buffers[2];
@@ -924,11 +931,20 @@ static int SparkQwen38MaxValModuleInitialize(SparkQwen38MaxValModule *module)
 	{
 		module->host_blocks[lane] = lane;
 		module->host_counts[lane] = 1u;
+		module->host_lanes[lane] = lane;
+		module->host_positions[lane] = (uint64_t)lane;
+		module->host_sequence_ids[lane] = 1u;
 	}
 	error = cudaMalloc((void **)&module->device_blocks,sizeof(module->host_blocks));
 	if (error == cudaSuccess) error = cudaMemcpy(module->device_blocks,module->host_blocks,sizeof(module->host_blocks),cudaMemcpyHostToDevice);
 	if (error == cudaSuccess) error = cudaMalloc((void **)&module->device_counts,sizeof(module->host_counts));
 	if (error == cudaSuccess) error = cudaMemcpy(module->device_counts,module->host_counts,sizeof(module->host_counts),cudaMemcpyHostToDevice);
+	if (error == cudaSuccess) error = cudaMalloc((void **)&module->device_lanes,sizeof(module->host_lanes));
+	if (error == cudaSuccess) error = cudaMemcpy(module->device_lanes,module->host_lanes,sizeof(module->host_lanes),cudaMemcpyHostToDevice);
+	if (error == cudaSuccess) error = cudaMalloc((void **)&module->device_positions,sizeof(module->host_positions));
+	if (error == cudaSuccess) error = cudaMemcpy(module->device_positions,module->host_positions,sizeof(module->host_positions),cudaMemcpyHostToDevice);
+	if (error == cudaSuccess) error = cudaMalloc((void **)&module->device_sequence_ids,sizeof(module->host_sequence_ids));
+	if (error == cudaSuccess) error = cudaMemcpy(module->device_sequence_ids,module->host_sequence_ids,sizeof(module->host_sequence_ids),cudaMemcpyHostToDevice);
 	if (SparkQwen38MaxValCuda(error,"module_table_alloc") != 0)
 		return(1);
 	module->table.abi_version = SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_KV_BLOCK_TABLE_ABI_VERSION;
@@ -980,6 +996,17 @@ static int SparkQwen38MaxValModuleExecute(SparkQwen38MaxValModule *module, uint3
 			? SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_FRAME_CONTEXT_FLAG_HIDDEN_OUTPUT_TRANSPORT
 			: 0u);
 	module->context.kv_block_table = &module->table;
+	/* The DECODE_BATCH_VIEW flag promises the view the module's KV frame
+	   preparation reads (row_sequence_ids feed LmKvFramePrepareFrame; the
+	   r14 tier reached KvPrepareFrame and fail-closed on a null view -
+	   the 27b validator pattern, adapted to this harness's arrays). */
+	module->decode_batch.abi_version = SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_DECODE_BATCH_VIEW_ABI_VERSION;
+	module->decode_batch.descriptor_bytes = sizeof(module->decode_batch);
+	module->decode_batch.row_count = rows;
+	module->decode_batch.row_lane_indices = module->device_lanes;
+	module->decode_batch.row_positions = module->device_positions;
+	module->decode_batch.row_sequence_ids = module->device_sequence_ids;
+	module->context.decode_batch = &module->decode_batch;
 	module->context.hidden_output_transport_session = module->head_stage != 0u ? 0 : (SparkHiddenTransportSession *)&module->capture;
 	module->context.hidden_output_send_function = module->head_stage != 0u ? 0 : SparkQwen38MaxValCaptureSend;
 	module->frame.program_id = 1u;
