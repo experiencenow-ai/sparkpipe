@@ -17,7 +17,10 @@ MODULE_ADDITIONAL_HOST_SOURCES = \
 	$(REPOSITORY_ROOT)/ring/transport/tp_collective.c \
 	$(REPOSITORY_ROOT)/ring/transport/tp_device_collective.c
 MINIMAX_MODEL_REVISION ?= minimax-h3-text-bf16-h5120-l64-mrope24-20-20-tp4-v1
-MINIMAX_CONTRACT_SHA256 ?= $(shell sha256sum $(CURDIR)/../../model-families/minimax/include/sparkpipe/llm_defines.h 2>/dev/null | awk '{print $$1}')
+# The package contract is the firmware description the driver compiles from:
+# the adapter's baked contract sha must equal the compiled driver's
+# model_description_sha256 (loader equality), so both sides derive from this file.
+MINIMAX_CONTRACT_SHA256 ?= $(shell sha256sum $(CURDIR)/../../examples/model_descriptions/minimax_resident_decode_stage_bf16_firmware.json 2>/dev/null | awk '{print $$1}')
 MODULE_COMPILE_FLAGS := \
 	-DSPARK_MINIMAX_MODULE_BUILD=1 \
 	-DMINIMAX_MODEL_REVISION=\"$(MINIMAX_MODEL_REVISION)\" \
