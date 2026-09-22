@@ -2220,3 +2220,29 @@ synchronous client timeout — either the daemon answers PENDING and the
 client polls (the async-creation design), or a standalone deploy-time
 warmer pre-creates the tail ONCE per node (minutes of storage reads at
 deploy, instant serving forever after). Plus the map re-attach revive.
+
+## 09-23 08:00 TICK — FIRST END-TO-END SERVING RECEIPT: real tokens, MEASURED
+
+THE RECEIPT (api.log, boot 144857 era): requests 100004-100006+ COMPLETED
+— status=0, engine_completed=1, real GLM token streams returned to the
+client (8 tokens each; 541 token-timestamp lines in the log). The whole
+stack served: rtx5090 tokenizer → engine → 16 ranks → chains → tokens.
+
+MEASURED (honest grading):
+- First token: +9.27s after acceptance (admission + prefill + first chain)
+- Steady decode: ~1.15 s/token (deltas 1128-1174ms across the streams;
+  ≈0.87 tok/s) — vs GOALS G1 = ≥14 tok/s: the gap is the relay-arrival
+  cadence + the per-token chain cost, the mission's actual target class.
+- The serving window rode a WARM daemon (the night's creation hammering
+  persisted server-side — creations survive client timeouts ✓ the
+  async-persistence hypothesis CONFIRMED); the current cold spell = the
+  daemon recycled again (11:57) wiping the arena → chains BUSY-30s again.
+
+THE SYSTEMIC FIX (named by this receipt): creations persist per-daemon-
+LIFETIME — every weightd restart re-pays the cold walk. The warmer must
+be AGENT-DRIVEN (post-weightd-start): pre-create the 6 tail layers once
+per daemon boot (minutes of storage reads, then serving is instant).
+With that + the map re-attach revive, the fleet becomes: recycle-proof,
+permanently warm, serving at the measured cadence — and the µs/round
+climb (330ms/round → the graph path's µs class) becomes the only
+remaining work.
