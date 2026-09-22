@@ -2405,3 +2405,25 @@ submission's deadline path — origin not yet located; the transport bump
 was not this one). NEXT: find and size the second deadline (the
 liveness-based design item unchanged), then the timed test: cold daemon
 → --wset preload (the 'literally 3 seconds' number) → warm canary.
+
+## 09-23 22:00 TICK — NOT a deadline: GRAPH replay works; ranks 4+12 stuck-tails = the pacing bottleneck
+
+THE "SECOND 30s DEADLINE" DECONSTRUCTED (log anatomy of the 35.06s
+death): GRAPH-REARM → gate → CAPTURE-OK → ONE-LAUNCH replay →
+GRAPH-REPLAY-TIME ns=35000000121 rounds=91 ns_per_round=384615385 →
+STUCK-TAILS: peers 4 and 12 sit TWO SEQS BEHIND (…892 vs …894) →
+cancel → DEGRADE graph-stuck → status 17.
+
+THE MEASUREMENTS (honest):
+- THE GRAPH PATH RUNS END-TO-END under the new stack (capture, 91-round
+  single-launch replay, clean cancel).
+- µs/round THIS ERA: 384.6 ms/round MEASURED in graph mode — the
+  relay-arrival cadence; allreduce host-side 0.3-0.5ms TOTAL.
+- THE BOTTLENECK'S NAME: ranks 4 and 12 lag 2 rounds at chain end —
+  the exact class the ARRIVAL ring was built to convict.
+
+THE NEXT LADDER RUNG (finally the mission's own climb): the arrival
+dump on a green-path replay — per-round arrival timestamps for ranks
+4/12 vs the pack — names the stall source (relay burst handling vs
+poll shape vs those nodes' load). Then the pacing fix; ≤100µs/round is
+the graph's own class once arrival stops gating.
