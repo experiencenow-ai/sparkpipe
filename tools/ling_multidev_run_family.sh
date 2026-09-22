@@ -150,7 +150,9 @@ HOST="spark$(printf '%x' "$RANK")"
 $(hostname); --nodes order must stay identical to the mesh map ($MESH_RANKS)"
 
 CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
-DEPLOYED_PACK="/home/$HOST/sparkdata/$ARM/packs/$ARM.rank$RANK.sp"
+# ling rank packs are HEX-named (rankb, not rank11): the stagepack
+# canonical rule names the file after the spark node letter.
+DEPLOYED_PACK="/home/$HOST/sparkdata/$ARM/packs/$ARM.rank$(printf '%x' "$RANK").sp"
 [ -f "$DEPLOYED_PACK" ] || fail "deployed rank pack missing: $DEPLOYED_PACK \
 (operator-placed set; grep the fleet pack inventory before any warm read)"
 

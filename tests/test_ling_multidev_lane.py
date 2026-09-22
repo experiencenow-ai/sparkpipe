@@ -142,8 +142,8 @@ def stage_gates(adapter, rank, codec, failures):
     check(adapter["expert_weight_codec"] == codec, failures,
           f"codec member matches the arm at rank {rank}")
     check(adapter["stage_pack_path"]
-          == f"packs/ling.{codec}.tp16.rank{rank}.sp", failures,
-          f"rank pack path at {rank}")
+          == f"packs/ling.{codec}.tp16.rank{rank:x}.sp", failures,
+          f"rank pack path at {rank} (hex-named packs)")
     check(adapter["tp_degree"] == 16 and adapter["tp_rank"] == rank,
           failures, f"tp degree/rank at {rank}")
     check(adapter["max_sequence_positions"] > 0

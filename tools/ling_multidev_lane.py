@@ -101,7 +101,10 @@ CODEC_NODE_TARGET = {
     codec: f"cuda.sm121.ling.resident_decode_stage.bf16.expert_{codec}"
     for codec in CODECS
 }
-PACK_TEMPLATE = "/home/{host}/sparkdata/ling.{codec}.tp16/packs/ling.{codec}.tp16.rank{rank}.sp"
+# ling rank packs are HEX-named (rankb, not rank11): the stagepack
+# canonical rule names the file after the spark node letter.
+PACK_TEMPLATE = ("/home/{host}/sparkdata/ling.{codec}.tp16/packs/"
+                 "ling.{codec}.tp16.rank{rank_hex}.sp")
 
 DEFAULT_KV_BACKING_BYTES = 8 * 1024 * 1024 * 1024
 
@@ -116,7 +119,8 @@ def host_of(rank: int) -> str:
 
 
 def deployed_pack(rank: int, codec: str) -> str:
-    return PACK_TEMPLATE.format(host=host_of(rank), codec=codec, rank=rank)
+    return PACK_TEMPLATE.format(host=host_of(rank), codec=codec,
+                                rank_hex=f"{rank:x}")
 
 
 def session_row(base: int) -> list[list[int]]:
@@ -137,7 +141,7 @@ def stage_config(rank: int, codec: str) -> dict:
         "schema_version": 3,
         "model_revision": MODEL_REVISION,
         "expert_weight_codec": codec,
-        "stage_pack_path": f"packs/ling.{codec}.tp16.rank{rank}.sp",
+        "stage_pack_path": f"packs/ling.{codec}.tp16.rank{rank:x}.sp",
         "max_sequence_positions": 32768,
         "execution_row_capacity": 128,
         "decode_split_context_threshold": 2048,
