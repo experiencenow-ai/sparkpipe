@@ -69,10 +69,12 @@ FAMILY_ENV=(
   "CUDA_DEVICE_MAX_CONNECTIONS=32"
 )
 
-# Milestone 3 hook: keep empty until weightd_warm speaks this family's
-# identity (model "dsv4", revision "", topology = the adapter's
-# tp_configuration_hash, geometry fingerprint over the pack header).
-WORKING_SET="${FAMILY_WORKING_SET:-}"
+# Milestone 3 hook: warm the smoke expert set through the same shared
+# socket before the resident attaches. Empty FAMILY_WORKING_SET skips the
+# warm; the default (applied below, where the repo root is known) is the
+# committed manifest's .wset companion. weightd_warm derives the exact
+# module attach identity via --family dsv4_pro --world-rank.
+WORKING_SET="${FAMILY_WORKING_SET:-default}"
 
 # ------------------------------ QUEUE CONTRACT -------------------------------
 
@@ -264,15 +266,23 @@ else
   echo "unknown WEIGHTD_MODE: $WEIGHTD_MODE" >&2; exit 2
 fi
 
-# Optional cold-launch preload (milestone 3; requires the weightd_warm
-# family-identity fix first - see the FAMILY PARAMETERS note).
-if [ -n "$WORKING_SET" ]; then
+# Optional cold-launch preload (milestone 3): warm the smoke expert set
+# through the same socket before the resident attaches, with the exact
+# module attach identity (--family dsv4_pro --world-rank).
+if [ "$WORKING_SET" = "default" ]; then
+  WORKING_SET="$REPO/model-families/dsv4/smoke-standard-v1.wset"
+fi
+if [ -n "$WORKING_SET" ] && [ "$WORKING_SET" != "default" ]; then
   CONFIG_REL="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["nodes"][int(sys.argv[2])]["adapter_configuration_path"])' "$ROOT/deployment.json" "$RANK")"
   PACK_REL="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["stage_pack_path"])' "$ROOT/runtime/$CONFIG_REL")"
   REVISION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("model_revision","0"))' "$ROOT/runtime/$CONFIG_REL")"
   PACK="$ROOT/runtime/$PACK_REL"
   SHA="$(cut -d' ' -f1 "$PACK.sha256")"
+  # Pool bound with 2 MiB chunk-granularity headroom (see
+  # tools/devcycle/dsv4pro_smoke_warm.sh): ~18 MiB chunked per expert.
+  export SPARK_WEIGHTD_EXPERT_POOL_BYTES=4294967296
   "$EXEC_PREFIX/weightd_warm" "$WEIGHTD_SOCKET" "$PACK" "$SHA" "$REVISION" "$SIZE" \
+    --family dsv4_pro --world-rank "$RANK" \
     --wset "$WORKING_SET" 300 >"$ROOT/warm.log" 2>&1
   grep -q "WSET-WARM keys=" "$ROOT/warm.log" || { echo "working set warm failed" >&2; exit 2; }
 fi
