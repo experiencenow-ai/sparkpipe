@@ -4728,8 +4728,8 @@
     },
     {
       "path": "model_contracts/must_work_targets.json",
-      "sha256": "c7c673b00f53ec97c437be41c572c9afa3e799b6fdb94b721aa65e151a53444c",
-      "size_bytes": 3871
+      "sha256": "40ecc46ac66470dc2b06e9215cf09b58c73d20484b74e611ce37087b048f7b4f",
+      "size_bytes": 3939
     },
     {
       "path": "model_contracts/qwen36_authoritative.json",
@@ -9753,8 +9753,8 @@
     },
     {
       "path": "tests/test_must_work_targets.py",
-      "sha256": "19510f7ab95552c6a2c113083546592ae756d7d60b4d0cf720751b1576ca0631",
-      "size_bytes": 2180
+      "sha256": "922444232ee28c6192bdeb408e75b354084b5949730d0d24f163837018da6085",
+      "size_bytes": 3030
     },
     {
       "path": "tests/test_no_python_in_production.py",
@@ -16345,5 +16345,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78079000
+  "total_bytes": 78079918
 }
