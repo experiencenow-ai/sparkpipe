@@ -1,5 +1,5 @@
 {
-  "file_count": 3262,
+  "file_count": 3264,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -10722,6 +10722,16 @@
       "size_bytes": 2417
     },
     {
+      "path": "tools/devcycle/lane_assignments.json",
+      "sha256": "6072d1c5f2d4215be3f5261b7f19cc56484fdf541b7fa844544da078a3ab143f",
+      "size_bytes": 5736
+    },
+    {
+      "path": "tools/devcycle/lane_budget_calc.py",
+      "sha256": "1d8237db634477bd3a3488b1b0b51b0d55fd8a868800cc411479894fef75e45a",
+      "size_bytes": 4697
+    },
+    {
       "path": "tools/devcycle/migrate_dev_system.sh",
       "sha256": "3bf841cc8b59d02e78470ec27586b7ce0a9d15abbdc54e8f353c01ef000b9dd5",
       "size_bytes": 2242
@@ -16315,5 +16325,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 76687406
+  "total_bytes": 76697839
 }
