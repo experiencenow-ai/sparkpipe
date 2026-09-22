@@ -1880,47 +1880,133 @@ static SparkStatus SparkWeightdAcquireBudget(SparkWeightdServer *server,SparkWei
 	}
 }
 
-static SparkStatus SparkWeightdLoadRange(SparkWeightdArena *arena,int32_t fd,const SparkWeightdRange *range)
+
+static SparkStatus SparkWeightdLoadRangeFromStaging(SparkWeightdArena *arena,
+	const SparkWeightdRange *range,const uint8_t *staging,uint64_t staging_base)
 {
 	SparkCk128Context context;
 	uint8_t digest[16];
-	uint64_t offset = 0u,bytes;
-	ssize_t moved;
+	const uint8_t *source;
+	source = staging + (range->offset - staging_base);
 	SparkCk128Initialize(&context);
-	while ( offset < range->bytes )
-	{
-		bytes = (range->bytes - offset);
-		if ( bytes > sizeof(arena->staging) )
-			bytes = sizeof(arena->staging);
-		moved = pread(fd,arena->staging,(size_t)bytes,(off_t)(range->offset + offset));
-		if ( moved < 0 && errno == EINTR )
-			continue;
-		if ( moved <= 0 )
-		{
-			fprintf(stderr,"WD-LOADRANGE-FAIL pread fd=%d off=%llu req=%llu moved=%ld errno=%d\n",
-				fd,(unsigned long long)(range->offset + offset),
-				(unsigned long long)bytes,(long)moved,errno);
-			return(SPARK_STATUS_IO_ERROR);
-		}
-		SparkCk128Update(&context,arena->staging,(size_t)moved);
-		if ( cudaMemcpy((uint8_t *)arena->device_base + range->offset + offset,arena->staging,(size_t)moved,cudaMemcpyHostToDevice) != cudaSuccess )
-		{
-			fprintf(stderr,"WD-LOADRANGE-FAIL memcpy dst_off=%llu bytes=%llu cuda=%s\n",
-				(unsigned long long)(range->offset + offset),
-				(unsigned long long)moved,cudaGetErrorString(cudaGetLastError()));
-			return(SPARK_STATUS_IO_ERROR);
-		}
-		offset += (uint64_t)moved;
-	}
+	SparkCk128Update(&context,source,(size_t)range->bytes);
 	SparkCk128Finalize(&context,digest);
-	return(memcmp(digest,range->digest,sizeof(digest)) == 0 ? SPARK_STATUS_OK : SPARK_STATUS_HASH_MISMATCH);
+	if ( memcmp(digest,range->digest,sizeof(digest)) != 0 )
+		return(SPARK_STATUS_HASH_MISMATCH);
+	if ( cudaMemcpy((uint8_t *)arena->device_base + range->offset,source,
+		(size_t)range->bytes,cudaMemcpyHostToDevice) != cudaSuccess )
+	{
+		fprintf(stderr,"WD-LOADRANGE-FAIL memcpy dst_off=%llu bytes=%llu cuda=%s\n",
+			(unsigned long long)range->offset,
+			(unsigned long long)range->bytes,cudaGetErrorString(cudaGetLastError()));
+		return(SPARK_STATUS_IO_ERROR);
+	}
+	return(SPARK_STATUS_OK);
+}
+
+static SparkStatus SparkWeightdLoadRangeGroup(SparkWeightdArena *arena,int32_t fd,
+	const SparkWeightdRange *ranges,uint32_t range_count)
+{
+	uint64_t staging_bytes = (uint64_t)SPARK_WEIGHTD_ARENA_STAGING_BYTES;
+	uint32_t first = 0u;
+	ssize_t moved;
+	while ( first < range_count )
+	{
+		uint64_t span_offset = ranges[first].offset;
+		uint64_t span_bytes = ranges[first].bytes;
+		uint32_t last = first;
+		while ( last + 1u < range_count &&
+			ranges[last + 1u].offset == ranges[last].offset + ranges[last].bytes &&
+			span_bytes + ranges[last + 1u].bytes <= staging_bytes )
+		{
+			last++;
+			span_bytes += ranges[last].bytes;
+		}
+		if ( ranges[first].bytes > staging_bytes )
+		{
+			uint64_t offset = 0u,bytes;
+			SparkCk128Context context;
+			uint8_t digest[16];
+			SparkCk128Initialize(&context);
+			while ( offset < ranges[first].bytes )
+			{
+				bytes = (ranges[first].bytes - offset);
+				if ( bytes > staging_bytes )
+					bytes = staging_bytes;
+				moved = pread(fd,arena->staging,(size_t)bytes,(off_t)(ranges[first].offset + offset));
+				if ( moved < 0 && errno == EINTR )
+					continue;
+				if ( moved <= 0 )
+				{
+					fprintf(stderr,"WD-LOADRANGE-FAIL pread fd=%d off=%llu req=%llu moved=%ld errno=%d\n",
+						fd,(unsigned long long)(ranges[first].offset + offset),
+						(unsigned long long)bytes,(long)moved,errno);
+					return(SPARK_STATUS_IO_ERROR);
+				}
+				SparkCk128Update(&context,arena->staging,(size_t)moved);
+				if ( cudaMemcpy((uint8_t *)arena->device_base + ranges[first].offset + offset,
+					arena->staging,(size_t)moved,cudaMemcpyHostToDevice) != cudaSuccess )
+				{
+					fprintf(stderr,"WD-LOADRANGE-FAIL memcpy dst_off=%llu bytes=%llu cuda=%s\n",
+						(unsigned long long)(ranges[first].offset + offset),
+						(unsigned long long)moved,cudaGetErrorString(cudaGetLastError()));
+					return(SPARK_STATUS_IO_ERROR);
+				}
+				offset += (uint64_t)moved;
+			}
+			SparkCk128Finalize(&context,digest);
+			if ( memcmp(digest,ranges[first].digest,sizeof(digest)) != 0 )
+				return(SPARK_STATUS_HASH_MISMATCH);
+		}
+		else
+		{
+			uint64_t offset = 0u;
+			while ( offset < span_bytes )
+			{
+				uint64_t bytes = span_bytes - offset;
+				if ( bytes > staging_bytes )
+					bytes = staging_bytes;
+				moved = pread(fd,arena->staging,(size_t)bytes,(off_t)(span_offset + offset));
+				if ( moved < 0 && errno == EINTR )
+					continue;
+				if ( moved <= 0 )
+				{
+					fprintf(stderr,"WD-LOADRANGE-FAIL pread fd=%d off=%llu req=%llu moved=%ld errno=%d\n",
+						fd,(unsigned long long)(span_offset + offset),
+						(unsigned long long)bytes,(long)moved,errno);
+					return(SPARK_STATUS_IO_ERROR);
+				}
+				{
+					uint32_t index = first;
+					while ( index <= last )
+					{
+						uint64_t range_begin = ranges[index].offset - span_offset;
+						uint64_t range_end = range_begin + ranges[index].bytes;
+						if ( range_begin >= offset && range_end <= offset + (uint64_t)moved )
+						{
+							SparkStatus status = SparkWeightdLoadRangeFromStaging(arena,
+								&ranges[index],arena->staging,span_offset + offset);
+							if ( status != SPARK_STATUS_OK )
+								return(status);
+							index++;
+						}
+						else
+							break;
+					}
+				}
+				offset += (uint64_t)moved;
+			}
+		}
+		first = last + 1u;
+	}
+	return(SPARK_STATUS_OK);
 }
 
 static SparkStatus SparkWeightdLoadLease(SparkWeightdArena *arena,int32_t fd,const SparkWeightdLease *lease)
 {
 	const SparkWeightdRangeGroup *group;
 	struct stat info;
-	uint32_t i,j;
+	uint32_t i;
 	SparkStatus status;
 	if ( fstat(fd,&info) != 0 || info.st_dev != arena->pack_stat.st_dev || info.st_ino != arena->pack_stat.st_ino || info.st_size != arena->pack_stat.st_size || SparkWeightdStatMtimeNs(&info) != SparkWeightdStatMtimeNs(&arena->pack_stat) )
 		return(SPARK_STATUS_HASH_MISMATCH);
@@ -1929,12 +2015,10 @@ static SparkStatus SparkWeightdLoadLease(SparkWeightdArena *arena,int32_t fd,con
 		if ( arena->experts[lease->groups[i]].present != 0u )
 			continue;
 		group = &arena->manifest.groups[lease->groups[i]];
-		for (j=0u; j<group->range_count; j++)
-		{
-			status = SparkWeightdLoadRange(arena,fd,&arena->manifest.ranges[group->first_range + j]);
-			if ( status != SPARK_STATUS_OK )
-				SPARK_RETURN(status);
-		}
+		status = SparkWeightdLoadRangeGroup(arena,fd,
+			&arena->manifest.ranges[group->first_range],group->range_count);
+		if ( status != SPARK_STATUS_OK )
+			SPARK_RETURN(status);
 	}
 	if ( fstat(fd,&info) != 0 || info.st_size != arena->pack_stat.st_size || SparkWeightdStatMtimeNs(&info) != SparkWeightdStatMtimeNs(&arena->pack_stat) )
 		return(SPARK_STATUS_HASH_MISMATCH);

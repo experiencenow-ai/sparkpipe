@@ -3507,15 +3507,25 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 		     state->lazy_pack != 0 &&
 		     state->lazy_pack->map != 0 )
 		{
-			pthread_t prefetch_thread;
-			state->prefetch_started = 1u;
-			state->prefetch_live = 1u;
-			fprintf(stderr,"PREFETCH-START immediate (parallel warm)\n");
-			if ( pthread_create(&prefetch_thread,0,
-			        SparkGlm5NextPrefetchMain,state) != 0 )
+			const char *prefetch_env = getenv("SPARK_GLM5_NEXT_PREFETCH");
+			if ( prefetch_env != 0 && prefetch_env[0] == '1' )
 			{
-				state->prefetch_live = 0u;
-				fprintf(stderr,"PREFETCH-THREAD-FAIL\n");
+				pthread_t prefetch_thread;
+				state->prefetch_started = 1u;
+				state->prefetch_live = 1u;
+				fprintf(stderr,"PREFETCH-START immediate (parallel warm; opt-in lane)\n");
+				if ( pthread_create(&prefetch_thread,0,
+				        SparkGlm5NextPrefetchMain,state) != 0 )
+				{
+					state->prefetch_live = 0u;
+					fprintf(stderr,"PREFETCH-THREAD-FAIL\n");
+				}
+			}
+			else
+			{
+				state->prefetch_started = 1u;
+				fprintf(stderr,
+				    "PREFETCH-OFF (demand-driven expert loading; set SPARK_GLM5_NEXT_PREFETCH=1 for the full-warm lane)\n");
 			}
 		}
 		if ( state->graph_path_enabled != 0u &&
