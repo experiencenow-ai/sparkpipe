@@ -235,6 +235,31 @@ static void check(unsigned fault,unsigned failures)
     assert(!handles[0] && !handles[1] && !mappings[0] && !mappings[1]);
     for (unsigned i=0u;i<events;i++) assert(live_events[i]==0u);
 }
+static void check_retirement(void)
+{
+    SparkWeightdMap map={0};
+    uint64_t owners[1]={3u};
+    uint8_t mapped[1]={1u};
+    CUmemGenericAllocationHandle imported[1]={(CUmemGenericAllocationHandle)(uintptr_t)2u};
+    map.base=base;map.chunk_bytes=8192u;map.chunk_count=1u;
+    map.owners=owners;map.mapped=mapped;map.handles=imported;
+    reserved=1u;handles[1]=mappings[1]=1u;
+    cleanup_faults=(1u<<1u)|(1u<<3u);cleanup_hits=0u;
+    assert(map_drop_slot(&map,0u)==SPARK_STATUS_OK && owners[0]==2u);
+    assert(mapped[0] && handles[1] && mappings[1] && cleanup_hits==0u);
+    assert(map_drop_slot(&map,1u)==SPARK_STATUS_IO_ERROR);
+    assert(owners[0]==2u && mapped[0] && handles[1] && mappings[1]);
+    assert(map_drop_slot(&map,1u)==SPARK_STATUS_IO_ERROR);
+    assert(owners[0]==2u && !mapped[0] && handles[1] && !mappings[1]);
+    assert(map_drop_slot(&map,1u)==SPARK_STATUS_OK);
+    assert(!owners[0] && !mapped[0] && !imported[0] && !handles[1] && !mappings[1]);
+    assert(cleanup_faults==0u && cleanup_hits==((1u<<1u)|(1u<<3u)));
+    map.pool_mapped=1u;owners[0]=1u;mapped[0]=1u;imported[0]=(CUmemGenericAllocationHandle)(uintptr_t)2u;
+    handles[1]=mappings[1]=1u;cleanup_hits=0u;
+    assert(map_drop_slot(&map,0u)==SPARK_STATUS_OK && !owners[0]);
+    assert(mapped[0] && imported[0] && handles[1] && mappings[1] && !cleanup_hits);
+    handles[1]=mappings[1]=reserved=0u;
+}
 int main(void)
 {
     for (unsigned phase=0u;phase<=6u;phase++) check(phase,0u);
@@ -244,7 +269,8 @@ int main(void)
         check(6u,1u<<phase);
     }
     check(0u,63u);check(6u,63u);
-    puts("PASS weightd map create: 21 actual-source cases; six init failures, six cleanup retry boundaries, combined retries, exact resource ownership");
+    check_retirement();
+    puts("PASS weightd map create: 21 actual-source cases; six init failures, six cleanup retry boundaries, combined retries, exact resource ownership; partial retirement retries and pooled retention");
     return 0;
 }
 '''
