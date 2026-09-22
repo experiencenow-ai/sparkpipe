@@ -1,5 +1,5 @@
 {
-  "file_count": 3228,
+  "file_count": 3229,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -1317,6 +1317,11 @@
       "size_bytes": 14846
     },
     {
+      "path": "docs/HANDOFF_MGR2_2026-09-21.md",
+      "sha256": "a280ad9887fceb74b3368c6cc72dca5fc02fe82adc3a943c49ee9137c98e5f52",
+      "size_bytes": 11236
+    },
+    {
       "path": "docs/HANDOFF_NEXT_SESSION.md",
       "sha256": "04de171fff2874be3cbc3c7eca29883da4ddb4e425b768998543357e9f1be0ab",
       "size_bytes": 8149
@@ -1343,8 +1348,8 @@
     },
     {
       "path": "docs/HILLCLIMB_20260920.md",
-      "sha256": "8549d7b20ebf85bf572778bd081083f6ab5f2d101a5046bdf73094e59aee8ac4",
-      "size_bytes": 169355
+      "sha256": "f1755be4f7dc7c8f39e35ad63bbe187893100c6f741e676118e9ad34e621958b",
+      "size_bytes": 173454
     },
     {
       "path": "docs/HILL_CLIMB_DEPLOY.md",
@@ -5098,8 +5103,8 @@
     },
     {
       "path": "modules/glm5_next_resident_decode_stage/source/spark_glm5_next_resident_decode_stage_module.c",
-      "sha256": "cfb43f0f82357c52b7950dd8b0f2c12076a322c917835303ef3acd8445dfd036",
-      "size_bytes": 209717
+      "sha256": "22ad8d100af99d088e6e8a408ca71010e24693edb2cef8f0c6c7430affc883de",
+      "size_bytes": 209924
     },
     {
       "path": "modules/glm5_next_resident_decode_stage/source/spark_glm5_next_serving_adapter.c",
@@ -16145,5 +16150,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 75896502
+  "total_bytes": 75912044
 }
