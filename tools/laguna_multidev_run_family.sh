@@ -289,21 +289,9 @@ DEFAULT_SPINE="${BUDGETS##* }"
 
 if [ -n "${LAGUNA_WORKING_SET:-}" ]; then
   WSET="$ROOT/smoke.wset"
-  python3 - "$CHECKOUT/model-families/laguna/smoke_experts.json" "$WSET" <<'PYWSET'
-import json, os, sys
-document = json.load(open(sys.argv[1], encoding="utf-8"))
-if document.get("family") != "laguna":
-    raise SystemExit("wset source is not the laguna census manifest")
-pairs = sorted({(int(e["layer"]), int(e["expert"])) for e in document["experts"]})
-with open(sys.argv[2], "wb") as handle:
-    for layer, expert in pairs:
-        handle.write(layer.to_bytes(4, "little"))
-        handle.write(expert.to_bytes(4, "little"))
-print("wset keys", len(pairs))
-PYWSET
-  REVISION="$MODEL_REVISION"
+  python3 "$CHECKOUT/tools/laguna_multidev_lane.py" --emit-wset "$WSET"
   "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
-    "$(cat "$ROOT/packs/pack.sha256")" "$REVISION" "$WORLD" \
+    "$(cat "$ROOT/packs/pack.sha256")" "$MODEL_REVISION" "$WORLD" \
     --wset "$WSET" 300 > "$ROOT/warm.log" 2>&1
   grep -q "WSET-WARM keys=" "$ROOT/warm.log" ||
     fail "working set warm failed (see $ROOT/warm.log)"
