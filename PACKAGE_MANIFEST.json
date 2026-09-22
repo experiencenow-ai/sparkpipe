@@ -3193,8 +3193,8 @@
     },
     {
       "path": "examples/model_descriptions/gemma4_resident_decode_stage_bf16_firmware.json",
-      "sha256": "d98c11bec1046e4b2f21719eec51ff3f880e9083a1959428a25a38269cff51e4",
-      "size_bytes": 3312
+      "sha256": "6d1c0125daff708c52325e9421e1fd4d39fbf9d10d80f4d6487df391ce040830",
+      "size_bytes": 3720
     },
     {
       "path": "examples/model_descriptions/glm52_resident_decode_stage_bf16_firmware.json",
@@ -17020,5 +17020,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80665024
+  "total_bytes": 80665432
 }
