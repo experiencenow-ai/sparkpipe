@@ -13,6 +13,7 @@ MODULE_CUDA_SOURCE := $(CURDIR)/source/spark_qwen38_27b_resident_decode_stage_cu
 include $(dir $(lastword $(MAKEFILE_LIST)))../../runtime/weightd_sources.mk
 MODULE_ADDITIONAL_HOST_SOURCES = \
 	$(REPOSITORY_ROOT)/runtime/stage_module_lifecycle.c \
+	$(REPOSITORY_ROOT)/runtime/stagepack_format.c \
 	$(addprefix $(REPOSITORY_ROOT)/,$(SPARKPIPE_WEIGHTD_SOURCES)) \
 	$(REPOSITORY_ROOT)/src/spark_status.c \
 	$(REPOSITORY_ROOT)/src/spark_sha256.c \
