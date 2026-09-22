@@ -270,16 +270,13 @@ int main(int argument_count,char **arguments)
     else if ( family != 0 && strcmp(family,"k3") == 0 )
     {
         /* Lane 3 (k3): the runner pins model "kimi-k3" / revision
-         * "mxfp4", topology = tp_degree (4), and - critically -
-         * identity.arena_bytes = the EXPERT POOL budget, NOT the pack
-         * size (modules/k3_resident_decode_stage/source/
-         * spark_k3_resident_decode_stage_runner.cu). The warm must
-         * present the identical arena identity or the daemon keys a
-         * second arena and the preload never meets the resident. */
+         * "mxfp4" / topology = tp_degree (4). arena_bytes keeps the
+         * default pack-size fill - the daemon's size-mismatch contract
+         * (WDATTACH) rejects any other value with INVALID_ARGUMENT,
+         * measured against the release-shared weightd. */
         strcpy(request.identity.model,"kimi-k3");
         strcpy(request.identity.revision,"mxfp4");
         request.identity.topology = 4u;
-        request.identity.arena_bytes = request.expert_pool_bytes;
         request.identity.geometry_fingerprint = 0u;
     }
     else if ( family != 0 )
@@ -388,7 +385,8 @@ usage:
         "       DSV4 Pro module attach identity; REVISION/TOPOLOGY args are then ignored)\n"
         "                           --family dsv41_flash (pin the module tag; REVISION/TOPOLOGY stay authoritative)\n"
         "                           --family k3 (pin the k3 runner identity: kimi-k3/mxfp4,\n"
-        "                              topology 4, arena bytes = the expert pool budget)\n"
+        "                              topology 4; arena bytes stay the pack size per the\n"
+        "                              daemon's size-mismatch contract)\n"
         "                           --identity-print (print the derived identity and exit)\n"
         "       finite SPARK_WEIGHTD_EXPERT_POOL_BYTES is required\n");
     return 2;

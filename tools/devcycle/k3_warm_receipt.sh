@@ -16,10 +16,10 @@
 #     filters it to its PP stage's layers first (a rank pack manifest
 #     holds only its stage's layers; weightd_warm fails closed on
 #     foreign keys). Per-stage subsets: s0/s1/s2/s3 printed by the filter.
-#   - the warm presents the EXACT k3 runner arena identity: model
-#     kimi-k3 / revision mxfp4 / topology 4 / arena bytes = the expert
-#     pool budget (--family k3 in weightd_warm) - anything else keys a
-#     second arena and the preload never meets the resident.
+#   - the warm presents the k3 runner arena identity: model kimi-k3 /
+#     revision mxfp4 / topology 4 (--family k3 in weightd_warm); arena
+#     bytes stay the pack size per the daemon's size-mismatch contract
+#     (WDATTACH) - anything else is INVALID_ARGUMENT.
 #
 # Bases: smoke_set_raw_bytes_per_node (exact expert range bytes of the
 # rank-local subset) and smoke_set_chunked_bytes_per_node (ceil-per-span

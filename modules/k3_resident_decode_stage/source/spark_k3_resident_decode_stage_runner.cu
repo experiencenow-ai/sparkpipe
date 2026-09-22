@@ -820,7 +820,11 @@ SparkStatus SparkK3StageRunnerInitialize(
 		snprintf(request.identity.model, sizeof(request.identity.model), "kimi-k3");
 		snprintf(request.identity.revision, sizeof(request.identity.revision), "mxfp4");
 		request.identity.abi_version = SPARK_WEIGHTD_IPC_ABI_VERSION;
-		request.identity.arena_bytes = expert_pool;
+		/* the daemon's size-mismatch contract: identity.arena_bytes must
+		 * equal the pack file size (WDATTACH rejects anything else with
+		 * INVALID_ARGUMENT - measured against the release-shared weightd;
+		 * the campaign-era daemon tolerated the old pool-sized value) */
+		request.identity.arena_bytes = state->module.pack.file_bytes;
 		request.identity.topology = configuration->tp_degree;
 		memcpy(request.pack_path, configuration->rank_pack_path,
 			strlen(configuration->rank_pack_path) + 1u);
