@@ -310,14 +310,27 @@ if [ "$WARM_LEG" -eq 1 ]; then
   REVISION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["model_revision"])' "$ROOT/config/adapter.json")"
   # weightd_warm fail-closes without finite pool/spine envs (it attaches
   # through the same identity path); the resident-launch exports below
-  # come too late for the warm leg - carry them on the invocation.
-  SPARK_WEIGHTD_EXPERT_POOL_BYTES="$QMAX_EXPERT_POOL_BYTES" \
-  SPARK_WEIGHTD_SPINE_BUDGET_BYTES="$QMAX_SPINE_BUDGET_BYTES" \
-  "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
-    "$(cat "$ROOT/packs/pack.sha256")" "$REVISION" "$WORLD" \
-    --wset "$WSET" 300 > "$ROOT/warm.log" 2>&1
-  grep -q "WSET-WARM keys=" "$ROOT/warm.log" ||
-    fail "working set warm failed (see $ROOT/warm.log)"
+  # come too late for the warm leg - carry them on the invocation. It
+  # also accepts at most 512 manifest key pairs per invocation; the
+  # census wset is 1501 keys, so warm sequential 512-key shards (the
+  # leases persist - coverage is the union; each shard prints its own
+  # WSET-WARM line).
+  WARM_KEYS=$(( $(stat -c %s "$WSET") / 8 ))
+  WARM_PARTS=$(( (WARM_KEYS + 511) / 512 ))
+  : > "$ROOT/warm.log"
+  WARM_SEEN=0
+  for ((warm_start = 0; warm_start < WARM_KEYS; warm_start += 512)); do
+    dd if="$WSET" of="$WSET.$warm_start.part" bs=8 skip="$warm_start" count=512 status=none
+    SPARK_WEIGHTD_EXPERT_POOL_BYTES="$QMAX_EXPERT_POOL_BYTES" \
+    SPARK_WEIGHTD_SPINE_BUDGET_BYTES="$QMAX_SPINE_BUDGET_BYTES" \
+    "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
+      "$(cat "$ROOT/packs/pack.sha256")" "$REVISION" "$WORLD" \
+      --wset "$WSET.$warm_start.part" 300 >> "$ROOT/warm.log" 2>&1 ||
+      fail "working set warm shard $warm_start failed (see $ROOT/warm.log)"
+    WARM_SEEN=$((WARM_SEEN + 1))
+  done
+  [ "$(grep -c "WSET-WARM keys=" "$ROOT/warm.log")" = "$WARM_PARTS" ] ||
+    fail "working set warm incomplete: $WARM_SEEN/$WARM_PARTS shards (see $ROOT/warm.log)"
 fi
 
 # ----------------------------- RESIDENT LAUNCH -------------------------------
