@@ -1,27 +1,56 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# minimax text-tower resident decode stage, retained-receipt GPU validation.
+# minimax text-tower resident decode stage, component-tier GPU validation
+# driver (sm_121a).
 #
-# STATUS: NOT YET IMPLEMENTED - fail-closed placeholder. The adopted PR #1080
-# driver reached lane 10 with its GPU qualification explicitly execution-
-# gated (kernel-level decode/prefill vs the CPU oracle, TP4 all-reduce
-# end-to-end, multi-position token match vs the t1 fixtures, sliding-window
-# semantics, graph replay). Until the real validator lands, `make validate`
-# must fail loudly rather than report an unearned PASS, and every module
-# publication carries this placeholder's name so the audit trail shows the
-# module is unqualified (the serving adapter additionally requires
-# SPARK_MINIMAX_ALLOW_UNQUALIFIED_EXECUTION=1 at initialize).
+# Compiles the validator translation unit against the MODULE ARCHIVE and
+# runs its component fixture with the supplied configuration identity:
+# embedding gather, RMSNorm (determinism rerun), residual add, per-head
+# norm + rope at the TP4 local geometry, SwiGLU, vocabulary argmax through
+# the sortable-u64 packing with the u64 max combine, and the two TP combine
+# kernels - each against a host mirror of the same math.
 #
-# Contract for the future real validator (shared validation-driver
-# skeleton, gemma4/dsv4 precedent):
-#   argument 1: validation configuration sha256 (retained receipt)
-#   environment: RUNTIME_CONFIGURATION from resident_decode_stage_rules.mk
-#   exit 0 only on measured GPU evidence recorded under
-#   qualification/serving-receipts/.
+# It does NOT consume a stage pack and does not run the linear projections,
+# attention dataflow, KV write path, multi-row decode, TP collectives over
+# real transports, or the t1 fixture streams. A component PASS is not full
+# minimax numerical or driver acceptance; the fixture-level ladder runs
+# through validation/minimax_cpu_validate.c (t1 reference streams) and the
+# lane receipts.
+#
+# The mechanical skeleton is the shared validation driver; scope and
+# tolerances below are minimax's own (laguna component-tier precedent).
 
-echo "minimax GPU validator: NOT IMPLEMENTED - module is not GPU-qualified" >&2
-echo "  (lane 10 bring-up interim; the module's InitializeGate requires"      >&2
-echo "   SPARK_MINIMAX_ALLOW_UNQUALIFIED_EXECUTION=1 and the publication"     >&2
-echo "   records this placeholder. Do not ship production traffic.)"          >&2
-exit 2
+validation_label="minimax"
+validation_digest_label="minimax"
+validation_gate_label="minimax"
+validation_env_prefix="SPARK_MINIMAX"
+validation_validator_file="spark_minimax_resident_decode_stage_cuda_validation.cu"
+validation_oracle_file=""
+validation_output_name="minimax_resident_decode_stage_validator"
+validation_hash_format_check=1
+validation_nvcc_splice=std
+
+validation_include_dirs() {
+    printf '%s\n' "model-families/minimax/include"
+    printf '%s\n' "model-families/minimax/include/sparkpipe"
+    printf '%s\n' "model-families/common/include"
+    printf '%s\n' "."
+}
+
+validation_nvcc_extra_args() {
+    :
+}
+
+script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${script_directory}/../../spark_resident_decode_stage_cuda_validation_common.sh"
+
+spark_cuda_validation_begin "$@"
+spark_cuda_validation_check_hash_format
+spark_cuda_validation_check_archive
+spark_cuda_validation_check_source_digests
+
+require_configuration_value SPARK_MINIMAX_CUDA_VALIDATOR_SHA256 "$(sha256sum "${script_directory}/${validation_validator_file}" | awk '{print $1}')"
+
+spark_cuda_validation_check_toolchain
+spark_cuda_validation_build_and_run

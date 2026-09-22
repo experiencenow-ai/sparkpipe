@@ -57,10 +57,12 @@ RUNTIME_CONFIGURATION := \
 	SPARK_MINIMAX_STAGE_KV_STORE=$(KV_PROVIDER) \
 	SPARK_MINIMAX_STAGE_KV_SERVICE=$(KV_SERVICE_ADDRESS) \
 	SPARK_MINIMAX_STAGE_KV_SOCKET=$(KV_SOCKET_PATH) \
-	SPARK_MINIMAX_STAGE_KV_POOL_BYTES=$(KV_POOL_BYTES) \
-	SPARK_MINIMAX_STAGE_KV_WORKERS=$(KV_WORKER_COUNT)
+		SPARK_MINIMAX_STAGE_KV_POOL_BYTES=$(KV_POOL_BYTES) \
+		SPARK_MINIMAX_STAGE_KV_WORKERS=$(KV_WORKER_COUNT) \
+		SPARK_MINIMAX_CUDA_VALIDATOR_SHA256=$(MINIMAX_CUDA_VALIDATOR_SHA256)
 
 GPU_VALIDATOR := validation/validate_minimax_resident_decode_stage_cuda.sh
+override MINIMAX_CUDA_VALIDATOR_SHA256 := $(shell sha256sum validation/spark_minimax_resident_decode_stage_cuda_validation.cu 2>/dev/null | awk '{print $$1}')
 
 # Dense text tower: bf16 is the only codec this module builds (no routed
 # experts, no quantization arms). EXPERT_CODEC still names the build slot so
