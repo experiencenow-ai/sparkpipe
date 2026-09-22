@@ -49,10 +49,10 @@ export PATH="/usr/local/cuda/bin:$PATH"
 # Host services, transport, adapter (top-level target carries the TP4
 # serving constants and the firmware-json contract sha).
 make -j4 CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
-    build/weightd_warm build/sparkpipe_model_residentd build/sparkpipe_model_api \
-    build/sparkpipe_model_batch build/sparkpipe_model_compile \
-    build/sparkpipe_module_publish build/sparkpipe_driver_inspect \
-    build/libqwen38_27b_serving_adapter.so \
+    build/sparkpipe_weightd build/weightd_warm build/sparkpipe_model_residentd \
+    build/sparkpipe_model_api build/sparkpipe_model_batch \
+    build/sparkpipe_model_compile build/sparkpipe_module_publish \
+    build/sparkpipe_driver_inspect build/libqwen38_27b_serving_adapter.so \
     hidden_transport_spark_host_rdma_verbs
 nvcc --version > "$receipts/toolchain.txt"
 cc --version >> "$receipts/toolchain.txt"
@@ -62,7 +62,28 @@ cc --version >> "$receipts/toolchain.txt"
 # Whole-stack TP tier per the validator contract: rank 0 in STANDALONE
 # collective mode (consistency + determinism gate here; cross-rank
 # numerics gate at the lane E2E run), unqualified execution admitted by
-# the retained-receipt validator itself.
+# the retained-receipt validator itself. The stage module refuses direct
+# pack loads outright (shared-node law), so the module tier attaches to a
+# PRIVATE weightd inside this job cgroup - the qualified single-node
+# validation shape; it never touches the node's shared daemon.
+pack_sha=$(cut -d' ' -f1 "$PACK.sha256")
+weightd_socket="$PWD/build/.qwen38-27b-lane-build-weightd.sock"
+rm -f "$weightd_socket"
+build/sparkpipe_weightd --socket "$weightd_socket" \
+    --device-bytes-max $((12800 * 1024 * 1024)) \
+    >"$receipts/build-weightd.log" 2>&1 &
+weightd_pid=$!
+for _ in $(seq 1 300); do
+    grep -q "spark_weightd ready" "$receipts/build-weightd.log" 2>/dev/null && break
+    kill -0 "$weightd_pid" 2>/dev/null || { cat "$receipts/build-weightd.log" >&2; exit 2; }
+    sleep 0.2
+done
+grep -q "spark_weightd ready" "$receipts/build-weightd.log" || { echo "private build weightd not ready" >&2; exit 2; }
+cleanup_weightd() { kill -TERM "$weightd_pid" 2>/dev/null || true; wait "$weightd_pid" 2>/dev/null || true; }
+trap 'cleanup_weightd; code=$?; if [ "$code" -ne 0 ]; then tail -40 "$receipts/build.log" >&3; fi' EXIT
+SPARK_WEIGHTD_ATTACH=1 \
+SPARK_WEIGHTD_SOCKET="$weightd_socket" \
+SPARK_WEIGHTD_PACK_SHA256="$pack_sha" \
 make -j4 -C modules/qwen38_27b_resident_decode_stage \
     CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
     STAGE_PACK_PATH="$(cd "$(dirname "$PACK")" && pwd)/$(basename "$PACK")" \
@@ -70,6 +91,10 @@ make -j4 -C modules/qwen38_27b_resident_decode_stage \
     STAGE_COUNT=1 STAGE_INDEX=0 STAGE_FIRST_LAYER=0 STAGE_LAYER_COUNT=64 \
     MAX_ACTIVE_SEQUENCES=16 KV_BLOCK_COUNT=256 \
     publish > "$receipts/module-publish.log" 2>&1
+publish_status=$?
+cleanup_weightd
+trap 'code=$?; if [ "$code" -ne 0 ]; then tail -40 "$receipts/build.log" >&3; fi' EXIT
+[ "$publish_status" -eq 0 ] || exit "$publish_status"
 
 # Driver link against the published module library.
 build/sparkpipe_model_compile \
