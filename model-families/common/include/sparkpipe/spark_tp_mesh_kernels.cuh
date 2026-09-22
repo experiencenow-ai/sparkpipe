@@ -1101,6 +1101,26 @@ extern "C" cudaError_t SparkGlm5NextMeshHardwarePrepare(void *host,void **device
         CU_DEVICE_ATTRIBUTE_CAN_USE_64_BIT_STREAM_MEM_OPS,device),"memop-capability");
     if ( status != cudaSuccess ) return status;
     if ( supported == 0 ) return cudaErrorNotSupported;
+    const void *kernels[] = {
+        (const void *)SparkGlm5NextMeshHardwareRequestKernel,
+        (const void *)SparkGlm5NextMeshHardwareGuardKernel,
+        (const void *)SparkGlm5NextMeshHardwarePublishKernel,
+        (const void *)SparkGlm5NextMeshHardwareDirectKernel,
+        (const void *)SparkGlm5NextMeshHardwareSeedKernel,
+        (const void *)SparkGlm5NextMeshHardwareFoldKernel,
+        (const void *)SparkGlm5NextMeshHardwareFinishKernel
+    };
+    cudaFuncAttributes attributes;
+    for ( uint32_t i = 0u; i < sizeof(kernels) / sizeof(kernels[0]); i++ )
+    {
+        status = cudaFuncGetAttributes(&attributes,kernels[i]);
+        if ( status != cudaSuccess )
+        {
+            fprintf(stderr,"MESH-HARDWARE-FAIL phase=preload kernel=%u cuda=%d (%s)\n",
+                i,(int)status,cudaGetErrorString(status));
+            return status;
+        }
+    }
     return cudaHostGetDevicePointer(device_out,host,0u);
 }
 
