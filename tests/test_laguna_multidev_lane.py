@@ -349,7 +349,11 @@ def manifest_gates(failures):
             check(pad == 0, failures, "record pad must be 0")
             check(layer == 5, failures,
                   "records must carry the GLOBAL layer index")
-            entry = entries[1 + kind]
+            check(kind in (28, 30), failures,
+                  f"record kind {kind} outside the laguna convention "
+                  "(tensor_kind*2 + payload plane; SparkLagunaManifestCheck "
+                  "walks exactly 28/30)")
+            entry = entries[1 + (0 if kind == 28 else 1)]
             expected_offset = entry[8] + expert * (entry[9] // group_count)
             check(offset == expected_offset, failures,
                   f"expert {expert} kind {kind}: offset {offset} != "

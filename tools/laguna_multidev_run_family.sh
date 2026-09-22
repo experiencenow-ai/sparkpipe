@@ -239,12 +239,19 @@ if [ -f "$DEPLOYED_PACK.experts" ] && python3 - "$DEPLOYED_PACK.experts" <<'PYVE
 import struct, sys
 with open(sys.argv[1], "rb") as handle:
     head = handle.read(16)
+    record = handle.read(48)
 magic, version, count, _ = struct.unpack("<IIII", head)
-raise SystemExit(0 if (magic == 0x58504557 and version == 2 and count > 0) else 1)
+ok = magic == 0x58504557 and version == 2 and count > 0 and len(record) == 48
+if ok:
+    kind = struct.unpack_from("<4I2Q", record)[2]
+    ok = kind in (28, 30)   # laguna range-kind convention (tensor_kind*2)
+raise SystemExit(0 if ok else 1)
 PYVER
 then
-  # only a v2 routed-expert manifest with records is usable by the lazy
-  # attach; stale sidecars regenerate below like missing ones
+  # only a v2 routed-expert manifest with records in the laguna kind
+  # convention is usable by the lazy attach; stale sidecars (including
+  # the k3-style 0/1 kinds of the first attempts) regenerate like
+  # missing ones
   ln -sfn "$DEPLOYED_PACK.experts" "$PRIVATE_PACK.experts"
 else
   bash "$CHECKOUT/tools/laguna_multidev_experts_manifest.sh" "$PRIVATE_PACK"
