@@ -2141,3 +2141,27 @@ residentd-restart dependency on every weightd recycle), (b) the
 admission-shape status-9 after restarts (the capacity/limits
 disagreement), (c) then the tail-layer creation class on a stable
 stack, (d) warm canary → GRAPH → ARRIVAL → clean µs/round.
+
+## 09-23 00:00 TICK — the admission watermark trap killed (status-9 wedge dead)
+
+THE CONVICTION: the module's admission predicate rejected every request
+with VALIDATION_FAILED(9) via `request->control_generation <
+state->control_generation` — but control_generation carries the ENGINE
+FINGERPRINT, a quasi-random value that legitimately moves BACKWARD
+whenever residentd generations change (any engine session rebuild).
+With no reset path armed (the session epoch is unchanged — my takeover-
+only arm is correct), the watermark had NO exit: permanent wedge after
+any fleet/engine restart combination. VERIFIED LIVE: zero
+submission_rejected lines post-fix (driver ce23f66e); requests admit
+across engine rebuilds.
+
+The backward check bought nothing: replay protection already lives in
+the per-session message-id gate (residentd) + epoch scoping + the
+KV-RECLAIM. Removed.
+
+STATE: back to the known cold-walk regime (7r/190s through the tail
+layers; BUSY-30s chains queued behind; prefetch ~3/45 this boot). The
+two open items stand: (a) the tail-layer chunk creation class at the
+weightsd (the 190s walk), (b) the map reconnect (weightd-recycle
+resilience). Then the ladder: warm canary → GRAPH → ARRIVAL → clean
+µs/round.
