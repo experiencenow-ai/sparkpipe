@@ -68,15 +68,21 @@ rm -f "$WSET.chunk."*
 split -b 4096 -d "$WSET" "$WSET.chunk."
 CHUNKS="$(ls "$WSET.chunk."* | sort)"
 if [ "$POOL" = 0 ]; then
-  BUDGETS="$(python3 tools/laguna_multidev_lane.py \
-    --smoke-budgets model-families/laguna/smoke_experts.json "$RANK")"
-  POOL="${BUDGETS##* }"   # second field = chunk-basis bytes for this rank
+  # The daemon charges the WHOLE pack file in 2 MiB chunks against the
+  # declared pool (ACQUIRE-LOAD-STAGE stage=budget; lane-4 rank-3 found
+  # the same law) - the pool default is the pack chunk basis, not the
+  # smoke subset. A stale arena created with an under-sized pool blocks
+  # the correctly-sized one until reclaimed:
+  #   build/weightd_warm SOCKET --reclaim
+  BUDGETS="$(python3 tools/laguna_multidev_lane.py --budgets "$PACK")"
+  POOL="${BUDGETS%% *}"   # first field = whole-pack chunk-basis pool bytes
 fi
 make -s build/weightd_warm
 
 echo "== laguna warm receipt (rank $RANK, $PACK)"
-echo "== pool=$POOL runs=$RUNS"
-echo "== bases (this rank's smoke head pairs, both bases):"
+echo "== pool=$POOL runs=$RUNS (pool = whole-pack 2 MiB chunk basis;"
+echo "   the daemon's acquire charges the full pack footprint)"
+echo "== working-set bases (this rank's smoke head pairs, both bases):"
 python3 tools/laguna_multidev_lane.py \
   --smoke-budgets model-families/laguna/smoke_experts.json "$RANK" \
   | python3 -c 'import sys; raw, chunked = sys.stdin.read().split(); print("smoke_set_raw_bytes_per_node=%s" % raw); print("smoke_set_chunked_bytes_per_node=%s" % chunked)'

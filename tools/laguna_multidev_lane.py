@@ -262,11 +262,15 @@ def resident_deployment(runtime_root: str, weightd_socket: str,
 def budgets(pack_path: str) -> int:
     """Emit 'expert_pool_bytes spine_bytes' for one rank pack.
 
-    Arena-side sizing derived from the pack's own .experts sidecar: the
-    pool is the exact sum of routed-expert span bytes and the spine is the
-    complement of those spans inside the pack file (the same arithmetic
-    runtime/spark_weightd_manifest.c build_spine performs). Zero assumed
-    numbers - a missing sidecar fails closed (generate it first with
+    The pool base is the daemon's own acquire accounting: the WHOLE pack
+    file charged in 2 MiB chunks (ceil(pack_bytes / 2 MiB) x 2 MiB) -
+    the shared weightd refuses an acquire whose declared pool is under
+    the pack's full chunk footprint (ACQUIRE-LOAD-STAGE stage=budget,
+    chunk_count x 2 MiB = retained; measured on lane 8, the lane-4
+    rank-3 cell found the same law). The spine base is the complement of
+    the expert spans inside the pack (the build_spine arithmetic),
+    derived from the .experts sidecar. Zero assumed numbers - a missing
+    sidecar fails closed (generate it first with
     tools/laguna_multidev_experts_manifest.sh).
     """
     pack = os.path.abspath(pack_path)
@@ -285,7 +289,6 @@ def budgets(pack_path: str) -> int:
         if magic != EXPERTS_MAGIC or version != EXPERTS_VERSION \
                 or reserved != 0 or count == 0:
             raise SystemExit("budgets: not a v2 routed-expert sidecar")
-        expert_bytes = 0
         spans = []
         for _ in range(count):
             record = handle.read(48)
@@ -293,7 +296,6 @@ def budgets(pack_path: str) -> int:
                 raise SystemExit("budgets: short sidecar record")
             _, _, _, _, offset, span_bytes = struct.unpack_from("<4I2Q", record)
             spans.append((offset, span_bytes))
-            expert_bytes += span_bytes
         trailing = handle.read(1)
         if trailing:
             raise SystemExit("budgets: trailing bytes after last record")
@@ -307,7 +309,9 @@ def budgets(pack_path: str) -> int:
         spine_bytes += offset - cursor
         cursor = offset + span_bytes
     spine_bytes += pack_bytes - cursor
-    print(f"{expert_bytes} {spine_bytes}")
+    chunk = 2 * 1024 * 1024
+    pool_bytes = -(-pack_bytes // chunk) * chunk
+    print(f"{pool_bytes} {spine_bytes}")
     return 0
 
 
