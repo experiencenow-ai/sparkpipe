@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -9,6 +10,7 @@ import shlex
 import signal
 import subprocess
 import time
+import threading
 from glm5_next_bench_wrap import measure
 
 
@@ -128,6 +130,56 @@ def private_config(config, port_map, reserved, protected, attempt):
     return result
 
 
+def replica_plans(spec):
+    plans = spec.get("replicas", [{"lane": None, "port_base": spec["port_base"], "port_map": spec["port_map"]}])
+    require(1 <= len(plans) <= 8, "require one to eight residents")
+    require(plans[0]["port_base"] == spec["port_base"] and plans[0]["port_map"] == spec["port_map"], "first resident must match primary ports")
+    lanes, listeners = set(), set()
+    for plan in plans:
+        lane, base = plan["lane"], plan["port_base"]
+        require(type(base) is int and 1024 <= base <= 65535 - 3 * len(spec["hosts"]), "invalid resident port range")
+        require(lane is None and len(plans) == 1 or type(lane) is int and 0 <= lane < 8, "invalid explicit collective lane")
+        require(lane not in lanes, "residents share a collective lane")
+        lanes.add(lane)
+        ports = set(range(base, base + 2 * len(spec["hosts"]))) | set(plan["port_map"].values())
+        require(not ports & listeners, "residents share a listener")
+        listeners |= ports
+    require(spec["port_base"] + 3 * len(spec["hosts"]) not in listeners, "resident listener aliases shared latch")
+    return plans
+
+
+def verify_concurrent(results):
+    require(all(result["valid"] for result in results), "concurrent inference failed")
+    starts = [result["started_seconds"] + result["ttft_seconds"] for result in results]
+    ends = [result["started_seconds"] + result["total_seconds"] for result in results]
+    require(min(ends) > max(starts), "resident decode intervals did not overlap")
+    return {"all_first_tokens_seconds": max(starts), "first_last_token_seconds": min(ends),
+            "overlap_seconds": min(ends) - max(starts)}
+
+
+def verify_lane(log, lane, rank):
+    matches = re.findall(r"GLM mesh lane mode=(\w+) requested=(\d+) resolved=(\d+) capacity=(\d+) rank=(\d+)", log)
+    require(matches == [("explicit", str(lane), str(lane), "8", str(rank))], "resident did not acquire its assigned mesh lane")
+
+
+def gpu_memory(children, limits, receipt, require_all=False):
+    result = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"],
+                            capture_output=True, text=True, timeout=5, check=True)
+    observed = {}
+    for line in result.stdout.splitlines():
+        pid, memory = (value.strip() for value in line.split(","))
+        require(pid.isdigit() and memory.isdigit(), "GPU memory census unavailable")
+        observed[int(pid)] = int(memory) * 1024 * 1024
+    peaks = receipt.setdefault("gpu_peak_bytes", {})
+    for index, child in enumerate(children):
+        if require_all:
+            require(child.pid in observed, "ready daemon missing from GPU memory census")
+        value = observed.get(child.pid, 0)
+        budget = limits["weightd_device_bytes"] + limits.get("weightd_overhead_bytes", 0) if index == 0 else limits["model_device_bytes"]
+        require(value <= budget, "observed GPU memory exceeds declared daemon budget")
+        peaks[str(child.pid)] = max(peaks.get(str(child.pid), 0), value)
+
+
 def prepare(spec, environment):
     attempt = environment.get("SPARK_QUEUE_ATTEMPT", "")
     require(re.fullmatch(r"[0-9a-f]{32}", attempt), "run through the authoritative spark queue")
@@ -136,6 +188,7 @@ def prepare(spec, environment):
     rank, size = int(environment["SPARK_QUEUE_RANK"]), int(environment["SPARK_QUEUE_SIZE"])
     hosts = spec["hosts"]
     require(size == len(hosts) and 0 <= rank < size and len(set(hosts)) == size and all(re.fullmatch(r"spark[0-9a-f]", host) for host in hosts), "invalid participant list")
+    plans = replica_plans(spec)
     base = spec["port_base"]
     require(isinstance(base, int) and 1024 <= base <= 65535 - 3 * size, "invalid private port range")
     reserved = [tuple(map(int, value.split(":"))) for value in environment.get("SPARK_QUEUE_PORTS", "").split(",") if value]
@@ -143,7 +196,8 @@ def prepare(spec, environment):
     device = int(environment["SPARK_QUEUE_DEVICE_MEMORY_MIB"]) * 1024 * 1024
     limits = spec["budgets"]
     require(all(isinstance(limits[key], int) and limits[key] > 0 for key in ("weightd_device_bytes", "model_device_bytes", "expert_pool_bytes", "spine_bytes")), "all device budgets must be finite and positive")
-    require(limits["weightd_device_bytes"] + limits["model_device_bytes"] <= device, "device plan exceeds queue reservation")
+    require(type(limits.get("weightd_overhead_bytes", 0)) is int and limits.get("weightd_overhead_bytes", 0) >= 0, "invalid daemon overhead budget")
+    require(limits["weightd_device_bytes"] + limits.get("weightd_overhead_bytes", 0) + len(plans) * limits["model_device_bytes"] <= device, "device plan exceeds queue reservation")
     require(limits["expert_pool_bytes"] + limits["spine_bytes"] <= limits["weightd_device_bytes"], "weightd working set exceeds ceiling")
     deployment = json.loads(Path(spec["deployment"]).read_text())
     batch = json.loads(Path(spec["batch"]).read_text())
@@ -154,7 +208,10 @@ def prepare(spec, environment):
     source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     require(source_commit == reference["source_commit"], "source differs from reference")
     require(subprocess.run(["git", "diff", "--quiet", "HEAD"]).returncode == 0, "source checkout is dirty")
-    require(set(reference["executables"]) == {"build/sparkpipe_weightd", "build/sparkpipe_model_residentd", "build/sparkpipe_model_batch"}, "pin every smoke executable")
+    executables = {"build/sparkpipe_weightd", "build/sparkpipe_model_residentd", "build/sparkpipe_model_batch"}
+    if "working_set" in spec:
+        executables.add("build/weightd_warm")
+    require(set(reference["executables"]) == executables, "pin every smoke executable")
     for name, sha in reference["executables"].items():
         require(digest(name) == sha, "executable differs from reference: " + name)
     require(reference["batch_sha256"] == digest(spec["batch"]), "batch differs from pinned reference")
@@ -177,24 +234,53 @@ def prepare(spec, environment):
     require(not Path(pack).is_absolute() and ".." not in Path(pack).parts, "pack escapes runtime root")
     require(pack + ".sha256" in assets and pack + ".experts" in assets, "lazy pack identity and experts manifest must be pinned")
     require((source / pack).is_file(), "stage pack is missing")
+    if len(plans) > 1:
+        require("working_set" in spec and limits.get("weightd_overhead_bytes", 0) > 0, "shared residents require explicit working set and daemon overhead")
+        require(all(deployment["runtime_limits"][key] == 1 for key in ("max_inflight_submissions", "max_active_sequences", "max_input_rows", "resident_sequence_capacity")), "shared smoke requires B1 and one in-flight submission")
+        require(len(batch["requests"]) == 1, "shared B1 smoke requires exactly one request per resident")
+        require(all(spec["environment"].get(key) == value for key, value in
+                    {"CUDA_MODULE_LOADING": "LAZY", "CUDA_KERNEL_LOADING": "LAZY", "CUDA_DEVICE_MAX_CONNECTIONS": "32"}.items()), "shared smoke requires pinned CUDA loading and connection settings")
+    if "working_set" in spec:
+        working = spec["working_set"]
+        require(working["mode"] in ("partial", "full"), "working set mode must be partial or full")
+        expected = "1" if working["mode"] == "full" else "0"
+        require(all(spec["environment"].get(key) == expected for key in ("SPARK_GLM5_NEXT_GRAPH_PATH", "SPARK_GLM5_NEXT_PIN_EXPERTS")), "graph and pin-all must match explicit working set mode")
+        require(working["path"] in assets, "working set is not pinned")
+        raw = (source / working["path"]).read_bytes()
+        require(0 < len(raw) <= 512 * 8 and len(raw) % 8 == 0, "working set requires 1..512 complete key pairs")
+        if working["mode"] == "full":
+            require(limits["expert_pool_bytes"] > (source / pack).stat().st_size, "pin-all requires full pack budget")
+        else:
+            require(limits["expert_pool_bytes"] <= (source / pack).stat().st_size, "partial working set must not premap full pack")
     root.mkdir(mode=0o700)
-    runtime = root / "runtime"
-    runtime.mkdir()
-    for name in set(assets) | {pack}:
-        target = runtime / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if name != config_name:
-            target.symlink_to((source / name).resolve())
+    (root / "mesh").mkdir()
     peers = config.get("tp_collective", {}).get("peer_hosts", [])
     require(all(host in hosts for host in peers), "collective references unreserved peers")
-    protected = set(range(base, base + 2 * size)) | {base + 3 * size}
-    config = private_config(config, spec["port_map"], reserved, protected, attempt)
-    (runtime / config_name).write_text(json.dumps(config) + "\n")
-    (root / "kv").mkdir()
-    (root / "mesh").mkdir()
-    value = private_deployment(deployment, root, base, hosts)
-    atomic_json(root / "deployment.json", value)
-    atomic_json(root / "batch.json", batch)
+    for index, replica in enumerate(plans):
+        local = root if index == 0 else root / ("resident-" + str(replica["lane"]))
+        local.mkdir(exist_ok=index == 0)
+        runtime = local / "runtime"
+        runtime.mkdir()
+        for name in set(assets) | {pack}:
+            target = runtime / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if name != config_name:
+                if name.endswith(".wset"):
+                    target.write_bytes((source / name).read_bytes())
+                else:
+                    target.symlink_to((source / name).resolve())
+        protected = set(range(replica["port_base"], replica["port_base"] + 2 * size)) | {base + 3 * size}
+        effective = private_config(config, replica["port_map"], reserved, protected, attempt)
+        if replica["lane"] is not None and effective.get("tp_collective"):
+            effective["tp_collective"]["collective_identifier"] += replica["lane"]
+        (runtime / config_name).write_text(json.dumps(effective) + "\n")
+        require(all(any(first <= port <= last for first, last in reserved) for port in protected), "queue does not reserve resident listeners")
+        (local / "kv").mkdir()
+        value = private_deployment(deployment, local, replica["port_base"], hosts)
+        value["weightd"]["socket_path"] = str(root / "weightd.sock")
+        atomic_json(local / "deployment.json", value)
+        atomic_json(local / "batch.json", batch)
+    value = json.loads((root / "deployment.json").read_text())
     return root, rank, hosts, batch, reference, value
 
 
@@ -235,12 +321,14 @@ def stop_owned(children, receipt, timeout=10):
 
 def run(spec):
     root, rank, hosts, batch, reference, deployment = prepare(spec, os.environ)
+    plans = replica_plans(spec)
+    locals_ = [root if index == 0 else root / ("resident-" + str(plan["lane"])) for index, plan in enumerate(plans)]
     deadline = time.monotonic() + spec["timeout_seconds"]
     require(0 < spec["timeout_seconds"] <= 840, "invalid smoke timeout")
     children, logs = [], []
     receipt = {"schema_version": 1, "rank": rank, "attempt": os.environ["SPARK_QUEUE_ATTEMPT"],
-               "reference_sha256": digest(spec["reference"]), "status": "FAIL"}
-    env = {key: value for key, value in os.environ.items() if not key.startswith("SPARK_")}
+               "reference_sha256": digest(spec["reference"]), "spec_sha256": hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest(), "status": "FAIL"}
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("SPARK_", "CUDA_"))}
     limits = spec["budgets"]
     env.update(SPARK_WEIGHTD_ATTACH="1", SPARK_WEIGHTD_SOCKET=str(root / "weightd.sock"),
                SPARK_WEIGHTD_DEVICE_BYTES_MAX=str(limits["weightd_device_bytes"]),
@@ -251,23 +339,29 @@ def run(spec):
     owned = {
         "SPARK_WEIGHTD_ATTACH", "SPARK_WEIGHTD_SOCKET", "SPARK_WEIGHTD_DEVICE_BYTES_MAX",
         "SPARK_WEIGHTD_EXPERT_POOL_BYTES", "SPARK_WEIGHTD_SPINE_BUDGET_BYTES",
-        "SPARK_WEIGHTD_KV_RESERVE_BYTES", "SPARK_WEIGHTD_MESH_DIR", "SPARK_WEIGHTD_LATCH_PORT"}
-    require(all(key.startswith("SPARK_") and not key.startswith("SPARK_QUEUE_") and key not in owned and isinstance(value, str) for key, value in spec["environment"].items()), "model environment overrides owned job configuration")
+        "SPARK_WEIGHTD_KV_RESERVE_BYTES", "SPARK_WEIGHTD_MESH_DIR", "SPARK_WEIGHTD_LATCH_PORT", "SPARK_WEIGHTD_LANE"}
+    require(all((key.startswith("SPARK_") and not key.startswith("SPARK_QUEUE_") or key in {"CUDA_MODULE_LOADING", "CUDA_KERNEL_LOADING", "CUDA_DEVICE_MAX_CONNECTIONS", "CUDA_VISIBLE_DEVICES"}) and key not in owned and isinstance(value, str) for key, value in spec["environment"].items()), "model environment overrides owned job configuration")
     env.update(spec["environment"])
     receipt.update(effective_deployment_sha256=digest(root / "deployment.json"),
                    effective_config_sha256=digest(root / "runtime" / deployment["nodes"][rank]["adapter_configuration_path"]),
                    source_commit=reference["source_commit"], budgets=limits, environment=spec["environment"])
 
-    def start(name, command):
+    def start(name, command, extra=None):
         log = (root / (name + ".log")).open("wb")
         logs.append(log)
-        child = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=env, start_new_session=True)
+        child = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=env | (extra or {}), start_new_session=True)
         children.append(child)
         return child
 
+    next_sample = 0.0
+
     def wait(check):
+        nonlocal next_sample
         while time.monotonic() < deadline:
             require(all(child.poll() is None for child in children), "owned daemon exited; inspect job logs")
+            if len(plans) > 1 and time.monotonic() >= next_sample:
+                gpu_memory(children, limits, receipt)
+                next_sample = time.monotonic() + 1
             result = check()
             if result:
                 return result
@@ -291,26 +385,61 @@ def run(spec):
                 temporary = path.with_suffix(".tmp")
                 temporary.write_bytes(payload)
                 temporary.replace(path)
-        start("residentd", ["build/sparkpipe_model_residentd", "--deployment", str(root / "deployment.json"), "--rank-index", str(rank)])
-        wait(lambda: f"model_residentd ready rank={rank} " in (root / "residentd.log").read_text(errors="replace"))
-        atomic_json(root / "ready.json", {"attempt": receipt["attempt"], "rank": rank, "reference_sha256": receipt["reference_sha256"]})
+        if "working_set" in spec:
+            config = json.loads((root / "runtime" / deployment["nodes"][rank]["adapter_configuration_path"]).read_text())
+            pack = root / "runtime" / config["stage_pack_path"]
+            working = root / "runtime" / spec["working_set"]["path"]
+            with (root / "warm.log").open("wb") as output:
+                warmed = subprocess.run(["build/weightd_warm", str(root / "weightd.sock"), str(pack),
+                    Path(str(pack) + ".sha256").read_text().split()[0], reference["model_revision"], str(len(hosts)),
+                    "--wset", str(working), "300"], env=env, stdout=output, stderr=subprocess.STDOUT,
+                    timeout=min(300, max(1, deadline - time.monotonic())))
+            require(warmed.returncode == 0 and "WSET-WARM keys=" in (root / "warm.log").read_text(), "working set warm failed")
+            receipt["working_set"] = dict(spec["working_set"], input_sha256=reference["ranks"][rank]["assets"][spec["working_set"]["path"]])
+        for index, (plan, local) in enumerate(zip(plans, locals_)):
+            extra = {} if plan["lane"] is None else {"SPARK_WEIGHTD_LANE": str(plan["lane"])}
+            name = "residentd" if index == 0 else "residentd-" + str(plan["lane"])
+            start(name, ["build/sparkpipe_model_residentd", "--deployment", str(local / "deployment.json"), "--rank-index", str(rank)], extra)
+            wait(lambda: f"model_residentd ready rank={rank} " in (root / (name + ".log")).read_text(errors="replace"))
+            if plan["lane"] is not None:
+                verify_lane((root / (name + ".log")).read_text(errors="replace"), plan["lane"], rank)
+        receipt["owned_pids"] = [child.pid for child in children]
+        if len(plans) > 1:
+            gpu_memory(children, limits, receipt, require_all=True)
+        atomic_json(root / "ready.json", {"attempt": receipt["attempt"], "rank": rank, "reference_sha256": receipt["reference_sha256"], "spec_sha256": receipt["spec_sha256"]})
         coordinator = deployment["coordinator_rank_index"]
         if rank == coordinator:
             for peer, host in enumerate(hosts):
                 peer_ready = json.loads(wait(lambda: remote_bytes(host, root / "ready.json"))) if peer != rank else json.loads((root / "ready.json").read_text())
-                require(peer_ready == {"attempt": receipt["attempt"], "rank": peer, "reference_sha256": receipt["reference_sha256"]}, "peer runs a different smoke job")
-            with (root / "batch.events.jsonl").open("wb") as output:
-                result = measure(["build/sparkpipe_model_batch", "--deployment", str(root / "deployment.json"), "--runtime-root", str(root / "runtime"), "--batch", str(root / "batch.json"), "--profile-stages"], max(1, deadline - time.monotonic()), env=env, event_sink=output, stderr_path=root / "batch.stderr.log")
-            require(result["valid"], "model_batch failed: " + str(result["errors"]))
-            receipt["tokens"] = verify_events((root / "batch.events.jsonl").read_text().splitlines(), batch, reference)
-            receipt["timing"] = result
-            atomic_json(root / "inference.json", {"attempt": receipt["attempt"], "reference_sha256": receipt["reference_sha256"], "tokens": receipt["tokens"]})
+                require(peer_ready == {"attempt": receipt["attempt"], "rank": peer, "reference_sha256": receipt["reference_sha256"], "spec_sha256": receipt["spec_sha256"]}, "peer runs a different smoke job")
+            began = time.monotonic()
+            barrier = threading.Barrier(len(plans))
+
+            def infer(local):
+                barrier.wait(timeout=max(1, deadline - time.monotonic()))
+                started = time.monotonic() - began
+                with (local / "batch.events.jsonl").open("wb") as output:
+                    result = measure(["build/sparkpipe_model_batch", "--deployment", str(local / "deployment.json"), "--runtime-root", str(local / "runtime"), "--batch", str(local / "batch.json"), "--profile-stages"], max(1, deadline - time.monotonic()), env=env, event_sink=output, stderr_path=local / "batch.stderr.log")
+                require(result["valid"], "model_batch failed: " + str(result["errors"]))
+                result["verified_tokens"] = verify_events((local / "batch.events.jsonl").read_text().splitlines(), batch, reference)
+                result["started_seconds"] = started
+                return result
+
+            with ThreadPoolExecutor(max_workers=len(plans)) as executor:
+                futures = [executor.submit(infer, local) for local in locals_]
+                wait(lambda: all(future.done() for future in futures))
+                results = [future.result() for future in futures]
+            receipt["tokens"] = sum(result["verified_tokens"] for result in results)
+            receipt["timing"] = results[0] if len(results) == 1 else results
+            if len(results) > 1:
+                receipt["concurrent_decode"] = verify_concurrent(results)
+            atomic_json(root / "inference.json", {"attempt": receipt["attempt"], "reference_sha256": receipt["reference_sha256"], "spec_sha256": receipt["spec_sha256"], "tokens": receipt["tokens"]})
         else:
             outcome = json.loads(wait(lambda: remote_bytes(hosts[coordinator], root / "inference.json")))
-            require(outcome["attempt"] == receipt["attempt"] and outcome["reference_sha256"] == receipt["reference_sha256"], "coordinator result identity differs")
+            require(outcome["attempt"] == receipt["attempt"] and outcome["reference_sha256"] == receipt["reference_sha256"] and outcome["spec_sha256"] == receipt["spec_sha256"], "coordinator result identity differs")
             receipt["tokens"] = outcome["tokens"]
         receipt["status"] = "PASS"
-    except (OSError, ValueError, KeyError, TimeoutError, subprocess.SubprocessError) as error:
+    except (OSError, ValueError, KeyError, TimeoutError, RuntimeError, subprocess.SubprocessError) as error:
         receipt["error"] = str(error)
     finally:
         stop_owned(children, receipt)

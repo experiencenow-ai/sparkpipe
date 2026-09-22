@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
@@ -93,6 +93,36 @@ class SmokeReceipts(unittest.TestCase):
                                            ({"peer_ports": [1, 2]}, {"1": 30000, "2": 30000}, set())):
             with self.assertRaises(ValueError):
                 smoke.private_config(config, mapping, [(30000, 30010)], protected, "a" * 32)
+
+    def test_concurrency_requires_overlapping_decode_not_only_live_processes(self):
+        first = dict(valid=True, started_seconds=0, ttft_seconds=2, total_seconds=8)
+        second = dict(valid=True, started_seconds=1, ttft_seconds=3, total_seconds=6)
+        self.assertEqual(smoke.verify_concurrent([first, second])["overlap_seconds"], 3)
+        second["started_seconds"] = 5
+        with self.assertRaisesRegex(ValueError, "did not overlap"):
+            smoke.verify_concurrent([first, second])
+        second.update(started_seconds=0, valid=False)
+        with self.assertRaisesRegex(ValueError, "failed"):
+            smoke.verify_concurrent([first, second])
+
+    def test_assigned_lane_requires_exact_single_rank_receipt(self):
+        log = "GLM mesh lane mode=explicit requested=2 resolved=2 capacity=8 rank=5\n"
+        smoke.verify_lane(log, 2, 5)
+        for wrong in (log.replace("explicit", "automatic"), log.replace("resolved=2", "resolved=1"),
+                      log.replace("rank=5", "rank=4"), log + log, ""):
+            with self.assertRaises(ValueError):
+                smoke.verify_lane(wrong, 2, 5)
+
+    def test_observed_device_budget_and_ready_owner_are_required(self):
+        limits = dict(weightd_device_bytes=2 << 20, weightd_overhead_bytes=1 << 20, model_device_bytes=4 << 20)
+        receipt = {}
+        children = [Mock(pid=10), Mock(pid=11), Mock(pid=12)]
+        with patch.object(smoke.subprocess, "run", return_value=Mock(stdout="10, 3\n11, 4\n12, 2\n")):
+            smoke.gpu_memory(children, limits, receipt, True)
+        self.assertEqual(receipt["gpu_peak_bytes"], {"10": 3 << 20, "11": 4 << 20, "12": 2 << 20})
+        for output in ("10, 4\n11, 4\n12, 2\n", "10, 3\n11, 5\n12, 2\n", "10, 3\n11, 4\n", "10, N/A\n"):
+            with patch.object(smoke.subprocess, "run", return_value=Mock(stdout=output)), self.assertRaises(ValueError):
+                smoke.gpu_memory(children, limits, {}, True)
 
     def test_shutdown_rejects_crash_and_timeout(self):
         for script, expected in (("raise SystemExit(3)", "FAIL"),
@@ -202,6 +232,159 @@ class SmokePreparation(unittest.TestCase):
         self.spec["budgets"]["model_device_bytes"] = 1024
         self.environment["SPARK_QUEUE_PORTS"] = "30000:30001"
         with self.assertRaisesRegex(ValueError, "reserve every listener"):
+            self.prepare()
+
+
+class SharedSmokePreparation(SmokePreparation):
+    def shared(self, count=4):
+        self.deployment["runtime_limits"] = dict(max_inflight_submissions=1, max_active_sequences=1,
+                                                max_input_rows=1, resident_sequence_capacity=1)
+        self.deployment_path.write_text(json.dumps(self.deployment))
+        self.reference["deployment_sha256"] = smoke.digest(self.deployment_path)
+        self.batch_path.write_text('{"requests":[{"request_id":11}],"stop_token_ids":[]}')
+        self.reference["batch_sha256"] = smoke.digest(self.batch_path)
+        working = "packs/model.pack.wset"
+        (self.source / working).write_bytes(bytes(8))
+        self.reference["ranks"][0]["assets"][working] = smoke.digest(self.source / working)
+        self.reference["executables"]["build/weightd_warm"] = "b" * 64
+        self.spec["environment"] = {"SPARK_GLM5_NEXT_GRAPH_PATH": "1", "SPARK_GLM5_NEXT_PIN_EXPERTS": "1", "CUDA_MODULE_LOADING": "LAZY", "CUDA_KERNEL_LOADING": "LAZY", "CUDA_DEVICE_MAX_CONNECTIONS": "32"}
+        self.reference["environment"] = self.spec["environment"]
+        self.spec["working_set"] = dict(mode="full", path=working)
+        self.spec["replicas"] = [dict(lane=index, port_base=30000 + 100 * index,
+                                      port_map={"19000": 30002 + 100 * index}) for index in range(count)]
+        self.spec["budgets"]["weightd_overhead_bytes"] = 1024
+        self.environment["SPARK_QUEUE_PORTS"] = "30000:31000"
+
+    def test_two_three_four_residents_share_only_daemon_and_pinned_pack(self):
+        for count in (2, 3, 4):
+            with self.subTest(count=count):
+                self.shared(count)
+                root, *_ = self.prepare()
+                identifiers = set()
+                for index in range(count):
+                    local = root if index == 0 else root / ("resident-" + str(index))
+                    deployment = json.loads((local / "deployment.json").read_text())
+                    config = json.loads((local / "runtime/config/model.json").read_text())
+                    self.assertEqual(deployment["weightd"]["socket_path"], str(root / "weightd.sock"))
+                    self.assertEqual(deployment["nodes"][0]["runtime_root"], str(local / "runtime"))
+                    self.assertEqual(deployment["nodes"][0]["kv_backing_directory"], str(local / "kv"))
+                    self.assertEqual(config["tp_collective"]["listen_port"], 30002 + index * 100)
+                    identifiers.add(config["tp_collective"]["collective_identifier"])
+                    working = local / "runtime/packs/model.pack.wset"
+                    self.assertFalse(working.is_symlink())
+                    working.write_bytes(b"recorded-runtime-demand")
+                    self.assertEqual((self.source / "packs/model.pack.wset").read_bytes(), bytes(8))
+                self.assertEqual(len(identifiers), count)
+                shutil.rmtree(root)
+
+    def test_runner_starts_one_daemon_explicit_lanes_and_real_wset_command(self):
+        self.shared(2)
+        batch = dict(requests=[dict(request_id=11, sequence_id=21, output_token_budget=2)], stop_token_ids=[])
+        self.batch_path.write_text(json.dumps(batch))
+        self.reference.update(model_id="fixture", model_revision="r1", vocabulary_size=100,
+                              tokens={"11": [7, 8]}, batch_sha256=smoke.digest(self.batch_path))
+        self.reference_path.write_text(json.dumps(self.reference))
+        self.spec.update(timeout_seconds=5)
+        calls, warm_calls = [], []
+
+        def start(command, **kwargs):
+            calls.append((command, kwargs["env"]))
+            if "residentd" in command[0]:
+                lane = kwargs["env"]["SPARK_WEIGHTD_LANE"]
+                kwargs["stdout"].write((f"GLM mesh lane mode=explicit requested={lane} resolved={lane} capacity=8 rank=0\nmodel_residentd ready rank=0 \n").encode())
+            else:
+                kwargs["stdout"].write(b"spark_weightd ready fixture\n")
+            kwargs["stdout"].flush()
+            return Mock(pid=100 + len(calls), poll=lambda: None)
+
+        def execute(command, **kwargs):
+            if command[0] == "build/weightd_warm":
+                warm_calls.append(command)
+                kwargs["stdout"].write(b"WSET-WARM keys=1 elapsed_ms=1\n")
+            return subprocess.CompletedProcess(command, 0)
+
+        def measure(command, timeout, **kwargs):
+            common = dict(schema_version=1, request_id=11, sequence_id=21, request_handle=1, status=0)
+            events = [dict(schema_version=1, event="ready", model_id="fixture", model_revision="r1"),
+                      dict(common, event="accepted")]
+            for index, token in enumerate((7, 8)):
+                events.append(dict(common, event="token", token_index=index, generated_token_count=index+1, token_id=token))
+            events.append(dict(common, event="completed", generated_token_count=2))
+            for event in events:
+                kwargs["event_sink"].write((json.dumps(event) + "\n").encode())
+            return dict(valid=True, errors=[], ttft_seconds=1, total_seconds=3)
+
+        original = smoke.digest
+        with patch.dict(smoke.os.environ, self.environment, clear=True), \
+             patch.object(smoke, "digest", side_effect=lambda p: "b" * 64 if str(p).startswith("build/") else original(p)), \
+             patch.object(smoke.subprocess, "check_output", return_value="a" * 40), \
+             patch.object(smoke.subprocess, "run", side_effect=execute), \
+             patch.object(smoke.subprocess, "Popen", side_effect=start), \
+             patch.object(smoke, "gpu_memory"), patch.object(smoke, "measure", side_effect=measure), \
+             patch.object(smoke, "stop_owned") as stopped:
+            self.assertEqual(smoke.run(self.spec), 0)
+        self.assertEqual([call[0][0] for call in calls], ["build/sparkpipe_weightd", "build/sparkpipe_model_residentd", "build/sparkpipe_model_residentd"])
+        self.assertEqual([call[1]["SPARK_WEIGHTD_LANE"] for call in calls[1:]], ["0", "1"])
+        self.assertEqual(len(warm_calls), 1)
+        self.assertEqual(warm_calls[0][6], "--wset")
+        self.assertEqual(warm_calls[0][7], str(self.root / "runtime/packs/model.pack.wset"))
+        self.assertEqual(len(stopped.call_args.args[0]), 3)
+        receipt = json.loads((self.root / "receipt.json").read_text())
+        self.assertEqual(receipt["tokens"], 4)
+        self.assertGreater(receipt["concurrent_decode"]["overlap_seconds"], 0)
+
+    def test_shared_budget_counts_every_resident_and_daemon_overhead(self):
+        self.shared()
+        self.spec["budgets"]["model_device_bytes"] = 300000
+        self.reference["ranks"][0]["model_device_bytes"] = 300000
+        with self.assertRaisesRegex(ValueError, "exceeds queue reservation"):
+            self.prepare()
+
+    def test_duplicate_lane_listener_or_missing_reservation_rejected(self):
+        for field, value, reason in (("lane", 0, "collective lane"), ("port_base", 30000, "listener"),
+                                      ("port_map", {"19000": 30002}, "listener"),
+                                      ("port_base", 40000, "reserve resident listeners")):
+            self.shared()
+            self.spec["replicas"][1][field] = value
+            with self.assertRaisesRegex(ValueError, reason):
+                self.prepare()
+            shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_shared_cuda_knobs_must_match_qualified_baseline(self):
+        self.shared()
+        self.spec["environment"]["CUDA_MODULE_LOADING"] = "EAGER"
+        with self.assertRaisesRegex(ValueError, "pinned CUDA"):
+            self.prepare()
+
+    def test_working_set_mode_cannot_hide_pin_all_cost(self):
+        self.shared()
+        self.spec["working_set"]["mode"] = "partial"
+        with self.assertRaisesRegex(ValueError, "match explicit working set mode"):
+            self.prepare()
+        self.spec["environment"].update(SPARK_GLM5_NEXT_GRAPH_PATH="0", SPARK_GLM5_NEXT_PIN_EXPERTS="0")
+        with self.assertRaisesRegex(ValueError, "must not premap full pack"):
+            self.prepare()
+        self.spec["working_set"]["mode"] = "full"
+        self.spec["environment"].update(SPARK_GLM5_NEXT_GRAPH_PATH="1", SPARK_GLM5_NEXT_PIN_EXPERTS="1")
+        self.spec["budgets"]["expert_pool_bytes"] = 1
+        with self.assertRaisesRegex(ValueError, "full pack budget"):
+            self.prepare()
+
+    def test_b1_cap_and_complete_pinned_working_set_are_required(self):
+        self.shared()
+        self.deployment["runtime_limits"]["max_input_rows"] = 2
+        self.deployment_path.write_text(json.dumps(self.deployment))
+        self.reference["deployment_sha256"] = smoke.digest(self.deployment_path)
+        with self.assertRaisesRegex(ValueError, "requires B1"):
+            self.prepare()
+        self.shared()
+        working = "packs/model.pack.wset"
+        (self.source / working).write_bytes(bytes(7))
+        self.reference["ranks"][0]["assets"][working] = smoke.digest(self.source / working)
+        with self.assertRaisesRegex(ValueError, "complete key pairs"):
+            self.prepare()
+        del self.reference["ranks"][0]["assets"][working]
+        with self.assertRaisesRegex(ValueError, "not pinned"):
             self.prepare()
 
 
