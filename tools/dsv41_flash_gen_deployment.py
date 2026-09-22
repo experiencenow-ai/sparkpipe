@@ -3,10 +3,12 @@
 configs and the shared model_resident.json (the GLM shared-socket pattern
 from tools/glm5_next_gen_deployment.py, applied to lane 4).
 
-Defaults are lane 4 of the eight shared developer lanes (PR #1083):
-TP4 on spark4..spark7, control 23064-23079, collective 67064-67079,
-transport 64064-64079. Every value is env-overridable so the same
-generator serves other lane geometries without edits.
+Defaults are lane 4 of the eight shared developer lanes (PR #1083,
+amended by PR #1094): TP4 on spark4..spark7, control 23064-23079,
+collective 53064-53079 (renumbered from 67064: port numbers above
+65535 are not bindable), transport 64064-64079. Every value is
+env-overridable so the same generator serves other lane geometries
+without edits.
 
 The stage config member list is the dsv41_flash module node context
 (spark_dsv41_flash_resident_decode_stage_firmware.h): the family serving
@@ -32,7 +34,7 @@ ROOT_NAME = os.environ.get("DSV41_FLASH_ROOT_NAME", "dsv41flash.mxfp4.tp4")
 RUNTIME_ROOT = os.environ.get("DSV41_FLASH_RUNTIME_ROOT",
                               "/home/{host}/sparkdata/" + ROOT_NAME)
 CONTROL_BASE = int(os.environ.get("DSV41_FLASH_CONTROL_BASE", "23064"))
-COLLECTIVE_BASE = int(os.environ.get("DSV41_FLASH_COLLECTIVE_BASE", "67064"))
+COLLECTIVE_BASE = int(os.environ.get("DSV41_FLASH_COLLECTIVE_BASE", "53064"))
 TRANSPORT_BASE = int(os.environ.get("DSV41_FLASH_TRANSPORT_BASE", "64064"))
 COLLECTIVE_ID = int(os.environ.get("DSV41_FLASH_COLLECTIVE_ID",
                                    "9911223344556684"))

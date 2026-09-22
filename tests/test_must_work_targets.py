@@ -17,6 +17,8 @@ EXPECTED_FAMILIES = {
     "qwen38_27b",
     "dsv4_flash",
     "dsv4_pro",
+    "mimo26_pro",
+    "mimo26_flash",
 }
 
 
@@ -69,6 +71,13 @@ def main() -> int:
     assert by_family["dsv4_flash"]["non_expert_weight_format"] == "fp8_e4m3_block_128x128"
     assert by_family["dsv4_pro"]["non_expert_weight_format"] == "fp8_e4m3_block_128x128"
     assert by_family["dsv4_flash"]["non_expert_activation_format"] == "bf16"
+    assert by_family["mimo26_pro"]["routed_expert_weight_format"] == "mxfp4_e2m1_e8m0_block32"
+    assert by_family["mimo26_flash"]["routed_expert_weight_format"] == "mxfp4_e2m1_e8m0_block32"
+    assert by_family["mimo26_pro"]["non_expert_weight_format"] == (
+        "fp8_e4m3_block_128x128_with_bf16_o_proj_embed_head"
+    )
+    assert by_family["mimo26_pro"]["contract"] == "model_contracts/mimo26_pro_authoritative.json"
+    assert by_family["mimo26_flash"]["contract"] == "model_contracts/mimo26_flash_authoritative.json"
     print("PASS mandatory model target contract")
     return 0
 

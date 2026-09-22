@@ -2060,7 +2060,25 @@ SparkStatus SparkTpDeviceCollectivePrepareReceiveBf16(
         if ( owner == 0 )
             result = cudaHostRegister(receive_device,(size_t)SPARK_WEIGHTD_MESH_REGION_BYTES,
                 SPARK_TP_CUDA_HOST_REGISTER_PORTABLE | SPARK_TP_CUDA_HOST_REGISTER_MAPPED);
-        if ( result != 0 )
+        if ( result == 1 /* cudaErrorInvalidValue */ )
+        {
+            /* The shared weightd's mesh region is RDMA-registered shmem
+             * (ibv_reg_mr with remote access) and CUDA refuses to host-register
+             * those pages in ANY flag combination (lane-0 fleet reproduction,
+             * glm-mesh-flag-run: PORTABLE|MAPPED, PORTABLE and default all
+             * return invalid argument on the attach-provided mapping while a
+             * self-created memfd of the same size registers cleanly in the
+             * same cgroup). GB10 is cache-coherent: the mesh kernels already
+             * address the region through host virtual addresses directly, so
+             * the registration is an optimization, not a precondition. Skip it
+             * and keep the unregistered mapping; every other failure remains
+             * fatal. */
+            fprintf(stderr,"MESH-REGISTER-SKIP ptr=%p region_bytes=%llu cuda=%d (%s) "
+                "coherent-host-path\n",
+                receive_device,(unsigned long long)SPARK_WEIGHTD_MESH_REGION_BYTES,
+                result,cudaGetErrorString(result));
+        }
+        else if ( result != 0 )
         {
             pthread_mutex_unlock(&SparkTpDeviceCollectiveRegistrationLock);
             fprintf(stderr,"MESH-REGISTER-FAIL ptr=%p region_bytes=%llu cuda=%d (%s)\n",
