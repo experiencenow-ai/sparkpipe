@@ -1,5 +1,5 @@
 {
-  "file_count": 3349,
+  "file_count": 3351,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -12397,6 +12397,16 @@
       "size_bytes": 10392
     },
     {
+      "path": "tools/mesh_register_repro.c",
+      "sha256": "2a6892938bfa20eb1e93c849384fa869ddf921ce30f7679a5ec2c0ee0f3df722",
+      "size_bytes": 3189
+    },
+    {
+      "path": "tools/mesh_register_repro_run.sh",
+      "sha256": "fdc8989c015e464e0f6afc1c4551e0580255e26d5661ac7a8aa2bced97eaa9ba",
+      "size_bytes": 420
+    },
+    {
       "path": "tools/metric.sh",
       "sha256": "9bd269b586ff3e28c5942c062ad34a15207cb53cdb03616dd4fffd279014e06c",
       "size_bytes": 2842
@@ -16750,5 +16760,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79862808
+  "total_bytes": 79866417
 }
