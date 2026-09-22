@@ -12478,8 +12478,8 @@
     },
     {
       "path": "tools/qwen38max_smoke_experts.py",
-      "sha256": "47c3915ffe22d4a2feea7199116ad70d34aa55876782f72c556104723593b8e1",
-      "size_bytes": 11689
+      "sha256": "7b24ad1cfbd114aa3ebce2594686bcdc3ef3c80542f9d578b9f3e004e3576c39",
+      "size_bytes": 11744
     },
     {
       "path": "tools/qwen38max_swap_rank.sh",
@@ -16335,5 +16335,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78070817
+  "total_bytes": 78070872
 }

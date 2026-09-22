@@ -51,7 +51,7 @@ EXPERT_TENSOR = re.compile(
     r"^model\.layers\.(\d+)\.mlp\.experts\.(\d+)\."
     r"(gate_proj|up_proj|down_proj)\."
     r"(weight(?:_scale_2|_scale|_2)?|input_scale)$")
-# Smoke context floor for kv_floor_bytes: prompts_tiny tops out at 12
+# Smoke context floor for kv_floor_bytes: prompts_qwen38max tops out at 12
 # positions; 128 tokens x 8 concurrent sequences bounds the smoke harness.
 KV_FLOOR_TOKENS = 128
 KV_FLOOR_SEQUENCES = 8
@@ -100,7 +100,7 @@ def main():
     fixture_manifest_path = os.path.join(fixture_dir, "MANIFEST.json")
     defines_path = os.path.join(repo, "model-families", FAMILY,
                                 "include/sparkpipe/llm_defines.h")
-    prompts_path = os.path.join(fixture_dir, "prompts_tiny.json")
+    prompts_path = os.path.join(fixture_dir, "prompts_qwen38max.json")
     emit_path = arguments.emit or os.path.join(repo, "model-families",
                                                FAMILY, "smoke_experts.json")
 
@@ -171,10 +171,11 @@ def main():
                          f"index covers {total_experts}")
 
     # The routed-expert working set: union of route_ids over every fixture
-    # recorded for the smoke prompt set (prompts_tiny.json).
+    # recorded for the smoke prompt set (prompts_qwen38max.json — the
+    # #1072 fixture identity).
     prompts_sha = sha256_file(prompts_path)
     if fixture_manifest["prompts_sha256"] != prompts_sha:
-        raise SystemExit("prompts_tiny.json drifted from the recorded "
+        raise SystemExit("prompts_qwen38max.json drifted from the recorded "
                          "fixture identity")
     touched = set()
     fixtures_used = []
@@ -215,7 +216,7 @@ def main():
     document = {
         "schema_version": SCHEMA_VERSION,
         "family": FAMILY,
-        "prompt_set": "qwen38max-prompts-tiny-v1",
+        "prompt_set": "qwen38max-t1-prompts-v1",
         "topology": TOPOLOGY,
         "nodes": NODES,
         "expert_shard": "tp",
