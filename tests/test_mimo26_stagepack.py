@@ -58,10 +58,10 @@ def build_checkpoint(directory: Path) -> dict:
     for layer in range(g["layers"]):
         kv = kv_heads(layer)
         qkv_rows = g["heads"] * g["head_dim"] + kv * g["head_dim"] + kv * g["v_head_dim"]
-        fused = f"model.layers.{layer}.self_attn.qkv_proj.weight"
-        grid_rows = qkv_rows // 128 + GRID_PAD_ROWS
-        add(fused, "F8_E4M3", [qkv_rows, g["hidden"]])
-        add(fused + ".weight_scale_inv", "F32", [grid_rows, g["hidden"] // 128])
+        module = f"model.layers.{layer}.self_attn.qkv_proj"
+        add(module + ".weight", "F8_E4M3", [qkv_rows, g["hidden"]])
+        add(module + ".weight_scale_inv", "F32",
+            [qkv_rows // 128 + GRID_PAD_ROWS, g["hidden"] // 128])
         add(f"model.layers.{layer}.self_attn.o_proj.weight", "BF16",
             [g["hidden"], g["heads"] * g["v_head_dim"]])
         add(f"model.layers.{layer}.input_layernorm.weight", "BF16", [g["hidden"]])

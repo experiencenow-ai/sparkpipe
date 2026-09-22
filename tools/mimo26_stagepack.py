@@ -189,6 +189,14 @@ def block_window(row0: int, rows: int) -> tuple:
     return row0 // FP8_BLOCK, rows // FP8_BLOCK
 
 
+def fused_scale_name(fused_weight_name: str) -> str:
+    """The fused qkv scale tensor is named off the module
+    (qkv_proj.weight_scale_inv), not off the weight tensor."""
+    if not fused_weight_name.endswith(".weight"):
+        raise PackFailure(f"not a weight tensor name: {fused_weight_name}")
+    return fused_weight_name[:-len(".weight")] + ".weight_scale_inv"
+
+
 def qkv_sections(arm: str, config: dict, layer: int) -> dict:
     g = arm_geometry(arm)
     kind = layer_kind(config, layer)
@@ -244,7 +252,7 @@ def check_shapes(arm: str, source: SafetensorsSource) -> None:
         sec = qkv_sections(arm, source.config, layer)
         fused = f"model.layers.{layer}.self_attn.qkv_proj.weight"
         source.check_shape(fused, sec["total"], g["hidden"], dtype="F8_E4M3")
-        _, smeta, _ = source.resolve(fused + ".weight_scale_inv")
+        _, smeta, _ = source.resolve(fused_scale_name(fused))
         if smeta["dtype"] != "F32" or smeta["shape"][1] != grid_columns \
                 or smeta["shape"][0] < sec["total"] // FP8_BLOCK:
             raise PackFailure(
@@ -340,7 +348,7 @@ def build_plan(arm: str, config: dict, tp_degree: int, tp_rank: int,
     for layer in layers:
         sec = qkv_sections(arm, config, layer)
         fused = f"model.layers.{layer}.self_attn.qkv_proj.weight"
-        fused_scale = fused + ".weight_scale_inv"
+        fused_scale = fused_scale_name(fused)
         grid_columns = g["hidden"] // FP8_BLOCK
         # q: this rank's head-group rows inside the fused q section
         q_row0 = sec["q0"] + tp_rank * q_heads * g["head_dim"]
