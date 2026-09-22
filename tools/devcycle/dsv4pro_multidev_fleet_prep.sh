@@ -40,13 +40,17 @@ case "$RANK" in
 esac
 
 cd "$PACKS"
-if [ -f "$NEW" ] && [ ! -f "$OLD" ]; then
-  echo "rename: already uniform ($NEW)"
-elif [ -f "$OLD" ] && [ ! -f "$NEW" ]; then
-  mv "$OLD" "$NEW"
-  echo "rename: $OLD -> $NEW"
+# The placed rank packs carry the standard immutable flag (chattr +i) and
+# the queue job is non-root: do NOT rename or clear the flag. The uniform
+# stage_pack_path name resolves through a symlink instead; pack bytes and
+# their placement stay untouched.
+if [ -L "$NEW" ] && [ -f "$OLD" ]; then
+  echo "link: already present ($NEW -> $OLD)"
+elif [ ! -e "$NEW" ] && [ -f "$OLD" ]; then
+  ln -s "$OLD" "$NEW"
+  echo "link: $NEW -> $OLD"
 else
-  echo "rename: unexpected packs state" >&2; ls -la >&2; exit 3
+  echo "link: unexpected packs state" >&2; ls -la >&2; exit 3
 fi
 
 # Header size must equal the receipt's file size before the sidecar goes in.

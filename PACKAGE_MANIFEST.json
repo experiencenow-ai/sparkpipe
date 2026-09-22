@@ -10718,8 +10718,8 @@
     },
     {
       "path": "tools/devcycle/dsv4pro_multidev_fleet_prep.sh",
-      "sha256": "03df7ae9afb82b454f6017ea05575e45d340d5d292cfd7f14cf2aafdcb7f8647",
-      "size_bytes": 3407
+      "sha256": "c6e61cc798e90d56a3a1be4af2b77e25bb4699070d0b19e038849c25a84deacc",
+      "size_bytes": 3666
     },
     {
       "path": "tools/devcycle/fabric_probe_pro.sh",
@@ -16505,5 +16505,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78519883
+  "total_bytes": 78520142
 }
