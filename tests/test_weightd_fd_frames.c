@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <pthread.h>
@@ -9,6 +10,7 @@ static pthread_mutex_t read_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t read_changed = PTHREAD_COND_INITIALIZER;
 static unsigned read_blocked,read_entered;
 static size_t read_limit;
+static unsigned fail_record_rename;
 
 static ssize_t test_pread(int fd,void *buffer,size_t bytes,off_t offset)
 {
@@ -26,9 +28,21 @@ static ssize_t test_pread(int fd,void *buffer,size_t bytes,off_t offset)
 	return pread(fd,buffer,bytes,offset);
 }
 
+static int test_rename(const char *source,const char *destination)
+{
+	if (__atomic_load_n(&fail_record_rename,__ATOMIC_SEQ_CST) != 0u)
+	{
+		errno = EIO;
+		return -1;
+	}
+	return rename(source,destination);
+}
+
+#define rename test_rename
 #define pread test_pread
 #include "../runtime/spark_weightd.c"
 #undef pread
+#undef rename
 
 void spark_stub_cuda_fail_alloc_after(uint32_t calls);
 
@@ -246,7 +260,7 @@ static void unblock_reads(void)
 
 static void check_cold_control_progress(void)
 {
-	char root[] = "/tmp/weightd-progress-XXXXXX",path[256],manifest_path[272],socket_path[256];
+	char root[] = "/tmp/weightd-progress-XXXXXX",path[256],manifest_path[272],socket_path[256],wset_path[272];
 	SparkWeightdServerConfig config = {0};
 	SparkWeightdLazyAttachRequest request = {0};
 	SparkWeightdLazyAttachResult attached;
@@ -255,20 +269,25 @@ static void check_cold_control_progress(void)
 	ProgressServer server = {0};
 	ProgressAcquire acquire = {0};
 	pthread_t server_thread,acquire_thread;
-	uint8_t source[512];
-	uint32_t header[4] = {SPARK_WEIGHTD_EXPERT_MANIFEST_MAGIC,2u,2u,0u};
-	FILE *pack,*manifest;
+	uint8_t source[768];
+	uint32_t header[4] = {SPARK_WEIGHTD_EXPERT_MANIFEST_MAGIC,2u,3u,0u};
+	FILE *pack,*manifest,*recording;
+	uint32_t recorded[4] = {0u,1u,0u,0u};
 	assert(mkdtemp(root) != 0);
 	snprintf(path,sizeof(path),"%s/pack",root);
 	snprintf(manifest_path,sizeof(manifest_path),"%s.experts",path);
 	snprintf(socket_path,sizeof(socket_path),"%s/socket",root);
+	snprintf(wset_path,sizeof(wset_path),"%s.wset",path);
+	recording = fopen(wset_path,"wb");
+	assert(recording != 0 && fwrite(recorded,sizeof(uint32_t),2u,recording) == 2u);
+	assert(fclose(recording) == 0);
 	pack = fopen(path,"wb");
 	manifest = fopen(manifest_path,"wb");
 	assert(pack != 0 && manifest != 0);
 	memset(source,0x5a,sizeof(source));
 	assert(fwrite(source,1u,sizeof(source),pack) == sizeof(source));
 	assert(fwrite(header,1u,sizeof(header),manifest) == sizeof(header));
-	for (uint32_t i=0u; i<2u; i++)
+	for (uint32_t i=0u; i<3u; i++)
 	{
 		uint8_t record[48] = {0},digest[16];
 		uint64_t offset = i * 256u,bytes = 256u;
@@ -294,11 +313,25 @@ static void check_cold_control_progress(void)
 	memset(request.identity.pack_sha256,'a',64u);
 	snprintf(request.pack_path,sizeof(request.pack_path),"%s",path);
 	request.expert_pool_bytes = UINT64_C(2097152);
+	for (uint32_t bytes=0u; bytes<=8u; bytes+=4u)
+	{
+		uint32_t invalid[2] = {0u,99u};
+		recording = fopen(wset_path,"wb");
+		assert(recording != 0 && fwrite(invalid,1u,bytes,recording) == bytes);
+		assert(fclose(recording) == 0);
+		assert(SparkWeightdClientAttachLazy(client,&request,&attached,UINT64_C(1000000000)) == SPARK_STATUS_SCHEMA_ERROR);
+		assert(attached.arena_count == 0u && attached.resident_bytes == 0u);
+	}
+	recording = fopen(wset_path,"wb");
+	assert(recording != 0 && fwrite(recorded,sizeof(uint32_t),2u,recording) == 2u);
+	assert(fclose(recording) == 0);
 	spark_stub_cuda_fail_alloc_after(3u);
 	assert(SparkWeightdClientAttachLazy(client,&request,&attached,UINT64_C(1000000000)) == SPARK_STATUS_CAPACITY_EXCEEDED);
 	assert(attached.arena_count == 0u && attached.resident_bytes == 0u);
 	assert(SparkWeightdClientAttachLazy(client,&request,&attached,UINT64_C(1000000000)) == SPARK_STATUS_OK);
 	assert(attached.pool_fd >= 0 && close(attached.pool_fd) == 0);
+	assert(server.server->arenas[0].recorded_count == 1u);
+	assert(server.server->arenas[0].recorded_keys[0] == UINT64_C(1));
 	acquire.client = client;
 	acquire.generation = attached.arena_generation;
 	acquire.timeout = UINT64_C(5000000000);
@@ -323,6 +356,10 @@ static void check_cold_control_progress(void)
 	assert(memcmp((void *)(uintptr_t)attached.device_handle,source,256u) == 0);
 	assert(SparkWeightdClientRelease(client,attached.arena_generation,
 		acquire.result.lease_identifier,&acquire.result,UINT64_C(1000000000)) == SPARK_STATUS_OK);
+	recording = fopen(wset_path,"rb");
+	assert(recording != 0 && fread(recorded,sizeof(uint32_t),4u,recording) == 4u);
+	assert(fgetc(recording) == EOF && !ferror(recording) && fclose(recording) == 0);
+	assert(recorded[0] == 0u && recorded[1] == 1u && recorded[2] == 0u && recorded[3] == 0u);
 	acquire.key.expert = 1u;
 	acquire.timeout = UINT64_C(50000000);
 	block_reads();
@@ -339,11 +376,31 @@ static void check_cold_control_progress(void)
 		&acquire.result,UINT64_C(1000000000)) == SPARK_STATUS_OK);
 	assert(SparkWeightdClientRelease(probe,attached.arena_generation,
 		acquire.result.lease_identifier,&acquire.result,UINT64_C(1000000000)) == SPARK_STATUS_OK);
+	acquire.key.expert = 2u;
+	__atomic_store_n(&fail_record_rename,1u,__ATOMIC_SEQ_CST);
+	assert(SparkWeightdClientAcquire(probe,attached.arena_generation,&acquire.key,1u,
+		&acquire.result,UINT64_C(1000000000)) == SPARK_STATUS_IO_ERROR);
+	assert(acquire.result.status == SPARK_STATUS_IO_ERROR && acquire.result.lease_identifier == 0u);
+	assert(server.server->arenas[0].recorded_count == 2u);
+	for (uint32_t i=0u; i<SPARK_WEIGHTD_LEASE_COUNT_MAX; i++)
+		assert(server.server->arenas[0].leases->leases[i].count == 0u);
+	for (uint32_t i=0u; i<server.server->arenas[0].manifest.group_count; i++)
+		assert(server.server->arenas[0].leases->pins[i] == 0u);
+	recording = fopen(wset_path,"rb");
+	assert(recording != 0 && fread(recorded,sizeof(uint32_t),4u,recording) == 4u);
+	assert(fgetc(recording) == EOF && !ferror(recording) && fclose(recording) == 0);
+	assert(recorded[0] == 0u && recorded[1] == 1u && recorded[2] == 0u && recorded[3] == 0u);
+	__atomic_store_n(&fail_record_rename,0u,__ATOMIC_SEQ_CST);
+	assert(SparkWeightdClientAcquire(probe,attached.arena_generation,&acquire.key,1u,
+		&acquire.result,UINT64_C(1000000000)) == SPARK_STATUS_OK);
+	assert(server.server->arenas[0].recorded_count == 3u);
+	assert(SparkWeightdClientRelease(probe,attached.arena_generation,
+		acquire.result.lease_identifier,&acquire.result,UINT64_C(1000000000)) == SPARK_STATUS_OK);
 	SparkWeightdClientClose(probe);
 	__atomic_store_n(&server.stop,1,__ATOMIC_SEQ_CST);
 	assert(pthread_join(server_thread,0) == 0);
 	SparkWeightdServerDestroy(server.server);
-	assert(unlink(path) == 0 && unlink(manifest_path) == 0 && rmdir(root) == 0);
+	assert(unlink(path) == 0 && unlink(manifest_path) == 0 && unlink(wset_path) == 0 && rmdir(root) == 0);
 }
 
 int main(void)

@@ -21,8 +21,8 @@ class WeightdSupervision(unittest.TestCase):
 #include <stdlib.h>
 #include <string.h>
 static int mode(const char *name) { const char *m=getenv("WARM_FAILURE"); return m && strcmp(m,name)==0; }
-SparkStatus SparkWeightdClientConnect(const char *p,SparkWeightdClient **c,SparkWeightdHelloResult *h) { (void)p;(void)h;*c=(SparkWeightdClient *)1;return SPARK_STATUS_OK; }
-SparkStatus SparkWeightdClientAttachLazy(SparkWeightdClient *c,const SparkWeightdLazyAttachRequest *q,SparkWeightdLazyAttachResult *r,uint64_t t) { (void)c;(void)t;memset(r,0,sizeof(*r));r->arena_generation=9;return q->expert_pool_bytes==4096 ? SPARK_STATUS_OK : SPARK_STATUS_INVALID_ARGUMENT; }
+SparkStatus SparkWeightdClientConnect(const char *p,SparkWeightdClient **c,SparkWeightdHelloResult *h) { (void)p;(void)h;if(mode("connect_rpc"))return SPARK_STATUS_IO_ERROR;*c=(SparkWeightdClient *)1;return SPARK_STATUS_OK; }
+SparkStatus SparkWeightdClientAttachLazy(SparkWeightdClient *c,const SparkWeightdLazyAttachRequest *q,SparkWeightdLazyAttachResult *r,uint64_t t) { (void)c;(void)t;memset(r,0,sizeof(*r));r->arena_generation=9;if(mode("attach_rpc"))return SPARK_STATUS_IO_ERROR;if(mode("attach_status"))r->status=SPARK_STATUS_IO_ERROR;return q->expert_pool_bytes==4096 ? SPARK_STATUS_OK : SPARK_STATUS_INVALID_ARGUMENT; }
 SparkStatus SparkWeightdClientAcquire(SparkWeightdClient *c,uint64_t g,const SparkWeightdExpertKey *k,uint32_t n,SparkWeightdWorkingSetResult *r,uint64_t t) { (void)c;(void)t;memset(r,0,sizeof(*r));r->lease_identifier=17;printf("ACQUIRE %u %u\n",k[0].layer,n);if(g!=9 || k[0].layer<3)return SPARK_STATUS_INVALID_ARGUMENT;if(mode("acquire_rpc"))return SPARK_STATUS_IO_ERROR;if(mode("acquire_status"))r->status=SPARK_STATUS_IO_ERROR;return SPARK_STATUS_OK; }
 SparkStatus SparkWeightdClientRelease(SparkWeightdClient *c,uint64_t g,uint64_t l,SparkWeightdWorkingSetResult *r,uint64_t t) { (void)c;(void)t;printf("RELEASE %llu\n",(unsigned long long)l);if(g!=9 || l!=17)return SPARK_STATUS_INVALID_ARGUMENT;if(mode("release_rpc"))return SPARK_STATUS_IO_ERROR;if(mode("release_status"))r->status=SPARK_STATUS_IO_ERROR;return SPARK_STATUS_OK; }
 void SparkWeightdClientClose(SparkWeightdClient *c) { if(c)puts("CLOSED"); }
@@ -107,6 +107,57 @@ int main(void) {
                 self.assertEqual(self.warm(budget=budget).returncode, 2)
         self.assertNotEqual(self.warm(extra=("3", "288")).returncode, 0)
         self.assertNotEqual(self.warm(extra=("45", "2")).returncode, 0)
+
+    def wset(self, data):
+        path = self.directory / "selected.wset"
+        path.write_bytes(data)
+        return ("--wset", str(path))
+
+    def test_wset_selected_subset_is_one_acquire_and_release(self):
+        extra = self.wset(struct.pack("<6I", 4, 0, 3, 7, 4, 0))
+        result = self.warm(extra=extra)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["ACQUIRE 4 2", "RELEASE 17", "CLOSED"])
+        self.assertIn("WSET-ONE-SHOT", result.stderr)
+        self.assertIn("WSET-WARM keys=2", result.stderr)
+
+    def test_wset_rejects_invalid_files_before_connecting(self):
+        for data in (b"", b"x", bytes(4), struct.pack("<2I", 3, 2)+b"x",
+                     struct.pack("<2I", 3, 99), struct.pack("<2I", 40, 0),
+                     struct.pack("<2I", 3, 2)*513):
+            with self.subTest(data=data[:16], size=len(data)):
+                result = self.warm(extra=self.wset(data))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertNotIn("WSET-WARM", result.stderr)
+        for path in (self.directory / "missing.wset", self.directory):
+            with self.subTest(path=path):
+                result = self.warm(extra=("--wset", str(path)))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+
+    def test_wset_rpc_and_release_failures_are_terminal(self):
+        extra = self.wset(struct.pack("<2I", 3, 7))
+        for mode in ("connect_rpc", "attach_rpc", "attach_status", "acquire_rpc",
+                     "acquire_status", "release_rpc", "release_status"):
+            with self.subTest(mode=mode):
+                result = self.warm(mode=mode, extra=extra)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertNotIn("WSET-WARM", result.stderr)
+                self.assertEqual(result.stdout.count("CLOSED"), mode != "connect_rpc")
+                self.assertEqual(result.stdout.count("ACQUIRE"),
+                                 mode.startswith("acquire") or mode.startswith("release"))
+
+    def test_wset_requires_finite_budget_and_valid_timeout(self):
+        extra = self.wset(struct.pack("<2I", 3, 2))
+        for budget in (None, "", "0", "-1", "18446744073709551615", "4096oops"):
+            with self.subTest(budget=budget):
+                self.assertEqual(self.warm(budget=budget, extra=extra).returncode, 2)
+        for timeout in ("0", "-1", "oops", "18446744074"):
+            with self.subTest(timeout=timeout):
+                self.assertEqual(self.warm(extra=(*extra, timeout)).returncode, 2)
+        self.assertEqual(self.warm(extra=("--wset",)).returncode, 2)
+        self.assertEqual(self.warm(extra=(*extra, "1", "extra")).returncode, 2)
 
     def test_latch_never_disturbs_existing_owner(self):
         result = subprocess.run([str(self.latch)], capture_output=True, text=True)

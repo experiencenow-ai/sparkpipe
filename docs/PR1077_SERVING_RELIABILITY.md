@@ -1,9 +1,11 @@
 # PR1077 serving reliability
 
 This change stacks on PR #1077, `hillclimb/graph-pacing` at
-`0e71aff0ae730285d176b3aac74043a5f1debf15`. It fixes the failure-reporting,
+`89330dcf8a804c29ff1a20350fadec77321275bf`. It fixes the failure-reporting,
 resource-lifetime and reconnect defects found in the September 22 review.
 It does not establish TP16 throughput or qualify a production deployment.
+The parent incorporated the initial collective/session repairs; the remaining
+stacked change completes teardown and recorded-working-set hardening.
 
 ## Runtime contract
 
@@ -45,7 +47,8 @@ It does not establish TP16 throughput or qualify a production deployment.
 
 ## Configuration and warm-up
 
-Set `SPARK_GLM5_NEXT_GRAPH_PATH` explicitly to `0` or `1` for every engine.
+Set `SPARK_GLM5_NEXT_GRAPH_PATH` explicitly to `0` or `1` for every engine
+(`G5_GRAPH_PATH` when launching through the fleet agent).
 Set `SPARK_WEIGHTD_EXPERT_POOL_BYTES` to the same explicit finite budget in
 all clients attaching the same arena. The daemon rejects incompatible budgets,
 overflow and allocations exceeding its device ceiling. A configured pool or
@@ -61,8 +64,21 @@ checks both acquire and release, and exits nonzero at the first required failure
 A successful layer print is emitted only after release succeeds. A warm pass
 is not a permanent pin: an undersized pool can evict earlier layers.
 
+The upstream `--wset FILE [TIMEOUT_S]` option remains available for one selected
+working set. It validates the file and manifest keys and checks acquire/release
+before reporting success. A selected working set qualifies only those keys,
+not every expert in the model. Recording loads after the pack path is set,
+rejects malformed existing files, publishes with checked atomic rename, and
+rolls back keys and the acquired lease if publication fails. The pack directory
+must be writable; recording failures are visible errors.
+
 Cold span reads accumulate short reads before checksum and device copy. A
 short read can no longer validate or publish an incomplete span.
+
+The shared memory-buffer free helper resets its descriptor before freeing the
+allocation. Serving adapters may store that descriptor inside the allocation;
+writing it afterward caused a real Linux teardown SIGSEGV. Pinned allocations
+also use their matching CUDA host-free operation.
 
 TCP keepalive and no-SIGPIPE setup are checked on Linux and macOS. An option
 failure rejects the socket. Platform-specific option names implement the same
@@ -83,26 +99,38 @@ codec, prompt/context, batch geometry, build, and diagnostics settings.
 
 ## Focused validation
 
-The new checks are registered in the existing Makefile test lists.
+The new checks are registered in the existing Makefile test lists. The
+`tools/test_serving_reliability_host.sh` runner executes 21 focused host
+regression targets on Linux in a fresh checkout, independently of CUDA compilation. GitHub rejected adding
+the prepared Actions workflow because the configured PAT lacks `workflow`
+scope; CI wiring is pending that permission.
 
 | Check | Result and boundary |
 | --- | --- |
 | Graph wait/guard/unpack, completion and daemon-loss harness | PASS under ASan/UBSan; executes production function bodies with CUDA/fabric boundaries mocked |
 | Allreduce transport fuzzer | PASS, 274 checks; host CUDA and shipper stubs |
 | GLM stage context, embedding collective and lazy dispatch | PASS; host module integration and opaque-generation checks |
+| Memory buffer | PASS on Linux/macOS and ASan; self-owned descriptors and matching deallocation, negative control fails |
 | Resident session/deadline/IPC | PASS; real partial socket writes, reset BUSY/failure, preserved route claims, no-SIGPIPE and terminal progress |
 | Resident reconnect | PASS; same live daemon disconnect and separate process restart |
 | Pipeline integration and mock | PASS; malformed completion fails exactly once, same daemon PIDs survive and accept later work |
 | Batch engine mock | PASS, 40 checks; interrupted partial response errors once, fresh request succeeds |
 | Weightd fd/progress | PASS under ASan/UBSan and TSan; blocked real acquire still permits 144 sequential HELLO/close probes and mesh RPCs, timeout poisons socket and fresh client recovers |
 | Weightd working set, experts, churn, stress, attach, worker | PASS; finite budgets, configured allocation failure rollback, short reads and lease cleanup |
-| Warmer/supervision tests | PASS, 11 tests; actual warmer and latch bodies, injected client failures and supervisor syscall fixtures |
+| Warmer/supervision tests | PASS, 15 tests; actual warmer and latch bodies, injected client failures and supervisor syscall fixtures |
 
 The existing `test_weightd_map` fails its 2-MiB chunk-size assertion against
 both the baseline and this branch: cold chunks use a 64-MiB minimum. This
 assertion was not weakened. Broad macOS `make all` also has setup failures in
 unrelated verbs declarations and missing DSV4 mesh shim symbols. No full-suite
 pass is claimed.
+
+Linux/Spark0 validation uses an isolated source archive, separate host-stub
+and real-CUDA build directories, and no running service changes. CUDA 13.0.88
+successfully compiles the GLM FP8 translation unit; `cuobjdump` identifies
+`sm_121a`. The runtime, residentd, weightd, warmer, and GLM module/adapter also
+compile against real CUDA headers/libraries. Module identity macros are labeled
+`compile-only`; these objects are not deployable model artifacts.
 
 ## Deployment qualification still required
 

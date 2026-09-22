@@ -51,14 +51,17 @@ SparkStatus SparkMemoryBufferAllocate(
 
 void SparkMemoryBufferFree(SparkMemoryBuffer *buffer)
 {
+	SparkMemoryBuffer allocation;
 	if ( buffer == 0 || buffer->pointer == 0 )
 		return;
-	if ( buffer->space == SPARK_MEMORY_SPACE_HOST_COHERENT )
-		free(buffer->pointer);
-	else if ( buffer->space == SPARK_MEMORY_SPACE_HOST_PINNED ||
-		buffer->space == SPARK_MEMORY_SPACE_DEVICE_PRIVATE )
-		(void)cudaFree(buffer->pointer);
+	allocation = *buffer;
 	SparkMemoryBufferReset(buffer);
+	if ( allocation.space == SPARK_MEMORY_SPACE_HOST_COHERENT )
+		free(allocation.pointer);
+	else if ( allocation.space == SPARK_MEMORY_SPACE_HOST_PINNED )
+		(void)cudaFreeHost(allocation.pointer);
+	else if ( allocation.space == SPARK_MEMORY_SPACE_DEVICE_PRIVATE )
+		(void)cudaFree(allocation.pointer);
 }
 
 static SparkStatus SparkMemoryBufferCopyDevice(

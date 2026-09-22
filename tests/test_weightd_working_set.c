@@ -379,7 +379,7 @@ static void check_orphan(SparkWeightdClient *a,uint64_t generation,uint64_t base
 
 static void check_many_exports(void)
 {
-	char root[] = "/tmp/weightd-many-XXXXXX",path[256],manifest[272],socket_path[256];
+	char root[] = "/tmp/weightd-many-XXXXXX",path[256],manifest[272],socket_path[256],wset[272];
 	TestServer state = {0};
 	SparkWeightdServerConfig config = {0};
 	SparkWeightdClient *client;
@@ -392,6 +392,7 @@ static void check_many_exports(void)
 	assert(mkdtemp(root) != 0);
 	snprintf(path,sizeof(path),"%s/pack",root);
 	snprintf(manifest,sizeof(manifest),"%s.experts",path);
+	snprintf(wset,sizeof(wset),"%s.wset",path);
 	snprintf(socket_path,sizeof(socket_path),"%s/socket",root);
 	write_many(path,manifest);
 	config.socket_path = socket_path;
@@ -421,12 +422,12 @@ static void check_many_exports(void)
 	assert(pthread_join(thread,0) == 0);
 	SparkWeightdServerDestroy(state.server);
 	assert(spark_stub_cuda_outstanding_allocs() == 0u);
-	assert(unlink(manifest) == 0 && unlink(path) == 0 && rmdir(root) == 0);
+	assert(unlink(manifest) == 0 && unlink(path) == 0 && unlink(wset) == 0 && rmdir(root) == 0);
 }
 
 static void check_pooled_attach(void)
 {
-	char root[] = "/tmp/weightd-pool-XXXXXX",path[256],manifest[272],socket_path[256];
+	char root[] = "/tmp/weightd-pool-XXXXXX",path[256],manifest[272],socket_path[256],wset[272];
 	SparkWeightdServerConfig config = {0};
 	SparkWeightdLazyAttachRequest request = {0};
 	SparkWeightdLazyAttachResult result;
@@ -441,6 +442,7 @@ static void check_pooled_attach(void)
 	assert(mkdtemp(root) != 0);
 	snprintf(path,sizeof(path),"%s/pack",root);
 	snprintf(manifest,sizeof(manifest),"%s.experts",path);
+	snprintf(wset,sizeof(wset),"%s.wset",path);
 	snprintf(socket_path,sizeof(socket_path),"%s/socket",root);
 	write_many(path,manifest);
 	config.socket_path = socket_path;
@@ -478,7 +480,7 @@ static void check_pooled_attach(void)
 	assert(pthread_join(thread,0) == 0);
 	SparkWeightdServerDestroy(state.server);
 	assert(spark_stub_cuda_outstanding_allocs() == 0u);
-	assert(unlink(manifest) == 0 && unlink(path) == 0 && rmdir(root) == 0);
+	assert(unlink(manifest) == 0 && unlink(path) == 0 && unlink(wset) == 0 && rmdir(root) == 0);
 }
 
 static SparkStatus reject_manifest(const SparkWeightdManifest *manifest,void *context)
@@ -586,7 +588,7 @@ static void check_budget_contract(SparkWeightdClient *client,const char *path)
 
 int main(void)
 {
-	char root[] = "/tmp/weightd-set-XXXXXX",path[256],manifest[272],socket_path[256];
+	char root[] = "/tmp/weightd-set-XXXXXX",path[256],manifest[272],socket_path[256],wset[272];
 	TestServer state = {0};
 	SparkWeightdServerConfig config = {0};
 	SparkWeightdClient *a,*b;
@@ -595,6 +597,7 @@ int main(void)
 	assert(mkdtemp(root) != 0);
 	snprintf(path,sizeof(path),"%s/pack",root);
 	snprintf(manifest,sizeof(manifest),"%s.experts",path);
+	snprintf(wset,sizeof(wset),"%s.wset",path);
 	snprintf(socket_path,sizeof(socket_path),"%s/socket",root);
 	write_fixture(path,manifest);
 	check_spine_load(path,manifest);
@@ -624,7 +627,7 @@ int main(void)
 	assert(pthread_join(thread,0) == 0);
 	SparkWeightdServerDestroy(state.server);
 	assert(spark_stub_cuda_outstanding_allocs() == 0u);
-	assert(unlink(manifest) == 0 && unlink(path) == 0 && rmdir(root) == 0);
+	assert(unlink(manifest) == 0 && unlink(path) == 0 && unlink(wset) == 0 && rmdir(root) == 0);
 	check_many_exports();
 	check_pooled_attach();
 	puts("PASS working-set IPC: all ranges, leases, rollback, scoped imports, 65-chunk exports and pooled single-alloc attach");

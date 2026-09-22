@@ -1,5 +1,5 @@
 {
-  "file_count": 3224,
+  "file_count": 3226,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "08ac8029ffbd4d4786cd3c8550d1e7dd4ebb7233b7343a32cc723d99b8f7c46c",
-      "size_bytes": 123713
+      "sha256": "e0436c8f9c975b5f309b46585dea3fc0eb04d9178f3cd5b47bdefe47b9912121",
+      "size_bytes": 124053
     },
     {
       "path": "Makefile.rej",
@@ -1343,8 +1343,8 @@
     },
     {
       "path": "docs/HILLCLIMB_20260920.md",
-      "sha256": "e7a32fa064a9746214786e6bdb02d9dbed5caec6bc8d6f912eef266fae0a1c25",
-      "size_bytes": 165229
+      "sha256": "b980818801c0d223e7da8bb796d3e86ae2f47ff49827067b689a07f8be20b810",
+      "size_bytes": 167622
     },
     {
       "path": "docs/HILL_CLIMB_DEPLOY.md",
@@ -1468,8 +1468,8 @@
     },
     {
       "path": "docs/PR1077_SERVING_RELIABILITY.md",
-      "sha256": "49e8d6d14e5f3f64d147b0138497dbd4e3c2c8fb4ba775d2df9cfde3c911cff5",
-      "size_bytes": 7479
+      "sha256": "ce6a2ad4df802760ad598613b022d0ceb0a19185286322e0c5fb523d8c6beeda",
+      "size_bytes": 9377
     },
     {
       "path": "docs/QWEN38_DFLASH2_RUNBOOK.md",
@@ -7708,8 +7708,8 @@
     },
     {
       "path": "runtime/memory_buffer.c",
-      "sha256": "41c6a60eca494f39cf41e0f9f1754b212f53edeb760121db914f4d532f969425",
-      "size_bytes": 3567
+      "sha256": "312732fb7453bbff7654b8d9744033e92518b3d1c44de730076d44c236c31afb",
+      "size_bytes": 3686
     },
     {
       "path": "runtime/model_batch_engine.c",
@@ -7813,8 +7813,8 @@
     },
     {
       "path": "runtime/spark_weightd.c",
-      "sha256": "445a55c8f68797d4e713e62a44101f8c1aa4ee9dbb418eba35816ba24d0a2a0f",
-      "size_bytes": 163180
+      "sha256": "05c0c291ff6348c52270cbfc6d6fd6a4b723ffdf275ceb0cc5c098888ad118f2",
+      "size_bytes": 168170
     },
     {
       "path": "runtime/spark_weightd_attach.c",
@@ -9487,6 +9487,11 @@
       "size_bytes": 4965
     },
     {
+      "path": "tests/test_memory_buffer.c",
+      "sha256": "d459b39e9d8205f2672c4bf9ef15cd3a9cd67d1010bbefec92b0ea1d3e4a8f35",
+      "size_bytes": 2306
+    },
+    {
       "path": "tests/test_memory_contracts.py",
       "sha256": "d6bff242c5a9450e4e8bdee95e16a91ef2d939b32f24507659a433a0c7ba9729",
       "size_bytes": 13834
@@ -10113,8 +10118,8 @@
     },
     {
       "path": "tests/test_weightd_churn.c",
-      "sha256": "6847a124184ce329a6a8a86851d5b3fd2c0a630d0ad1bea77b7a28af0f33fb0b",
-      "size_bytes": 11611
+      "sha256": "dc8003fae59708e61dd07278c30be474e6b859d3bc1337c2e83c11e9c5386f72",
+      "size_bytes": 11707
     },
     {
       "path": "tests/test_weightd_expert.c",
@@ -10123,13 +10128,13 @@
     },
     {
       "path": "tests/test_weightd_expert_stress.c",
-      "sha256": "15f5f2c508410f48b67f01401468c571dd269630899fe460dfa633fa77114771",
-      "size_bytes": 8641
+      "sha256": "c00261a2cf81be24aab74e6494804ade326a6b6b2a386f79ad8d618ff8357a4e",
+      "size_bytes": 8737
     },
     {
       "path": "tests/test_weightd_fd_frames.c",
-      "sha256": "1a8d98bbac28430937cd43dadd92a3f0b8e19def9ad1156bb4459463e437b408",
-      "size_bytes": 13509
+      "sha256": "acfaed2153b22dddbd3de4b1b8344fa57c02296848d8ee2007a9baa67c01b12b",
+      "size_bytes": 16447
     },
     {
       "path": "tests/test_weightd_lazy_pair.py",
@@ -10173,8 +10178,8 @@
     },
     {
       "path": "tests/test_weightd_supervision.py",
-      "sha256": "7add4d1e2909a3ce5ce145e1c3fa6e0ea8384601f52ee1124b3e7166ad358408",
-      "size_bytes": 10963
+      "sha256": "ad1a413a1ff3b6200e50b6ec8160002513f90918d1d8d3ce7af7421f40e2ee9c",
+      "size_bytes": 13968
     },
     {
       "path": "tests/test_weightd_worker.c",
@@ -10183,8 +10188,8 @@
     },
     {
       "path": "tests/test_weightd_working_set.c",
-      "sha256": "dcb53f1af87a20f9b0c1e5355cf4bffc21fa4ef8514fc0ba47a095c237be9488",
-      "size_bytes": 28822
+      "sha256": "7aff906f66c7548315a7f58bc8d10844625c1b25a31ec369f2447165f7196b82",
+      "size_bytes": 29050
     },
     {
       "path": "tests/test_work_transaction.c",
@@ -12792,6 +12797,11 @@
       "size_bytes": 20106
     },
     {
+      "path": "tools/test_serving_reliability_host.sh",
+      "sha256": "935f5b2b0240f2e8333043a4fb465f764dc87fef5d6e098a6c8ce8e9dd81df0f",
+      "size_bytes": 1115
+    },
+    {
       "path": "tools/validate_dsv4_tp16_pack.sh",
       "sha256": "0425fc81c7580236d04e7e0443428147d5e722851321fba64c735dc532dbec71",
       "size_bytes": 1670
@@ -12873,8 +12883,8 @@
     },
     {
       "path": "tools/weightd_warm.c",
-      "sha256": "90958af9d9beba29089fd2d343598ef886d1e1b325a50a6127713f884fefb9d3",
-      "size_bytes": 5191
+      "sha256": "4bf676a96798282b93d599dd586b4d3d104211749f1a6c1229450d04fb62ceb5",
+      "size_bytes": 8079
     },
     {
       "path": "tools/weightdctl.c",
@@ -16125,5 +16135,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 75791192
+  "total_bytes": 75813604
 }
