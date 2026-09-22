@@ -275,8 +275,12 @@ fi
   fail "packs/ must contain exactly one .sha256 sidecar"
 
 # 4. Arena-side budgets: default to the exact sidecar-derived numbers for
-#    THIS rank pack (expert span sum + spine complement); the envs only
-#    override (queue cmd stays bare).
+#    THIS rank pack (whole-pack 2 MiB chunk basis for the pool - the
+#    daemon's acquire accounting - and the spine complement); the envs
+#    only override (queue cmd stays bare). Exported HERE: the warm leg
+#    below runs weightd_warm, which requires the pool env (the lane-8
+#    attach-001 finding: the warm hook ran before the launch-block
+#    exports and failed with the weightd_warm usage error).
 BUDGETS="$(python3 "$CHECKOUT/tools/laguna_multidev_lane.py" --budgets "$PRIVATE_PACK")"
 DEFAULT_POOL="${BUDGETS%% *}"
 DEFAULT_SPINE="${BUDGETS##* }"
@@ -284,27 +288,28 @@ DEFAULT_SPINE="${BUDGETS##* }"
 : "${LAGUNA_SPINE_BUDGET_BYTES:=$DEFAULT_SPINE}"
 [ "$LAGUNA_EXPERT_POOL_BYTES" -gt 0 ] && [ "$LAGUNA_SPINE_BUDGET_BYTES" -gt 0 ] ||
   fail "expert-pool/spine budgets must be positive decimal byte counts"
+export SPARK_WEIGHTD_EXPERT_POOL_BYTES="$LAGUNA_EXPERT_POOL_BYTES"
+export SPARK_WEIGHTD_SPINE_BUDGET_BYTES="$LAGUNA_SPINE_BUDGET_BYTES"
 
 # --------------------- COLD-LAUNCH PRELOAD (milestone 3) ---------------------
 
 if [ -n "${LAGUNA_WORKING_SET:-}" ]; then
+  # Per-rank filtered wset (weightd_warm rejects pairs outside this
+  # pack's manifest), split into <=512-pair chunks
+  # (SPARK_WEIGHTD_LEASE_GROUPS_MAX) warmed sequentially - the GLM
+  # pin-experts chunked-lease precedent.
   WSET="$ROOT/smoke.wset"
-  python3 - "$CHECKOUT/model-families/laguna/smoke_experts.json" "$WSET" <<'PYWSET'
-import json, os, sys
-document = json.load(open(sys.argv[1], encoding="utf-8"))
-if document.get("family") != "laguna":
-    raise SystemExit("wset source is not the laguna census manifest")
-pairs = sorted({(int(e["layer"]), int(e["expert"])) for e in document["experts"]})
-with open(sys.argv[2], "wb") as handle:
-    for layer, expert in pairs:
-        handle.write(layer.to_bytes(4, "little"))
-        handle.write(expert.to_bytes(4, "little"))
-print("wset keys", len(pairs))
-PYWSET
-  REVISION="$MODEL_REVISION"
-  "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
-    "$(cat "$ROOT/packs/pack.sha256")" "$REVISION" "$WORLD" \
-    --wset "$WSET" 300 > "$ROOT/warm.log" 2>&1
+  python3 "$CHECKOUT/tools/laguna_multidev_lane.py" \
+    --emit-wset "$WSET" --rank "$RANK"
+  rm -f "$WSET.chunk."*
+  split -b 4096 -d "$WSET" "$WSET.chunk."
+  : > "$ROOT/warm.log"
+  for chunk in $(ls "$WSET.chunk."* | sort); do
+    "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
+      "$(cat "$ROOT/packs/pack.sha256")" "$MODEL_REVISION" "$WORLD" \
+      --wset "$chunk" 300 >> "$ROOT/warm.log" 2>&1 ||
+      fail "working set warm failed (see $ROOT/warm.log, chunk $chunk)"
+  done
   grep -q "WSET-WARM keys=" "$ROOT/warm.log" ||
     fail "working set warm failed (see $ROOT/warm.log)"
 fi
@@ -315,8 +320,7 @@ export SPARK_WEIGHTD_ATTACH=1
 export SPARK_WEIGHTD_SOCKET="$SOCKET"
 export SPARK_WEIGHTD_LANE="$LANE"
 export SPARK_TP_MESH_RANKS="$MESH_RANKS"
-export SPARK_WEIGHTD_EXPERT_POOL_BYTES="$LAGUNA_EXPERT_POOL_BYTES"
-export SPARK_WEIGHTD_SPINE_BUDGET_BYTES="$LAGUNA_SPINE_BUDGET_BYTES"
+# Budget envs were exported at derivation time (the warm leg needs them).
 # Pinned CUDA environment for shared-lane smoke (template hard rule).
 export CUDA_MODULE_LOADING=LAZY
 export CUDA_MODULE_DATA_LOADING=LAZY

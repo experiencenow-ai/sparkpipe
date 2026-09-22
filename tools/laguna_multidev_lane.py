@@ -93,6 +93,12 @@ LANE = 8
 WORLD = 16
 TP = 8
 PP = 2
+# Family geometry (model-families/laguna/include/sparkpipe/llm_defines.h):
+# 48 layers over 2 pipeline stages. A rank's stage owns the contiguous
+# 24-layer span; layer->stage is layer // 24 (NOT the rank->stage rank//8
+# arithmetic - the two only coincide for ranks).
+LAYER_COUNT = 48
+LAYERS_PER_STAGE = LAYER_COUNT // PP
 HEX = "0123456789abcdef"
 HOSTS = [f"spark{HEX[i]}" for i in range(WORLD)]
 
@@ -256,11 +262,15 @@ def resident_deployment(runtime_root: str, weightd_socket: str,
 def budgets(pack_path: str) -> int:
     """Emit 'expert_pool_bytes spine_bytes' for one rank pack.
 
-    Arena-side sizing derived from the pack's own .experts sidecar: the
-    pool is the exact sum of routed-expert span bytes and the spine is the
-    complement of those spans inside the pack file (the same arithmetic
-    runtime/spark_weightd_manifest.c build_spine performs). Zero assumed
-    numbers - a missing sidecar fails closed (generate it first with
+    The pool base is the daemon's own acquire accounting: the WHOLE pack
+    file charged in 2 MiB chunks (ceil(pack_bytes / 2 MiB) x 2 MiB) -
+    the shared weightd refuses an acquire whose declared pool is under
+    the pack's full chunk footprint (ACQUIRE-LOAD-STAGE stage=budget,
+    chunk_count x 2 MiB = retained; measured on lane 8, the lane-4
+    rank-3 cell found the same law). The spine base is the complement of
+    the expert spans inside the pack (the build_spine arithmetic),
+    derived from the .experts sidecar. Zero assumed numbers - a missing
+    sidecar fails closed (generate it first with
     tools/laguna_multidev_experts_manifest.sh).
     """
     pack = os.path.abspath(pack_path)
@@ -279,8 +289,6 @@ def budgets(pack_path: str) -> int:
         if magic != EXPERTS_MAGIC or version != EXPERTS_VERSION \
                 or reserved != 0 or count == 0:
             raise SystemExit("budgets: not a v2 routed-expert sidecar")
-        expert_bytes = 0
-        covered_end = 0
         spans = []
         for _ in range(count):
             record = handle.read(48)
@@ -288,7 +296,6 @@ def budgets(pack_path: str) -> int:
                 raise SystemExit("budgets: short sidecar record")
             _, _, _, _, offset, span_bytes = struct.unpack_from("<4I2Q", record)
             spans.append((offset, span_bytes))
-            expert_bytes += span_bytes
         trailing = handle.read(1)
         if trailing:
             raise SystemExit("budgets: trailing bytes after last record")
@@ -302,7 +309,82 @@ def budgets(pack_path: str) -> int:
         spine_bytes += offset - cursor
         cursor = offset + span_bytes
     spine_bytes += pack_bytes - cursor
-    print(f"{expert_bytes} {spine_bytes}")
+    chunk = 2 * 1024 * 1024
+    pool_bytes = -(-pack_bytes // chunk) * chunk
+    print(f"{pool_bytes} {spine_bytes}")
+    return 0
+
+
+def smoke_budgets(source: str, rank: int) -> int:
+    """Emit 'raw_bytes chunked_bytes' for one rank's smoke-expert set.
+
+    The M3 warm-receipt sizing on both bases (the 2026-09-22 chunk-basis
+    correction): raw = the exact per-rank span sum of this rank's STAGE's
+    head pairs (a node holds every expert of its own stage's layers at
+    the per-rank span); chunked = each span rounded up to the 2 MiB lazy
+    pool chunk (runtime/spark_weightd.c: pool chunk = max(gpu allocation
+    granularity, 2 MiB); measured 2 MiB on sm_121a). Laguna's small
+    per-expert spans (w1 1.5 MiB, w2 0.75 MiB) make the chunk factor
+    material - receipts carry both bases, never a factor.
+    """
+    document = json.load(open(source, encoding="utf-8"))
+    if document.get("family") != "laguna":
+        raise SystemExit("budgets source is not the laguna census manifest")
+    bases = document["provenance"]["byte_bases"]
+    spans = bases["per_rank_expert_span_bytes"]
+    w1, w2 = int(spans["w1"]), int(spans["w2"])
+    chunk = 2 * 1024 * 1024
+    stage = stage_of(rank)
+    raw = 0
+    chunked = 0
+    pairs = 0
+    for entry in document["experts"]:
+        if int(entry["layer"]) // LAYERS_PER_STAGE != stage:
+            continue
+        pairs += 1
+        raw += w1 + w2
+        chunked += -(-w1 // chunk) * chunk + -(-w2 // chunk) * chunk
+    if pairs == 0:
+        raise SystemExit(f"rank {rank}: the census head has no pairs for "
+                         f"stage {stage}")
+    print(f"{raw} {chunked}")
+    return 0
+
+
+def emit_wset(source: str, output: str, rank: int | None = None) -> int:
+    """Materialize the smoke-expert working set as a .wset binary.
+
+    Raw little-endian (layer u32, expert u32) pairs, deduplicated and
+    sorted - the format tools/weightd_warm.c --wset validates against the
+    pack manifest. Source: model-families/laguna/smoke_experts.json
+    (machine-generated; the M2 census receipt).
+
+    With --rank: filtered to that rank's PP-stage layers. weightd_warm
+    (a) rejects any pair absent from the warmed pack's own manifest and
+    (b) caps one --wset file at SPARK_WEIGHTD_LEASE_GROUPS_MAX (512)
+    pairs - the warm side splits the filtered file into <=4096-byte
+    (512-pair) chunks and warms them sequentially (the GLM pin-experts
+    chunked-lease precedent).
+    """
+    document = json.load(open(source, encoding="utf-8"))
+    if document.get("family") != "laguna":
+        raise SystemExit("wset source is not the laguna census manifest")
+    pairs = sorted({(int(e["layer"]), int(e["expert"]))
+                    for e in document["experts"]})
+    filtered = pairs
+    if rank is not None:
+        stage = stage_of(rank)
+        filtered = [pair for pair in pairs
+                    if pair[0] // LAYERS_PER_STAGE == stage]
+        if not filtered:
+            raise SystemExit(f"rank {rank}: the census head has no pairs "
+                             f"for stage {stage}")
+    with open(output, "wb") as handle:
+        for layer, expert in filtered:
+            handle.write(layer.to_bytes(4, "little"))
+            handle.write(expert.to_bytes(4, "little"))
+    print(json.dumps({"wset": output, "keys": len(filtered),
+                      "rank_filter": rank}))
     return 0
 
 
@@ -325,6 +407,14 @@ def main() -> int:
                         help="print 'expert_pool_bytes spine_bytes' "
                              "derived from the pack's .experts sidecar "
                              "and exit")
+    parser.add_argument("--smoke-budgets", nargs=2, metavar=("MANIFEST", "RANK"),
+                        help="print 'raw_bytes chunked_bytes' for this "
+                             "rank's smoke-expert head pairs and exit")
+    parser.add_argument("--emit-wset", metavar="OUTPUT",
+                        help="write the smoke-expert .wset and exit")
+    parser.add_argument("--wset-source", default=os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "model-families", "laguna", "smoke_experts.json"))
     parser.add_argument("--check", action="store_true",
                         help="regenerate and compare against output-dir "
                              "instead of writing")
@@ -332,6 +422,14 @@ def main() -> int:
 
     if arguments.budgets:
         return budgets(arguments.budgets)
+    if arguments.smoke_budgets:
+        source, rank_text = arguments.smoke_budgets
+        if not rank_text.isdigit() or not 0 <= int(rank_text) < WORLD:
+            raise SystemExit(f"rank must be 0..{WORLD - 1}")
+        return smoke_budgets(source, int(rank_text))
+    if arguments.emit_wset:
+        rank = arguments.rank if arguments.rank is not None else None
+        return emit_wset(arguments.wset_source, arguments.emit_wset, rank)
 
     missing = [name for name, value in (
         ("--runtime-root", arguments.runtime_root),

@@ -369,8 +369,11 @@ def manifest_gates(failures):
               f"--budgets failed: {budget.stderr.strip()[:200]}")
         if budget.returncode == 0:
             pool_text, spine_text = budget.stdout.split()
-            check(int(pool_text) == expert_total, failures,
-                  f"pool {pool_text} != expert span sum {expert_total}")
+            chunk = 2 * 1024 * 1024
+            pack_chunk_basis = -(-pack_bytes // chunk) * chunk
+            check(int(pool_text) == pack_chunk_basis, failures,
+                  f"pool {pool_text} != whole-pack chunk basis "
+                  f"{pack_chunk_basis} (the daemon's acquire budget law)")
             check(int(spine_text) == spine, failures,
                   f"spine {spine_text} != complement {spine}")
         # idempotence: a valid sidecar is left untouched
