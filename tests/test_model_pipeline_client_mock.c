@@ -310,7 +310,6 @@ int main(void)
 	if ( SparkModelPipelineClientGetView(pipeline, &view) == SPARK_STATUS_OK )
 		CHECK( view.failed_status == SPARK_STATUS_OK, "unknown-submission completion is not fatal");
 
-	SparkModelPipelineClientClearTransactions(pipeline);
 	MockResidentClientFireResult(0u, 3u, SPARK_STATUS_OK);
 	(void)SparkModelPipelineClientProgress(pipeline, 8u);
 	if ( SparkModelPipelineClientGetView(pipeline, &view) == SPARK_STATUS_OK )
@@ -333,11 +332,33 @@ int main(void)
 
 	fingerprint_b = SparkModelPipelineClientSessionFingerprint(pipeline);
 	CHECK( fingerprint_a == fingerprint_b, "fingerprint stable without disconnects");
-	MockResidentClientDisconnect(1u);
-	{
-		uint64_t fp = SparkModelPipelineClientSessionFingerprint(pipeline);
-		CHECK( fp != fingerprint_b, "fingerprint changes on a rank disconnect");
-	}
+	TestBuildSubmission(&submission,lanes,4u);
+	CHECK(SparkModelPipelineClientSubmit(pipeline,&submission) == SPARK_STATUS_OK,
+		"submit before transport loss");
+	uint32_t completions_before = cb.completion_count;
+	MockResidentClientKill(1u);
+	CHECK(SparkModelPipelineClientSessionFingerprint(pipeline) == fingerprint_b,
+		"disconnect does not publish a partial session");
+	CHECK(SparkModelPipelineClientRecover(pipeline) == SPARK_STATUS_IO_ERROR,
+		"recovery stays failed while a rank is unavailable");
+	CHECK(cb.completion_count == completions_before + 1u &&
+		cb.last_completion_status == SPARK_STATUS_IO_ERROR,
+		"lost submission completes with failure exactly once");
+	CHECK(SparkModelPipelineClientSessionFingerprint(pipeline) == fingerprint_b &&
+		SparkModelPipelineClientAllRanksReady(pipeline) == 0u,
+		"partial reconnection retains old fingerprint and closed admission");
+	CHECK(SparkModelPipelineClientGetView(pipeline,&view) == SPARK_STATUS_OK &&
+		view.active_transaction_count == 0u,
+		"failed transaction accounting is released");
+	(void)SparkModelPipelineClientRecover(pipeline);
+	CHECK(cb.completion_count == completions_before + 1u,
+		"retry does not duplicate completion");
+	MockResidentClientRevive(1u);
+	CHECK(SparkModelPipelineClientRecover(pipeline) == SPARK_STATUS_OK,
+		"all ranks recover");
+	CHECK(SparkModelPipelineClientSessionFingerprint(pipeline) != fingerprint_b &&
+		SparkModelPipelineClientAllRanksReady(pipeline) != 0u,
+		"complete new session publishes one fingerprint");
 
 	SparkModelPipelineClientDestroy(pipeline);
 	MockResidentClientReset();

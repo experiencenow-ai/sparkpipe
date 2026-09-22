@@ -132,11 +132,13 @@ typedef struct FuzzRank
 } FuzzRank;
 
 static FuzzRank g_ranks[FUZZ_MAX_RANKS];
+static volatile uint64_t g_rejected_completion_count;
 
 static void FuzzComplete(void *context, const SparkTpDeviceCollectiveCompletion *completion)
 {
 	FuzzRank *rank = (FuzzRank *)context;
-	(void)completion;
+	if ( completion->status != SPARK_STATUS_OK )
+		__sync_add_and_fetch(&g_rejected_completion_count, 1u);
 	__sync_add_and_fetch(&rank->completion_count, 1u);
 }
 
@@ -1058,6 +1060,7 @@ int main(int argc, char **argv)
 			SparkTpDeviceCollectiveDestroy(&g_ranks[rank].collective);
 		free(g_regions[rank]);
 	}
+	CHECK( g_rejected_completion_count == 0u, "synchronous rejection does not queue completion" );
 	fprintf(stderr,"test_tp_allreduce_fuzz: %u checks, %u failures (broadcasts=%llu)\n",
 	    test_checks, test_failures, (unsigned long long)g_broadcast_count);
 	return( test_failures != 0u || wedge != 0u ? 1 : 0 );

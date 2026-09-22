@@ -115,6 +115,9 @@ cudaError_t cudaGraphInstantiate(
     cudaGraphExec_t *graph_exec,
     cudaGraph_t graph,
     ...);
+cudaError_t cudaGraphUpload(
+    cudaGraphExec_t graph_exec,
+    cudaStream_t stream);
 cudaError_t cudaGraphLaunch(
     cudaGraphExec_t graph_exec,
     cudaStream_t stream);

@@ -66,6 +66,7 @@ struct SparkModelPipelineClient
 	uint64_t lease_generation;
 	uint64_t last_submission_id;
 	uint64_t session_epoch;
+	uint64_t session_fingerprint;
 	uint64_t submitted_count;
 	uint64_t continued_count;
 	uint64_t admitted_count;
@@ -192,16 +193,8 @@ static void SparkModelPipelineClientSetFailure(
 	pipeline->failed_stage_index = stage_index;
 	fprintf(stderr,"pipeline set-failure status=%u stage=%u\n",
 		(unsigned)status,(unsigned)stage_index);
-	if ( stage_index < pipeline->rank_count )
-	{
-		SparkModelResidentClientFailStop(pipeline->clients[stage_index]);
-		fprintf(stderr,
-			"pipeline rank-scoped failure: only rank %u connection dropped (16-way teardown was the #22 reconnect storm)\n",
-			(unsigned)stage_index);
-	}
-	else
-		for (rank=0u; rank<pipeline->rank_count; rank++)
-			SparkModelResidentClientFailStop(pipeline->clients[rank]);
+	for (rank=0u; rank<pipeline->rank_count; rank++)
+		SparkModelResidentClientFailStop(pipeline->clients[rank]);
 	for (slot=0u; slot<pipeline->runtime_limits.resident_sequence_capacity;
 		slot++)
 	{
@@ -718,6 +711,21 @@ static SparkStatus SparkModelPipelineClientConnectRank(
 	return(SparkModelResidentClientConnect(&client_configuration,&pipeline->clients[stage]));
 }
 
+static void SparkModelPipelineClientPublishSession(SparkModelPipelineClient *pipeline)
+{
+	SparkModelResidentClientView view;
+	uint64_t fingerprint = pipeline->session_epoch;
+	uint32_t rank;
+	for (rank=0u; rank<pipeline->rank_count; rank++)
+	{
+		if ( SparkModelResidentClientGetView(pipeline->clients[rank],&view) != SPARK_STATUS_OK ||
+			view.connected == 0u )
+			return;
+		fingerprint += view.client_generation * (uint64_t)(rank + 1u);
+	}
+	pipeline->session_fingerprint = fingerprint;
+}
+
 SparkStatus SparkModelPipelineClientConnect(
 	const SparkModelPipelineClientConfiguration *configuration,
 	SparkModelPipelineClient **pipeline_out)
@@ -742,6 +750,7 @@ SparkStatus SparkModelPipelineClientConnect(
 		SparkModelPipelineClientDestroy(pipeline);
 		SPARK_RETURN(status);
 	}
+	SparkModelPipelineClientPublishSession(pipeline);
 	*pipeline_out = pipeline;
 	return(SPARK_STATUS_OK);
 }
@@ -804,7 +813,7 @@ uint32_t SparkModelPipelineClientAllRanksReady(
 {
 	SparkModelResidentClientView view;
 	uint32_t rank;
-	if ( pipeline == 0 || pipeline->rank_count == 0u )
+	if ( pipeline == 0 || pipeline->rank_count == 0u || pipeline->failed_status != SPARK_STATUS_OK )
 		return(0u);
 	for (rank=0u; rank<pipeline->rank_count; rank++)
 	{
@@ -818,88 +827,19 @@ uint32_t SparkModelPipelineClientAllRanksReady(
 uint64_t SparkModelPipelineClientSessionFingerprint(
 	const SparkModelPipelineClient *pipeline)
 {
-	SparkModelResidentClientView view;
-	uint64_t fingerprint;
-	uint32_t rank;
-	if ( pipeline == 0 )
-		return(0u);
-	fingerprint = pipeline->session_epoch;
-	for (rank=0u; rank<pipeline->rank_count; rank++)
-	{
-		if ( SparkModelResidentClientGetView(pipeline->clients[rank],&view) != SPARK_STATUS_OK )
-			continue;
-		fingerprint += view.client_generation * (uint64_t)(rank + 1u);
-	}
-	return(fingerprint);
+	return(pipeline != 0 ? pipeline->session_fingerprint : 0u);
 }
 
-void SparkModelPipelineClientClearTransactions(
-    SparkModelPipelineClient *pipeline)
+SparkStatus SparkModelPipelineClientRecover(SparkModelPipelineClient *pipeline)
 {
-    uint32_t index;
-    uint32_t cleared = 0u;
-    if ( pipeline == 0 )
-        return;
-    for (index=0u; index<pipeline->transaction_capacity; index++)
-        if ( pipeline->transactions[index].active != 0u )
-        {
-            pipeline->transactions[index].active = 0u;
-            pipeline->transactions[index].decision_expected_mask = 0u;
-            pipeline->transactions[index].decision_result_mask = 0u;
-            pipeline->transactions[index].prepared_mask = 0u;
-            pipeline->transactions[index].result_mask = 0u;
-            pipeline->transactions[index].completion_mask = 0u;
-            cleared++;
-        }
-    if ( cleared != 0u )
-        fprintf(stderr,
-            "pipeline transactions cleared: %u stale transaction(s) discarded\n",
-            cleared);
-}
-
-SparkStatus SparkModelPipelineClientRecover(
-	SparkModelPipelineClient *pipeline)
-{
-	SparkModelResidentClientView view;
-	uint32_t rank,degraded;
 	if ( pipeline == 0 )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
-	degraded = pipeline->failed_status != SPARK_STATUS_OK ? 1u : 0u;
-	if ( degraded == 0u )
-		for (rank=0u; rank<pipeline->rank_count; rank++)
-		{
-			if ( SparkModelResidentClientGetView(pipeline->clients[rank],&view) != SPARK_STATUS_OK || view.connected == 0u )
-			{
-				degraded = 1u;
-				break;
-			}
-		}
-	if ( degraded == 0u )
+	if ( SparkModelPipelineClientAllRanksReady(pipeline) != 0u )
 		return(SPARK_STATUS_OK);
-	pipeline->failed_status = SPARK_STATUS_OK;
-	pipeline->failed_stage_index = SPARK_MODEL_PIPELINE_CLIENT_INVALID_STAGE_INDEX;
-	for (rank=0u; rank<pipeline->rank_count; rank++)
-		(void)SparkModelResidentClientProgress(pipeline->clients[rank],1u);
-	{
-		uint32_t index;
-		uint32_t cleared = 0u;
-		for (index=0u; index<pipeline->transaction_capacity; index++)
-			if (pipeline->transactions[index].active != 0u)
-			{
-				pipeline->transactions[index].active = 0u;
-				pipeline->transactions[index].decision_expected_mask = 0u;
-				pipeline->transactions[index].decision_result_mask = 0u;
-				pipeline->transactions[index].prepared_mask = 0u;
-				pipeline->transactions[index].result_mask = 0u;
-				pipeline->transactions[index].completion_mask = 0u;
-				cleared++;
-			}
-		if (cleared != 0u)
-			fprintf(stderr,
-			    "pipeline recovered: cleared %u stale transaction(s) — their in-flight completions will be ignored\n",
-			    cleared);
-	}
-	return(SPARK_STATUS_OK);
+	if ( pipeline->failed_status == SPARK_STATUS_OK )
+		SparkModelPipelineClientSetFailure(pipeline,SPARK_STATUS_IO_ERROR,
+			SPARK_MODEL_PIPELINE_CLIENT_INVALID_STAGE_INDEX);
+	return(SparkModelPipelineClientProgress(pipeline,1u));
 }
 
 SparkStatus SparkModelPipelineClientSubmit(
@@ -1016,11 +956,12 @@ SparkStatus SparkModelPipelineClientProgress(
 	uint32_t maximum_message_count_per_rank)
 {
 	SparkStatus status;
-	uint32_t rank;
+	uint32_t rank,recovering;
 	if ( pipeline == 0 || maximum_message_count_per_rank == 0u )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	if ( pipeline->failed_status != SPARK_STATUS_OK )
 		SparkModelPipelineClientFailTransactions(pipeline,(SparkStatus)pipeline->failed_status);
+	recovering = pipeline->failed_status != SPARK_STATUS_OK;
 	status = SPARK_STATUS_OK;
 	uint32_t failing_index = SPARK_MODEL_PIPELINE_CLIENT_INVALID_STAGE_INDEX;
 	for (rank=pipeline->rank_count; rank!=0u; rank--)
@@ -1031,6 +972,13 @@ SparkStatus SparkModelPipelineClientProgress(
 		{
 			status = rank_status;
 			failing_index = rank - 1u;
+		}
+		if ( recovering == 0u && (rank_status != SPARK_STATUS_OK ||
+			pipeline->failed_status != SPARK_STATUS_OK) )
+		{
+			if ( pipeline->failed_status == SPARK_STATUS_OK )
+				SparkModelPipelineClientSetFailure(pipeline,rank_status,rank - 1u);
+			break;
 		}
 	}
 	if ( status != SPARK_STATUS_OK && pipeline->failed_status == SPARK_STATUS_OK )
@@ -1046,11 +994,12 @@ SparkStatus SparkModelPipelineClientProgress(
 				healthy = 0u;
 				break;
 			}
-		if ( healthy != 0u )
+		if ( healthy != 0u && status == SPARK_STATUS_OK )
 		{
 			fprintf(stderr,
 				"pipeline SELF-HEAL: failed_status=%u cleared (all ranks reconnected)\n",
 				(unsigned)pipeline->failed_status);
+			SparkModelPipelineClientPublishSession(pipeline);
 			pipeline->failed_status = SPARK_STATUS_OK;
 			pipeline->failed_stage_index = SPARK_MODEL_PIPELINE_CLIENT_INVALID_STAGE_INDEX;
 		}

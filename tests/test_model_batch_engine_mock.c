@@ -132,9 +132,8 @@ static SparkModelBatchEngine *TestConnect(const SparkModelResidentDeployment *de
 	return(engine);
 }
 
-static void TestSubmit(SparkModelBatchEngine *engine, uint64_t request_id, uint64_t sequence_id, uint32_t budget)
+static void TestSubmitPrompt(SparkModelBatchEngine *engine, uint64_t request_id, uint64_t sequence_id, uint32_t budget,const uint32_t *prompt,uint32_t prompt_count)
 {
-	static const uint32_t prompt[4] = { 11u, 12u, 13u, 14u };
 	SparkModelBatchSubmitRequest request;
 	SparkModelBatchRequestHandle handle;
 	SparkStatus status;
@@ -144,11 +143,17 @@ static void TestSubmit(SparkModelBatchEngine *engine, uint64_t request_id, uint6
 	request.request_id = request_id;
 	request.sequence_id = sequence_id;
 	request.prompt_token_ids = prompt;
-	request.prompt_token_count = 4u;
+	request.prompt_token_count = prompt_count;
 	request.output_token_budget = budget;
 	handle = 0;
 	status = SparkModelBatchEngineSubmit(engine,&request,&handle);
 	CHECK(status == SPARK_STATUS_OK, "submit request");
+}
+
+static void TestSubmit(SparkModelBatchEngine *engine, uint64_t request_id, uint64_t sequence_id, uint32_t budget)
+{
+	static const uint32_t prompt[4] = {11u,12u,13u,14u};
+	TestSubmitPrompt(engine,request_id,sequence_id,budget,prompt,4u);
 }
 
 /* One drive step: engine progress (which pumps the pipeline and the mock
@@ -201,7 +206,7 @@ static void TestScenarioRankDiesMidDecode(const SparkModelResidentDeployment *de
 {
 	TestBatchState state;
 	SparkModelBatchEngine *engine;
-	uint32_t step;
+	uint32_t step,tokens_before;
 	MockResidentClientReset();
 	memset(&state,0,sizeof(state));
 	engine = TestConnect(deployment,&state,runtime_root);
@@ -217,20 +222,75 @@ static void TestScenarioRankDiesMidDecode(const SparkModelResidentDeployment *de
 		usleep(1000);
 	}
 	CHECK( state.token_events[1] != 0u, "chaos: prefill produced a token before the kill");
-	/* The resident dies with a decode in flight. The pipeline must detect
-	 * the dead socket, fail the in-flight transaction loudly, reconnect,
-	 * and the engine must retry the request to completion — no restart. */
+	tokens_before = state.token_events[1];
 	MockResidentClientDisconnect(1u);
 	TestDriveUntilTerminal(engine,&state,1u,2000u);
-	CHECK( state.completed_events[1] == 1u && state.error_events[1] == 0u,
-		"chaos: request completed after a mid-decode rank death");
-	CHECK( state.token_events[1] >= 4u,
-		"chaos: the full token budget was produced across the failure");
-	/* The pipeline must be healthy for the NEXT request, not just this one. */
+	CHECK( state.completed_events[1] == 0u && state.error_events[1] == 1u,
+		"disconnect: started stream fails exactly once");
+	CHECK( state.token_events[1] == tokens_before,
+		"disconnect: emitted tokens are never replayed");
+	{
+		SparkModelBatchEngineView view;
+		CHECK( SparkModelBatchEngineGetView(engine,&view) == SPARK_STATUS_OK &&
+			view.inflight_submission_count == 0u &&
+			view.pipeline.active_transaction_count == 0u,
+			"disconnect: old submissions and transactions retire before reuse");
+	}
 	TestSubmit(engine,2u,501u,2u);
 	TestDriveUntilTerminal(engine,&state,2u,400u);
 	CHECK( state.completed_events[2] == 1u && state.error_events[2] == 0u,
 		"chaos: a fresh request completes after the recovery");
+	SparkModelBatchEngineDestroy(engine);
+}
+
+static uint32_t TestWaitLane(SparkModelBatchEngine *engine,uint64_t request_id,uint64_t position,SparkModelServingLane *lane)
+{
+	for (uint32_t step = 0u; step < 2000u; step++)
+	{
+		(void)SparkModelBatchEngineProgress(engine,8u);
+		if ( MockResidentClientLastLane(0u,lane) != 0u &&
+		     lane->request_id == request_id && lane->sequence_position == position )
+			return(1u);
+		(void)MockResidentClientDriveAll();
+		usleep(1000);
+	}
+	return(0u);
+}
+
+static void TestScenarioCachedPrefixSessionReset(const SparkModelResidentDeployment *deployment,const char *runtime_root)
+{
+	static const uint32_t prompt[8] = {11u,12u,13u,14u,15u,16u,17u,18u};
+	TestBatchState state = {0};
+	SparkModelBatchEngine *engine;
+	SparkModelServingLane canonical = {0},cached = {0},rebuilt = {0};
+	MockResidentClientReset();
+	engine = TestConnect(deployment,&state,runtime_root);
+	if ( engine == 0 )
+		return;
+	MockResidentClientSetAutoTokens(1u);
+	MockResidentClientSetFinalRank(TEST_RANKS - 1u,1u);
+	TestSubmit(engine,1u,500u,1u);
+	CHECK(TestWaitLane(engine,1u,0u,&canonical) != 0u &&
+		canonical.cache_publish_token_count == 4u,
+		"prefix reset: capture canonical first block identity");
+	TestDriveUntilTerminal(engine,&state,1u,400u);
+	CHECK(state.completed_events[1] == 1u,"prefix reset: warm request completes");
+	TestSubmitPrompt(engine,2u,501u,1u,prompt,8u);
+	CHECK(TestWaitLane(engine,2u,4u,&cached) != 0u &&
+		cached.cache_prefix_token_count == 4u &&
+		(cached.flags & SPARK_MODEL_SERVING_LANE_FLAG_CACHE_PREFIX) != 0u,
+		"prefix reset: next request actually uses cached prefix");
+	CHECK(state.token_events[2] == 0u,"prefix reset: session dies before emitted token");
+	MockResidentClientDisconnect(1u);
+	CHECK(TestWaitLane(engine,2u,0u,&rebuilt) != 0u &&
+		rebuilt.cache_prefix_token_count == 0u && rebuilt.cache_publish_token_count == 4u,
+		"prefix reset: recovered session recomputes first block");
+	CHECK(memcmp(&canonical.cache_publish_identity,&rebuilt.cache_publish_identity,
+		sizeof(canonical.cache_publish_identity)) == 0,
+		"prefix reset: rebuilt digest equals canonical prompt digest");
+	TestDriveUntilTerminal(engine,&state,2u,400u);
+	CHECK(state.completed_events[2] == 1u && state.error_events[2] == 0u &&
+		state.token_events[2] == 1u,"prefix reset: recovered request completes exactly once");
 	SparkModelBatchEngineDestroy(engine);
 }
 
@@ -380,6 +440,7 @@ int main(void)
 		TestScenarioHappyPath(&deployment,runtime_root);
 		TestScenarioRankDiesMidDecode(&deployment,runtime_root);
 		TestScenarioRankKilledAndRevived(&deployment,runtime_root);
+		TestScenarioCachedPrefixSessionReset(&deployment,runtime_root);
 		TestScenarioRankBusyBackpressure(&deployment,runtime_root);
 		TestScenarioEosEarlyStop(&deployment,runtime_root);
 		TestScenarioTwoRequestsRankDies(&deployment,runtime_root);

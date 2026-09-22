@@ -117,7 +117,8 @@ static __global__ void SparkGlm5NextHeadMaxlocUnpackKernel(
 	uint32_t row;
 	row = blockIdx.x * blockDim.x + threadIdx.x;
 	if ( row < row_count )
-		token_ids[row] = UINT32_MAX - (uint32_t)maxloc[row];
+		token_ids[row] = maxloc[row] == UINT64_MAX ? UINT32_MAX :
+			UINT32_MAX - (uint32_t)maxloc[row];
 }
 extern "C" cudaError_t SparkGlm5NextLaunchHeadMaxlocPack(cudaStream_t stream,const float *scores,const uint32_t *token_ids,uint64_t *maxloc,uint32_t row_count,uint32_t rank_offset)
 {

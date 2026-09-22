@@ -318,6 +318,28 @@ int main(void)
 	assert(SparkModelResidentClientCommit(client,501u) == SPARK_STATUS_OK);
 	TestModelResidentWaitForCompletion(client,&state,1u);
 	assert(state.completion.submission_id == 501u);
+	assert(SparkModelResidentClientGetView(client,&view) == SPARK_STATUS_OK);
+	uint64_t previous_generation = view.client_generation;
+	SparkModelResidentClientFailStop(client);
+	status = SPARK_STATUS_IO_ERROR;
+	for (attempt=0u; attempt<TEST_MODEL_RESIDENT_RECONNECT_ATTEMPTS; attempt++)
+	{
+		status = SparkModelResidentClientProgress(client,8u);
+		if ( status == SPARK_STATUS_OK )
+			break;
+		nanosleep(&delay,0);
+	}
+	assert(status == SPARK_STATUS_OK);
+	assert(kill(child,0) == 0);
+	assert(SparkModelResidentClientGetView(client,&view) == SPARK_STATUS_OK);
+	assert(view.connected != 0u && view.client_generation != previous_generation);
+	TestModelResidentBuildDecode(&submission,lanes,tokens,row_lanes,positions,sequences,502u);
+	assert(SparkModelResidentClientPrepare(client,&submission) == SPARK_STATUS_OK);
+	TestModelResidentWaitForResult(client,&state,2u);
+	assert(state.result_status == SPARK_STATUS_OK);
+	assert(SparkModelResidentClientCommit(client,502u) == SPARK_STATUS_OK);
+	TestModelResidentWaitForCompletion(client,&state,2u);
+	assert(state.completion.submission_id == 502u);
 	assert(kill(child,SIGKILL) == 0);
 	assert(waitpid(child,&child_status,0) == child);
 	assert(WIFSIGNALED(child_status) && WTERMSIG(child_status) == SIGKILL);
@@ -345,14 +367,14 @@ int main(void)
 	assert(status == SPARK_STATUS_OK);
 	assert(SparkModelResidentClientGetView(client,&view) == SPARK_STATUS_OK);
 	assert(view.connected == 1u);
-	TestModelResidentBuildDecode(&submission,lanes,tokens,row_lanes,positions,sequences,502u);
+	TestModelResidentBuildDecode(&submission,lanes,tokens,row_lanes,positions,sequences,503u);
 	assert(SparkModelResidentClientPrepare(client,&submission) == SPARK_STATUS_OK);
-	TestModelResidentWaitForResult(client,&state,2u);
+	TestModelResidentWaitForResult(client,&state,3u);
 	assert(state.result_status == SPARK_STATUS_OK);
-	assert(state.result_submission_id == 502u);
-	assert(SparkModelResidentClientCommit(client,502u) == SPARK_STATUS_OK);
-	TestModelResidentWaitForCompletion(client,&state,2u);
-	assert(state.completion.submission_id == 502u);
+	assert(state.result_submission_id == 503u);
+	assert(SparkModelResidentClientCommit(client,503u) == SPARK_STATUS_OK);
+	TestModelResidentWaitForCompletion(client,&state,3u);
+	assert(state.completion.submission_id == 503u);
 	SparkModelResidentClientDestroy(client);
 	SparkModelServingAdapterUnloadInterface(&adapter);
 	assert(kill(child,SIGTERM) == 0);
