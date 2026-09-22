@@ -1575,7 +1575,13 @@ static cudaError_t SparkGemma4ValChainDeviceStages(SparkGemma4ValChain *chain)
 {
 	SparkGemma4LinearView view;
 	cudaError_t error;
-	error = SparkGemma4LaunchRmsNorm(cudaStreamPerThread,chain->h_device,chain->gain_device,chain->normed_device,SPARK_GEMMA4_VAL_CHAIN_ROWS,chain->hidden,SPARK_GEMMA4_MODEL_RMS_NORM_EPSILON);
+	/* self-contained per run: gain_device is shared with the tail's
+	   post_attention/post_feedforward uploads, so every stages run must
+	   re-stage the input_ln gains it consumes - the determinism rerun
+	   otherwise normed with the previous run's leftover tail gains. */
+	error = SparkGemma4ValCopyUp(chain->gain_device,chain->input_ln,(uint64_t)chain->hidden * 2u);
+	if (error == cudaSuccess)
+		error = SparkGemma4LaunchRmsNorm(cudaStreamPerThread,chain->h_device,chain->gain_device,chain->normed_device,SPARK_GEMMA4_VAL_CHAIN_ROWS,chain->hidden,SPARK_GEMMA4_MODEL_RMS_NORM_EPSILON);
 	if (error == cudaSuccess)
 		error = SparkGemma4ValChainView(&view,chain->query_weight_device,chain->hidden,chain->query_out);
 	if (error == cudaSuccess)
@@ -1819,7 +1825,6 @@ static int SparkGemma4ValCheckChainSliding(void)
 	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.kv_row_position_device,&row_position,sizeof(uint32_t));
 	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.kv_sequence_device,&sequence,sizeof(uint32_t));
 	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.h_device,chain.h0,(uint64_t)SPARK_GEMMA4_VAL_CHAIN_ROWS * hidden * 2u);
-	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.gain_device,chain.input_ln,(uint64_t)hidden * 2u);
 	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.positions_device,chain.positions,sizeof(chain.positions));
 	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.query_norm_device,chain.query_norm,(uint64_t)chain.head_dimension * 2u);
 	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.key_norm_device,chain.key_norm,(uint64_t)chain.head_dimension * 2u);
