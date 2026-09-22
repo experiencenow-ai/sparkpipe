@@ -63,7 +63,11 @@ set -euo pipefail
 FAMILY="laguna"
 LANE=8
 WORLD=16
-MESH_RANKS="0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15"
+# The TP8 collective's mesh map is GROUP-SCOPED (the quickstart topology
+# table's TP-subset convention): SparkTpDeviceCollectiveMeshTopology
+# parses exactly tp_degree entries, so a stage's ranks export their own
+# eight physical ranks (attach-010: the 16-entry identity map failed the
+# parser's terminator check after the 8th entry). Set after STAGE below."
 EXPERT_CODEC="bf16"
 # The placed packs' identity (every .receipt.json beside them pins this
 # revision); the module build and the adapter serving pin must agree.
@@ -140,6 +144,7 @@ the operator must establish the shared daemon (never start one by hand)"
 
 STAGE=$((RANK / 8))
 TP_RANK=$((RANK % 8))
+MESH_RANKS="$(seq -s, $((STAGE * 8)) $((STAGE * 8 + 7)))"
 HOST="spark$(printf '%x' "$RANK")"
 [ "$(hostname)" = "$HOST" ] ||
   fail "node order mismatch: rank $RANK expects $HOST but this job runs on \
