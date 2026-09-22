@@ -478,6 +478,7 @@ PYTHON_TESTS := \
 	tests/test_qwen38_27b_stagepack.py \
 	tests/test_qwen38_max_validation_harness.py \
 	tests/test_qwen38max_multidev_lane.py \
+	tests/test_ling_multidev_lane.py \
 	tests/test_recipe_generation.py \
 	tests/test_release_assemble.py \
 	tests/test_release_agent.py \
