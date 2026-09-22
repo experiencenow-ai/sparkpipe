@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "394b12eac78e2f58b409e7b4d0947f80065a36efbad36a375d07e3170130deed",
-      "size_bytes": 127785
+      "sha256": "cce8c6a990d6ae8b0ab43aee2dc64505b5f67c0bb9dde00b5e49c688d0557dd1",
+      "size_bytes": 127929
     },
     {
       "path": "Makefile.rej",
@@ -7893,8 +7893,8 @@
     },
     {
       "path": "ring/transport/rdma.cu",
-      "sha256": "8077c7eabaaa21cf8aee7710ea65d1387760fa6bd079bed5eb5249d7571f6a7f",
-      "size_bytes": 9517
+      "sha256": "dd2bfe8f19fcb52a10009e3774695bf771e93e7fdc424c633da1c3f8e86594d3",
+      "size_bytes": 9868
     },
     {
       "path": "ring/transport/rdma_control.c",
@@ -16870,5 +16870,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80373731
+  "total_bytes": 80374226
 }

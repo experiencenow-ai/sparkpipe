@@ -1,20 +1,24 @@
 #include "sparkpipe/spark_hidden_transport.h"
 #include "sparkpipe/spark_status.h"
+/* The weightd client entry points come from the extern "C" guarded
+ * header and the residentd-side static runtime archive. This TU compiles
+ * as C++: hand-declaring the prototypes (the old form here) mangles the
+ * references — the .so carried undefined _Z...SparkWeightdClient* symbols
+ * that no host could resolve, and residentd's RTLD_NOW transport load
+ * failed closed (first-launch find, same class as the k3 adapter
+ * mesh-kernel symbol). The hand-declared forms were also wrong: connect
+ * takes (path, SparkWeightdClient**, hello_out), there is no Disconnect
+ * (Close), and MeshBroadcast carries the seq_value/seq_remote_offset
+ * pair. */
+#include "sparkpipe/spark_weightd.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-extern SparkStatus SparkWeightdClientConnect(const char *path,
-    void *client, uint64_t reserved);
-extern SparkStatus SparkWeightdClientDisconnect(void *client);
-extern SparkStatus SparkWeightdClientMeshBroadcast(void *client,
-    uint32_t peer_mask, uint64_t source_offset, uint64_t remote_offset,
-    uint32_t length, uint64_t timeout_nanoseconds);
-
 typedef struct SparkHiddenSparkHostRdmaState
 {
-    char client[4096];
+    SparkWeightdClient *client;
     void *mesh_buffer;
     uint32_t mesh_buffer_bytes;
 } SparkHiddenSparkHostRdmaState;
@@ -37,7 +41,7 @@ static SparkStatus SparkHiddenSparkHostRdmaInitialize(
         char path[128];
         snprintf(path,sizeof(path),"%s",
             socket != 0 ? socket : "/tmp/spark_weightd.sock");
-        if ( SparkWeightdClientConnect(path,state->client,0) !=
+        if ( SparkWeightdClientConnect(path,&state->client,0) !=
                 SPARK_STATUS_OK )
         {
             free(state);
@@ -54,7 +58,7 @@ static void SparkHiddenSparkHostRdmaDestroy(void *transport_state)
         (SparkHiddenSparkHostRdmaState *)transport_state;
     if ( state == 0 )
         return;
-    (void)SparkWeightdClientDisconnect(state->client);
+    SparkWeightdClientClose(state->client);
     free(state);
 }
 
@@ -72,7 +76,7 @@ static SparkStatus SparkHiddenSparkHostRdmaSend(
         packet->hidden_dimension * packet->bytes_per_sequence;
     memcpy(state->mesh_buffer,packet->hidden_bf16,(size_t)bytes);
     return SparkWeightdClientMeshBroadcast(state->client,
-        0x7FFFu,0,0,(uint32_t)bytes,5000000000ull);
+        0x7FFFu,0,0,(uint32_t)bytes,0u,0u,5000000000ull);
 }
 
 static SparkStatus SparkHiddenSparkHostRdmaSendFixed(
@@ -89,7 +93,7 @@ static SparkStatus SparkHiddenSparkHostRdmaSendFixed(
         return SPARK_STATUS_INVALID_ARGUMENT;
     memcpy(state->mesh_buffer,local_buffer,(size_t)bytes);
     return SparkWeightdClientMeshBroadcast(state->client,
-        0x7FFFu,0,remote_offset,(uint32_t)bytes,5000000000ull);
+        0x7FFFu,0,remote_offset,(uint32_t)bytes,0u,0u,5000000000ull);
 }
 
 static SparkStatus SparkHiddenSparkHostRdmaPoll(
