@@ -145,7 +145,8 @@ PACK_SHA="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["out
 [ "${#PACK_SHA}" -eq 64 ] || fail "bad output_sha256 in $PACK.receipt.json"
 BUDGET_LINE="$(python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" \
   --budgets "$CHECKOUT/model-families/qwen38_max/smoke_experts.json" \
-  --rank "$NODE_RANK")"
+  --rank "$NODE_RANK" \
+  --pack "$PACK")"
 POOL_BYTES="${BUDGET_LINE%% *}"
 SPINE_BYTES="${BUDGET_LINE##* }"
 export SPARK_WEIGHTD_SOCKET="$WEIGHTD_SOCKET"

@@ -111,6 +111,11 @@ done
 
 # ------------------------------- WEIGHTD MODE --------------------------------
 
+# The synced checkout this script runs from (needed by the budget and
+# deployment steps below; resolved once, before first use - the previous
+# late definition died unbound under set -u before the first attach run).
+CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
+
 # shared-socket only: the lane-2 charter runs smoke and small B* under the
 # shared lanes; a private daemon is never started by this wrapper.
 SOCKET="${QMAX_WEIGHTD_SOCKET:-${SPARK_WEIGHTD_SOCKET:-/run/sparkpipe-weightd-shared/weightd.sock}}"
@@ -125,9 +130,13 @@ MANIFEST_JSON="$CHECKOUT/model-families/qwen38_max/smoke_experts.json"
   fail "smoke_experts.json missing (the census manifest is the sizing record)"
 # --rank: the pool default is THIS rank's chunk-basis size from the pools
 # manifest (per-rank placement is uneven: 3.05-4.44 GiB chunked); budgets
-# fails loud without it by design.
+# fails loud without it by design. --pack: the spine default is MEASURED
+# from this rank's placed pack (.experts sidecar; the lazy tier's exact
+# allocation arithmetic - the spine holds replicated tensors that a
+# spine/16 division under-declares).
+RANK_PACK="/home/spark$(printf '%x' "$RANK")/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank$(printf '%x' "$RANK").sp"
 BUDGETS="$(python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" \
-  --budgets "$MANIFEST_JSON" --rank "$RANK")"
+  --budgets "$MANIFEST_JSON" --rank "$RANK" --pack "$RANK_PACK")"
 DEFAULT_POOL="${BUDGETS%% *}"
 DEFAULT_SPINE="${BUDGETS##* }"
 : "${QMAX_EXPERT_POOL_BYTES:=$DEFAULT_POOL}"
@@ -149,8 +158,7 @@ HOST="spark$(printf '%x' "$RANK")"
   fail "node order mismatch: rank $RANK expects $HOST but this job runs on \
 $(hostname); --nodes order must stay identical to the mesh map ($MESH_RANKS)"
 
-CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
-DEPLOYED_PACK="/home/$HOST/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank${HOST#spark}.sp"
+DEPLOYED_PACK="$RANK_PACK"
 [ -f "$DEPLOYED_PACK" ] || fail "deployed rank pack missing: $DEPLOYED_PACK \
 (operator-placed set; grep the fleet pack inventory before any warm read)"
 

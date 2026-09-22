@@ -174,7 +174,48 @@ def render(rank: int, runtime_root: str, weightd_socket: str,
 POOLS_MANIFEST_NAME = "smoke_experts_pools.json"
 
 
-def budgets(source: str, rank: int) -> int:
+def pack_spine_allocation(pack: str) -> int:
+    """Measure one rank pack's spine allocation exactly as the lazy tier
+    sizes it (runtime/spark_weightd_manifest.c build_spine): the spans
+    BETWEEN expert ranges, each padded to a cumulative 256-byte
+    alignment. The naive spine/nodes division under-declares every rank
+    because the spine holds REPLICATED tensors (embeddings, norms, head)
+    that do not shard across TP ranks (rank 0 measures 14,761,125,376 B
+    against a 9,420,097,264 B /16 budget - the r12p publish failure).
+    """
+    import struct
+    sidecar_path = pack + ".experts"
+    sidecar = open(sidecar_path, "rb").read()
+    if sidecar[:4] != b"WEPX":
+        raise SystemExit("budgets: bad sidecar magic in %s" % sidecar_path)
+    count = struct.unpack_from("<I", sidecar, 8)[0]
+    if len(sidecar) < 16 + count * 48:
+        raise SystemExit("budgets: truncated sidecar %s" % sidecar_path)
+    ranges = []
+    for i in range(count):
+        off, size = struct.unpack_from("<QQ", sidecar, 16 + i * 48 + 16)
+        ranges.append((off, size))
+    ranges.sort()
+    pack_bytes = os.path.getsize(pack)
+    cursor = 0
+    allocation = 0
+    spans = 0
+    for offset, size in ranges:
+        if offset > cursor:
+            padding = (cursor - allocation) & 255
+            allocation += padding + (offset - cursor)
+            spans += 1
+        cursor = offset + size
+    if pack_bytes > cursor:
+        padding = (cursor - allocation) & 255
+        allocation += padding + (pack_bytes - cursor)
+        spans += 1
+    if spans == 0 or allocation == 0:
+        raise SystemExit("budgets: %s has no spine spans" % sidecar_path)
+    return allocation
+
+
+def budgets(source: str, rank: int, pack: str = None) -> int:
     """Emit 'expert_pool_bytes raw_bytes spine_bytes' for ONE rank.
 
     The pool default is the CHUNK-BASIS working-set size for this exact
@@ -186,8 +227,11 @@ def budgets(source: str, rank: int) -> int:
     Raw division of the census bytes (sum/16) under-declares every rank
     (this family measures 1.40x-1.44x; lane 5's 2.15x and lane 0's 5.17x
     are their families' factors, not ours). The raw per-rank number is
-    emitted second so receipts can carry BOTH bases; spine stays raw
-    (the pin-all whole-arena tier does not pay chunking).
+    emitted second so receipts can carry BOTH bases. The spine default is
+    MEASURED from this rank's placed pack (--pack; the exact lazy-tier
+    arithmetic including replicated, non-sharded spine tensors); without
+    a pack it falls back to the raw spine/nodes division, which
+    under-declares replicated spines and must only size pin-all tiers.
     """
     document = json.load(open(source, encoding="utf-8"))
     nodes = int(document["nodes"])
@@ -206,7 +250,10 @@ def budgets(source: str, rank: int) -> int:
             "budgets need %s with per_rank/per_rank_raw for rank %d "
             "(chunk-basis sizing record; missing key: %s)"
             % (pools_path, rank, error))
-    spine = -(-int(document["spine_bytes"]) // nodes)
+    if pack is not None:
+        spine = pack_spine_allocation(pack)
+    else:
+        spine = -(-int(document["spine_bytes"]) // nodes)
     print(f"{chunked} {raw} {spine}")
     return 0
 
@@ -239,6 +286,10 @@ def main() -> int:
     parser.add_argument("--weightd-socket")
     parser.add_argument("--output-dir")
     parser.add_argument("--rank", type=int)
+    parser.add_argument("--pack", metavar="PACK",
+                        help="with --budgets: measure the spine default from "
+                             "this rank pack's .experts sidecar (the exact "
+                             "lazy-tier allocation; requires the placed pack)")
     parser.add_argument("--kv-backing-bytes", type=int,
                         default=DEFAULT_KV_BACKING_BYTES)
     parser.add_argument("--emit-wset", metavar="OUTPUT",
@@ -256,7 +307,7 @@ def main() -> int:
     arguments = parser.parse_args()
 
     if arguments.budgets:
-        return budgets(arguments.budgets, arguments.rank)
+        return budgets(arguments.budgets, arguments.rank, arguments.pack)
     if arguments.emit_wset:
         return emit_wset(arguments.wset_source, arguments.emit_wset)
 
