@@ -64,7 +64,14 @@
 	(state)->pp_stage_count
 #define SPARK_QWEN38_SERVING_ADAPTER_ENV_STAGE_INDEX(state) \
 	SparkMinimaxServingPpStageIndex(state,(state)->stage_index)
-#define SPARK_QWEN38_SERVING_ADAPTER_BIND_FAMILY(state) SPARK_STATUS_OK
+#define SPARK_QWEN38_SERVING_ADAPTER_BIND_FAMILY(state) \
+	SparkMinimaxServingInitializeFamilyState(state)
+#define SPARK_QWEN38_SERVING_ADAPTER_PREFETCH SparkMinimaxServingPrefetch
+#define SPARK_QWEN38_SERVING_ADAPTER_RESOLVE_PREFETCH \
+	SparkMinimaxServingResolvePrefetch
+#define SPARK_QWEN38_SERVING_ADAPTER_RESET SparkMinimaxServingReset
+#define SPARK_QWEN38_SERVING_ADAPTER_SUBMISSION_STALE(state,submission) \
+	SparkMinimaxServingSubmissionStale((state),(submission))
 
 typedef struct SparkMinimaxServingPending
 {
@@ -124,6 +131,8 @@ typedef struct SparkMinimaxServingState
 	uint32_t kv_block_count;
 	uint32_t quiescing;
 	uint64_t orphan_completion_count;
+	atomic_uint reset_active;
+	atomic_uint_fast64_t reset_generation;
 	SparkModelServingRuntimeLimits runtime_limits;
 	SparkMinimaxKvBlockTableView block_table;
 	uint32_t *host_block_indices;
@@ -137,6 +146,121 @@ typedef struct SparkMinimaxServingState
 	SparkMinimaxServingTransportShim shim;
 	SparkMinimaxServingPending pending[SPARK_MINIMAX_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
 } SparkMinimaxServingState;
+
+static SparkStatus SparkMinimaxServingValidateSubmission(
+	void *adapter_state,const SparkModelServingSubmission *submission);
+static SparkStatus SparkMinimaxServingQuiesce(
+	void *adapter_state,uint64_t deadline_time_ns);
+
+static _Thread_local SparkModelDriverCacheLane SparkMinimaxServingCacheScratch[SPARK_MINIMAX_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT];
+
+static uint32_t SparkMinimaxServingSubmissionStale(
+	const SparkMinimaxServingState *state,const SparkModelServingSubmission *submission)
+{
+	if ( submission == 0 )
+		return(0u);
+	return(submission->control_generation <
+		atomic_load_explicit(&state->reset_generation,memory_order_acquire) ? 1u : 0u);
+}
+
+static SparkStatus SparkMinimaxServingInitializeFamilyState(SparkMinimaxServingState *state)
+{
+	if ( state == 0 )
+		return(SPARK_STATUS_INVALID_ARGUMENT);
+	atomic_init(&state->reset_active,0u);
+	atomic_init(&state->reset_generation,0u);
+	return(SPARK_STATUS_OK);
+}
+
+static SparkServingCacheAdmission SparkMinimaxServingCacheContext(
+	SparkMinimaxServingState *state,SparkModelDriverCacheLane *lanes)
+{
+	SparkServingCacheAdmission cache;
+	cache.program_id = state->program->program_id;
+	cache.lane_capacity = SPARK_MINIMAX_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT;
+	cache.lanes = lanes;
+	cache.driver = state->driver.interface;
+	cache.driver_instance = state->driver_instance;
+	cache.validate = SparkMinimaxServingValidateSubmission;
+	cache.adapter_state = state;
+	return(cache);
+}
+
+static SparkStatus SparkMinimaxServingPrefetch(void *adapter_state,
+	const SparkModelServingSubmission *submissions,uint32_t count)
+{
+	SparkMinimaxServingState *state;
+	SparkServingCacheAdmission cache;
+	state = (SparkMinimaxServingState *)adapter_state;
+	if ( state == 0 || state->program == 0 )
+		return(SPARK_STATUS_INVALID_ARGUMENT);
+	cache = SparkMinimaxServingCacheContext(state,SparkMinimaxServingCacheScratch);
+	return(SparkServingCacheAdmissionRun(&cache,submissions,count,
+		SPARK_MODEL_DRIVER_ADMISSION_FLAG_CACHE_PREPARE));
+}
+
+static SparkStatus SparkMinimaxServingResolvePrefetch(void *adapter_state,
+	const SparkModelServingSubmission *submission,uint32_t resolution)
+{
+	SparkMinimaxServingState *state;
+	SparkServingCacheAdmission cache;
+	uint32_t flags;
+	state = (SparkMinimaxServingState *)adapter_state;
+	if ( state == 0 || state->program == 0 ||
+		(resolution != SPARK_MODEL_SERVING_PREFETCH_RESOLUTION_COMMIT &&
+		 resolution != SPARK_MODEL_SERVING_PREFETCH_RESOLUTION_ABORT) )
+		return(SPARK_STATUS_INVALID_ARGUMENT);
+	flags = resolution == SPARK_MODEL_SERVING_PREFETCH_RESOLUTION_COMMIT ?
+		SPARK_MODEL_DRIVER_ADMISSION_FLAG_CACHE_COMMIT :
+		SPARK_MODEL_DRIVER_ADMISSION_FLAG_CACHE_ABORT;
+	cache = SparkMinimaxServingCacheContext(state,SparkMinimaxServingCacheScratch);
+	return(SparkServingCacheAdmissionRun(&cache,submission,1u,flags));
+}
+
+static SparkStatus SparkMinimaxServingResetControl(void *adapter_state,
+	uint64_t control_generation)
+{
+	SparkMinimaxServingState *state = (SparkMinimaxServingState *)adapter_state;
+	SparkModelDriverAdmissionRequest request = {0};
+	SparkModelDriverAdmissionDecision decision;
+	SparkStatus status;
+	if ( state == 0 || control_generation == 0u ||
+		control_generation <= atomic_load_explicit(&state->reset_generation,memory_order_acquire) )
+		return(SPARK_STATUS_INVALID_ARGUMENT);
+	status = SparkMinimaxServingQuiesce(state,UINT64_MAX);
+	if ( status != SPARK_STATUS_OK )
+		return(status);
+	request.descriptor_bytes = (uint32_t)sizeof(request);
+	request.program_id = state->program->program_id;
+	request.control_generation = control_generation;
+	request.admission_flags = SPARK_MODEL_DRIVER_ADMISSION_FLAG_RESET;
+	SparkModelDriverInitializeAdmissionDecision(&decision);
+	status = state->driver.interface->admit(state->driver_instance,&request,&decision);
+	if ( status == SPARK_STATUS_OK && decision.accepted == 0u )
+		status = SPARK_STATUS_VALIDATION_FAILED;
+	if ( status == SPARK_STATUS_OK )
+	{
+		atomic_store_explicit(&state->reset_generation,control_generation,memory_order_release);
+		state->quiescing = 0u;
+	}
+	return(status);
+}
+
+static SparkStatus SparkMinimaxServingReset(void *adapter_state,
+	uint64_t control_generation)
+{
+	SparkMinimaxServingState *state = (SparkMinimaxServingState *)adapter_state;
+	uint32_t expected = 0u;
+	SparkStatus status;
+	if ( state == 0 )
+		return(SPARK_STATUS_INVALID_ARGUMENT);
+	if ( atomic_compare_exchange_strong_explicit(&state->reset_active,&expected,1u,
+		memory_order_acquire,memory_order_relaxed) == 0 )
+		return(SPARK_STATUS_BUSY);
+	status = SparkMinimaxServingResetControl(state,control_generation);
+	atomic_store_explicit(&state->reset_active,0u,memory_order_release);
+	return(status);
+}
 
 static const SparkModelServingAdapterDescriptor SparkMinimaxServingDescriptor =
 {
