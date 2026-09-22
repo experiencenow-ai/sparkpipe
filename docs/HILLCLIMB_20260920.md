@@ -2357,3 +2357,29 @@ read process state (alive + serving = fine); (b) the daemon's accept
 loop/backlog must survive a busy handler (drain accepts; backlog ≥16;
 or the creation moves off the connection thread). Then the warm run
 finally completes end-to-end and the fleet warms permanently.
+
+## 09-23 18:00 TICK — DEMAND-DRIVEN EXPERT LOADING (the operator's production rule)
+
+OPERATOR RULING: "why are all the experts needed? track which experts a
+small request needs, load them in batch in seconds... parallel debugging
+is broken by loading all weights; for the allreduce I allow it, but we
+need a production solution to shared debugging."
+
+LANDED (@8c8fb4d, driver 4093d8dd + daemon af955ef5):
+1. SPAN-BATCHED PACK READS: contiguous ranges merge into one pread per
+   span (per-range digest+copy from staging) — the old per-expert path
+   was ~2MB/s on NVMe (1000x under hardware; the death-by-tiny-reads
+   was ALSO the entire 190s-cold-walk class and the warmer's hours).
+2. PREFETCH DEFAULT OFF ("PREFETCH-OFF" prints live on the engines):
+   experts demand-load per routed submission (top-8-of-288; tens of MB
+   for a small request); the bulk warm is opt-in via
+   SPARK_GLM5_NEXT_PREFETCH=1 (the allreduce lane only).
+3. My earlier full-warm-vs-fresh-daemon mistake acknowledged in the
+   record: the 42-vs-6 split was daemon-uptime artifact; nothing
+   required warming all — the demand path was just too slow (now fixed).
+
+ACCEPTANCE TEST (the small-request canary): queued behind the retry
+backlog at wrap — the receipt (routed experts demand-load in seconds +
+tokens returned) lands next tick. The allreduce lane's full warm (env
+opt-in) re-measures then too: span-batched, the 45-layer warm should
+drop from hours to ~minutes.
