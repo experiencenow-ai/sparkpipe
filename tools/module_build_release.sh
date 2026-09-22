@@ -17,6 +17,10 @@ cd "$(dirname "$0")/.."
 git diff --quiet HEAD || { printf '%s\n' 'tracked build inputs differ from HEAD' >&2; exit 2; }
 source_commit=$(git rev-parse HEAD)
 [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]] || exit 2
+if [ -d build/obj ] || [ -d build/modules ]; then
+    printf '%s\n' 'use a fresh queue-synced checkout; existing objects can carry a different contract' >&2
+    exit 2
+fi
 mkdir -p build
 exec 9>build/.firmware-build.lock
 flock -n 9 || { printf '%s\n' 'another build owns this checkout' >&2; exit 2; }

@@ -31,6 +31,9 @@ def main():
         env.update(SPARK_QUEUE_ID="test-failed-build", PATH=str(root) + ":" + env["PATH"])
         result = subprocess.run(["bash", str(fixture_script)], env=env, capture_output=True)
         assert result.returncode == 23 and b"BUILD-PASS" not in result.stdout
+        (root / "build/obj").mkdir()
+        result = subprocess.run(["bash", str(fixture_script)], env=env, capture_output=True)
+        assert result.returncode == 2 and b"different contract" in result.stderr
     print("PASS queue build: required ownership, legacy refusal, first-failure propagation")
 
 

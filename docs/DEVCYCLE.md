@@ -21,7 +21,7 @@ bash tools/module_build_release.sh FAMILY CODEC OUTPUT_NAME MODEL_REVISION CONTR
 ```
 
 The builder requires `SPARK_QUEUE_ID`, refuses a dirty tracked tree or an existing
-output, and takes a nonblocking lock in this checkout. `FIRMWARE_JSON` explicitly
+output or preexisting compiled objects, and takes a nonblocking lock in this checkout. `FIRMWARE_JSON` explicitly
 selects a firmware description when its filename differs from the family/codec
 convention. An unsupported adapter/build interface fails visibly.
 
