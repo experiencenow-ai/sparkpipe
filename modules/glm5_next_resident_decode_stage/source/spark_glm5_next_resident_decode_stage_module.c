@@ -241,6 +241,7 @@ struct SparkGlm5NextModuleState
 	uint32_t tp_chain_active;
 	uint32_t tp_lane;
 	SparkWeightdClient *lane_client;
+	const SparkGlm5NextResidentDecodeStageNodeContext *collective_context;
 	SparkTpDeviceCollectiveCreditBinding tp_credit_bindings[SPARK_TP_DEVICE_COLLECTIVE_MAX_BINDING_COUNT];
 	uint32_t tp_credit_binding_count;
 	void *tp_credit_send_bf16;
@@ -1960,6 +1961,7 @@ static SparkStatus SparkGlm5NextModuleInitializeTpCollective(
 	SparkStatus status;
 	if ( state == 0 || context == 0 )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	state->collective_context = context;
 	if ( state->tp_degree == 1u || state->tp_collective_disabled != 0u )
 		return(SPARK_STATUS_OK);
 	if ( state->lane_client == 0 )
@@ -2129,6 +2131,41 @@ static SparkStatus SparkGlm5NextChainOrdinal(SparkGlm5NextTpChain *chain,uint32_
 	return(SparkTpChainOrdinal(chain->frame->request_id,state->pipeline_slot_count,SPARK_GLM5_NEXT_TP_COLLECTIVE_CREDITS_PER_SLOT,SPARK_GLM5_NEXT_TP_CHAIN_OPERATIONS,operation,ordinal));
 }
 
+static SparkStatus SparkGlm5NextModuleReviveWeightdStack(
+	SparkGlm5NextModuleState *state)
+{
+	SparkStatus status;
+	if ( state->lane_client == 0 ||
+		SparkWeightdClientAlive(state->lane_client) != 0u )
+		return(SPARK_STATUS_OK);
+	if ( state->collective_context == 0 )
+	{
+		fprintf(stderr,"GLM weightd stack dead and no stored collective context — cannot revive\n");
+		SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+	}
+	(void)SparkWeightdClientClose(state->lane_client);
+	state->lane_client = 0;
+	if ( state->tp_device_collective_initialized != 0u )
+	{
+		SparkTpDeviceCollectiveDestroy(&state->tp_device_collective);
+		state->tp_device_collective_initialized = 0u;
+	}
+	if ( state->tp_device_collective_hc_initialized != 0u )
+	{
+		SparkTpDeviceCollectiveDestroy(&state->tp_device_collective_hc);
+		state->tp_device_collective_hc_initialized = 0u;
+	}
+	status = SparkGlm5NextModuleInitializeTpCollective(state,
+		state->collective_context);
+	if ( status != SPARK_STATUS_OK )
+	{
+		fprintf(stderr,"GLM weightd stack RE-INIT FAILED status=%d\n",(int32_t)status);
+		SPARK_RETURN(status);
+	}
+	fprintf(stderr,"GLM weightd stack REVIVED (lane client + both collectives re-created)\n");
+	return(SPARK_STATUS_OK);
+}
+
 static SparkStatus SparkGlm5NextModuleReduceHiddenWide(SparkGlm5NextTpChain *chain,
 	void *device_bf16,uint32_t hc_wide)
 {
@@ -2146,6 +2183,9 @@ static SparkStatus SparkGlm5NextModuleReduceHiddenWide(SparkGlm5NextTpChain *cha
 	}
 	if ( state->tp_device_collective_initialized == 0u )
 		SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
+	ordinal_status = SparkGlm5NextModuleReviveWeightdStack(state);
+	if ( ordinal_status != SPARK_STATUS_OK )
+		SPARK_RETURN(ordinal_status);
 	if ( hc_wide != 0u )
 	{
 		if ( state->tp_device_collective_hc_initialized == 0u )
