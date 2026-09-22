@@ -660,10 +660,15 @@ static SparkStatus SparkK3ManifestCheck(const SparkWeightdManifest *manifest,
 			SPARK_FAIL(SPARK_STATUS_PARSE_ERROR);
 		if ( !have_w1 )
 			continue;
+		/* per-expert divisibility per tensor only: k3's w1/w2 expert
+		 * geometries differ (intermediate 6144 vs 3072 halves the w2
+		 * span), so demanding equal per-expert bytes rejects the real
+		 * deployed manifests — measured: w1 2924544 vs w2 1462272
+		 * bytes/expert on every rank pack (first-launch find #7, the
+		 * lazy-attach manifest check). Each range is still validated
+		 * against ITS tensor's span below. */
 		if ( w1.bytes % pack->config.experts != 0u ||
-			w2.bytes % pack->config.experts != 0u ||
-			w1.bytes / pack->config.experts !=
-				w2.bytes / pack->config.experts )
+			w2.bytes % pack->config.experts != 0u )
 			SPARK_FAIL(SPARK_STATUS_PARSE_ERROR);
 		for ( expert = 0u; expert < pack->config.experts; ++expert )
 		{
