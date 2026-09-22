@@ -104,8 +104,10 @@ model families or continuous-batch kernel reuse.
 
 The separate mixed-topology probe reached 34 ready CUDA children but failed
 15 mesh registrations before any numerical round. The shared lazy-attach code
-rounded a file mapping pointer without preserving file offset zero. That defect
-is being repaired; the mixed-topology result remains a failure until rerun.
+rounded a file mapping pointer without preserving file offset zero. Commit `498275a6` repairs that defect by reserving an aligned range and mapping
+file offset zero into it. Nine focused offset/failure/schema cases pass; the old
+implementation fails the forced-misalignment byte oracle. The mixed-topology
+hardware result remains a failure until rerun.
 All sixteen queue control groups stopped. The failed attempt is
 `76dbd15ed4154c38a49cef183513a116`; its [failure receipt](receipts/mixed-mesh-44fe4af7-failure.json)
 retains the exact initialization error and qualification boundary.
