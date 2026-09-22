@@ -1,5 +1,5 @@
 {
-  "file_count": 3285,
+  "file_count": 3288,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -4335,6 +4335,16 @@
       "path": "model-families/dsv4/include/sparkpipe/spark_dsv4_runtime_contract.h",
       "sha256": "d782a60b67b3ff011004524af1e15e3717e8b59cbcbb0adf2d6a9ce01fd6a883",
       "size_bytes": 2981
+    },
+    {
+      "path": "model-families/dsv4/smoke-standard-v1.wset",
+      "sha256": "34f655333e606c3a5aa76ee10887ccd1c70584374a4885a88e0c21aad34d0b87",
+      "size_bytes": 1432
+    },
+    {
+      "path": "model-families/dsv4/smoke_experts.json",
+      "sha256": "085f0df9ad75c6470efc47bb2514c436efef2b1ef02aeb0b001235bac9606e28",
+      "size_bytes": 19231
     },
     {
       "path": "model-families/dsv4/src/spark_dsv4_cache_arena.c",
@@ -10982,6 +10992,11 @@
       "size_bytes": 15355
     },
     {
+      "path": "tools/dsv4_pro_smoke_experts.py",
+      "sha256": "0b6d61df12d82e7a89d758a90931c8b0bdf96d7b1c8388adc41896ccfc98bcff",
+      "size_bytes": 21802
+    },
+    {
       "path": "tools/dsv4_pro_stagepack.py",
       "sha256": "b8a788c023504b344d3241f687479c2c740c02134d28baa00759276a8c82d703",
       "size_bytes": 16184
@@ -16430,5 +16445,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78355601
+  "total_bytes": 78398066
 }
