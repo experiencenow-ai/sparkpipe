@@ -12143,8 +12143,8 @@
     },
     {
       "path": "tools/mesh_register_attach_repro.c",
-      "sha256": "0d93f77934aea422025d81cffc0e557b3b0f2aea30164532e2aef5ca455a0e1e",
-      "size_bytes": 5273
+      "sha256": "c8b3530bd2227efa013244976d113632fbe9ef67665e8230e8289d8cb8c4fc72",
+      "size_bytes": 5777
     },
     {
       "path": "tools/mesh_register_repro.c",
@@ -16445,5 +16445,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78352081
+  "total_bytes": 78352585
 }
