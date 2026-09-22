@@ -2,7 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define SPARK_TP_MESH_ROUND_CONTROL_WORDS 10u
+#define SPARK_TP_MESH_ROUND_CONTROL_WORDS 18u
 #define SPARK_TP_MESH_ROUND_CONTROL_BYTES \
     (SPARK_TP_MESH_ROUND_CONTROL_WORDS * sizeof(uint64_t))
 
@@ -16,6 +16,14 @@
 #define SPARK_TP_MESH_ROUND_CONTROL_WORD_EPOCH 7u
 #define SPARK_TP_MESH_ROUND_CONTROL_WORD_ERROR 8u
 #define SPARK_TP_MESH_ROUND_CONTROL_WORD_DIAG 9u
+#define SPARK_TP_MESH_ROUND_CONTROL_WORD_SOURCE_WAIT_NS 10u
+#define SPARK_TP_MESH_ROUND_CONTROL_WORD_PEER_WAIT_NS 11u
+#define SPARK_TP_MESH_ROUND_CONTROL_WORD_COPY_NS 12u
+#define SPARK_TP_MESH_ROUND_CONTROL_WORD_COMBINE_NS 13u
+#define SPARK_TP_MESH_ROUND_CONTROL_WORD_WAIT_STARTED_NS 14u
+#define SPARK_TP_MESH_ROUND_CONTROL_WORD_MATH_STARTED_NS 15u
+#define SPARK_TP_MESH_ROUND_CONTROL_WORD_MATH_FINISHED_NS 16u
+#define SPARK_TP_MESH_ROUND_CONTROL_WORD_MATH_BLOCKS_DONE 17u
 
 typedef struct SparkTpMeshRoundControl
 {
@@ -29,6 +37,14 @@ typedef struct SparkTpMeshRoundControl
     uint64_t epoch;
     uint64_t error_word;
     uint64_t diag_word;
+    uint64_t source_wait_ns;
+    uint64_t peer_wait_ns;
+    uint64_t copy_ns;
+    uint64_t combine_ns;
+    uint64_t wait_started_ns;
+    uint64_t math_started_ns;
+    uint64_t math_finished_ns;
+    uint64_t math_blocks_done;
 } SparkTpMeshRoundControl;
 
 #define SPARK_TP_MESH_ROUND_LOOP_DECISION_GO 0u
