@@ -621,6 +621,7 @@ static void SparkTestDaemonProcessTermPath(void)
     {
         char ceiling_text[32];
         setenv("SPARK_WEIGHTD_LATCH_PORT","0",1);
+        setenv("SPARK_WEIGHTD_KV_RESERVE_BYTES","0",1);
         snprintf(ceiling_text, sizeof(ceiling_text), "%llu",
             (unsigned long long)(2ull * SPARK_TEST_ARENA_BYTES));
         (void)dup2(stdout_pipe[1], 1);
