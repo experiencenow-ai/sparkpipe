@@ -1,5 +1,5 @@
 {
-  "file_count": 3296,
+  "file_count": 3297,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "fc22799cb40b72641d557add106de1885b00ff2d86e3fa119bfa721be0c1a37a",
-      "size_bytes": 126266
+      "sha256": "3887d3ab18d0af0cf76a5e130f2c05ffb9cf5f0b31bdb253869c48d610d2c958",
+      "size_bytes": 126348
     },
     {
       "path": "Makefile.rej",
@@ -8937,6 +8937,11 @@
       "size_bytes": 5035
     },
     {
+      "path": "tests/test_dsv4_pro_weightd_warm_identity.py",
+      "sha256": "d07699471d54bcbe07fd24789373b7261ada41a557333368bda865b9247bca2d",
+      "size_bytes": 6826
+    },
+    {
       "path": "tests/test_dsv4_serving_adapter.c",
       "sha256": "157318b55fc6f9b6443f18032b50aff52b3296db16bbba683230c4f13d3bd8dd",
       "size_bytes": 16300
@@ -13233,8 +13238,8 @@
     },
     {
       "path": "tools/weightd_warm.c",
-      "sha256": "4bf676a96798282b93d599dd586b4d3d104211749f1a6c1229450d04fb62ceb5",
-      "size_bytes": 8079
+      "sha256": "9db8b8e00816a7d378760a4c1285170ab3c5563be1b1206aff7360dbe61efcb9",
+      "size_bytes": 14358
     },
     {
       "path": "tools/weightdctl.c",
@@ -16485,5 +16490,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78501549
+  "total_bytes": 78514736
 }
