@@ -129,10 +129,15 @@ def resident_deployment(runtime_root: str, weightd_socket: str) -> dict:
         "weightd": {
             "socket_path": weightd_socket,
         },
+        # Caps from the family adapter descriptor: max_inflight is 1
+        # (SparkGemma4ServingDescriptor) and input rows are bounded by the
+        # descriptor's max_input_row_count (MAX_ACTIVE_SEQUENCE_COUNT) - the
+        # loader rejects anything above (model_serving_adapter.c:232,
+        # launch-6 lesson).
         "runtime_limits": {
-            "max_inflight_submissions": 4,
+            "max_inflight_submissions": 1,
             "max_active_sequences": 16,
-            "max_input_rows": 128,
+            "max_input_rows": 32,
             "resident_sequence_capacity": 16,
             "kv_logical_page_capacity": page_capacity,
             "kv_physical_page_capacity": page_capacity,
