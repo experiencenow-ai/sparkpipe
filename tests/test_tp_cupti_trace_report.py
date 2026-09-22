@@ -46,6 +46,13 @@ class TraceReportTest(unittest.TestCase):
         self.assertEqual(result['clipped_record_count'], 3)
         self.assertEqual(result['categories']['compute']['covered_ns'], 25)
 
+    def test_host_copy_is_not_gpu_activity(self):
+        result = self.analyze(TRACE + 'MEMCPY "HtoH" [ 5, 500 ] duration 495, size 1024\n')
+        self.assertEqual(result['window_ns'], 80)
+        self.assertEqual(result['gpu_covered_ns'], 60)
+        self.assertEqual(result['gpu_uncovered_ns'], 20)
+        self.assertEqual(result['categories']['host_memcpy']['covered_ns'], 80)
+
     def test_loss_incomplete_and_malformed_are_partial(self):
         result = self.analyze(TRACE.replace('dropped_records=0', 'dropped_records=7').replace('TRACE_EXIT', 'UNFINISHED') +
                               'KERNEL [ 0, 100 ] duration 100, "incomplete"\nMEMCPY unreadable\n')

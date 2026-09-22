@@ -52,12 +52,13 @@ def report(path, clock='cupti', start=None, end=None):
                 if first == 0 or last <= first or duration != last - first:
                     invalid += 1
                     continue
-                category = 'memcpy' if kind == 'MEMCPY' else 'memset' if kind == 'MEMSET' else 'mesh' if 'SparkGlm5NextMesh' in (name or '') else 'compute'
+                category = ('host_memcpy' if copy_kind == 'HtoH' else 'memcpy') if kind == 'MEMCPY' else 'memset' if kind == 'MEMSET' else 'mesh' if 'SparkGlm5NextMesh' in (name or '') else 'compute'
                 if kind in ('KERNEL', 'CONCURRENT_KERNEL') and not name:
                     invalid += 1
                     continue
                 records.append((first, last, category, name or copy_kind or kind))
-    if not records:
+    gpu_records = [item for item in records if item[2] != 'host_memcpy']
+    if not gpu_records:
         raise ValueError('No completed GPU kernel/copy/set activity records')
     offsets = {'cupti': 0}
     if anchor is not None:
@@ -66,8 +67,8 @@ def report(path, clock='cupti', start=None, end=None):
         raise ValueError(f'{clock} selection requires TRACE_ANCHOR')
     if (start is None) != (end is None):
         raise ValueError('Specify both start and end')
-    low = min(item[0] for item in records) if start is None else start - offsets[clock]
-    high = max(item[1] for item in records) if end is None else end - offsets[clock]
+    low = min(item[0] for item in gpu_records) if start is None else start - offsets[clock]
+    high = max(item[1] for item in gpu_records) if end is None else end - offsets[clock]
     if high <= low:
         raise ValueError('Selected interval must have positive duration')
     categories = collections.defaultdict(list)
@@ -79,7 +80,7 @@ def report(path, clock='cupti', start=None, end=None):
             clipped += interval != [first, last]
             categories[category].append(interval)
             names[(category, name)].append(interval)
-    active = merge([interval for group in categories.values() for interval in group])
+    active = merge([interval for category, group in categories.items() if category != 'host_memcpy' for interval in group])
     gaps = []
     cursor = low
     for first, last in active:
@@ -116,7 +117,7 @@ def report(path, clock='cupti', start=None, end=None):
         'largest_uncovered_intervals': [{'duration_ns': last - first,
                                          **{f'{key}_ns': [first + offset, last + offset] for key, offset in offsets.items()}}
                                         for first, last in gaps[:20]],
-        'interpretation': 'Coverage is the union of GPU intervals. Category coverage may overlap and is not additive. Gaps are unobserved GPU activity, not automatically network or CPU time. Clock anchors are nearby samples, not cross-host synchronization.'
+        'interpretation': 'Coverage is the union of GPU intervals, excluding host-to-host copies. Category coverage may overlap and is not additive. Gaps are unobserved GPU activity, not automatically network or CPU time. Clock anchors are nearby samples, not cross-host synchronization.'
     }
 
 
