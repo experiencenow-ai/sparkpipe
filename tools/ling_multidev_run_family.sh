@@ -279,7 +279,8 @@ if [ -n "${LING_WORKING_SET:-}" ]; then
     > "$ROOT/smoke.shards"
   : > "$ROOT/warm.log"
   while read -r shard _keys; do
-    "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
+    SPARK_WEIGHTD_EXPERT_POOL_BYTES="$LING_EXPERT_POOL_BYTES" \
+      "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
       "$(cat "$ROOT/packs/pack.sha256")" "$REVISION" "$WORLD" \
       --family ling --wset "$shard" 300 >> "$ROOT/warm.log" 2>&1 ||
       fail "working set warm failed on $shard (see $ROOT/warm.log)"
