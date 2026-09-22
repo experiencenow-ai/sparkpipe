@@ -212,7 +212,10 @@ def pack_spine_allocation(pack: str) -> int:
         spans += 1
     if spans == 0 or allocation == 0:
         raise SystemExit("budgets: %s has no spine spans" % sidecar_path)
-    return allocation
+    # +255: the lazy tier's budget check is (allocation + 255) > budget
+    # (lazy_spine_load reserves alignment headroom on top of the aligned
+    # allocation - r13p4 failed every node by exactly 255 bytes).
+    return allocation + 255
 
 
 def budgets(source: str, rank: int, pack: str = None) -> int:
