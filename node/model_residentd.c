@@ -2899,6 +2899,26 @@ static void SparkModelResidentdReportStuckRoutes(
 				(unsigned long long)route->client_generation);
 			stuck++;
 		}
+		if ( route->abandoned == 0u &&
+			route->client_generation != runtime->client.generation )
+		{
+			SparkStatus deactivate_status;
+			fprintf(stderr,
+				"ROUTE-RECLAIM id=%llu gen=%llu != current %llu (dead session's route; its abort never arrived) — freeing the lane\n",
+				(unsigned long long)route->submission_id,
+				(unsigned long long)route->client_generation,
+				(unsigned long long)runtime->client.generation);
+			pthread_mutex_lock(&runtime->mutex);
+			route->abandoned = 1u;
+			route->resident_slots_claimed = 0u;
+			deactivate_status = SparkModelResidentdDeactivateRouteLocked(runtime,route);
+			if ( deactivate_status != SPARK_STATUS_OK )
+			{
+				route->active = 0u;
+				route->state = SPARK_MODEL_RESIDENTD_ROUTE_FENCED;
+			}
+			pthread_mutex_unlock(&runtime->mutex);
+		}
 
 	}
 	(void)stuck;
