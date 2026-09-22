@@ -2481,3 +2481,39 @@ canary RC=28s. The gap is in the request/completion plumbing (their
 every-rank-drain deferral under real traffic needs the look — or the
 API connection path again). Timer stays STOPPED per the operator;
 state parked for the next session/astra's next word.
+
+## 09-24 04:30 — BENCHMARK FINDINGS + the abandoned-spinners FIXED (fleet idle SM 96%→0%)
+
+WHY 250ms/token WHEN ALLREDUCE IS ~30µs/round (measured, operator challenge):
+- Reduce stages (the actual collective device work): 1.5-3.6ms per 91-round
+  chain = ~30µs/round. Confirmed negligible.
+- Host collective submit: 71-109ms per chain (0.8-1.2ms PER ROUND on the
+  host — should be ~10µs).
+- "Attention"/"MLP" stage walls (82-97 / 139-156ms): NOT compute — the GPU
+  ran 96% SM at 0% MEMORY (both during chains AND IDLE): spin-wait kernels
+  monopolize SMs waiting for peer publishes; host timers attribute that
+  wall to the surrounding stages.
+
+THE SKEW ANSWER (operator: "it can't be 1ms"): natural compute skew is
+µs (identical kernels/GPUs). The ms-scale arrival spread has two real
+sources: (a) the host submit path — per-round enqueue takes 0.3-1.2ms
+with variance ACROSS ranks, so the slowest rank's late publish makes the
+other 15 spin ~1ms/round (this is the real skew, and it's host-made);
+(b) GPU timeslicing against abandoned spin kernels. Both vanish in the
+graph path (one launch).
+
+THE INTERRUPT ANSWER: CUDA has no device-side interrupt; the practical
+fast mechanism is PUSH-not-PULL — the publisher's RDMA write lands in
+each PEER'S LOCAL cell and the waiter polls LOCAL memory (sub-µs,
+negligible bus traffic). Today waiters poll REMOTE cells via ld.global.cv
+(RDMA read per poll sweep ×16 ranks — the operator's bus-saturation
+concern is exactly right). The graph path + local-cell push = the ≤100µs
+design.
+
+THE SPINNER FIX (@0733326, driver 0d9b1fe7): cancel broadcast on BOTH
+collectives at chain COMPLETION (previously only on failure) — lingering
+wait kernels from final rounds exit immediately. VERIFIED FLEET-WIDE:
+idle SM 96%→0% on every sampled node (spark1/3/5/7/9/c/f all 0).
+
+ALSO NOTED: the fresh boot shows "GLM execution mode=graph" — the merged
+PR's explicit-graph-mode default is live.
