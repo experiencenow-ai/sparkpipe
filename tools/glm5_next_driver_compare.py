@@ -15,7 +15,7 @@ def token_receipt(path, rows, prefix=False):
     lines = path.read_text().splitlines()
     tokens = [line for line in lines if line.startswith("TOKEN ")]
     batches = ([(step, rows) for step in range(67)] + [(1000, 3 if rows == 5 else 1), (1001, rows), (1002, rows)] +
-               [(step, rows) for step in list(range(63, 67)) + list(range(4))] if prefix else
+               [(step, rows) for step in list(range(63, 67)) + list(range(4))] + [(2000, 4 + sum(1 + lane % 4 for lane in range(1, rows)))] if prefix else
                [(step, rows) for step in range(4)])
     expected_rows = [(step, row) for step, width in batches for row in range(width)]
     marker = "PASS local-prefix-reuse " if prefix else "PASS local-token-smoke "
@@ -27,13 +27,17 @@ def token_receipt(path, rows, prefix=False):
             raise RuntimeError(f"invalid token ordering: {path}")
     if prefix:
         states = [line for line in lines if line.startswith("STATE ")]
-        state_steps = list(range(4)) + list(range(63, 67)) * 2 + list(range(4))
+        state_steps = list(range(4)) + list(range(63, 67)) * 2 + list(range(4)) + [2000]
         if len(states) != rows * len(state_steps):
             raise RuntimeError(f"incomplete state receipt: {path}")
         for index, line in enumerate(states):
             match = re.fullmatch(r"STATE step=(\d+) row=(\d+) bytes=([1-9]\d*) hash=([0-9a-f]{16}) score=([0-9a-f]{8})", line)
             if match is None or tuple(map(int, match.groups()[:2])) != (state_steps[index // rows], index % rows):
                 raise RuntimeError(f"invalid state ordering: {path}")
+        temporal_rows = 4 + sum(1 + lane % 4 for lane in range(1, rows))
+        temporal = f"TEMPORAL lanes={rows} rows={temporal_rows} unequal_lengths={int(rows > 1)} state=exact selected-logit=exact tokens=exact"
+        if lines.count(temporal) != 1:
+            raise RuntimeError(f"missing temporal batch differential receipt: {path}")
         existing = 3 if rows == 5 else 1
         joined = f"JOIN existing={existing} new={rows-existing} launched={rows} unequal_positions={int(rows > 1)}"
         if lines.count(joined) != 1:
@@ -116,7 +120,7 @@ def compare(args):
             receipt = {"result": "PASS local state and token parity" if args.prefix else "PASS local token parity", "queue": os.environ["SPARK_QUEUE_ID"],
                        "pack_sha256": args.pack_sha256, "pool_bytes": args.pool_bytes,
                        "spine_bytes_per_consumer": args.spine_bytes,
-                       "probe": "prefix-eviction-movement-state-reset" if args.prefix else "token-smoke",
+                       "probe": "prefix-eviction-movement-state-reset-temporal" if args.prefix else "token-smoke",
                        "full_vocabulary_logits": False, "batch_widths": [1, 3, 5],
                        "collectives": "disabled", "tp_degree": 16, "rank": 0,
                        "full_model_numerical_qualification": False}

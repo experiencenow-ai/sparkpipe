@@ -208,6 +208,8 @@ static int32_t SparkGlm5NextStageWaveMetadata(const SparkGlm5NextCudaWave *wave)
 		error = cudaMemcpyAsync(slot->run_begin,wave->host_sequence_row_begin,((uint64_t)wave->run_count + 1u) * sizeof(uint32_t),cudaMemcpyHostToDevice,stream);
 		if ( error == cudaSuccess )
 			error = cudaMemcpyAsync(slot->run_state_index,wave->host_run_state_index,(uint64_t)wave->run_count * sizeof(uint32_t),cudaMemcpyHostToDevice,stream);
+		if ( error == cudaSuccess )
+			error = cudaMemcpyAsync(slot->run_row_indices,wave->host_sequence_row_indices,(uint64_t)wave->row_count * sizeof(uint32_t),cudaMemcpyHostToDevice,stream);
 	}
 	if ( error == cudaSuccess && wave->owns_embedding != 0u )
 		error = cudaMemcpyAsync(slot->token_ids,wave->host_token_ids,(uint64_t)wave->row_count * sizeof(uint32_t),cudaMemcpyHostToDevice,stream);
@@ -427,6 +429,7 @@ static void SparkGlm5NextBindLayer(
 	buffers->kda_write_gate = slot->kda_write_gate;
 	buffers->kda_state_index = wave->run_count != 0u ? wave->run_state_index : wave->kda_state_index;
 	buffers->sequence_row_begin = wave->sequence_row_begin;
+	buffers->sequence_row_indices = wave->sequence_row_indices;
 	kda_ordinal = wave->kda_ordinal_by_local_layer[local_layer];
 	if ( kda_ordinal != UINT32_MAX )
 	{

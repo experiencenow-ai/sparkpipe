@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +14,7 @@
 
 #define PROBE_ROWS 5u
 #define PROBE_STEPS 4u
+#define PROBE_INPUT_ROWS (PROBE_ROWS * PROBE_STEPS)
 #define PROBE_PREFIX_TOKENS 63u
 #define PROBE_TARGET "cuda.sm121.glm5_next.resident_decode_stage.bf16.expert_fp8"
 
@@ -35,8 +37,8 @@ typedef struct probe_state
 	SparkGlm5NextStateCaptureLane captured_lanes[PROBE_ROWS];
 	uint32_t logical_pages[PROBE_ROWS * 2u],physical_pages[PROBE_ROWS * 2u];
 	uint64_t next_request_id,control_generation;
-	uint32_t tokens[PROBE_ROWS],slots[PROBE_ROWS],outputs[PROBE_ROWS];
-	uint64_t positions[PROBE_ROWS],sequences[PROBE_ROWS];
+	uint32_t tokens[PROBE_INPUT_ROWS],slots[PROBE_INPUT_ROWS],outputs[PROBE_INPUT_ROWS];
+	uint64_t positions[PROBE_INPUT_ROWS],sequences[PROBE_INPUT_ROWS];
 } probe_state_t;
 
 static uint64_t probe_time(void)
@@ -88,7 +90,7 @@ static void probe_node(probe_state_t *state,const char *pack,uint32_t rows)
 	node->resident_sequence_capacity = state->prefix_probe != 0u ? 2u * rows : rows;
 	node->pipeline_slot_count = 1u;
 	node->max_sequence_positions = state->prefix_probe != 0u ? 128u : 64u;
-	node->execution_row_capacity = rows;
+	node->execution_row_capacity = state->prefix_probe != 0u ? rows * PROBE_STEPS : rows;
 	node->tp_degree = 16u;
 	node->tp_rank = 0u;
 	node->stage_pack_path = pack;
@@ -276,16 +278,19 @@ static int32_t probe_execute(probe_state_t *state,uint32_t rows,uint32_t step)
 	}
 	if ( state->completion.request_id != state->frame.request_id || state->completion.program_id != state->frame.program_id || state->completion.sequence_id != state->frame.sequence_id || state->completion.sequence_position != state->frame.sequence_position )
 		return(-11);
-	for (row=0u; row<rows; row++)
+	for (row=0u; row<state->batch.row_count; row++)
 	{
 		if ( state->outputs[row] >= SPARK_GLM5_NEXT_MODEL_OUTPUT_VOCAB_COUNT )
 			return(-10);
 		printf("TOKEN step=%u row=%u input=%u output=%u\n",step,row,state->tokens[row],state->outputs[row]);
+	}
+	for (row=0u; row<rows; row++)
+	{
 		if ( state->context.state_capture != 0 )
 		{
 			SparkGlm5NextStateCaptureLane *lane = &state->captured_lanes[row];
 			uint32_t score;
-			if ( state->capture.payload_bytes == 0u || state->capture.payload_bytes > state->capture.payload_capacity || lane->sequence_id != state->sequences[row] || lane->next_position != state->positions[row] + 1u || lane->resident_slot != state->slots[row] || lane->payload_bytes == 0u || lane->payload_offset > state->capture.payload_bytes || lane->payload_bytes > state->capture.payload_bytes - lane->payload_offset )
+			if ( !isfinite(lane->output_score) || state->capture.payload_bytes == 0u || state->capture.payload_bytes > state->capture.payload_capacity || lane->sequence_id != state->sequences[row] || lane->next_position != state->cache_lanes[row].context_token_count || lane->resident_slot != state->slots[row] || lane->payload_bytes == 0u || lane->payload_offset > state->capture.payload_bytes || lane->payload_bytes > state->capture.payload_bytes - lane->payload_offset )
 				return(-18);
 			memcpy(&score,&lane->output_score,sizeof(score));
 			printf("STATE step=%u row=%u bytes=%llu hash=%016llx score=%08x\n",step,row,(unsigned long long)lane->payload_bytes,(unsigned long long)probe_payload_hash(state->capture.payload + lane->payload_offset,lane->payload_bytes),score);
@@ -403,6 +408,28 @@ static int32_t probe_reset(probe_state_t *state)
 }
 
 
+static void probe_temporal_frame(probe_state_t *state,uint32_t lanes)
+{
+	uint32_t lane,step,row = 0u;
+	probe_batch(state,lanes,0u);
+	probe_frame(state,lanes,0u);
+	for (lane=0u; lane<lanes; lane++)
+		state->cache_lanes[lane].context_token_count = lane == 0u ? PROBE_STEPS : 1u + lane % PROBE_STEPS;
+	for (step=0u; step<PROBE_STEPS; step++)
+		for (lane=0u; lane<lanes; lane++)
+			if (step < state->cache_lanes[lane].context_token_count)
+			{
+				state->tokens[row] = 1u + lane * PROBE_STEPS + step;
+				state->slots[row] = lane;
+				state->positions[row] = step;
+				state->sequences[row] = lane + 1u;
+				state->outputs[row++] = UINT32_MAX;
+			}
+	state->batch.row_count = state->frame.new_token_count = row;
+	state->buffer.bytes = row * sizeof(uint32_t);
+	state->frame.tokens_per_sequence = 0u;
+}
+
 static int32_t probe_prefix(probe_state_t *state,uint32_t rows)
 {
 	uint32_t start[PROBE_STEPS][PROBE_ROWS],continuation[PROBE_STEPS][PROBE_ROWS];
@@ -485,10 +512,27 @@ static int32_t probe_prefix(probe_state_t *state,uint32_t rows)
 		if ( result != 0 || memcmp(start[step],state->outputs,rows * sizeof(uint32_t)) != 0 || state->capture.payload_bytes != sizes[step] || memcmp(expected[step],state->capture.payload,sizes[step]) != 0 )
 			return(result != 0 ? result : -16);
 	}
+	result = probe_release(state,rows,PROBE_STEPS);
+	if ( result == 0 ) result = probe_reset(state);
+	if ( result != 0 ) return(result);
+	probe_temporal_frame(state,rows);
+	result = probe_execute(state,rows,2000u);
+	if ( result != 0 ) return(result);
+	for (row=0u; row<state->batch.row_count; row++)
+		if ( state->outputs[row] != start[state->positions[row]][state->slots[row]] )
+			return(-21);
+	for (row=0u; row<rows; row++)
+	{
+		SparkGlm5NextStateCaptureLane *lane = &state->captured_lanes[row];
+		step = state->cache_lanes[row].context_token_count - 1u;
+		if ( sizes[step] % rows != 0u || lane->payload_bytes != sizes[step] / rows || memcmp(expected[step] + row * lane->payload_bytes,state->capture.payload + lane->payload_offset,lane->payload_bytes) != 0 || memcmp(&scores[step][row],&lane->output_score,sizeof(float)) != 0 )
+			return(-22);
+	}
+	printf("TEMPORAL lanes=%u rows=%u unequal_lengths=%u state=exact selected-logit=exact tokens=exact\n",rows,state->batch.row_count,rows > 1u ? 1u : 0u);
 	for (step=0u; step<PROBE_STEPS * 2u; step++)
 		free(expected[step]);
 	printf("RESTORE rows=%u moved=%u state=exact selected-logit=exact full-vocabulary-logits=unavailable\n",rows,moved);
-	return(probe_release(state,rows,PROBE_STEPS));
+	return(probe_release(state,rows,UINT32_MAX));
 }
 
 int main(int argc,char **argv)

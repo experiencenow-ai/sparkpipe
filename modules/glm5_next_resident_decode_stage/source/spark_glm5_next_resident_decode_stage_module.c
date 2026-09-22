@@ -854,6 +854,8 @@ static SparkStatus SparkGlm5NextAllocateSlotHost(SparkGlm5NextExecutionSlot *slo
 	cursor = (uint32_t *)slot->host_run_begin;
 	cursor += rows + 1u;
 	slot->host_run_state_index = cursor;
+	cursor += rows;
+	slot->host_run_row_indices = cursor;
 	error = cudaEventCreateWithFlags((cudaEvent_t *)&slot->route_ready_event,cudaEventDisableTiming);
 	return(SparkStageModuleCudaStatus(SPARK_GLM5_NEXT_MODULE_TAG,error,"route_ready_event"));
 }
@@ -880,6 +882,7 @@ static void SparkGlm5NextReleaseSlotHost(SparkGlm5NextModuleState *state)
 			(void)cudaFreeHost(state->slots[index].host_run_begin);
 		state->slots[index].host_run_begin = 0;
 		state->slots[index].host_run_state_index = 0;
+		state->slots[index].host_run_row_indices = 0;
 	}
 }
 
@@ -893,6 +896,7 @@ static SparkStatus SparkGlm5NextAllocateSlotMetadata(
 	if ( status == SPARK_STATUS_OK ) status = SparkGlm5NextAllocateBytes(state,state->execution_row_capacity,1u,sizeof(uint32_t),(void **)&slot->positions);
 	if ( status == SPARK_STATUS_OK ) status = SparkGlm5NextAllocateBytes(state,state->execution_row_capacity + 1u,1u,sizeof(uint32_t),(void **)&slot->run_begin);
 	if ( status == SPARK_STATUS_OK ) status = SparkGlm5NextAllocateBytes(state,state->execution_row_capacity,1u,sizeof(uint32_t),(void **)&slot->run_state_index);
+	if ( status == SPARK_STATUS_OK ) status = SparkGlm5NextAllocateBytes(state,state->execution_row_capacity,1u,sizeof(uint32_t),(void **)&slot->run_row_indices);
 	if ( status == SPARK_STATUS_OK ) status = SparkGlm5NextAllocateBytes(state,state->resident_sequence_capacity,1u,sizeof(uint32_t),(void **)&slot->context_lengths);
 	if ( status == SPARK_STATUS_OK ) status = SparkGlm5NextAllocateBytes(state,2u,1u,sizeof(uint32_t),(void **)&slot->dense_row_offset);
 	if ( status == SPARK_STATUS_OK ) status = SparkGlm5NextAllocateBytes(state,2u,1u,sizeof(uint32_t),(void **)&slot->dense_tile_prefix);
@@ -1546,19 +1550,6 @@ static SparkStatus SparkGlm5NextAdmissionPredicate(
 	return(SPARK_STATUS_OK);
 }
 
-static uint32_t SparkGlm5NextRoundMajorWaveRows(
-	const SparkGlm5NextModuleState *state,
-	const SparkGlm5NextResidentDecodeStageBatchView *batch,
-	uint32_t first_row)
-{
-	SparkStageModuleClaimedLaneContext lanes;
-	if ( state == 0 || batch == 0 || batch->active_sequence_count == 0u )
-		return(0u);
-	lanes.index_states = state->lane_states;
-	lanes.index_capacity = state->resident_sequence_capacity;
-	return(SparkRowLayoutRoundMajorWaveRowCount(first_row,batch->row_count,batch->row_resident_slots,SparkStageModuleClaimedLaneOrdinal,&lanes));
-}
-
 static SparkStatus SparkGlm5NextValidateRoundMajor(
 	const SparkGlm5NextModuleState *state,
 	const SparkGlm5NextResidentDecodeStageBatchView *batch)
@@ -1701,7 +1692,7 @@ static SparkStatus SparkGlm5NextValidateStateCapture(
 		return(SPARK_STATUS_OK);
 	if ( capture->abi_version != SPARK_GLM5_NEXT_STATE_CAPTURE_ABI_VERSION || capture->descriptor_bytes != sizeof(*capture) )
 		SPARK_FAIL(SPARK_STATUS_ABI_MISMATCH);
-	if ( state->mtp_enabled != 0u || state->owns_final_head == 0u || context->batch->row_count != context->batch->active_sequence_count )
+	if ( state->mtp_enabled != 0u || state->owns_final_head == 0u )
 		SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
 	if ( capture->lanes == 0 || capture->logical_pages == 0 || capture->physical_pages == 0 || capture->payload == 0 || capture->lane_capacity < context->batch->active_sequence_count || capture->pages_per_lane_capacity < state->pages_per_sequence )
 		SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
@@ -1731,7 +1722,7 @@ static SparkStatus SparkGlm5NextValidateFrame(
 	if ( context->abi_version != SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_FRAME_CONTEXT_ABI_VERSION || context->descriptor_bytes != sizeof(*context) || context->reserved0 != 0u || (context->flags & ~SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_FRAME_KNOWN_FLAGS) != 0u || context->batch == 0 )
 		SPARK_FAIL(SPARK_STATUS_ABI_MISMATCH);
 	batch = context->batch;
-	if ( batch->abi_version != SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_BATCH_VIEW_ABI_VERSION || batch->descriptor_bytes != sizeof(*batch) || batch->row_count == 0u || batch->row_count > SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_INPUT_ROW_COUNT || batch->active_sequence_count == 0u || batch->active_sequence_count > state->resident_sequence_capacity || batch->row_resident_slots == 0 || batch->row_positions == 0 || batch->row_sequence_ids == 0 )
+	if ( batch->abi_version != SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_BATCH_VIEW_ABI_VERSION || batch->descriptor_bytes != sizeof(*batch) || batch->row_count == 0u || batch->row_count > state->execution_row_capacity || batch->active_sequence_count == 0u || batch->active_sequence_count > state->resident_sequence_capacity || batch->row_resident_slots == 0 || batch->row_positions == 0 || batch->row_sequence_ids == 0 )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	prefill = (frame->flags & SPARK_MODEL_DRIVER_FRAME_FLAG_PREFILL) != 0u ? 1u : 0u;
 	if ( prefill == 0u && batch->row_count != batch->active_sequence_count )
@@ -1793,7 +1784,6 @@ typedef struct SparkGlm5NextTpChain
 	SparkGlm5NextCudaWave wave;
 	uint32_t first_row;
 	uint32_t wave_rows;
-	uint32_t next_wave_row;
 	uint32_t stage;
 	uint32_t next_layer;
 	uint32_t active;
@@ -1816,7 +1806,7 @@ static SparkStatus SparkGlm5NextEnqueueAsyncCompletion(
 	SparkGlm5NextExecutionSlot *slot,
 	uint32_t slot_index);
 
-static void SparkGlm5NextBuildWave(SparkGlm5NextTpChain *chain)
+static SparkStatus SparkGlm5NextBuildWave(SparkGlm5NextTpChain *chain)
 {
 	SparkGlm5NextModuleState *state;
 	SparkGlm5NextExecutionSlot *slot;
@@ -1897,29 +1887,25 @@ static void SparkGlm5NextBuildWave(SparkGlm5NextTpChain *chain)
 	wave->attention_split_partial_blocks = SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_ATTN_SPLIT_PARTIAL_BLOCKS(
 		state->execution_row_capacity,SPARK_GLM5_NEXT_MODEL_HEAD_COUNT / state->tp_degree);
 	{
-		uint32_t run,row_of_run;
-		slot->host_run_begin[0] = 0u;
-		run = 0u;
-		for (row=1u; row<chain->wave_rows; row++)
-		{
-			if ( slot->host_resident_slots[chain->first_row + row] !=
-			     slot->host_resident_slots[chain->first_row + row - 1u] )
-			{
-				run++;
-				slot->host_run_begin[run] = row;
-			}
-		}
-		run++;
-		slot->host_run_begin[run] = chain->wave_rows;
-		for (row_of_run=0u; row_of_run<run; row_of_run++)
-			slot->host_run_state_index[row_of_run] =
-				slot->host_resident_slots[chain->first_row + slot->host_run_begin[row_of_run]];
-		wave->run_count = run;
+		uint32_t lane,ordinals[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT],cursor[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT];
+		uint32_t lanes = chain->batch->active_sequence_count;
+		SparkRowLayoutDirectLaneContext map;
+		SparkStatus status = SparkRowLayoutDirectLaneMapInitialize(&map,ordinals,state->resident_sequence_capacity,wave->host_resident_slots,lanes);
+		if ( status == SPARK_STATUS_OK )
+			status = SparkRowLayoutGroupRows(chain->wave_rows,lanes,wave->host_resident_slots,SparkRowLayoutDirectLaneOrdinal,&map,slot->host_run_begin,slot->host_run_row_indices,cursor);
+		if ( status != SPARK_STATUS_OK )
+			return(status);
+		for (lane=0u; lane<lanes; lane++)
+			slot->host_run_state_index[lane] = wave->host_resident_slots[lane];
+		wave->run_count = lanes;
 		wave->sequence_row_begin = slot->run_begin;
+		wave->sequence_row_indices = slot->run_row_indices;
 		wave->run_state_index = slot->run_state_index;
 		wave->host_sequence_row_begin = slot->host_run_begin;
+		wave->host_sequence_row_indices = slot->host_run_row_indices;
 		wave->host_run_state_index = slot->host_run_state_index;
 	}
+	return(SPARK_STATUS_OK);
 }
 
 static SparkStatus SparkGlm5NextModuleCombineBf16(
@@ -2359,7 +2345,6 @@ static SparkStatus SparkGlm5NextMtpDriveDraft(
 		slot->host_resident_slots[step] = lane;
 	}
 	chain->wave_rows = SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MTP_DRAFT_DEPTH + 1u;
-	chain->next_wave_row = chain->wave_rows;
 	chain->spec_verify = 1u;
 	return(SPARK_STATUS_OK);
 }
@@ -3409,7 +3394,11 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 		     state->experts_warm != 0u )
 		{
 			SparkStatus graph_status;
-			SparkGlm5NextBuildWave(chain);
+			if ( SparkGlm5NextBuildWave(chain) != SPARK_STATUS_OK )
+			{
+				SparkGlm5NextTpChainFail(chain,SPARK_STATUS_INVALID_ARGUMENT);
+				return;
+			}
 			SparkGlm5NextGraphEnsure(chain,&graph_status);
 			if ( graph_status == SPARK_STATUS_OK )
 			{
@@ -3433,7 +3422,11 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 			SparkGlm5NextTpChainFail(chain,graph_status);
 			return;
 		}
-		SparkGlm5NextBuildWave(chain);
+		if ( SparkGlm5NextBuildWave(chain) != SPARK_STATUS_OK )
+		{
+			SparkGlm5NextTpChainFail(chain,SPARK_STATUS_INVALID_ARGUMENT);
+			return;
+		}
 		SparkGlm5NextT1Wave(&chain->wave);
 		if ( SparkGlm5NextLaunchCudaWaveBegin(&chain->wave) != 0 )
 		{
@@ -3589,22 +3582,6 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 				return;
 			}
 		}
-		if ( chain->next_wave_row < chain->batch->row_count )
-		{
-			uint32_t next_wave;
-			next_wave = SparkGlm5NextRoundMajorWaveRows(chain->state,chain->batch,chain->next_wave_row);
-			if ( next_wave == 0u )
-			{
-				SparkGlm5NextTpChainFail(chain,SPARK_STATUS_INVALID_ARGUMENT);
-				return;
-			}
-			chain->first_row = chain->next_wave_row;
-			chain->wave_rows = next_wave;
-			chain->next_wave_row += next_wave;
-			chain->stage = SPARK_GLM5_NEXT_CHAIN_STAGE_BEGIN;
-			SparkGlm5NextTpChainAdvance(chain,SPARK_STATUS_OK);
-			return;
-		}
 		if ( state->experts_warm == 0u )
 		{
 			state->experts_warm = 1u;
@@ -3739,7 +3716,7 @@ static SparkStatus SparkGlm5NextCaptureState(SparkGlm5NextAsyncCompletion *async
 	SparkGlm5NextModuleState *state = async->state;
 	SparkGlm5NextStateCapture *capture = async->state_capture;
 	SparkGlm5NextExecutionSlot *slot = &state->slots[async->slot_index];
-	uint32_t lane,page,resident,logical,physical,valid_tokens;
+	uint32_t lane,page,resident,logical,physical,valid_tokens,last_row;
 	uint64_t offset = 0u,key_bytes,index_bytes,hidden_bytes,map_offset;
 	SparkKvLaneTransaction *owner;
 	SparkGlm5NextStateCaptureLane *out;
@@ -3785,7 +3762,13 @@ static SparkStatus SparkGlm5NextCaptureState(SparkGlm5NextAsyncCompletion *async
 		if ( status != SPARK_STATUS_OK )
 			return(status);
 		offset += state->recurrent_page_bytes;
-		if ( cudaMemcpy(capture->payload + offset,slot->hidden_bf16 + lane * hidden_bytes / sizeof(uint16_t),hidden_bytes,cudaMemcpyDeviceToHost) != cudaSuccess || cudaMemcpy(&out->output_score,slot->output_score + lane,sizeof(float),cudaMemcpyDeviceToHost) != cudaSuccess )
+		last_row = async->row_count;
+		while ( last_row != 0u && slot->host_resident_slots[last_row - 1u] != resident )
+			last_row--;
+		if ( last_row == 0u )
+			SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
+		last_row--;
+		if ( cudaMemcpy(capture->payload + offset,slot->hidden_bf16 + last_row * hidden_bytes / sizeof(uint16_t),hidden_bytes,cudaMemcpyDeviceToHost) != cudaSuccess || cudaMemcpy(&out->output_score,slot->output_score + last_row,sizeof(float),cudaMemcpyDeviceToHost) != cudaSuccess )
 			SPARK_FAIL(SPARK_STATUS_IO_ERROR);
 		offset += hidden_bytes;
 		out->payload_bytes = offset - out->payload_offset;
@@ -4160,8 +4143,7 @@ static SparkStatus SparkGlm5NextStartClaimedBatch(SparkGlm5NextModuleState *stat
 	chain->context = context;
 	chain->batch = context->batch;
 	state->completions[slot_index].chain_start_ns = SparkGlm5NextNowNs();
-	chain->wave_rows = SparkGlm5NextRoundMajorWaveRows(state,context->batch,0u);
-	chain->next_wave_row = chain->wave_rows;
+	chain->wave_rows = context->batch->row_count;
 	chain->stage = SPARK_GLM5_NEXT_CHAIN_STAGE_BEGIN;
 	chain->active = 1u;
 	atomic_fetch_add_explicit(&state->submitted_count,1u,memory_order_relaxed);
@@ -4404,7 +4386,7 @@ SparkStatus SparkGlm5NextResidentDecodeStageAdmit(
 	table.abi_version = SPARK_ADMISSION_ABI_VERSION;
 	table.descriptor_bytes = (uint32_t)sizeof(table);
 	table.max_active_sequence_count = state->resident_sequence_capacity;
-	table.max_input_row_count = SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_INPUT_ROW_COUNT;
+	table.max_input_row_count = state->execution_row_capacity;
 	table.max_sequence_positions = state->max_sequence_positions;
 	table.flags = SPARK_ADMISSION_POLICY_FLAG_DECODE_EQUALS_SLOTS |
 		SPARK_ADMISSION_POLICY_FLAG_ALLOW_DISPATCH_FLAG;

@@ -155,6 +155,7 @@ static int32_t check_cache_transactions(void)
 	memset(device_table,0xff,sizeof(device_table));
 	memset(shadow,0xff,sizeof(shadow));
 	state.pipeline_slot_count = 2u;
+	state.execution_row_capacity = 1u;
 	state.resident_sequence_capacity = 4u;
 	state.pages_per_sequence = 4u;
 	state.kv_transactions = fixture.transactions;
@@ -164,6 +165,10 @@ static int32_t check_cache_transactions(void)
 	state.page_table_shadow = shadow;
 	if ( pthread_mutex_init(&state.kv_mutex,0) != 0 )
 		return(-20);
+	assert(SparkGlm5NextResidentDecodeStageAdmit(&state,&fixture.request,&decision) == SPARK_STATUS_OK);
+	assert(decision.accepted == 0u && decision.rejection_reason == SPARK_MODEL_DRIVER_ADMISSION_REJECTED_UNSUPPORTED_SHAPE);
+	assert(fixture.owners[0].phase == SPARK_KV_LANE_TRANSACTION_EMPTY && fixture.owners[1].phase == SPARK_KV_LANE_TRANSACTION_EMPTY);
+	state.execution_row_capacity = 2u;
 	SparkModelDriverInitializeAdmissionDecision(&decision);
 	if ( SparkGlm5NextAdmissionPredicate(&state,&fixture.request,&decision) != SPARK_STATUS_OK || SparkModelDriverAdmissionDecisionIsValid(&decision) == 0u )
 		return(-21);
@@ -273,42 +278,55 @@ static int32_t check_cache_release(void)
 static int32_t check_batch_waves(void)
 {
 	SparkGlm5NextResidentDecodeStageBatchView batch = {0};
-	uint32_t slots[303],width,row;
+	SparkGlm5NextResidentDecodeStageFrameContext context = {.batch=&batch};
+	SparkGlm5NextTpChain chain = {.state=&state,.slot=&state.slots[0],.context=&context,.batch=&batch};
+	SparkGlm5NextExecutionSlot *slot = &state.slots[0];
+	uint32_t slots[303],positions[303] = {0},begin[102],indices[303],runs[101],width,row,lane;
+	uint32_t ragged[8] = {5u,2u,9u,5u,2u,9u,5u,9u};
+	uint32_t expected[8] = {0u,3u,6u,1u,4u,2u,5u,7u};
 	atomic_uint *claims = state.lane_states;
 	state.resident_sequence_capacity = 101u;
+	state.tp_degree = 1u;
+	slot->host_positions = positions;
+	slot->host_run_begin = begin;
+	slot->host_run_row_indices = indices;
+	slot->host_run_state_index = runs;
 	for (row=0u; row<101u; row++)
 		atomic_init(&claims[row],SPARK_STAGE_MODULE_SLOT_FREE);
-	uint32_t ragged[8] = {5u,2u,9u,5u,2u,9u,5u,9u};
-	batch.row_resident_slots = slots;
+	batch.row_resident_slots = slot->host_resident_slots = slots;
 	for (width=1u; width<=101u; width++)
 	{
 		batch.active_sequence_count = width;
-		batch.row_count = (width * 3u);
+		chain.wave_rows = batch.row_count = width * 3u;
 		for (row=0u; row<batch.row_count; row++)
-			slots[row] = (width - 1u - (row % width));
-		if ( SparkGlm5NextValidateRoundMajor(&state,&batch) != SPARK_STATUS_OK || SparkStageModuleIndexSetClaim(claims,101u,slots,width) != SPARK_STATUS_OK )
-			return(-4);
-		for (row=0u; row<batch.row_count; row+=width)
-			if ( SparkGlm5NextRoundMajorWaveRows(&state,&batch,row) != width )
-				return(-1);
+			slots[row] = width - 1u - row % width;
+		assert(SparkGlm5NextValidateRoundMajor(&state,&batch) == SPARK_STATUS_OK);
+		assert(SparkStageModuleIndexSetClaim(claims,101u,slots,width) == SPARK_STATUS_OK);
+		assert(SparkGlm5NextBuildWave(&chain) == SPARK_STATUS_OK);
+		assert(chain.wave.row_count == 3u * width && chain.wave.run_count == width);
+		for (lane=0u; lane<width; lane++)
+		{
+			assert(runs[lane] == slots[lane] && begin[lane] == lane * 3u);
+			for (row=0u; row<3u; row++)
+				assert(indices[begin[lane] + row] == lane + row * width);
+		}
+		assert(begin[width] == batch.row_count);
 		SparkStageModuleIndexSetRelease(claims,101u,slots,width);
 	}
-	batch.row_resident_slots = ragged;
+	batch.row_resident_slots = slot->host_resident_slots = ragged;
 	batch.active_sequence_count = 3u;
-	batch.row_count = 8u;
-	if ( SparkGlm5NextValidateRoundMajor(&state,&batch) != SPARK_STATUS_OK || SparkStageModuleIndexSetClaim(claims,101u,ragged,3u) != SPARK_STATUS_OK )
-		return(-5);
-	if ( SparkGlm5NextRoundMajorWaveRows(&state,&batch,0u) != 3u || SparkGlm5NextRoundMajorWaveRows(&state,&batch,3u) != 3u || SparkGlm5NextRoundMajorWaveRows(&state,&batch,6u) != 2u )
-		return(-2);
-	if ( SparkGlm5NextRoundMajorWaveRows(&state,&batch,8u) != 0u || SparkGlm5NextRoundMajorWaveRows(&state,0,0u) != 0u )
-		return(-3);
-	SparkStageModuleIndexSetRelease(claims,101u,ragged,3u);
-	if ( SparkGlm5NextRoundMajorWaveRows(&state,&batch,0u) != 0u )
-		return(-6);
+	chain.wave_rows = batch.row_count = 8u;
+	assert(SparkGlm5NextValidateRoundMajor(&state,&batch) == SPARK_STATUS_OK);
+	assert(SparkGlm5NextBuildWave(&chain) == SPARK_STATUS_OK);
+	assert(chain.wave.row_count == 8u && chain.wave.run_count == 3u);
+	assert(begin[0] == 0u && begin[1] == 3u && begin[2] == 5u && begin[3] == 8u);
+	assert(memcmp(indices,expected,sizeof(expected)) == 0);
 	ragged[6] = 9u;
 	ragged[7] = 5u;
-	if ( SparkGlm5NextValidateRoundMajor(&state,&batch) == SPARK_STATUS_OK )
-		return(-7);
+	assert(SparkGlm5NextValidateRoundMajor(&state,&batch) != SPARK_STATUS_OK);
+	ragged[7] = 10u;
+	assert(SparkGlm5NextBuildWave(&chain) == SPARK_STATUS_INVALID_ARGUMENT);
+	memset(slot,0,sizeof(*slot));
 	return(0);
 }
 
@@ -480,14 +498,16 @@ static void check_physical_budget(void)
 		SparkGlm5NextStateCaptureLane lane;
 		uint32_t logical[2],mapped[2];
 		uint64_t hidden_bytes = (uint64_t)SPARK_GLM5_NEXT_MODEL_HC_MULT * SPARK_GLM5_NEXT_MODEL_HIDDEN_DIMENSION * sizeof(uint16_t);
-		float score = 1.25f;
-		uint8_t *hidden = malloc(hidden_bytes),*payload = malloc(2u * (key_bytes + value_bytes) + hidden_bytes);
+		float scores[2] = {3.5f,1.25f};
+		uint32_t capture_slots[2] = {0u,0u};
+		uint8_t *hidden = malloc(2u * hidden_bytes),*payload = malloc(2u * (key_bytes + value_bytes) + hidden_bytes);
 		SparkGlm5NextStateCapture capture = {.abi_version=SPARK_GLM5_NEXT_STATE_CAPTURE_ABI_VERSION,.descriptor_bytes=sizeof(capture),.lane_capacity=1u,.pages_per_lane_capacity=2u,.payload_capacity=2u * (key_bytes + value_bytes) + hidden_bytes,.lanes=&lane,.logical_pages=logical,.physical_pages=mapped,.payload=payload};
-		SparkGlm5NextResidentDecodeStageBatchView batch = {.row_count=1u,.active_sequence_count=1u};
+		SparkGlm5NextResidentDecodeStageBatchView batch = {.row_count=2u,.active_sequence_count=1u};
 		SparkGlm5NextResidentDecodeStageFrameContext context = {.batch=&batch,.state_capture=&capture};
-		SparkGlm5NextAsyncCompletion completion = {.state=&state,.lane_count=1u,.row_count=1u,.lane_next_positions={64u},.lane_sequence_ids={1u},.state_capture=&capture};
+		SparkGlm5NextAsyncCompletion completion = {.state=&state,.lane_count=1u,.row_count=2u,.lane_next_positions={64u},.lane_sequence_ids={1u},.state_capture=&capture};
 		assert(hidden != 0 && payload != 0);
-		memset(hidden,0x65,hidden_bytes);
+		memset(hidden,0x35,hidden_bytes);
+		memset(hidden + hidden_bytes,0x65,hidden_bytes);
 		state.owns_final_head = 1u;
 		assert(SparkGlm5NextValidateStateCapture(&state,&context) == SPARK_STATUS_OK);
 		capture.payload_capacity--;
@@ -497,7 +517,8 @@ static void check_physical_budget(void)
 		assert(SparkGlm5NextValidateStateCapture(&state,&context) == SPARK_STATUS_ABI_MISMATCH);
 		capture.abi_version--;
 		state.slots[0].hidden_bf16 = (uint16_t *)hidden;
-		state.slots[0].output_score = &score;
+		state.slots[0].output_score = scores;
+		state.slots[0].host_resident_slots = capture_slots;
 		state.kv_lane_transactions[0].phase = SPARK_KV_LANE_TRANSACTION_EXECUTING;
 		state.kv_lane_transactions[0].page_count = 1u;
 		state.kv_lane_logical_pages[0] = pages[2];
@@ -505,8 +526,8 @@ static void check_physical_budget(void)
 		assert(SparkKvCacheArenaPinResidentBlock(&state.kv_arena,pages[2]) == SPARK_STATUS_OK);
 		assert(SparkGlm5NextCaptureState(&completion) == SPARK_STATUS_OK);
 		assert(capture.payload_bytes == key_bytes + value_bytes + hidden_bytes && capture.backing_write_count == state.kv_page_store.write_count && capture.backing_read_count == 1u);
-		assert(lane.next_position == 64u && lane.page_count == 1u && lane.output_score == score && logical[0] == pages[2] && mapped[0] == state.kv_blocks[pages[2]].resident_slot_index);
-		assert(memcmp(payload,expected,key_bytes + value_bytes) == 0 && memcmp(payload + key_bytes + value_bytes,hidden,hidden_bytes) == 0);
+		assert(lane.next_position == 64u && lane.page_count == 1u && lane.output_score == scores[1] && logical[0] == pages[2] && mapped[0] == state.kv_blocks[pages[2]].resident_slot_index);
+		assert(memcmp(payload,expected,key_bytes + value_bytes) == 0 && memcmp(payload + key_bytes + value_bytes,hidden + hidden_bytes,hidden_bytes) == 0);
 		assert(SparkKvCacheArenaUnpinResidentBlock(&state.kv_arena,pages[2]) == SPARK_STATUS_OK);
 		assert(SparkGlm5NextCaptureState(&completion) == SPARK_STATUS_INTERNAL_ERROR && capture.payload_bytes == 0u);
 		free(hidden);
@@ -766,6 +787,7 @@ static void check_module_reset(void)
 	state.kv_transactions = fixture.transactions;
 	state.kv_lane_transactions = fixture.owners;
 	state.pipeline_slot_count = 2u;
+	state.execution_row_capacity = 1u;
 	state.resident_sequence_capacity = 4u;
 	state.pages_per_sequence = 4u;
 	state.page_table_shadow = shadow;
