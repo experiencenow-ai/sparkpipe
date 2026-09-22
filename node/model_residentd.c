@@ -1906,6 +1906,13 @@ static void SparkModelResidentdReadCandidate(
 	ssize_t bytes_read;
 	if ( runtime->candidate_fd < 0 )
 		return;
+	if ( runtime->candidate_input_bytes >= sizeof(runtime->candidate_input) )
+	{
+		close(runtime->candidate_fd);
+		runtime->candidate_fd = -1;
+		runtime->candidate_input_bytes = 0u;
+		return;
+	}
 	bytes_read = read(runtime->candidate_fd,
 		runtime->candidate_input + runtime->candidate_input_bytes,
 		sizeof(runtime->candidate_input) - runtime->candidate_input_bytes);
