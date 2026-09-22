@@ -190,6 +190,21 @@ else
     archive adapter
   ADAPTER="$CHECKOUT/build/modules/qwen38_max_resident_decode_stage/$EXPERT_CODEC/libqwen38_max_serving_adapter_$EXPERT_CODEC.so"
   [ -f "$ADAPTER" ] || fail "adapter not built: $ADAPTER"
+  # The driver compile resolves the module by exact identity from
+  # build/module_library; publish it first (whole-stack smoke tier on the
+  # rank-0 placed pack, the validator's admitted single-node tier).
+  PUBLISH_PACK="/home/$HOST/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank0.sp"
+  [ -r "$PUBLISH_PACK" ] || fail "rank-0 placed pack missing: $PUBLISH_PACK"
+  make -C "$CHECKOUT/modules/qwen38_max_resident_decode_stage" -j1 \
+    CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
+    EXPERT_CODEC="$EXPERT_CODEC" \
+    MODEL_REVISION="$MODEL_REVISION" \
+    CONTRACT_SHA256="$CONTRACT_SHA256" \
+    STAGE_PACK_PATH="$PUBLISH_PACK" \
+    STAGE_COUNT=1 STAGE_INDEX=0 STAGE_FIRST_LAYER=0 STAGE_LAYER_COUNT=92 \
+    MTP_LAYER_COUNT=0 MAX_ACTIVE_SEQUENCES=8 KV_BLOCK_COUNT=8 \
+    ALLOW_UNQUALIFIED_EXECUTION=1 \
+    publish
   rm -rf "$ROOT/driver"
   "$CHECKOUT/build/sparkpipe_model_compile" \
     --model "$CHECKOUT/examples/model_descriptions/qwen38_max_resident_decode_stage_firmware.json" \

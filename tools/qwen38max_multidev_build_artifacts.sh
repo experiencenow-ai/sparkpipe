@@ -2,9 +2,11 @@
 # qwen38max_multidev_build_artifacts.sh — build the lane-2 wrapper's
 # PREBUILT artifact set on THIS node (multidev M3 build arm).
 #
-# A CPU queue job (nvcc compiles CUDA but needs no GPU device) that
-# produces the coherent artifact set the wrapper's QMAX_PREBUILT_DIR
-# consumes, in a persistent node-local directory:
+# A GPU-owned queue job (glm5_next build precedent): nvcc compiles CUDA
+# and the module publish step executes retained-receipt GPU validation,
+# so a CPU-only reservation is insufficient. Produces the coherent
+# artifact set the wrapper's QMAX_PREBUILT_DIR consumes, in a persistent
+# node-local directory:
 #
 #   /home/<host>/sparkdata/qwen38max.tp16/build-latest/
 #     sparkpipe_model_residentd  model_serving_adapter.so
@@ -12,15 +14,19 @@
 #
 # Same build chain as the wrapper's inline path (the family's proven
 # qwen38_tp4_build.sh flow): root targets, module archive+adapter with
-# the pinned serving revision, then sparkpipe_model_compile for the
-# driver. Atomic: builds into build-partial.$$ and renames on success.
-# Queue cmd stays BARE.
+# the pinned serving revision, module publish (whole-stack smoke tier on
+# the rank-0 placed pack, the only pack a single-node TP1 validation may
+# touch), then sparkpipe_model_compile for the driver — the driver
+# compile resolves the module from build/module_library, so the publish
+# MUST precede it. Atomic: builds into build-partial.$$ and renames on
+# success. Queue cmd stays BARE.
 set -euo pipefail
 
 WORLD=16
 EXPERT_CODEC="fp8"
 MODEL_REVISION="d2dc35658bcf77e66643428cb52e774cc3b5bd29"
 CONTRACT="model_contracts/qwen38_authoritative.json"
+PACK="/home/$(hostname)/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank0.sp"
 OUT_REL="sparkdata/qwen38max.tp16/build-latest"
 
 fail() { echo "qwen38max-build-artifacts: $*" >&2; exit 1; }
@@ -44,17 +50,19 @@ rm -rf "$PARTIAL"
 mkdir -p "$PARTIAL"
 trap 'rm -rf "$PARTIAL"' EXIT
 
+[ -r "$PACK" ] || fail "rank-0 placed pack missing: $PACK (operator-placed NVMe set; no pack, no publish)"
+
 PATH="/usr/local/cuda/bin:$PATH"
 export PATH
 CONTRACT_SHA256="$(sha256sum "$CHECKOUT/$CONTRACT" | awk '{print $1}')"
 START="$(date +%s)"
 
-make -C "$CHECKOUT" -j2 \
+make -C "$CHECKOUT" -j4 \
   build/sparkpipe_model_residentd \
   build/sparkpipe_model_compile \
   build/weightd_warm \
   hidden_transport_spark_host_rdma_verbs
-make -C "$CHECKOUT/modules/qwen38_max_resident_decode_stage" -j2 \
+make -C "$CHECKOUT/modules/qwen38_max_resident_decode_stage" -j4 \
   CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
   EXPERT_CODEC="$EXPERT_CODEC" \
   MODEL_REVISION="$MODEL_REVISION" \
@@ -62,6 +70,22 @@ make -C "$CHECKOUT/modules/qwen38_max_resident_decode_stage" -j2 \
   archive adapter
 ADAPTER="$CHECKOUT/build/modules/qwen38_max_resident_decode_stage/$EXPERT_CODEC/libqwen38_max_serving_adapter_$EXPERT_CODEC.so"
 [ -f "$ADAPTER" ] || fail "adapter not built: $ADAPTER"
+# Publish the validated module into build/module_library: the driver
+# compile below resolves the module by exact identity from the library
+# and fails with MODULE_NOT_VALIDATED without this. Whole-stack smoke
+# tier (STAGE_COUNT=1, all 92 layers, TP1, MAS=8) on the rank-0 placed
+# pack — the validator's admitted single-node tier (qwen38_27b publish
+# precedent: tp4-rank0 pack + standalone whole-stack).
+make -C "$CHECKOUT/modules/qwen38_max_resident_decode_stage" -j2 \
+  CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
+  EXPERT_CODEC="$EXPERT_CODEC" \
+  MODEL_REVISION="$MODEL_REVISION" \
+  CONTRACT_SHA256="$CONTRACT_SHA256" \
+  STAGE_PACK_PATH="$PACK" \
+  STAGE_COUNT=1 STAGE_INDEX=0 STAGE_FIRST_LAYER=0 STAGE_LAYER_COUNT=92 \
+  MTP_LAYER_COUNT=0 MAX_ACTIVE_SEQUENCES=8 KV_BLOCK_COUNT=8 \
+  ALLOW_UNQUALIFIED_EXECUTION=1 \
+  publish
 "$CHECKOUT/build/sparkpipe_model_compile" \
   --model "$CHECKOUT/examples/model_descriptions/qwen38_max_resident_decode_stage_firmware.json" \
   --stage qwen38_max_resident_decode_stage \
