@@ -2165,3 +2165,21 @@ two open items stand: (a) the tail-layer chunk creation class at the
 weightsd (the 190s walk), (b) the map reconnect (weightd-recycle
 resilience). Then the ladder: warm canary → GRAPH → ARRIVAL → clean
 µs/round.
+
+## 09-23 02:00 TICK — the verdict instrument deployed through the core channel; routes stall at RESOLVING
+
+- THE PACK EXONERATED: receipt file_bytes == on-disk size (21,706,046,976)
+  — not truncation; the tail-layer class is not a short pack.
+- THE VERDICT INSTRUMENT LIVE: rate-limited ACQUIRE-FAIL lines (layer0,
+  key_count, status + the full budget arithmetic: pool/retained/other-
+  resident/device_max/chunk_count) + the sticky ARENA-FAILED path gets
+  its own line. Deployed via the core announce channel (hub WEIGHTSD_BIN
+  sha16 → agents sync core → install → recycle) — daemon a6c9188e live
+  16/16, mesh wired. FIRST core-channel deploy through this flow.
+- STATE AT WRAP: submissions admitted (the watermark fix holds) but
+  routes stall at state=1 RESOLVING (~36s age) — the resolve path's own
+  acquire never reaches the daemon (weightd log quiet; no ACQUIRE lines
+  yet). The verdict lands when a route's resolve actually issues its
+  acquire. NEXT: (a) read the ACQUIRE-FAIL verdicts, (b) the
+  RESOLVING-stall question (why the resolve's acquire never fires),
+  (c) map reconnect still queued.
