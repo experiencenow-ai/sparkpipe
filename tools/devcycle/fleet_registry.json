@@ -12,14 +12,15 @@
         "spark3"
       ],
       "rank_count": 4,
-      "runtime_root": "/home/{host}/sparkdata/qwen38.bf16.pp16",
-      "pack_dir": "/home/{host}/sparkdata/qwen38.bf16.pp16/packs",
-      "control_port_base": 17480,
-      "collective_port_base": 61620,
-      "transport_control_base": 58700,
-      "owner": "qwen session - verify runtime_root and fill deployment specifics",
+      "runtime_root": "/home/{host}/sparkdata/qwen38-27b.nvfp4a16.tp4",
+      "pack_dir": "/home/{host}/sparkdata/qwen38-27b.nvfp4a16.tp4/packs",
+      "control_port_base": 23016,
+      "collective_port_base": 67016,
+      "transport_control_base": 64016,
+      "owner": "dev-lane1 (multidev lane 1)",
       "status": "active",
-      "topology": "TP4"
+      "topology": "TP4",
+      "notes": "Complete Qwen 3.8 27B TP4 rank pack set tp4-rank00..03.q38sp (nvfp4 FFN + bf16 spine, 11.8 GB/rank) on spark0-3. Lane-1 launch: tools/qwen38_27b_lane_launch.sh (PR #1087). Ports are the multidev lane-1 block (lane_assignments.json); the old always-on block 17480/61620/58700 is retired. The COORDINATION-era qwen38.bf16.pp16 runtime root never existed on the nodes; bf16 TP4 pack regen is in the rotation queue."
     },
     "dsv4-flash": {
       "tier": "always-on",
