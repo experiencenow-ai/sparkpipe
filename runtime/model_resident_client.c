@@ -70,6 +70,7 @@ struct SparkModelResidentClient
 	uint32_t pending_count;
 	uint32_t prepared_count;
 	uint64_t client_generation;
+	uint64_t session_epoch;
 	SparkModelServingRuntimeLimits runtime_limits;
 	SparkModelResidentEndpoint endpoint;
 	uint32_t connect_timeout_ms;
@@ -347,6 +348,27 @@ static SparkStatus SparkModelResidentClientOpenEndpoint(
 	SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 }
 
+static SparkStatus SparkModelResidentClientResolveSessionEpoch(
+	SparkModelResidentClient *client,
+	const SparkModelResidentClientConfiguration *configuration)
+{
+	struct timespec now_ts;
+	if ( client->session_epoch != 0u )
+		return(SPARK_STATUS_OK);
+	if ( configuration != 0 && configuration->session_epoch != 0u )
+	{
+		client->session_epoch = configuration->session_epoch;
+		return(SPARK_STATUS_OK);
+	}
+	if ( clock_gettime(CLOCK_MONOTONIC,&now_ts) != 0 )
+		return(SPARK_STATUS_IO_ERROR);
+	client->session_epoch = (uint64_t)now_ts.tv_sec * UINT64_C(1000000000) + (uint64_t)now_ts.tv_nsec;
+	client->session_epoch ^= (uint64_t)(client->rank_index + 1u) << 48;
+	if ( client->session_epoch == 0u )
+		client->session_epoch = 1u;
+	return(SPARK_STATUS_OK);
+}
+
 static SparkStatus SparkModelResidentClientHandshake(
 	SparkModelResidentClient *client,
 	const SparkModelResidentClientConfiguration *configuration)
@@ -354,7 +376,9 @@ static SparkStatus SparkModelResidentClientHandshake(
 	SparkModelResidentIpcHello hello;
 	SparkModelResidentIpcHelloAck ack;
 	SparkStatus status;
-	status = SparkModelResidentIpcInitializeHello(&hello,1u,configuration->rank_index,configuration->stage_index,configuration->adapter_descriptor);
+	status = SparkModelResidentClientResolveSessionEpoch(client,configuration);
+	if ( status == SPARK_STATUS_OK )
+		status = SparkModelResidentIpcInitializeHello(&hello,1u,configuration->rank_index,configuration->stage_index,client->session_epoch,configuration->adapter_descriptor);
 	if ( status == SPARK_STATUS_OK )
 		status = SparkModelResidentClientWriteFull(client->fd,&hello,sizeof(hello),configuration->connect_timeout_ms);
 	if ( status == SPARK_STATUS_OK )
@@ -364,7 +388,7 @@ static SparkStatus SparkModelResidentClientHandshake(
 	if ( status == SPARK_STATUS_OK )
 		status = SparkModelResidentClientReadFull(client->fd,(uint8_t *)&ack + sizeof(ack.header),sizeof(ack) - sizeof(ack.header),configuration->connect_timeout_ms);
 	if ( status == SPARK_STATUS_OK )
-		status = SparkModelResidentIpcValidateHelloAck(&ack,sizeof(ack),1u,configuration->rank_index,configuration->stage_index,configuration->adapter_descriptor,&configuration->runtime_limits);
+		status = SparkModelResidentIpcValidateHelloAck(&ack,sizeof(ack),1u,configuration->rank_index,configuration->stage_index,client->session_epoch,configuration->adapter_descriptor,&configuration->runtime_limits);
 	if ( status == SPARK_STATUS_OK && ack.status != SPARK_STATUS_OK )
 		status = (SparkStatus)ack.status;
 	if ( status == SPARK_STATUS_OK )

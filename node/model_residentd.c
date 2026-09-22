@@ -145,6 +145,7 @@ typedef struct SparkModelResidentdClient
 	uint32_t input_capacity;
 	uint64_t had_active_routes;
 	uint64_t generation;
+	uint64_t session_epoch;
 	uint64_t pending_client_reset;
 	uint64_t reset_attempt_ns;
 	uint64_t reset_done;
@@ -225,6 +226,9 @@ typedef struct SparkModelResidentdRuntime
 	cudaStream_t execution_stream;
 	cudaStream_t transport_stream;
 	int32_t listen_fd;
+	int32_t candidate_fd;
+	uint32_t candidate_input_bytes;
+	uint8_t candidate_input[512];
 	int32_t wake_read_fd;
 	int32_t wake_write_fd;
 	uint32_t control_endpoint_kind;
@@ -1151,6 +1155,8 @@ static void SparkModelResidentdResetRuntime(SparkModelResidentdRuntime *runtime)
 	runtime->wake_read_fd = -1;
 	runtime->wake_write_fd = -1;
 	runtime->client.fd = -1;
+	runtime->candidate_fd = -1;
+	runtime->candidate_input_bytes = 0u;
 	runtime->client.generation = SparkModelResidentdMonotonicTimeNs();
 	if ( runtime->client.generation == 0u )
 		runtime->client.generation = 1u;
@@ -1459,6 +1465,21 @@ static void SparkModelResidentdCloseClient(SparkModelResidentdRuntime *runtime)
 	}
 }
 
+static void SparkModelResidentdDetachClient(SparkModelResidentdRuntime *runtime)
+{
+	pthread_mutex_lock(&runtime->mutex);
+	if ( runtime->client.fd >= 0 )
+		close(runtime->client.fd);
+	runtime->client.fd = -1;
+	runtime->client.input_bytes = 0u;
+	runtime->client.target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
+	runtime->client.close_after_output = 0u;
+	pthread_mutex_unlock(&runtime->mutex);
+	fprintf(stderr,
+	    "model_residentd client detached (session epoch kept, awaiting reattach) generation=%llu\n",
+	    (unsigned long long)runtime->client.generation);
+}
+
 static uint64_t SparkModelResidentdMonotonicTimeNs(void)
 {
 	struct timespec timestamp;
@@ -1561,13 +1582,6 @@ static void SparkModelResidentdDestroy(
 static void SparkModelResidentdAcceptClient(SparkModelResidentdRuntime *runtime)
 {
 	int32_t fd;
-	if ( runtime->client.fd >= 0 )
-	{
-		fprintf(stderr,
-		    "model_residentd takeover: closing old client fd=%d for new connection\n",
-		    runtime->client.fd);
-		SparkModelResidentdCloseClient(runtime);
-	}
 	fd = accept(runtime->listen_fd,0,0);
 	if ( fd < 0 )
 		return;
@@ -1600,14 +1614,10 @@ static void SparkModelResidentdAcceptClient(SparkModelResidentdRuntime *runtime)
 			(void)setsockopt(fd,IPPROTO_TCP,TCP_KEEPCNT,&keepcnt,sizeof(keepcnt));
 		}
 	}
-	pthread_mutex_lock(&runtime->mutex);
-	runtime->client.fd = fd;
-	runtime->client.target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
-	runtime->client.last_activity_ns = SparkModelResidentdMonotonicTimeNs();
-	runtime->client.generation += 1u;
-	if ( runtime->client.generation == 0u )
-		runtime->client.generation = 1u;
-	pthread_mutex_unlock(&runtime->mutex);
+	if ( runtime->candidate_fd >= 0 )
+		close(runtime->candidate_fd);
+	runtime->candidate_fd = fd;
+	runtime->candidate_input_bytes = 0u;
 }
 
 static SparkModelResidentdRoute *SparkModelResidentdReserveRoute(
@@ -1766,6 +1776,7 @@ static SparkStatus SparkModelResidentdProcessHello(
 	queue_status = SparkModelResidentIpcInitializeHelloAck(&ack,
 		hello->header.message_id,status,runtime->rank_plan.rank_index,
 		runtime->rank_plan.stage_index,runtime->client.generation,
+		hello->session_epoch,
 		runtime->adapter_library.adapter_interface.descriptor,
 		&runtime->runtime_limits);
 	if ( queue_status == SPARK_STATUS_OK )
@@ -1778,6 +1789,7 @@ static SparkStatus SparkModelResidentdProcessHello(
 	{
 		pthread_mutex_lock(&runtime->mutex);
 		runtime->client.hello_complete = 1u;
+		runtime->client.session_epoch = hello->session_epoch;
 		runtime->client.last_submission_id = 0u;
 		runtime->client.pending_client_reset = runtime->client.generation;
 		runtime->client.reset_attempt_ns = 0u;
@@ -1816,6 +1828,122 @@ static SparkStatus SparkModelResidentdProcessHello(
 			(unsigned)runtime->client.reset_done);
 	}
 	SPARK_RETURN(queue_status);
+}
+
+static SparkStatus SparkModelResidentdAdoptCandidate(
+	SparkModelResidentdRuntime *runtime,
+	const SparkModelResidentIpcHello *hello)
+{
+	SparkModelResidentIpcHelloAck ack;
+	SparkStatus status,queue_status;
+	int32_t fd;
+	fd = runtime->candidate_fd;
+	runtime->candidate_fd = -1;
+	status = SparkModelResidentIpcValidateHello(hello,
+		SPARK_MODEL_RESIDENT_IPC_HELLO_BYTES,runtime->rank_plan.rank_index,
+		runtime->rank_plan.stage_index,
+		runtime->adapter_library.adapter_interface.descriptor);
+	if ( status != SPARK_STATUS_OK )
+	{
+		fprintf(stderr,
+		    "model_residentd candidate rejected status=%u epoch=%llu (current client untouched)\n",
+		    (unsigned)status,
+		    (unsigned long long)hello->session_epoch);
+		close(fd);
+		SPARK_RETURN(status);
+	}
+	pthread_mutex_lock(&runtime->mutex);
+	if ( runtime->client.hello_complete != 0u &&
+		hello->session_epoch == runtime->client.session_epoch )
+	{
+		if ( runtime->client.fd >= 0 )
+			close(runtime->client.fd);
+		runtime->client.fd = fd;
+		runtime->client.input_bytes = 0u;
+		runtime->client.target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
+		runtime->client.close_after_output = 0u;
+		runtime->client.last_activity_ns = SparkModelResidentdMonotonicTimeNs();
+		queue_status = SparkModelResidentIpcInitializeHelloAck(&ack,
+			hello->header.message_id,SPARK_STATUS_OK,
+			runtime->rank_plan.rank_index,runtime->rank_plan.stage_index,
+			runtime->client.generation,runtime->client.session_epoch,
+			runtime->adapter_library.adapter_interface.descriptor,
+			&runtime->runtime_limits);
+		if ( queue_status == SPARK_STATUS_OK )
+			queue_status = SparkModelResidentdQueueRawLocked(runtime,&ack,sizeof(ack));
+		pthread_mutex_unlock(&runtime->mutex);
+		fprintf(stderr,
+		    "model_residentd client REATTACH same-epoch fd=%d generation=%llu (session state kept, no reset)\n",
+		    fd,(unsigned long long)runtime->client.generation);
+		SPARK_RETURN(queue_status);
+	}
+	if ( runtime->client.hello_complete != 0u )
+	{
+		fprintf(stderr,
+		    "model_residentd client takeover: new epoch %llu replaces %llu — old session cleared\n",
+		    (unsigned long long)hello->session_epoch,
+		    (unsigned long long)runtime->client.session_epoch);
+		SparkModelResidentdCloseClientLocked(runtime);
+		runtime->client.generation += 1u;
+		if ( runtime->client.generation == 0u )
+			runtime->client.generation = 1u;
+	}
+	runtime->client.fd = fd;
+	runtime->client.input_bytes = 0u;
+	runtime->client.target_bytes = SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES;
+	runtime->client.close_after_output = 0u;
+	runtime->client.last_activity_ns = SparkModelResidentdMonotonicTimeNs();
+	runtime->client.hello_complete = 0u;
+	pthread_mutex_unlock(&runtime->mutex);
+	SPARK_RETURN(SparkModelResidentdProcessHello(runtime,hello,
+		SPARK_MODEL_RESIDENT_IPC_HELLO_BYTES));
+}
+
+static void SparkModelResidentdReadCandidate(
+	SparkModelResidentdRuntime *runtime)
+{
+	const SparkModelResidentIpcHeader *header;
+	ssize_t bytes_read;
+	if ( runtime->candidate_fd < 0 )
+		return;
+	bytes_read = read(runtime->candidate_fd,
+		runtime->candidate_input + runtime->candidate_input_bytes,
+		sizeof(runtime->candidate_input) - runtime->candidate_input_bytes);
+	if ( bytes_read == 0 )
+	{
+		close(runtime->candidate_fd);
+		runtime->candidate_fd = -1;
+		runtime->candidate_input_bytes = 0u;
+		return;
+	}
+	if ( bytes_read < 0 )
+	{
+		if ( errno != EAGAIN && errno != EWOULDBLOCK )
+		{
+			close(runtime->candidate_fd);
+			runtime->candidate_fd = -1;
+			runtime->candidate_input_bytes = 0u;
+		}
+		return;
+	}
+	runtime->candidate_input_bytes += (uint32_t)bytes_read;
+	if ( runtime->candidate_input_bytes < SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES )
+		return;
+	header = (const SparkModelResidentIpcHeader *)runtime->candidate_input;
+	if ( runtime->candidate_input_bytes == SPARK_MODEL_RESIDENT_IPC_HEADER_BYTES &&
+		( header->kind != SPARK_MODEL_RESIDENT_IPC_KIND_HELLO ||
+		 header->message_bytes != SPARK_MODEL_RESIDENT_IPC_HELLO_BYTES ) )
+	{
+		close(runtime->candidate_fd);
+		runtime->candidate_fd = -1;
+		runtime->candidate_input_bytes = 0u;
+		return;
+	}
+	if ( runtime->candidate_input_bytes < SPARK_MODEL_RESIDENT_IPC_HELLO_BYTES )
+		return;
+	(void)SparkModelResidentdAdoptCandidate(runtime,
+		(const SparkModelResidentIpcHello *)runtime->candidate_input);
+	runtime->candidate_input_bytes = 0u;
 }
 
 static SparkStatus SparkModelResidentdQueueSubmitResult(
@@ -2193,7 +2321,7 @@ static SparkStatus SparkModelResidentdReadClient(
 		if ( bytes_read == 0 )
 		{
 			fprintf(stderr,"model_residentd client closed: peer eof fd=%d\n",runtime->client.fd);
-			SparkModelResidentdCloseClient(runtime);
+			SparkModelResidentdDetachClient(runtime);
 			return(SPARK_STATUS_OK);
 		}
 		if ( bytes_read < 0 )
@@ -2886,7 +3014,7 @@ static SparkStatus SparkModelResidentdBuildPollFds(
 {
 	SparkStatus status;
 	uint32_t count;
-	if ( capacity < 3u )
+	if ( capacity < 4u )
 		SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
 	memset(fds,0,capacity * sizeof(fds[0]));
 	fds[0].fd = runtime->listen_fd;
@@ -2899,7 +3027,9 @@ static SparkStatus SparkModelResidentdBuildPollFds(
 	pthread_mutex_unlock(&runtime->mutex);
 	fds[2].fd = runtime->wake_read_fd;
 	fds[2].events = POLLIN;
-	count = 3u;
+	fds[3].fd = runtime->candidate_fd;
+	fds[3].events = runtime->candidate_fd >= 0 ? POLLIN : 0;
+	count = 4u;
 	status = SparkModelResidentdAppendTransportFds(runtime->input_transport,fds,capacity,&count);
 	if ( status == SPARK_STATUS_OK )
 		status = SparkModelResidentdAppendTransportFds(runtime->output_transport,fds,capacity,&count);
@@ -2928,7 +3058,7 @@ static int32_t SparkModelResidentdPollTimeoutMs(
 
 static SparkStatus SparkModelResidentdRun(SparkModelResidentdRuntime *runtime)
 {
-	struct pollfd fds[3u + (2u * SPARK_MODEL_RESIDENTD_TRANSPORT_POLL_CAPACITY)];
+	struct pollfd fds[4u + (2u * SPARK_MODEL_RESIDENTD_TRANSPORT_POLL_CAPACITY)];
 	uint32_t count;
 	SparkStatus status;
 	SparkStatus client_status;
@@ -2956,47 +3086,33 @@ static SparkStatus SparkModelResidentdRun(SparkModelResidentdRuntime *runtime)
 			status = progress_status;
 		}
 		poll_status = poll(fds,count,SparkModelResidentdPollTimeoutMs(runtime));
-		if ( runtime->client.fd >= 0 && runtime->client.hello_complete == 0u && runtime->client.last_activity_ns != 0u &&
-		     SparkModelResidentdMonotonicTimeNs() - runtime->client.last_activity_ns > UINT64_C(30000000000) )
-		{
-			uint32_t inflight_index,inflight_count = 0u;
-			if ( runtime->routes != 0 )
-				for (inflight_index=0u; inflight_index<runtime->route_capacity; inflight_index++)
-					if ( runtime->routes[inflight_index].active != 0u )
-						inflight_count++;
-			if ( inflight_count == 0u )
-			{
-				fprintf(stderr,"model_residentd client idle timeout; closing fd=%d\n",runtime->client.fd);
-				SparkModelResidentdCloseClient(runtime);
-			}
-			else
-				runtime->client.last_activity_ns = SparkModelResidentdMonotonicTimeNs();
-		}
 		if ( poll_status < 0 && errno != EINTR )
 			status = SPARK_STATUS_IO_ERROR;
 		if ( poll_status > 0 && (fds[0].revents & POLLIN) != 0 )
 			SparkModelResidentdAcceptClient(runtime);
+		if ( poll_status > 0 && fds[3].fd >= 0 && (fds[3].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL)) != 0 )
+			SparkModelResidentdReadCandidate(runtime);
 		if ( poll_status > 0 && fds[1].fd >= 0 && (fds[1].revents & POLLIN) != 0 )
 		{
 			client_status = SparkModelResidentdReadClient(runtime,
 				&submission_processed);
 			if ( client_status != SPARK_STATUS_OK )
-				SparkModelResidentdCloseClient(runtime);
+				SparkModelResidentdDetachClient(runtime);
 			else if ( submission_processed != 0u )
 			{
 				client_status = SparkModelResidentdWriteClient(runtime);
 				if ( client_status != SPARK_STATUS_OK )
-					SparkModelResidentdCloseClient(runtime);
+					SparkModelResidentdDetachClient(runtime);
 			}
 		}
 		if ( status == SPARK_STATUS_OK && poll_status > 0 && fds[1].fd >= 0 && (fds[1].revents & POLLOUT) != 0 )
 		{
 			client_status = SparkModelResidentdWriteClient(runtime);
 			if ( client_status != SPARK_STATUS_OK )
-				SparkModelResidentdCloseClient(runtime);
+				SparkModelResidentdDetachClient(runtime);
 		}
 		if ( poll_status > 0 && fds[1].fd >= 0 && (fds[1].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 )
-			SparkModelResidentdCloseClient(runtime);
+			SparkModelResidentdDetachClient(runtime);
 		if ( poll_status > 0 && (fds[2].revents & POLLIN) != 0 )
 			SparkModelResidentdDrainWake(runtime);
 	}

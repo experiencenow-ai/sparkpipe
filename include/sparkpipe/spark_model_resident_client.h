@@ -34,6 +34,7 @@ typedef struct SparkModelResidentClientConfiguration
 	uint32_t stage_index;
 	uint32_t connect_timeout_ms;
 	uint32_t reserved0;
+	uint64_t session_epoch;
 	SparkModelServingRuntimeLimits runtime_limits;
 	SparkModelResidentEndpoint endpoint;
 	const SparkModelServingAdapterDescriptor *adapter_descriptor;

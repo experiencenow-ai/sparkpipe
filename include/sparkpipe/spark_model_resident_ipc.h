@@ -51,6 +51,7 @@ typedef struct SparkModelResidentIpcHello
 	char model_id[SPARK_MODEL_RESIDENT_IPC_ID_BYTES];
 	char model_revision[SPARK_MODEL_RESIDENT_IPC_REVISION_BYTES];
 	char artifact_sha256[SPARK_MODEL_RESIDENT_IPC_SHA256_BYTES];
+	uint64_t session_epoch;
 } SparkModelResidentIpcHello;
 
 typedef struct SparkModelResidentIpcHelloAck
@@ -81,6 +82,7 @@ typedef struct SparkModelResidentIpcHelloAck
 	char model_id[SPARK_MODEL_RESIDENT_IPC_ID_BYTES];
 	char model_revision[SPARK_MODEL_RESIDENT_IPC_REVISION_BYTES];
 	char artifact_sha256[SPARK_MODEL_RESIDENT_IPC_SHA256_BYTES];
+	uint64_t session_epoch;
 } SparkModelResidentIpcHelloAck;
 
 typedef struct SparkModelResidentIpcSubmit
@@ -202,6 +204,7 @@ SparkStatus SparkModelResidentIpcInitializeHello(
 	uint64_t message_id,
 	uint32_t rank_index,
 	uint32_t stage_index,
+	uint64_t session_epoch,
 	const SparkModelServingAdapterDescriptor *descriptor);
 SparkStatus SparkModelResidentIpcValidateHello(
 	const SparkModelResidentIpcHello *hello,
@@ -216,6 +219,7 @@ SparkStatus SparkModelResidentIpcInitializeHelloAck(
 	uint32_t rank_index,
 	uint32_t stage_index,
 	uint64_t client_generation,
+	uint64_t session_epoch,
 	const SparkModelServingAdapterDescriptor *descriptor,
 	const SparkModelServingRuntimeLimits *runtime_limits);
 SparkStatus SparkModelResidentIpcValidateHelloAck(
@@ -224,6 +228,7 @@ SparkStatus SparkModelResidentIpcValidateHelloAck(
 	uint64_t message_id,
 	uint32_t rank_index,
 	uint32_t stage_index,
+	uint64_t session_epoch,
 	const SparkModelServingAdapterDescriptor *descriptor,
 	const SparkModelServingRuntimeLimits *runtime_limits);
 SparkStatus SparkModelResidentIpcInitializeSubmitResult(
