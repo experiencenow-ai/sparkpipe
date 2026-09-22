@@ -1,9 +1,12 @@
 # Batch, cache and parallel inference implementation status
 
-PR1082 now targets PR1077's `hillclimb/graph-pacing` branch directly. PR1081 was
-merged into that branch; its stabilization fixes remain ancestors of this work.
-This is an implementation draft. GPU numerical and performance acceptance remain
-open; a host pass or a real CUDA compile does not qualify inference.
+PR1082 targets `main`; PR1077 and PR1081 are already merged. The shared runtime
+has passed four- and eight-instance GLM inference across all sixteen Sparks,
+including exact output, overlapping decode and terminal cleanup. The latest
+broad host campaign passed 166 checks. See [parallel qualification](PARALLEL_RESIDENT_QUALIFICATION.md)
+and [multideveloper setup](MULTIDEV_QUICKSTART.md) for precise results and limits.
+Different-model numerical parity, partial-pool GPU eviction and sustained
+continuous-batch performance remain open.
 
 Implemented and host-tested:
 
@@ -50,7 +53,7 @@ Selected evidence:
   assertion. The [receipt](receipts/tp-hardware-wait-cd344a64.json) pins source,
   binaries, commands and results; it does not qualify model throughput.
 
-- Queue: 47 tests; legacy receipt rejection: 3; real smoke runner: 12.
+- Queue: 48 tests; legacy receipt rejection: 3; real smoke runner: 27.
 - Cache fuzz: 13 scenarios, seed73/2000 produced 659645 checks; additional
   seed1337, sanitizer runs and rollback/copy failure negative controls passed.
 - Collectives: all TP2..TP16 host configurations pass the direct/tree mandatory cases (46 after initialization/registration coverage);
@@ -81,7 +84,7 @@ Still required:
   establish a hard device memory bound.
 - Real GPU numerical parity, graph replay/failure, TP4/TP16/TP4xPP4 serving,
   simultaneous different-model inference and sustained matched performance.
-- Rerun the complete host campaign after the latest repairs. PR1081's historical
+- Retain the earlier failed campaigns. PR1081's historical
   receipt remains 114 PASS, 8 FAIL, 4 SETUP_FAIL. The PR1082 checkpoint 816160d2
   recorded 120 PASS, 8 FAIL, 1 SETUP_FAIL, 0 TIMEOUT. Checkpoint ec340d3a recorded
   128 PASS, 1 FAIL, 0 SETUP_FAIL, 0 TIMEOUT. Its sole failure exposed two cache
@@ -92,6 +95,7 @@ Still required:
   deployments now match the current generators, including mesh session tables,
   GLM pack names, EOS tokens and configured cache geometry.
 
-The current persistent fleet GPU processes have not been restarted by this work.
-Unknown or unbounded consumers block shared admission. Record functional,
+The old fleet-agent inference services were stopped for the shared qualification.
+The authoritative queue owns the new jobs; unknown or unbounded consumers block
+shared admission. Record functional,
 setup, unrun hardware and performance results separately.

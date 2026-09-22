@@ -71,8 +71,44 @@ and reuses the pending receipt rather than appending callbacks. The retained rea
 concurrent processes: zero false successes, all four exited zero and all PIDs
 were absent. Its binary SHA256 is
 `2139eff5fc2458dae58b6bd698c8ef7f7c3e70b60cc0e283ccea163941bd8076`,
-built from `bd25d2c7`. This is a common completion-helper gate; a new fleet run
-is still required before counting four or eight residents as passed.
+built from `bd25d2c7`. This is a common completion-helper gate; the subsequent
+fleet results are recorded below.
+
+## Eight-resident fleet qualification
+
+Source `44fe4af719daeb5ad3ecaacd78daed5247067fb4` completed the repaired four-
+and eight-resident runs through the authoritative queue. All sixteen ranks
+passed exact output, assigned-lane, GPU-budget and terminal-cleanup checks.
+The unchanged isolated baseline supplied the expected tokens.
+
+| Residents per Spark | Result | Output tokens | Per-resident decode tok/s | Aggregate common-window tok/s | Device MiB per Spark | Owned processes gone |
+| --- | --- | ---: | --- | ---: | ---: | ---: |
+| 4 | PASS | 128 | 3.100–3.133 | 12.388 | 34,610 | 80 |
+| 8 | PASS | 256 | 1.658–1.708 | 13.300 | 48,346 | 144 |
+
+The shared decode windows were 9.768 and 17.745 seconds. The eight residents
+used lanes 0–7, separate ports 20000–27999 and separate cache/runtime roots.
+Each had the same finite B1/context 512/KV plan described above. Both jobs
+reserved 16 GiB host memory per Spark. The eight-resident device reservation was
+61,952 MiB, total 78,336 MiB, with the queue retaining 8,192 MiB node headroom.
+Measured device usage was 47.2 GiB per Spark. Reclaimable pack page cache filled
+one host cgroup during startup without an OOM; these are declared reservations
+plus observed allocations, not a hard CUDA allocator limit.
+
+The corresponding [compact receipt](receipts/parallel-residents-44fe4af7.json)
+contains every rank receipt hash and timing boundary. Raw receipts remain under
+`/private/tmp/sparkpipe-pr1082-receipts/shared-44fe4af7/` on the review workstation.
+Eight is the current explicit lane capacity. These are eight independent GLM
+instances sharing one daemon per physical Spark; they do not establish eight
+model families or continuous-batch kernel reuse.
+
+The separate mixed-topology probe reached 34 ready CUDA children but failed
+15 mesh registrations before any numerical round. The shared lazy-attach code
+rounded a file mapping pointer without preserving file offset zero. That defect
+is being repaired; the mixed-topology result remains a failure until rerun.
+All sixteen queue control groups stopped. The failed attempt is
+`76dbd15ed4154c38a49cef183513a116`; its [failure receipt](receipts/mixed-mesh-44fe4af7-failure.json)
+retains the exact initialization error and qualification boundary.
 
 ## Evidence
 

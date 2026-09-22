@@ -171,7 +171,7 @@ worker and loader benchmark remain a concrete removal item for the subsequent
 code review; their public region operation now returns `UNSUPPORTED`.
 
 
-## Current host and GPU checkpoint
+## Historical host and GPU checkpoint
 
 The immutable Linux campaign at
 `52d2944262eb643d901df08f7662e5272fa7351b` recorded **163 PASS, 0 FAIL,
@@ -219,3 +219,23 @@ quality, distributed cache reuse or fleet throughput. Source/binary/process
 provenance and the exact timings are retained in the
 [HC receipt](receipts/glm5-next-hc-mix-012f16a4.json) and
 [performance report](TP16_HARDWARE_PROFILE_20260922.md).
+
+## Shared serving release host campaign
+
+Source `040f8eec545e052b38b9212a27ffa7d62ae92d6d` completed **166 PASS,
+0 FAIL, 0 SETUP_FAIL, 0 TIMEOUT** in a fresh Linux archive: seeds 1/7/73,
+128 rounds, 24 loopback rounds, two build jobs and 180 seconds per test. It
+selected 114/115 registered C targets; the Qwen GPU target and 164 unselected
+Python files remain separate. The non-document source digest is
+`d64118a9cedc2233064b7882a8de4a7b04b1996783b64a8375411551885d979f`. The retained receipt is
+`/private/tmp/sparkpipe-pr1082-receipts/host-040f8eec/reliability/results.json`.
+
+The preceding 44fe4af7 attempt exposed a GCC fixture-indentation error and
+was killed at its 8 GiB cgroup limit after 54 successful checks; it is a failed,
+partial campaign. The corrected fresh run used an explicit 32 GiB host budget.
+The queue regression also reproduces fetched-only commits in a real shallow
+Git repository and proves sync preserves the requested source.
+
+See [parallel resident qualification](PARALLEL_RESIDENT_QUALIFICATION.md) for
+actual four/eight-instance GLM fleet results and the separate mixed-topology
+initialization failure. These host and device receipts retain different scopes.

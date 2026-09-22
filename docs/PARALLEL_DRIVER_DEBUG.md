@@ -1,5 +1,8 @@
 # Parallel driver debugging
 
+Start with the [multideveloper quickstart](MULTIDEV_QUICKSTART.md) for the current
+controller, shared-daemon setup, lane assignments and model-specific boundaries.
+
 This is the shared workflow for every driver lane. Family code owns geometry,
 tensor descriptions and model math. Reuse stage_module_common for ownership,
 weightd for shared residency, the serving adapter/session lifecycle, the topology
