@@ -9173,7 +9173,7 @@
     },
     {
       "path": "tests/test_gemma4_tp16_shared_socket.py",
-      "sha256": "aa1f9915a3fae73b21e8dc1802be5fcc9b0a85f8bfc0b21b9d805344479b268a",
+      "sha256": "260691ac89091fd4cf83ee3b86cf8b1c44d9bdfb1377515afef99927504b451e",
       "size_bytes": 11492
     },
     {
@@ -11003,7 +11003,7 @@
     },
     {
       "path": "tools/devcycle/lane_assignments.json",
-      "sha256": "eae43739b6ee25bf4dfc862fb32bfb91d4331f70eb0cb93ca05bfd4347a00e03",
+      "sha256": "34839a1d0c9aea3ca26c29958cfd202a05e9d96d9a4ecbbbea0ea8e07441e3b1",
       "size_bytes": 11021
     },
     {
@@ -11463,8 +11463,8 @@
     },
     {
       "path": "tools/gemma4_tp16_gen_deployment.py",
-      "sha256": "6d4f7b52c57b0d9d748ffedbc669f54728a89cb628814afb9c89d1b7f565394e",
-      "size_bytes": 6586
+      "sha256": "ce261fb5943d79131c5494d620e7707fdeb0f6787e37cfed8c80329bf5840871",
+      "size_bytes": 6667
     },
     {
       "path": "tools/gemma4_tp16_shared_socket.sh",
@@ -16820,5 +16820,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80134371
+  "total_bytes": 80134452
 }

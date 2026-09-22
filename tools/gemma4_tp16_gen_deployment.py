@@ -8,14 +8,15 @@ NVMe-verified: ~/sparkdata/gemma4_31b.bf16.tp16/packs).
 Lane 6 port blocks (tools/devcycle/lane_assignments.json, amended by
 PR #1094: the 67000-series collective block exceeded the TCP port ceiling
 and is renumbered into the 53000 series):
-control 23096-23111, collective 53096-53111, transport 64096-64111.
+control 23096-23111, collective 53200-53215 (one-off renumber-around: tailscaled
+squat on spark8 port 53100, manager ruling), transport 64096-64111.
 
 Every emitted listener stays inside those blocks:
   control endpoint   23096+rank   (residentd control)
   transport base     64096        (host-rdma transport control, +rank)
-  collective base    53096        (TP collective control, +rank)
+  collective base    53200        (TP collective control, +rank)
 The SPARK_GEMMA4_STAGE_TP_SESSION_PORTS matrix is column-derived
-(cell [a][b] = 53096+b, diagonal 0): the mesh collective backend ignores
+(cell [a][b] = 53200+b, diagonal 0): the mesh collective backend ignores
 it, and any future per-pair binding still lands inside the reserved block.
 
 Runtime roots default to the literal ${SPARK_QUEUE_RUNTIME_ROOT} template;
@@ -41,7 +42,7 @@ NODE_TARGET = "cuda.sm121.gemma4.31b.resident_decode_stage.bf16"
 PACK_TEMPLATE = "packs/gemma4_31b_tp16_rank%s_stage0.gemma4sp"  # rank in hex
 HOSTS = [f"spark{hex(r)[2:]}" for r in range(RANKS)]
 LANE_CONTROL_BASE = 23096
-LANE_COLLECTIVE_BASE = 53096
+LANE_COLLECTIVE_BASE = 53200
 LANE_TRANSPORT_BASE = 64096
 COLLECTIVE_ID = 6609642311120931
 EOS_TOKEN_IDS = [1, 106, 50]
