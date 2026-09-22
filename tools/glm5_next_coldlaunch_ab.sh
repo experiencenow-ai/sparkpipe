@@ -237,6 +237,13 @@ config_rel="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["n
 pack_rel="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["stage_pack_path"])' "$ROOT/runtime/$config_rel")"
 revision="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("model_revision","0"))' "$ROOT/runtime/$config_rel")"
 
+# the module and the warmer both require explicit finite pool/spine budgets
+# (qualified PR #1082 values: 24 GiB pool / 4 GiB spine; the shared daemon
+# enforces its own arena bounds on top)
+export SPARK_WEIGHTD_EXPERT_POOL_BYTES=25769803776
+export SPARK_WEIGHTD_SPINE_BUDGET_BYTES=4294967296
+export SPARK_WEIGHTD_KV_RESERVE_BYTES=0
+
 # ------------------------------ arm B preload -------------------------------
 if [ "$ARM" = "B" ]; then
   PACK="$ROOT/runtime/$pack_rel"
@@ -262,12 +269,6 @@ export CUDA_MODULE_DATA_LOADING=LAZY
 export CUDA_DEVICE_MAX_CONNECTIONS=32
 export SPARK_GLM5_NEXT_GRAPH_PATH=1
 export SPARK_GLM5_NEXT_PIN_EXPERTS=1
-# the module requires explicit finite pool/spine budgets at driver load
-# (qualified PR #1082 values: 24 GiB pool / 4 GiB spine; the shared daemon
-# enforces its own arena bounds on top)
-export SPARK_WEIGHTD_EXPERT_POOL_BYTES=25769803776
-export SPARK_WEIGHTD_SPINE_BUDGET_BYTES=4294967296
-export SPARK_WEIGHTD_KV_RESERVE_BYTES=0
 
 t0=$(date +%s.%N)
 setsid "$EXEC_ROOT/bin/sparkpipe_model_residentd" \
