@@ -313,6 +313,7 @@ struct Probe
                 waiting |= Load(&Gate(rank)->request_id)!=0u && Load(&Gate(rank)->kind)==SPARK_WEIGHTD_MESH_WAIT_PEERS && Load(&Gate(rank)->ready)==0u;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));REQUIRE(!Done());
+        REQUIRE(Load(&Gate(0u)->request_id)==1u && Load(&Gate(0u)->ready)==0u && Load(Entry(0u))==0u);
         hold.store(false);Wait(begin);Verify();
         EndWorker();completed_cases++;std::puts("PASS delayed/stale tails and stale ready block graph replay until exact completion");
         Setup(4u,1u,2u,513u,2u,true);Data(10u);hold.store(true);StartWorker();begin=Now();Launch(true);
@@ -326,13 +327,24 @@ struct Probe
     void Timings()
     {
         Setup(16u,1u,1u,257u,91u);Data(20u);double construction=Capture();StartWorker();
-        std::vector<double> samples;
+        std::vector<double> samples,waits,copies,math;
+        SparkTpMeshRoundControl previous[16]={};
         for (uint32_t i=0u;i<8u;i++)
         {
-            Data(i+20u);uint64_t begin=Now();Launch(true);double elapsed=Wait(begin);Verify();if (i>=2u) samples.push_back(elapsed);
+            Data(i+20u);uint64_t begin=Now();Launch(true);double elapsed=Wait(begin);Verify();
+            uint64_t maximum_wait=0u,maximum_copy=0u,maximum_math=0u;
+            for (uint32_t rank=0u;rank<degree;rank++)
+            {
+                SparkTpMeshRoundControl control={};CUDA(cudaMemcpy(&control,ranks[rank].control,sizeof(control),cudaMemcpyDeviceToHost));
+                maximum_wait=std::max(maximum_wait,control.source_wait_ns+control.peer_wait_ns-previous[rank].source_wait_ns-previous[rank].peer_wait_ns);
+                maximum_copy=std::max(maximum_copy,control.copy_ns-previous[rank].copy_ns);
+                maximum_math=std::max(maximum_math,control.combine_ns-previous[rank].combine_ns);previous[rank]=control;
+            }
+            if (i>=2u) { samples.push_back(elapsed);waits.push_back(maximum_wait/1e6);copies.push_back(maximum_copy/1e6);math.push_back(maximum_math/1e6); }
         }
-        EndWorker();std::sort(samples.begin(),samples.end());
+        EndWorker();std::sort(samples.begin(),samples.end());std::sort(waits.begin(),waits.end());std::sort(copies.begin(),copies.end());std::sort(math.begin(),math.end());
         std::printf("TIMING tp=16 rows=1 rounds=91 graph_construct_ms=%.3f warmups=2 samples=%zu min_ms=%.3f median_ms=%.3f max_ms=%.3f transport=cpu-copy actual_daemon_gate=1\n",construction,samples.size(),samples.front(),samples[samples.size()/2u],samples.back());
+        std::printf("PHASE_TIMING median_max_rank_wait_ms=%.3f copy_ms=%.3f combine_ms=%.3f samples=%zu\n",waits[waits.size()/2u],copies[copies.size()/2u],math[math.size()/2u],samples.size());
         completed_cases++;
     }
 };
@@ -345,6 +357,9 @@ int main(int argc,char **argv)
     }
     REQUIRE(std::setvbuf(stdout,nullptr,_IOLBF,0)==0);
     CUDA(cudaSetDeviceFlags(cudaDeviceMapHost));CUDA(cudaSetDevice(0));
+    CUmoduleLoadingMode loading;REQUIRE(cuModuleGetLoadingMode(&loading)==CUDA_SUCCESS);
+    std::printf("ENV CUDA_MODULE_LOADING=%s CUDA_MODULE_DATA_LOADING=%s CUDA_DEVICE_MAX_CONNECTIONS=%s\n",loading==CU_MODULE_LAZY_LOADING ? "LAZY" : "EAGER",
+        std::getenv("CUDA_MODULE_DATA_LOADING") ? std::getenv("CUDA_MODULE_DATA_LOADING") : "unset",std::getenv("CUDA_DEVICE_MAX_CONNECTIONS") ? std::getenv("CUDA_DEVICE_MAX_CONNECTIONS") : "unset");
     Probe probe;
     for (uint32_t degree:{2u,3u,4u,8u,16u})
         for (uint32_t operation:{0u,1u,2u})
