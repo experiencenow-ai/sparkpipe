@@ -2066,3 +2066,40 @@ NEXT: (a) the weightsd-side question for layers 39-44 (why do their
 chunks fail the exchange while 42 layers succeed), (b) liveness-based
 chain deadline, (c) then the warm canary → chain2 GRAPH → ARRIVAL
 receipt → the clean µs/round.
+
+## 09-22 21:00 TICK — prefetch retries landed; the acquire failure is FABRIC-LEVEL (mesh writes die at RDMA)
+
+CLIMB STEP LANDED (@00b0a95): prefetch retries failing layers across 5
+passes + WITHHOLDS experts_warm while layers stay cold (the graph gate
+was opening over cold layers). Also from this tick: KV-RECLAIM +
+weightd-stack revive held (commits still flow).
+
+THE REVERSAL + CONVICTION CHAIN:
+- After the roll, prefetch failed ALL layers (was 42/45): the acquire
+  exchange dies at spark_weightd.c:3490 = THE MESH WRITE OP — not the
+  acquire logic itself. The weightd logs WD-MESH-CQERR (wr opcode=1
+  status=12 vendor=129) + WD-QP-REPAIR loops ("qp left RTS after
+  errors").
+- RECORDS EXONERATED (wrong-dir detour): the daemon runs WITHOUT
+  --mesh-dir (default /tmp/weightd-mesh — FRESH, all 16 recs, agent-
+  synced); the /tmp/weightd-mesh-fleet dir I first inspected is the
+  ABANDONED newer-agent era. Hub qpn/ records fresh; fetch path 3ms.
+  (Agents restarted fleet-wide anyway — the running 619-line version
+  syncs the correct default dir; the 691-line version with mesh_dir()
+  selection lives only in /tmp on spark0 — NOT canonical.)
+- Post-fresh-records: prefetch 1/45 (was 0), one chain 7 rounds over
+  319s then IO, chains BUSY at the 30s acquire deadline. Slight
+  movement, not a cure.
+
+THE FRONTIER (next session, exact): the weightd's RDMA mesh WRITES fail
+(CQERR vendor 129) with fresh records + wired control plane ("ready
+peers=15") — diagnose at the fabric level: what vendor 129 is on
+rocep1s0f1, whether QP-REPAIR restores traffic or loops, whether it
+started at a specific daemon restart, and whether a cold weightd restart
+fleet-wide (agent-supervised) heals the QP state. THEN the 6-tail-layer
+creation class re-measures on a healthy fabric.
+
+Standing receipts this tick: canary HTTP round-trips clean end-to-end
+(RC=0, well-formed errors); the retry-prefetch + warm-gate deployed
+fleet-wide (driver e9ee22e7); agent fleet restarted with records
+verified flowing.
