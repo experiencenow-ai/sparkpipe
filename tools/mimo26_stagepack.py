@@ -617,28 +617,114 @@ def parse_window(text):
     return (first, count)
 
 
+def preflight(source: SafetensorsSource, stage_dir: Path) -> dict:
+    """Emission pre-flight: measure the metadata plane (one stat per source
+    shard - a stalled MDS band shows up here as a slow walk, not as a silent
+    crawl mid-emission) and pin the carving tool's own bytes against the
+    archive ledger so the carve is provenance-clean."""
+    import time as _time
+    shards = sorted(set(source.weight_map.values()))
+    t0 = _time.perf_counter()
+    missing = []
+    for shard in shards:
+        if not (source.root / shard).is_file():
+            missing.append(shard)
+    walk_seconds = _time.perf_counter() - t0
+    if missing:
+        raise PackFailure(f"preflight: {len(missing)} source shards missing, "
+                          f"first {missing[0]}")
+    ledger = (Path(__file__).resolve().parents[1] / "SHA256SUMS")
+    tool_sha = None
+    if ledger.is_file():
+        want = next((line.split()[0] for line in ledger.read_text().splitlines()
+                     if line.endswith("  tools/mimo26_stagepack.py")), None)
+        if want:
+            tool_sha = sha256_file(Path(__file__).resolve())
+            if tool_sha != want:
+                raise PackFailure("preflight: packer bytes do not match the "
+                                  "archive SHA256SUMS pin")
+    print(f"preflight: {len(shards)} shards stat-walked in {walk_seconds:.2f}s"
+          + (f", tool sha pinned ({tool_sha[:12]}...)" if tool_sha else ""))
+    if walk_seconds > 30.0:
+        raise PackFailure(f"preflight: metadata walk took {walk_seconds:.1f}s - "
+                          "the MDS band is stalled; refusing to emit")
+    return {"shards": len(shards), "stat_walk_seconds": round(walk_seconds, 3),
+            "tool_sha256_pinned": bool(tool_sha)}
+
+
+def emit_file_major(source: SafetensorsSource, records: list, stage_dir: Path,
+                    reader: SourceReader) -> int:
+    """Default emission shape: every span grouped by its SOURCE SHARD, one
+    open per shard, spans in file-offset order, bytes appended to the
+    content-addressed staging files. 16 sequential streams replace ~2900
+    per-tensor MDS lookups per rank (the file-major ruling)."""
+    from collections import defaultdict
+    by_shard = defaultdict(list)
+    for record in records:
+        for plane in (True, False):
+            for span in record.spans:
+                for name in (payload_name(span, plane),):
+                    shard = source.weight_map.get(name)
+                    if shard is None:
+                        raise PackFailure(f"span source not in index: {name}")
+                    by_shard[shard].append((record, span, plane))
+    done = 0
+    outs = {}
+    try:
+        for shard in sorted(by_shard):
+            items = by_shard[shard]
+            file = reader._file(shard)
+            for record, span, plane in items:
+                path = stage_dir / (stage_name(record, "payload" if plane else "scale"))
+                want = record.payload_bytes if plane else record.scale_bytes
+                if path.exists():
+                    if path.stat().st_size == want:
+                        continue  # complete planes are layout-independent
+                    # a PARTIAL plane cannot be resumed across emission
+                    # layouts (span order differs); discard and rewrite
+                    path.unlink()
+                out = outs.get(path)
+                if out is None:
+                    out = open(path, "wb")
+                    outs[path] = out
+                reader.produce(span, record, out, payload=plane)
+                done += want
+    finally:
+        for out in outs.values():
+            out.flush()
+            os.fsync(out.fileno())
+            out.close()
+    # any record that staged nothing in this pass (already complete) counts too
+    return done
+
+
+def payload_name(span, plane):
+    if not plane and span.scale_name:
+        return span.scale_name
+    return span.name
+
+
 def do_emit(args) -> int:
     source = SafetensorsSource(Path(args.checkpoint))
     check_source(args.arm, source)
     check_shapes(args.arm, source)
+    preflight(source, Path(args.stage_dir or (str(args.out) + ".stage")))
     records = build_plan(args.arm, source.config, args.tp, args.rank,
                          parse_window(getattr(args, "layer_window", None)))
     stage_dir = Path(args.stage_dir or (str(args.out) + ".stage"))
     stage_dir.mkdir(parents=True, exist_ok=True)
     reader = SourceReader(source)
     journal_path = stage_dir / "journal.jsonl"
-    done_bytes = 0
+    done_bytes = emit_file_major(source, records, stage_dir, reader)
     with open(journal_path, "a", encoding="utf-8") as journal:
         for index, record in enumerate(records):
-            emit_record(reader, record, stage_dir)
-            done_bytes += record.payload_bytes + record.scale_bytes
             journal.write(json.dumps({
                 "index": index, "kind": record.kind, "layer": record.layer,
                 "name": record.name, "rows": record.rows, "columns": record.columns,
                 "weight_format": record.weight_format,
                 "payload_bytes": record.payload_bytes,
                 "scale_bytes": record.scale_bytes}) + "\n")
-    print(f"emit: {len(records)} records, {done_bytes} bytes staged under {stage_dir}")
+    print(f"emit: {len(records)} records, {done_bytes} new bytes staged under {stage_dir} (file-major)")
     return 0
 
 
