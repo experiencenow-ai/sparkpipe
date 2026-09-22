@@ -79,7 +79,10 @@ make -C "$CHECKOUT" -j4 \
   hidden_transport_spark_host_rdma_verbs
 # The variant archive (NOT the default `archive` target): the b128 TU
 # carries -DSPARK_BATCH_BUCKET=128; the adapter takes the ladder's last
-# bucket (128) for the same reason.
+# bucket (128) for the same reason. publish_variants then publishes the
+# bucket under its documented bucketed identity THROUGH the module's
+# retained-receipt GPU validator (synthesized weights; the release
+# publish path for the unbucketed archive stays as-is elsewhere).
 make -C "$CHECKOUT/$MODULE" -j4 \
   CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
   EXPERT_CODEC="$EXPERT_CODEC" \
@@ -88,27 +91,20 @@ make -C "$CHECKOUT/$MODULE" -j4 \
   MODULE_BATCH_VARIANT_BUCKETS="$BUCKET" \
   "../../build/modules/ling_resident_decode_stage/$EXPERT_CODEC/libling_resident_decode_stage_${EXPERT_CODEC}_b${BUCKET}.a" \
   adapter
+make -C "$CHECKOUT/$MODULE" -j1 \
+  CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
+  EXPERT_CODEC="$EXPERT_CODEC" \
+  MODEL_REVISION="$MODEL_REVISION" \
+  CONTRACT_SHA256="$CONTRACT_SHA256" \
+  MODULE_BATCH_VARIANT_BUCKETS="$BUCKET" \
+  publish_variants
 VARIANT_ARCHIVE="$CHECKOUT/build/modules/ling_resident_decode_stage/$EXPERT_CODEC/libling_resident_decode_stage_${EXPERT_CODEC}_b${BUCKET}.a"
 ADAPTER="$CHECKOUT/build/modules/ling_resident_decode_stage/$EXPERT_CODEC/libling_serving_adapter_$EXPERT_CODEC.so"
 for artifact in "$VARIANT_ARCHIVE" "$ADAPTER"; do
   [ -f "$artifact" ] || { echo "not built: $artifact" >&2; exit 1; }
 done
-
-# Record-only publish of the bucketed variant (no --validator: the
-# numerical gate is the decode-time T1R exactness receipt, not this
-# link step; the release publish path keeps its GPU-validated recipe).
-mkdir -p "$CHECKOUT/build/module_library"
-"$CHECKOUT/build/sparkpipe_module_publish" \
-  --library "$CHECKOUT/build/module_library" \
-  --module "$MODULE_ID_BUCKETED" \
-  --target "$MODULE_TARGET" \
-  --link-unit "$VARIANT_ARCHIVE" \
-  --recipe "ling.lane9.b${BUCKET}.attach.v1" \
-  --initialize "${ENTRY_PREFIX}Initialize" \
-  --execute "${ENTRY_PREFIX}Execute" \
-  --admit "${ENTRY_PREFIX}Admit" \
-  --snapshot "${ENTRY_PREFIX}Snapshot" \
-  --destroy "${ENTRY_PREFIX}Destroy"
+grep -q "$MODULE_ID_BUCKETED" "$CHECKOUT"/build/module_library/active/*.json 2>/dev/null \
+  || { echo "bucketed module record missing from the library" >&2; exit 1; }
 
 # Lane-local firmware: the committed firmware with the module id
 # rewritten to the bucketed variant (generated at build time; no
