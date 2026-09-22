@@ -627,6 +627,14 @@ build/test_glm5_next_hc_mix: tests/test_glm5_next_hc_mix.cu tests/fixtures/glm5_
 test-glm-hc-mix: build/test_glm5_next_hc_mix
 	./build/test_glm5_next_hc_mix --run
 
+build/test_cuda_stream_receipt: tests/test_cuda_stream_receipt.c $(MODEL_COMMON_LIBRARY) $(RUNTIME_LIBRARY) $(CORE_LIBRARY) | build
+	test -f $(CUDA_HOME)/include/cuda_runtime.h
+	$(CC) $(MODEL_COMMON_INCLUDE_FLAGS) $(CFLAGS) $^ $(LDFLAGS) $(LDLIBS) $(SPARKPIPE_CUDA_RUNTIME_LINK) $(SPARKPIPE_CUDA_DRIVER_LINK) -o $@
+
+.PHONY: test-cuda-stream-receipt
+test-cuda-stream-receipt: build/test_cuda_stream_receipt
+	./build/test_cuda_stream_receipt --run
+
 build/test_modules:
 	mkdir -p build/test_modules
 
