@@ -42,7 +42,12 @@ esac
 RANK="$((16#${HOST#spark}))"
 PACK="/home/$HOST/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank${HOST#spark}.sp"
 SHA="$(cut -d' ' -f1 "$PACK.sha256")"
-REVISION="$(python3 -c 'import json;print(json.load(open("'"$REPO"'/examples/model_descriptions/qwen38_max_resident_decode_stage_firmware.json"))["model_revision"])')"
+# The pinned serving revision (the adapter matches it EXACTLY): lane.py's
+# MODEL_REVISION constant, the same value the deployment render carries in
+# adapter.json (the firmware example has no model_revision member).
+REVISION="$(sed -n 's/^MODEL_REVISION = "\(.*\)"$/\1/p' \
+  "$REPO/tools/qwen38max_multidev_lane.py")"
+[ "${#REVISION}" -eq 40 ] || { echo "bad MODEL_REVISION parse" >&2; exit 2; }
 WSET="$(mktemp -q /tmp/qmax-wset.XXXXXX)"
 trap 'rm -f "$WSET"' EXIT
 
