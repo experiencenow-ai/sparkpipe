@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from test_generated_control_admission import generate_admission
 
 ROOT = Path(__file__).resolve().parents[1]
 HARNESS = r'''
@@ -18,6 +19,8 @@ HARNESS = r'''
 #define main SparkUnusedKvTestMain
 #include "tests/test_kv_cache.c"
 #undef main
+typedef struct { void *operation_0_state; } SparkGeneratedDriverInstance;
+#include "generated_admission.inc"
 static SparkGlm5NextModuleState state;
 static uint32_t COPY_COUNT,CANCEL_COUNT,STREAM_QUERY_COUNT,EXPECTED_CANCEL_COUNT,END_COUNT;
 static SparkStatus END_STATUS;
@@ -1220,6 +1223,9 @@ static void check_checkpoint_finish(uint32_t fail_copy,uint32_t prefix_tokens,ui
 	if ( post_publish != 0u )
 	{
 		SparkModelDriverAdmissionDecision decision;
+		SparkGeneratedDriverInstance instance = {&state};
+		SparkModelDriverInterface driver = {.admit = SparkGeneratedDriverAdmit};
+		PUBLISH_CALLBACKS = 0u;
 		assert(SparkGlm5NextFinishCacheLanes(&completion) == SPARK_STATUS_OK);
 		assert(fixture.pages.cache.published_page_count == 0u);
 		state.pipeline_slot_count = 1u;
@@ -1232,10 +1238,18 @@ static void check_checkpoint_finish(uint32_t fail_copy,uint32_t prefix_tokens,ui
 		fixture.lanes[0].sequence_position = prefix_tokens;
 		SparkTestKvPagePublish(&fixture.lanes[0],prefix_tokens,81u);
 		fixture.request.admission_flags = SPARK_MODEL_DRIVER_ADMISSION_FLAG_CACHE_PREPARE;
-		assert(SparkGlm5NextResidentDecodeStageAdmit(&state,&fixture.request,&decision) == SPARK_STATUS_OK && decision.accepted != 0u);
+		assert(SparkModelDriverEvaluateAdmission(&driver,&instance,&fixture.request,&decision) == SPARK_STATUS_OK && decision.accepted != 0u);
 		fixture.request.admission_flags = SPARK_MODEL_DRIVER_ADMISSION_FLAG_CACHE_COMMIT;
-		assert(SparkGlm5NextResidentDecodeStageAdmit(&state,&fixture.request,&decision) == SPARK_STATUS_OK);
+		assert(SparkModelDriverEvaluateAdmission(&driver,&instance,&fixture.request,&decision) == SPARK_STATUS_OK);
+		fixture.request.admission_flags = 0u;
+		atomic_store(&state.slot_states[0],SPARK_STAGE_MODULE_SLOT_CLAIMED);
+		assert(SparkModelDriverEvaluateAdmission(&driver,&instance,&fixture.request,&decision) == SPARK_STATUS_BUSY);
+		assert(fixture.owners[0].phase == SPARK_KV_LANE_TRANSACTION_COMMITTED && PUBLISH_CALLBACKS == 0u);
+		atomic_store(&state.slot_states[0],SPARK_STAGE_MODULE_SLOT_FREE);
+		assert(SparkModelDriverEvaluateAdmission(&driver,&instance,&fixture.request,&decision) == SPARK_STATUS_OK);
+		assert(decision.available_dispatch_slot_count == 1u);
 		frame = SparkTestKvTransactionFrame(&fixture.request);
+		assert(SparkModelDriverApplyAdmissionDecision(&decision,&frame) == SPARK_STATUS_OK);
 		frame.flags |= SPARK_MODEL_DRIVER_FRAME_FLAG_CACHE_PUBLISH;
 		frame.sequence_position = prefix_tokens;
 		frame.completion_function = publish_complete;
@@ -1575,6 +1589,8 @@ int32_t main(void)
 
 def main():
     with tempfile.TemporaryDirectory() as directory:
+        emitter = generate_admission(Path(directory), 1, "SparkGlm5NextResidentDecodeStageAdmit")
+        Path(directory, "generated_admission.inc").write_text(subprocess.check_output([str(emitter), "module"], text=True))
         source, binary = Path(directory) / "probe.c", Path(directory) / "probe"
         source.write_text(HARNESS)
         includes = [".", "include", "tests/cuda_stub", "model-families/common/include",
