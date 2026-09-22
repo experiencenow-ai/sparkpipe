@@ -50,10 +50,13 @@ class WarmDsv41FlashSourceContract(unittest.TestCase):
         self.assertIn(
             'strcmp(family,"dsv4_pro") == 0 && !world_rank_given', warm)
 
-    def test_unknown_family_lists_both(self):
+    def test_unknown_family_lists_all(self):
+        # k3 (#1131) and ling (lane 9) appended to the whitelist; the
+        # pin follows the current full list so a silent removal of any
+        # family fails here.
         warm = WARM.read_text()
         self.assertIn(
-            'unknown family %s (dsv4_pro, dsv41_flash)', warm)
+            'unknown family %s (dsv4_pro, dsv41_flash, k3, ling)', warm)
 
 
 class Dsv41FlashIdentityPrintFunctional(unittest.TestCase):
