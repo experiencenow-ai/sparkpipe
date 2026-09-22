@@ -205,7 +205,7 @@ static void TestApiWriteDeployment(const char *path,
 		if ( SparkTokenizerSidecarLoad(&sidecar,&configuration) == SPARK_STATUS_OK &&
 			SparkSha256File(tokenizer_asset_path,asset_sha256) == SPARK_STATUS_OK )
 		{
-			fixture.tokenizer_vocabulary_size = sidecar.tokenizer.vocabulary_count;
+			fixture.tokenizer_vocabulary_size = sidecar.tokenizer.maximum_token_id + 1u;
 			fixture.tokenizer_asset_sha256 = asset_sha256;
 		}
 		else

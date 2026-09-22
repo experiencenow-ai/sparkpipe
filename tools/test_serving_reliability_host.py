@@ -125,7 +125,7 @@ def main():
     selected_python = {"test_" + name + ".py" for names in PYTHON.values() for name in names.split()} | {"test_model_api_queue_lifetime.py"}
     report["unrun_python_test_files"] = sorted(path.name for path in (ROOT / "tests").glob("test_*.py") if path.name not in selected_python)
     save()
-    run("build", ["make", "-k", f"-j{args.jobs}", "CUDA_HOME=/nonexistent", *["build/" + name for name in targets]], 900, "setup")
+    run("build", ["make", "-k", f"-j{args.jobs}", "CUDA_HOME=/nonexistent", *["build/" + name for name in targets], "build/sparkpipe_weightd", "build/sparkpipe_registrar"], 900, "setup")
     for group, names in GROUPS.items():
         for name in names.split():
             binary = "build/test_" + name

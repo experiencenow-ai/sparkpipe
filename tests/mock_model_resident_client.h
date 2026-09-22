@@ -31,6 +31,7 @@ uint64_t MockResidentClientPendingEvent(uint32_t stage_index, uint32_t kind, uin
 uint32_t MockResidentClientDeliverEvent(uint32_t stage_index, uint64_t submission_id,
     uint32_t kind, SparkStatus status, uint32_t deliver);
 uint32_t MockResidentClientPendingCount(uint32_t stage_index);
+uint32_t MockResidentClientOwnsSubmission(uint32_t stage_index, uint64_t submission_id);
 SparkModelResidentClient *MockResidentClientByRank(uint32_t stage_index);
 uint32_t MockResidentClientCalls(uint32_t stage_index, uint32_t kind);
 uint64_t MockResidentClientGeneration(uint32_t stage_index);

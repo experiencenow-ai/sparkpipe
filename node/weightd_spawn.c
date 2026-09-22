@@ -75,7 +75,7 @@ static int32_t SparkWeightdFindDigest(DIR *directory,const char *root,char diges
 			return(-6);
 		status = SparkWeightdReadDigestPath(path,digest);
 		if ( status != 0 )
-			continue;
+			SPARK_RETURN(status);
 		found = 1u;
 		errno = 0;
 	}
@@ -104,11 +104,15 @@ int32_t SparkModelResidentdPrepareWeightd(const char *root,const char *socket_pa
 {
 	struct sockaddr_un address;
 	char digest[65];
+	const char *attach;
 	int32_t fd,status;
 	if ( root == 0 || socket_path == 0 || root[0] == '\0' || socket_path[0] == '\0' )
 		return(-12);
 	if ( strlen(socket_path) >= sizeof(address.sun_path) )
 		return(-13);
+	attach = getenv("SPARK_WEIGHTD_ATTACH");
+	if ( attach != 0 && strcmp(attach,"1") != 0 )
+		return(-14);
 	status = SparkWeightdResolveDigest(root,digest);
 	if ( status != 0 )
 		SPARK_RETURN(status);

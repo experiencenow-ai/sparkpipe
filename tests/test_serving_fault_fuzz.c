@@ -104,6 +104,12 @@ static void FaultCompletion(void *context, const SparkModelServingCompletion *co
 	}
 	else
 		CHECK(completion->token_count == 0u,"failed work cannot publish tokens");
+	{
+		uint32_t rank;
+		for (rank=0u; rank<TEST_RANKS; rank++)
+			CHECK(MockResidentClientOwnsSubmission(rank,completion->submission_id) == 0u,
+				"completion cannot release a transaction still owned by a rank");
+	}
 	state->completions++;
 	if ( state->reentrant != 0 && completion->submission_id == state->reentrant_trigger )
 	{
@@ -504,6 +510,13 @@ static void FaultRunCase(SparkModelPipelineClient *pipeline, FaultState *state,
 			CHECK(MockResidentClientDeliverEvent(rank,r->submission.submission_id,MOCK_EVENT_DECISION,SPARK_STATUS_OK,1u) == 1u,"rank commit precedes its execution completion");
 		FaultExpectFailure(r,SPARK_STATUS_IO_ERROR);
 		CHECK(MockResidentClientDeliverEvent(rank,r->submission.submission_id,MOCK_EVENT_COMPLETION,SPARK_STATUS_IO_ERROR,1u) == 1u,"execution failure cannot publish successful output");
+		if ( phase % 2u == 0u )
+		{
+			for (i=0u; i<TEST_RANKS; i++)
+				if ( i != rank )
+					CHECK(MockResidentClientDeliverEvent(i,r->submission.submission_id,MOCK_EVENT_DECISION,SPARK_STATUS_OK,1u) == 1u,"remaining ranks acknowledge commit while their execution is withheld");
+			CHECK(r->completion_count == 0u,"an early execution error cannot retire slower committed ranks");
+		}
 	}
 	else if ( kind == FAULT_DECISION_ERROR )
 	{

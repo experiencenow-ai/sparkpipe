@@ -17,7 +17,7 @@ class SupervisedWeightd(unittest.TestCase):
         cls.build = tempfile.TemporaryDirectory(prefix="weightd-gate-")
         library = Path(cls.build.name) / "gate.so"
         subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
-                        "-shared", "-fPIC", str(ROOT / "node/weightd_spawn.c"),
+                        "-shared", "-fPIC", "-I", str(ROOT / "include"), str(ROOT / "node/weightd_spawn.c"),
                         "-o", str(library)], check=True)
         cls.library = ctypes.CDLL(str(library))
         cls.gate = cls.library.SparkModelResidentdPrepareWeightd
@@ -94,8 +94,16 @@ class SupervisedWeightd(unittest.TestCase):
         self.assertEqual(self.call(), -20)
 
     def test_explicit_off_cannot_override_deployment(self):
-        os.environ["SPARK_WEIGHTD_ATTACH"] = "0"
-        self.assertEqual(self.call(), -14)
+        for value in ("0", "", "true", "2"):
+            os.environ["SPARK_WEIGHTD_ATTACH"] = value
+            self.assertEqual(self.call(), -14)
+        os.environ["SPARK_WEIGHTD_ATTACH"] = "1"
+        self.assertEqual(self.call(), 0)
+
+    def test_bad_sidecar_cannot_be_hidden_by_valid_digest(self):
+        (self.root / "packs/broken.sha256").write_text("z" * 64)
+        self.assertNotEqual(self.call(), 0)
+        self.assertIsNone(self.libc.getenv(b"SPARK_WEIGHTD_PACK_SHA256"))
 
     def test_invalid_arguments(self):
         self.assertEqual(self.gate(None, b"socket"), -12)

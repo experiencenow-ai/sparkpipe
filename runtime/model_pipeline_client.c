@@ -478,7 +478,7 @@ static void SparkModelPipelineClientRankDecisionResult(
 	if ( transaction->decision_result_mask != transaction->decision_expected_mask )
 		return;
 	SparkModelPipelineClientReportResult(context->pipeline,transaction);
-	if ( transaction->status != SPARK_STATUS_OK )
+	if ( transaction->decision_kind == SPARK_MODEL_RESIDENT_IPC_DECISION_ABORT )
 		transaction->completion_mask = context->pipeline->all_rank_mask;
 	SparkModelPipelineClientReportCompletion(context->pipeline,transaction);
 }

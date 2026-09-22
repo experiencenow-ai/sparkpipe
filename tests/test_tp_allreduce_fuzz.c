@@ -91,8 +91,8 @@ SparkStatus SparkWeightdClientMeshBroadcast(SparkWeightdClient *client, uint32_t
 	uint32_t source_rank = *(uint32_t *)client;
 	uint32_t peer;
 	(void)seq_value; (void)seq_remote_offset; (void)timeout_nanoseconds;
-    if ( g_broadcast_fail != 0u )
-        return SPARK_STATUS_IO_ERROR;
+	if ( g_broadcast_fail != 0u )
+		return(SPARK_STATUS_IO_ERROR);
 	__sync_add_and_fetch(&g_broadcast_count, 1u);
 	if ( source_rank >= g_rank_count || g_regions[source_rank] == 0 )
 		return(SPARK_STATUS_IO_ERROR);
@@ -144,8 +144,8 @@ static SparkStatus FuzzCombineBf16(void *combine_context, void *destination_devi
 	uint32_t count = active_sequence_count * hidden_dimension;
 	uint32_t index;
 	(void)combine_context; (void)cuda_stream;
-    if ( g_combine_fail != 0u )
-        return SPARK_STATUS_IO_ERROR;
+	if ( g_combine_fail != 0u )
+		return(SPARK_STATUS_IO_ERROR);
 	for ( index = 0u; index < count; index++ )
 		destination[index] = FuzzBf16FromFloat(
 		    FuzzBf16ToFloat(destination[index]) +
