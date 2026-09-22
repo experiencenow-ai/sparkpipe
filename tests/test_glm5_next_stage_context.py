@@ -123,6 +123,14 @@ void SparkTpDeviceCollectiveRoundStats(SparkTpDeviceCollective *collective,
     *elapsed = 0u;
 }
 
+SparkStatus SparkTpDeviceCollectiveHardwareStats(SparkTpDeviceCollective *collective,
+    SparkTpDeviceCollectiveHardwareTiming *timing)
+{
+    (void)collective;
+    (void)timing;
+    return(SPARK_STATUS_UNSUPPORTED);
+}
+
 cudaError_t cudaMalloc(void **pointer,size_t bytes)
 {
 	if ( ALLOCATIONS_BEFORE_FAILURE == 0 )
