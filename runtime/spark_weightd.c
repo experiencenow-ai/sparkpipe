@@ -2001,7 +2001,18 @@ static SparkStatus SparkWeightdAcquireWorkingSet(SparkWeightdServer *server,Spar
 	if ( arena->lazy == 0u )
 		return(SPARK_STATUS_INVALID_ARGUMENT);
 	if ( arena->failure_status != SPARK_STATUS_OK )
+	{
+		static uint64_t arena_fail_count_,arena_fail_shown_;
+		arena_fail_count_++;
+		if ( arena_fail_shown_ < 8u || (arena_fail_count_ % 100000u) == 0u )
+			fprintf(stderr,
+				"ACQUIRE-ARENA-FAILED count=%llu sticky_status=%u layer0=%u key_count=%u\n",
+				(unsigned long long)arena_fail_count_,
+				(unsigned)arena->failure_status,
+				count != 0u ? (unsigned)keys[0].layer : 0u,count);
+		arena_fail_shown_++;
 		return(arena->failure_status);
+	}
 	{
 		uint32_t lease_lane = SparkWeightdConnectionLane(connection);
 		status = SparkWeightdLeaseAcquire(arena->leases,connection->owner,lease_lane,keys,count,identifier);
@@ -2012,6 +2023,23 @@ static SparkStatus SparkWeightdAcquireWorkingSet(SparkWeightdServer *server,Spar
 	status = SparkWeightdAcquireLoad(server,arena,lease);
 	if ( status == SPARK_STATUS_OK )
 		SPARK_RETURN(status);
+	{
+		static uint64_t acquire_fail_count_,acquire_fail_shown_;
+		acquire_fail_count_++;
+		if ( acquire_fail_shown_ < 8u || (acquire_fail_count_ % 100000u) == 0u )
+			fprintf(stderr,
+				"ACQUIRE-FAIL count=%llu layer0=%u expert0=%u key_count=%u status=%u budget: pool=%llu retained=%llu other_resident=%llu device_max=%llu chunk_count=%u\n",
+				(unsigned long long)acquire_fail_count_,
+				count != 0u ? (unsigned)keys[0].layer : 0u,
+				count != 0u ? (unsigned)keys[0].expert : 0u,
+				count,(unsigned)status,
+				(unsigned long long)arena->expert_pool_bytes,
+				(unsigned long long)(arena->chunk_bytes * (uint64_t)arena->chunk_count),
+				(unsigned long long)(server->resident_bytes - arena->pool_committed_bytes),
+				(unsigned long long)server->config.device_bytes_max,
+				arena->chunk_count);
+		acquire_fail_shown_++;
+	}
 	for (i=0u; i<arena->chunk_count; i++)
 		if ( arena->created_chunks[i] != 0u && SparkWeightdFreeChunk(server,arena,i) != SPARK_STATUS_OK )
 			status = SPARK_STATUS_IO_ERROR;
