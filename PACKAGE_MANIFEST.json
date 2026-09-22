@@ -1,5 +1,5 @@
 {
-  "file_count": 3293,
+  "file_count": 3299,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "5769286cece7da0cb01f686454c17888fd63df21626d207fa5bc47e33658bc1e",
-      "size_bytes": 126222
+      "sha256": "87a8b96b19fcfd49aaab1b7c400d10bc6f29a08a64dc2feecf4fd3337cf33ce6",
+      "size_bytes": 126539
     },
     {
       "path": "Makefile.rej",
@@ -280,6 +280,16 @@
       "path": "deployment/dsv41_flash_tp4/model_resident.json",
       "sha256": "61d18d02d2814e1be2e2f100cbd8b09647e304218417ff88e60f67dd40d10848",
       "size_bytes": 2667
+    },
+    {
+      "path": "deployment/dsv4_pro_tp4pp4/config/dsv4_pro_tp4_pp4_stage.json",
+      "sha256": "8beafcb6beb51d3791adc4f1dc95c7919593bab5c89a932e3bfe1e8c140dd1ba",
+      "size_bytes": 1917
+    },
+    {
+      "path": "deployment/dsv4_pro_tp4pp4/model_resident.json",
+      "sha256": "948385763253467677cd1935667ee24fc2d132de851cfd7bd551ffd820c6ea2e",
+      "size_bytes": 9430
     },
     {
       "path": "deployment/glm5_next_tp16/LAUNCH-STATE.md",
@@ -8937,6 +8947,11 @@
       "size_bytes": 5035
     },
     {
+      "path": "tests/test_dsv4_pro_tp4pp4_shared_lane.py",
+      "sha256": "acf137e0681c454fb7ef34e020653f08705c936f4ae122832ba83a688e48c0ba",
+      "size_bytes": 11418
+    },
+    {
       "path": "tests/test_dsv4_serving_adapter.c",
       "sha256": "157318b55fc6f9b6443f18032b50aff52b3296db16bbba683230c4f13d3bd8dd",
       "size_bytes": 16300
@@ -10847,6 +10862,11 @@
       "size_bytes": 1281
     },
     {
+      "path": "tools/devcycle/run-dsv4-pro-family-job.sh",
+      "sha256": "4b3dffecfa44f8076da63a80318b6f0f69f1d69bde2714667419bbf76e8ee1a6",
+      "size_bytes": 13369
+    },
+    {
       "path": "tools/devcycle/show_node_context.py",
       "sha256": "5de4d947b8a58122775560bbf61daefdc4aa2a2e3005ead03b074a602e042920",
       "size_bytes": 238
@@ -11002,6 +11022,11 @@
       "size_bytes": 10517
     },
     {
+      "path": "tools/dsv4_pro_experts_manifest.c",
+      "sha256": "94b76c8098913f10153004ba2e6caed6114a459bd817aa7d75c72e6c950233d4",
+      "size_bytes": 8946
+    },
+    {
       "path": "tools/dsv4_pro_rank_pack_verify.py",
       "sha256": "b88f2a0f305eb9df95f1e74988d57d844da0aaa9ed510e93c4dd66450105e20d",
       "size_bytes": 15355
@@ -11015,6 +11040,11 @@
       "path": "tools/dsv4_pro_stagepack.py",
       "sha256": "b8a788c023504b344d3241f687479c2c740c02134d28baa00759276a8c82d703",
       "size_bytes": 16184
+    },
+    {
+      "path": "tools/dsv4_pro_tp4pp4_gen_deployment.py",
+      "sha256": "5e4af032e0517e513ab310bae74ef94fc07208bd47ea7921c01f32571e2c3c9c",
+      "size_bytes": 6608
     },
     {
       "path": "tools/dsv4_stage_source.py",
@@ -16470,5 +16500,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78464051
+  "total_bytes": 78516056
 }
