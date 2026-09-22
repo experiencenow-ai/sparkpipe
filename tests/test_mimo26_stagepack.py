@@ -109,7 +109,7 @@ def build_checkpoint(directory: Path) -> dict:
         "quantization_config": {
             "fmt": "e4m3",
             "ignored_layers": [
-                f"model.layers.{layer}.self_attn.o_proj.weight"
+                f"model.layers.{layer}.self_attn.o_proj"
                 for layer in range(g["layers"])] + ["model.decoder.self_attn.o_proj"],
         },
     }

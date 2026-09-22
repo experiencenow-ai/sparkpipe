@@ -226,9 +226,10 @@ def check_source(arm: str, source: SafetensorsSource) -> dict:
         raise PackFailure("source quantization_config.fmt is not e4m3")
     ignored = quant.get("ignored_layers") or []
     for layer in range(g["layers"]):
-        name = f"model.layers.{layer}.self_attn.o_proj.weight"
-        if name not in ignored:
-            raise PackFailure(f"{name} is not on the fp8 ignore list; the "
+        # the release lists module paths without the .weight suffix
+        module = f"model.layers.{layer}.self_attn.o_proj"
+        if module not in ignored:
+            raise PackFailure(f"{module} is not on the fp8 ignore list; the "
                               "BF16-o_proj pin does not hold for this release")
     return g
 
