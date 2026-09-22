@@ -2383,3 +2383,25 @@ backlog at wrap — the receipt (routed experts demand-load in seconds +
 tokens returned) lands next tick. The allreduce lane's full warm (env
 opt-in) re-measures then too: span-batched, the 45-layer warm should
 drop from hours to ~minutes.
+
+## 09-23 20:00 TICK — the recorded-working-set feature PROVEN (336 keys); a second 30s deadline found
+
+THE OPERATOR'S ONE-SHOT SMOKE WARM, LANDED (@192025c, daemon c366b561):
+- The daemon RECORDS every acquired expert key to <PACK>.wset (the
+  live tape; loaded back at arena creation; written on change).
+- weightd_warm --wset FILE: replays ANY named set (one file per smoke
+  test — snapshot the live tape per test) in ONE batched acquire with
+  elapsed_ms timing.
+- PROVEN LIVE: the recording exists — packs/rank0.sp.wset = 336 keys =
+  exactly the smoke decode set (45 layers x top-8, deduped). The shape
+  is right; the feature works.
+- The transport's round spin timeout now 120s (a chain hit the bound at
+  exactly 120.00087s — live).
+
+OPEN (blocks the cold-preload timing test): a SECOND 30s deadline —
+chains still die at 35.06s with 91 ROUNDS COMPLETED and sub-ms
+allreduce (0.3-0.5ms TOTAL): the wall is engine/adapter-side (the
+submission's deadline path — origin not yet located; the transport bump
+was not this one). NEXT: find and size the second deadline (the
+liveness-based design item unchanged), then the timed test: cold daemon
+→ --wset preload (the 'literally 3 seconds' number) → warm canary.
