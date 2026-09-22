@@ -17,6 +17,134 @@
 #include <pthread.h>
 #include <unistd.h>
 
+static void CUDART_CB SparkStageModuleCudaWaitComplete(void *context)
+{
+    SparkStageModuleCudaWait *wait = context;
+    pthread_mutex_lock(&wait->mutex);
+    wait->completed_generation = wait->generation;
+    pthread_cond_broadcast(&wait->changed);
+    pthread_mutex_unlock(&wait->mutex);
+}
+
+SparkStatus SparkStageModuleCudaWaitInitialize(SparkStageModuleCudaWait *wait,cudaStream_t stream)
+{
+    pthread_condattr_t attributes;
+    int result;
+    if ( wait == 0 || stream == 0 || wait->initialized != 0u )
+        return(SPARK_STATUS_INVALID_ARGUMENT);
+    if ( pthread_mutex_init(&wait->mutex,0) != 0 )
+        return(SPARK_STATUS_INTERNAL_ERROR);
+    result = pthread_condattr_init(&attributes);
+    if ( result == 0 )
+    {
+#if !defined(__APPLE__)
+        result = pthread_condattr_setclock(&attributes,CLOCK_MONOTONIC);
+#endif
+        if ( result == 0 )
+            result = pthread_cond_init(&wait->changed,&attributes);
+        pthread_condattr_destroy(&attributes);
+    }
+    if ( result != 0 )
+    {
+        pthread_mutex_destroy(&wait->mutex);
+        return(SPARK_STATUS_INTERNAL_ERROR);
+    }
+    wait->stream = stream;
+    wait->generation = wait->completed_generation = 0u;
+    wait->waiting = 0u;
+    wait->initialized = 1u;
+    return(SPARK_STATUS_OK);
+}
+
+SparkStatus SparkStageModuleCudaWaitFor(SparkStageModuleCudaWait *wait,uint64_t timeout_ns)
+{
+    struct timespec deadline;
+    cudaError_t error;
+    int result = 0;
+    if ( wait == 0 || wait->initialized == 0u || timeout_ns == 0u || timeout_ns > UINT64_C(3600000000000) )
+        return(SPARK_STATUS_INVALID_ARGUMENT);
+    if ( clock_gettime(CLOCK_MONOTONIC,&deadline) != 0 )
+        return(SPARK_STATUS_INTERNAL_ERROR);
+    deadline.tv_sec += (time_t)(timeout_ns / UINT64_C(1000000000));
+    deadline.tv_nsec += (long)(timeout_ns % UINT64_C(1000000000));
+    if ( deadline.tv_nsec >= 1000000000L )
+    {
+        deadline.tv_sec++;
+        deadline.tv_nsec -= 1000000000L;
+    }
+    pthread_mutex_lock(&wait->mutex);
+    if ( wait->waiting != 0u )
+    {
+        pthread_mutex_unlock(&wait->mutex);
+        return(SPARK_STATUS_BUSY);
+    }
+    wait->waiting = 1u;
+    if ( wait->generation == wait->completed_generation )
+    {
+        error = cudaStreamQuery(wait->stream);
+        if ( error != cudaErrorNotReady )
+        {
+            wait->waiting = 0u;
+            pthread_mutex_unlock(&wait->mutex);
+            return(error == cudaSuccess ? SPARK_STATUS_OK : SPARK_STATUS_IO_ERROR);
+        }
+        wait->generation++;
+        pthread_mutex_unlock(&wait->mutex);
+        error = cudaLaunchHostFunc(wait->stream,SparkStageModuleCudaWaitComplete,wait);
+        pthread_mutex_lock(&wait->mutex);
+        if ( error != cudaSuccess )
+        {
+            wait->completed_generation = wait->generation;
+            wait->waiting = 0u;
+            pthread_mutex_unlock(&wait->mutex);
+            return(SPARK_STATUS_IO_ERROR);
+        }
+    }
+    while ( wait->generation != wait->completed_generation && result == 0 )
+    {
+#if defined(__APPLE__)
+        struct timespec now,remaining;
+        if ( clock_gettime(CLOCK_MONOTONIC,&now) != 0 )
+            result = EINVAL;
+        else
+        {
+            remaining.tv_sec = deadline.tv_sec - now.tv_sec;
+            remaining.tv_nsec = deadline.tv_nsec - now.tv_nsec;
+            if ( remaining.tv_nsec < 0 )
+            {
+                remaining.tv_sec--;
+                remaining.tv_nsec += 1000000000L;
+            }
+            result = remaining.tv_sec < 0 ? ETIMEDOUT : pthread_cond_timedwait_relative_np(&wait->changed,&wait->mutex,&remaining);
+        }
+#else
+        result = pthread_cond_timedwait(&wait->changed,&wait->mutex,&deadline);
+#endif
+    }
+    wait->waiting = 0u;
+    if ( wait->generation == wait->completed_generation )
+        result = 0;
+    pthread_mutex_unlock(&wait->mutex);
+    return(result == 0 ? SPARK_STATUS_OK : result == ETIMEDOUT ? SPARK_STATUS_BUSY : SPARK_STATUS_INTERNAL_ERROR);
+}
+
+SparkStatus SparkStageModuleCudaWaitDestroy(SparkStageModuleCudaWait *wait)
+{
+    if ( wait == 0 || wait->initialized == 0u )
+        return(SPARK_STATUS_INVALID_ARGUMENT);
+    pthread_mutex_lock(&wait->mutex);
+    if ( wait->waiting != 0u || wait->generation != wait->completed_generation )
+    {
+        pthread_mutex_unlock(&wait->mutex);
+        return(SPARK_STATUS_BUSY);
+    }
+    pthread_mutex_unlock(&wait->mutex);
+    pthread_cond_destroy(&wait->changed);
+    pthread_mutex_destroy(&wait->mutex);
+    wait->initialized = 0u;
+    return(SPARK_STATUS_OK);
+}
+
 static const char *SparkStageModuleSafeText(const char *text)
 {
     return text != 0 ? text : "unknown";

@@ -147,6 +147,7 @@ struct SparkGlm5NextModuleState
 	uint32_t owns_embedding;
 	uint32_t owns_final_head;
 	void *execution_stream;
+	SparkStageModuleCudaWait stream_wait;
 	char model_revision[SPARK_GLM5_NEXT_STAGEPACK_MODEL_REVISION_BYTES];
 	SparkGlm5NextLayerWeights layers[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_LAYERS_PER_STAGE];
 	uint32_t index_ordinal_by_local_layer[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_LAYERS_PER_STAGE];
@@ -2946,22 +2947,9 @@ static void SparkGlm5NextGraphStep(SparkGlm5NextTpChain *chain,
 			struct timespec replay_t0,replay_t1;
 			clock_gettime(CLOCK_MONOTONIC,&replay_t0);
 			cudaError_t poll;
-			uint64_t watch_stop;
-			struct timespec watch_now;
-			clock_gettime(CLOCK_MONOTONIC,&watch_now);
-			watch_stop = (uint64_t)watch_now.tv_sec *
-				UINT64_C(1000000000) + (uint64_t)watch_now.tv_nsec +
-				(uint64_t)state->tp_device_collective.operation_timeout_milli *
-				UINT64_C(1000000);
-			while ( (poll = cudaStreamQuery(chain->slot->stream)) ==
-				cudaErrorNotReady )
-			{
-				clock_gettime(CLOCK_MONOTONIC,&watch_now);
-				if ( (uint64_t)watch_now.tv_sec *
-					UINT64_C(1000000000) +
-					(uint64_t)watch_now.tv_nsec >= watch_stop )
-					break;
-			}
+			SparkStatus wait_status = SparkStageModuleCudaWaitFor(&state->stream_wait,
+				(uint64_t)state->tp_device_collective.operation_timeout_milli * UINT64_C(1000000));
+			poll = wait_status == SPARK_STATUS_OK ? cudaSuccess : wait_status == SPARK_STATUS_BUSY ? cudaErrorNotReady : cudaErrorUnknown;
 			clock_gettime(CLOCK_MONOTONIC,&replay_t1);
 			{
 				uint64_t replay_ns = (uint64_t)(replay_t1.tv_sec - replay_t0.tv_sec) *
@@ -3880,6 +3868,19 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 	}
 	async->completion.status = SparkGlm5NextCompletionStatus(async,slot);
 	async->completion.status = SparkGlm5NextFinishCacheLanes(async);
+	{
+		SparkStatus end_status = SPARK_STATUS_OK;
+		if ( state->tp_device_collective_initialized != 0u )
+			end_status = SparkTpDeviceCollectiveEndChain(&state->tp_device_collective,state->execution_stream);
+		if ( end_status == SPARK_STATUS_OK && state->tp_device_collective_hc_initialized != 0u )
+			end_status = SparkTpDeviceCollectiveEndChain(&state->tp_device_collective_hc,state->execution_stream);
+		if ( end_status != SPARK_STATUS_OK )
+		{
+			(void)SparkGlm5NextTerminalFailure(state,end_status);
+			fprintf(stderr,"GLM chain end failed: slot %u status %d; retaining ownership\n",async->slot_index,(int)end_status);
+			return;
+		}
+	}
 
 	{
 		uint64_t round_count = 0u,round_ns = 0u,chain_ns = SparkGlm5NextNowNs();
@@ -4535,8 +4536,10 @@ SparkStatus SparkGlm5NextResidentDecodeStageSnapshot(
 	return(SparkGlm5NextWeightdHealth(state));
 }
 
-static void SparkGlm5NextReleaseCaches(SparkGlm5NextModuleState *state)
+static SparkStatus SparkGlm5NextReleaseCaches(SparkGlm5NextModuleState *state)
 {
+	if ( state->stream_wait.initialized != 0u && SparkStageModuleCudaWaitDestroy(&state->stream_wait) != SPARK_STATUS_OK )
+		return(SPARK_STATUS_BUSY);
 	if ( state->completion_queue_lock_initialized != 0u )
 	{
 		(void)pthread_mutex_destroy(&state->completion_queue_lock);
@@ -4563,6 +4566,7 @@ static void SparkGlm5NextReleaseCaches(SparkGlm5NextModuleState *state)
 		(void)cudaFreeHost(state->kv_lane_physical_pages);
 	if ( state->kv_mutex_initialized != 0u )
 		(void)pthread_mutex_destroy(&state->kv_mutex);
+	return(SPARK_STATUS_OK);
 }
 
 void SparkGlm5NextResidentDecodeStageDestroy(void *module_state)
@@ -4622,7 +4626,8 @@ void SparkGlm5NextResidentDecodeStageDestroy(void *module_state)
 		(void)SparkWeightdClientClose(state->lane_client);
 		state->lane_client = 0;
 	}
-	SparkGlm5NextReleaseCaches(state);
+	if ( SparkGlm5NextReleaseCaches(state) != SPARK_STATUS_OK )
+		return;
 	SparkGlm5NextReleaseSlotHost(state);
 	SparkStageModuleLedgerRelease(&state->ledger);
 	free(state->mtp_lane_armed);
@@ -4700,6 +4705,8 @@ static SparkStatus SparkGlm5NextInitializeState(
 	for (lane=0u; lane<SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT; lane++)
 		atomic_init(&state->lazy_retained[lane],0);
 	status = SparkGlm5NextModuleConfigure(state,configuration,host_services,&pack_path);
+	if ( status == SPARK_STATUS_OK )
+		status = SparkStageModuleCudaWaitInitialize(&state->stream_wait,(cudaStream_t)state->execution_stream);
 	if ( status == SPARK_STATUS_OK && SparkGlm5NextConfigureCudaModule(&state->multiprocessor_count) != 0 )
 		status = SPARK_STATUS_TARGET_MISMATCH;
 	if ( status == SPARK_STATUS_OK )
@@ -4739,7 +4746,8 @@ static SparkStatus SparkGlm5NextInitializeState(
 			(void)SparkWeightdClientClose(state->lane_client);
 			state->lane_client = 0;
 		}
-		SparkGlm5NextReleaseCaches(state);
+		if ( SparkGlm5NextReleaseCaches(state) != SPARK_STATUS_OK )
+			SPARK_RETURN(status);
 		SparkGlm5NextReleaseSlotHost(state);
 		SparkStageModuleLedgerRelease(&state->ledger);
 		free(state->mtp_lane_armed);

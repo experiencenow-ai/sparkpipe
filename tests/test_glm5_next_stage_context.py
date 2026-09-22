@@ -17,7 +17,37 @@ HARNESS = r'''
 #include "tests/test_kv_cache.c"
 #undef main
 static SparkGlm5NextModuleState state;
-static uint32_t COPY_COUNT,CANCEL_COUNT,STREAM_QUERY_COUNT,EXPECTED_CANCEL_COUNT;
+static uint32_t COPY_COUNT,CANCEL_COUNT,STREAM_QUERY_COUNT,EXPECTED_CANCEL_COUNT,END_COUNT;
+static SparkStatus END_STATUS;
+static uint32_t HOST_MODE,HOST_COUNT;
+static cudaHostFn_t HOST_FUNCTIONS[16];
+static void *HOST_CONTEXTS[16];
+static pthread_t HOST_THREAD;
+
+static void *complete_delayed(void *context)
+{
+	uint32_t index = (uint32_t)(uintptr_t)context;
+	struct timespec pause = {0,20000000};
+	nanosleep(&pause,0);
+	HOST_FUNCTIONS[index](HOST_CONTEXTS[index]);
+	return(0);
+}
+
+cudaError_t cudaLaunchHostFunc(cudaStream_t stream,cudaHostFn_t function,void *context)
+{
+	uint32_t index = HOST_COUNT++;
+	(void)stream;
+	assert(index < 16u);
+	HOST_FUNCTIONS[index] = function;
+	HOST_CONTEXTS[index] = context;
+	if ( HOST_MODE == 3u )
+		return(cudaErrorInvalidValue);
+	if ( HOST_MODE == 0u )
+		function(context);
+	if ( HOST_MODE == 2u )
+		assert(pthread_create(&HOST_THREAD,0,complete_delayed,(void *)(uintptr_t)index) == 0);
+	return(cudaSuccess);
+}
 static cudaError_t DRAIN_STATUS;
 static uint32_t REAL_BACKEND;
 static int32_t ALLOCATIONS_BEFORE_FAILURE = -1;
@@ -32,6 +62,15 @@ void SparkTpDeviceCollectiveBroadcastCancel(SparkTpDeviceCollective *collective)
 {
     (void)collective;
     CANCEL_COUNT++;
+}
+
+SparkStatus SparkTpDeviceCollectiveEndChain(SparkTpDeviceCollective *collective,void *stream)
+{
+    (void)collective;
+    assert(stream == state.execution_stream && DRAIN_STATUS == cudaSuccess);
+    assert(atomic_load(&state.tp_chain_active) == 1u);
+    END_COUNT++;
+    return(END_STATUS);
 }
 
 void SparkTpDeviceCollectiveRoundStats(SparkTpDeviceCollective *collective,
@@ -74,7 +113,7 @@ cudaError_t cudaMemsetAsync(void *pointer,int value,size_t bytes,cudaStream_t st
 
 cudaError_t cudaStreamQuery(cudaStream_t stream)
 {
-	assert(stream == (cudaStream_t)state.execution_stream);
+	assert(stream != 0 || state.execution_stream == 0);
 	STREAM_QUERY_COUNT++;
 	return(DRAIN_STATUS);
 }
@@ -152,6 +191,55 @@ static void observe_completion(void *context,const SparkModelDriverCompletion *c
 	}
 }
 
+static void check_stream_receipt(void)
+{
+	SparkStageModuleCudaWait first = {0},second = {0};
+	uint64_t start;
+	uint32_t count;
+	assert(SparkStageModuleCudaWaitInitialize(&first,(cudaStream_t)(uintptr_t)1u) == SPARK_STATUS_OK);
+	assert(SparkStageModuleCudaWaitInitialize(&second,(cudaStream_t)(uintptr_t)2u) == SPARK_STATUS_OK);
+	HOST_COUNT = STREAM_QUERY_COUNT = 0u;
+	DRAIN_STATUS = cudaSuccess;
+	assert(SparkStageModuleCudaWaitFor(&first,UINT64_C(1000000)) == SPARK_STATUS_OK);
+	assert(HOST_COUNT == 0u && STREAM_QUERY_COUNT == 1u);
+	DRAIN_STATUS = cudaErrorNotReady;
+	HOST_MODE = 0u;
+	assert(SparkStageModuleCudaWaitFor(&first,UINT64_C(1000000)) == SPARK_STATUS_OK);
+	assert(first.generation == 1u && first.completed_generation == 1u && HOST_COUNT == 1u);
+	HOST_MODE = 1u;
+	assert(SparkStageModuleCudaWaitFor(&first,UINT64_C(1000000)) == SPARK_STATUS_BUSY);
+	assert(SparkStageModuleCudaWaitDestroy(&first) == SPARK_STATUS_BUSY);
+	count = STREAM_QUERY_COUNT;
+	assert(SparkStageModuleCudaWaitFor(&first,UINT64_C(1000000)) == SPARK_STATUS_BUSY);
+	assert(STREAM_QUERY_COUNT == count && HOST_COUNT == 2u && first.generation == 2u);
+	assert(SparkStageModuleCudaWaitFor(&second,UINT64_C(1000000)) == SPARK_STATUS_BUSY);
+	HOST_FUNCTIONS[1](HOST_CONTEXTS[1]);
+	assert(first.completed_generation == 2u && second.completed_generation == 0u);
+	assert(SparkStageModuleCudaWaitDestroy(&first) == SPARK_STATUS_OK);
+	assert(SparkStageModuleCudaWaitDestroy(&second) == SPARK_STATUS_BUSY);
+	HOST_FUNCTIONS[2](HOST_CONTEXTS[2]);
+	assert(SparkStageModuleCudaWaitDestroy(&second) == SPARK_STATUS_OK);
+	assert(SparkStageModuleCudaWaitInitialize(&first,(cudaStream_t)(uintptr_t)3u) == SPARK_STATUS_OK);
+	HOST_MODE = 2u;
+	count = STREAM_QUERY_COUNT;
+	start = SparkGlm5NextNowNs();
+	assert(SparkStageModuleCudaWaitFor(&first,UINT64_C(500000000)) == SPARK_STATUS_OK);
+	assert(SparkGlm5NextNowNs() - start >= UINT64_C(10000000));
+	assert(SparkGlm5NextNowNs() - start < UINT64_C(250000000));
+	assert(pthread_join(HOST_THREAD,0) == 0);
+	assert(STREAM_QUERY_COUNT == count + 1u && HOST_COUNT == 4u);
+	HOST_MODE = 3u;
+	assert(SparkStageModuleCudaWaitFor(&first,UINT64_C(1000000)) == SPARK_STATUS_IO_ERROR);
+	assert(first.generation == first.completed_generation);
+	DRAIN_STATUS = cudaErrorInvalidValue;
+	count = HOST_COUNT;
+	assert(SparkStageModuleCudaWaitFor(&first,UINT64_C(1000000)) == SPARK_STATUS_IO_ERROR);
+	assert(HOST_COUNT == count);
+	assert(SparkStageModuleCudaWaitDestroy(&first) == SPARK_STATUS_OK);
+	DRAIN_STATUS = cudaSuccess;
+	HOST_MODE = 0u;
+}
+
 static void check_chain_ownership(void)
 {
 	memset(&state,0,sizeof(state));
@@ -172,7 +260,7 @@ static void check_chain_ownership(void)
 	DRAIN_STATUS = cudaSuccess;
 }
 
-static int32_t check_cache_transactions(SparkStatus completion_status,cudaError_t drain_status)
+static int32_t check_cache_transactions(SparkStatus completion_status,SparkStatus end_status,cudaError_t drain_status)
 {
 	SparkTestKvTransactions fixture;
 	SparkModelDriverAdmissionDecision decision;
@@ -234,7 +322,8 @@ static int32_t check_cache_transactions(SparkStatus completion_status,cudaError_
 	atomic_store(&state.tp_chain_active,1u);
 	state.tp_device_collective_initialized = state.tp_device_collective_hc_initialized = 1u;
 	EXPECTED_CANCEL_COUNT = completion_status != SPARK_STATUS_OK ? 2u : 0u;
-	CANCEL_COUNT = COMPLETION_REUSED = 0u;
+	CANCEL_COUNT = END_COUNT = COMPLETION_REUSED = 0u;
+	END_STATUS = end_status;
 	DRAIN_STATUS = drain_status;
 	COMPLETION_WORK = 0;
 	WORK_STATUS = SPARK_STATUS_BUSY;
@@ -247,11 +336,12 @@ static int32_t check_cache_transactions(SparkStatus completion_status,cudaError_
 		return(-29);
 	COMPLETION_WORK(COMPLETION_CONTEXT);
 	assert(CANCEL_COUNT == EXPECTED_CANCEL_COUNT);
-	if ( drain_status != cudaSuccess )
+	if ( drain_status != cudaSuccess || end_status != SPARK_STATUS_OK )
 	{
 		assert(COMPLETION_REUSED == 0u && atomic_load(&state.tp_chain_active) == 1u);
 		assert(atomic_load(&state.slot_states[0]) == SPARK_STAGE_MODULE_SLOT_CLAIMED);
 		assert(atomic_load(&state.lane_states[0]) == SPARK_STAGE_MODULE_SLOT_CLAIMED);
+		assert(END_COUNT == (drain_status != cudaSuccess ? 0u : 1u));
 		assert(fixture.owners[0].phase == (drain_status != cudaSuccess ? SPARK_KV_LANE_TRANSACTION_EXECUTING : SPARK_KV_LANE_TRANSACTION_EMPTY));
 		assert(atomic_load(&state.terminal_status) != SPARK_STATUS_OK);
 		DRAIN_STATUS = cudaSuccess;
@@ -259,7 +349,7 @@ static int32_t check_cache_transactions(SparkStatus completion_status,cudaError_
 		memset(&state,0,sizeof(state));
 		return(0);
 	}
-
+	assert(END_COUNT == 2u);
 	if ( COMPLETION_REUSED == 0u )
 		return(-30);
 	if ( COMPLETION_STATUS != completion_status || atomic_load(&state.slot_states[0]) != SPARK_STAGE_MODULE_SLOT_FREE || atomic_load(&state.lane_states[0]) != SPARK_STAGE_MODULE_SLOT_FREE || atomic_load(&state.lane_states[1]) != SPARK_STAGE_MODULE_SLOT_FREE || (completion_status != SPARK_STATUS_OK && (fixture.pages.cache.sequences[0].sequence_id != 0u || fixture.pages.cache.sequences[1].sequence_id != 0u || shadow[0] != UINT32_MAX)) )
@@ -1040,10 +1130,12 @@ int32_t main(void)
 	SparkFirmwareModuleHostServices services = {0};
 	const char *path = 0;
 	uint32_t first[4] = {0u,12u,23u,34u},counts[4] = {12u,11u,11u,11u},stage;
+	check_stream_receipt();
 	check_chain_ownership();
-	int32_t status = check_cache_transactions(SPARK_STATUS_IO_ERROR,cudaSuccess);
-	assert(check_cache_transactions(SPARK_STATUS_OK,cudaSuccess) == 0);
-	assert(check_cache_transactions(SPARK_STATUS_OK,cudaErrorInvalidValue) == 0);
+	int32_t status = check_cache_transactions(SPARK_STATUS_IO_ERROR,SPARK_STATUS_OK,cudaSuccess);
+	assert(check_cache_transactions(SPARK_STATUS_OK,SPARK_STATUS_OK,cudaSuccess) == 0);
+	assert(check_cache_transactions(SPARK_STATUS_OK,SPARK_STATUS_IO_ERROR,cudaSuccess) == 0);
+	assert(check_cache_transactions(SPARK_STATUS_OK,SPARK_STATUS_OK,cudaErrorInvalidValue) == 0);
 	if ( status != 0 )
 		return(-status);
 	status = check_cache_release();
