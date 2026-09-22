@@ -44,7 +44,7 @@ template __global__ void LmTopkSmallKernel<QWEN38_THREADS, QWEN38_TOP_K, true, 1
 template __global__ void LmRouteBuildKernel<QWEN38_THREADS, QWEN38_EXPERTS>(const uint32_t *, uint32_t, uint32_t, uint32_t *, uint32_t *, uint32_t *, uint32_t, uint32_t, uint32_t *, uint32_t, uint32_t *);
 template __global__ void LmMoeFinalizeKernel<QWEN38_THREADS>(const uint16_t *, const uint32_t *, const float *, uint16_t *, uint32_t, uint32_t, uint32_t);
 template __global__ void LmCopyRowsKernel<QWEN38_THREADS>(const uint16_t *, uint16_t *, uint32_t, uint32_t);
-template __global__ void Qwen38SharedExpertAddKernel<QWEN38_THREADS>(const uint16_t *, const uint16_t *, const uint16_t *, uint16_t *, uint32_t, uint32_t);
+template __global__ void Qwen38SharedExpertAddKernel<QWEN38_THREADS>(const uint16_t *, const uint16_t *, const uint16_t *, const uint16_t *, uint16_t *, uint32_t, uint32_t);
 template __global__ void LmHeadCandidateKernel<QWEN38_THREADS, 1024u>(const uint16_t *, const uint16_t *, const uint32_t *, float *, uint32_t *, uint32_t, uint32_t, uint32_t);
 template __global__ void LmHeadCommitKernel<QWEN38_THREADS>(const float *, const uint32_t *, uint32_t, uint32_t *, float *, uint32_t);
 
