@@ -12803,8 +12803,8 @@
     },
     {
       "path": "tools/qwen38max_multidev_build_artifacts.sh",
-      "sha256": "34e1ace94776371a3289d96c4edeab440b83931874fa3b3066f128c33f3e06de",
-      "size_bytes": 5515
+      "sha256": "dcf8e5adc0b4710d5d6cc1101a8c6f5823d7f4c9d48f22c14390bbcbce5ae541",
+      "size_bytes": 5651
     },
     {
       "path": "tools/qwen38max_multidev_experts_manifest.sh",
@@ -12813,18 +12813,18 @@
     },
     {
       "path": "tools/qwen38max_multidev_lane.py",
-      "sha256": "38fc01bac755bf50c990f9d88b97087182fb80ce312561948bcd38c076fcfa41",
-      "size_bytes": 13579
+      "sha256": "dd66d8545f42de9ff3006a08f721d7dfea3815c821b0cf02dabee20b23199aff",
+      "size_bytes": 13788
     },
     {
       "path": "tools/qwen38max_multidev_pack_emit.sh",
-      "sha256": "f94a8cfeb29c01d5f3f0ef28fa935288521b8491f92cde0e070a9421a482a225",
-      "size_bytes": 6659
+      "sha256": "aa45fdf3d4b9f9376d04fc306fd5679d4b990dcfcb6c317255742a690e4c7b2a",
+      "size_bytes": 6874
     },
     {
       "path": "tools/qwen38max_multidev_run_family.sh",
-      "sha256": "75a76120c761ff756a3f13337149d028407f7c0adeafc45c61a18eda63361dae",
-      "size_bytes": 15167
+      "sha256": "253ae60ef98290e8b51a3da3b4eac86e918e9cf2b6d4c7dcd096e4303036467a",
+      "size_bytes": 15175
     },
     {
       "path": "tools/qwen38max_multidev_warm_probe.sh",
@@ -12888,8 +12888,8 @@
     },
     {
       "path": "tools/qwen38max_verify_pools.py",
-      "sha256": "c40f1394058984b31bb52640b4cd3296a4a1198373fc3df25b2ceaff734d65c9",
-      "size_bytes": 4785
+      "sha256": "117f24f84ef3ca91d8f3e187f901ea100e353d8556e808911372e5c7a7db2ea9",
+      "size_bytes": 4787
     },
     {
       "path": "tools/qwen4_flash_b1_32k_batch.json",
@@ -16725,5 +16725,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79685156
+  "total_bytes": 79685726
 }
