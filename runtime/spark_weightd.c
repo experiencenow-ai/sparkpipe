@@ -1975,18 +1975,29 @@ static SparkStatus SparkWeightdAcquireLoad(SparkWeightdServer *server,SparkWeigh
 	memset(arena->created_chunks,0,arena->chunk_count);
 	status = SparkWeightdAcquireBudget(server,arena);
 	if ( status != SPARK_STATUS_OK )
+	{
+		fprintf(stderr,"ACQUIRE-LOAD-STAGE stage=budget status=%u\n",(unsigned)status);
 		SPARK_RETURN(status);
+	}
 	for (i=0u; i<arena->chunk_count; i++)
 		if ( arena->needed_chunks[i] != 0u && arena->chunk_handles[i] == 0 )
 		{
 			status = SparkWeightdArenaChunkEnsure(server,arena,i,i);
 			if ( status != SPARK_STATUS_OK )
+			{
+				fprintf(stderr,"ACQUIRE-LOAD-STAGE stage=chunk_ensure index=%u status=%u\n",i,(unsigned)status);
 				SPARK_RETURN(status);
+			}
 		}
 	fd = open(arena->pack_path,O_RDONLY | O_NONBLOCK);
 	if ( fd < 0 )
+	{
+		fprintf(stderr,"ACQUIRE-LOAD-STAGE stage=open_pack path=%s errno=%d\n",arena->pack_path,errno);
 		return(SPARK_STATUS_IO_ERROR);
+	}
 	status = SparkWeightdLoadLease(arena,fd,lease);
+	if ( status != SPARK_STATUS_OK )
+		fprintf(stderr,"ACQUIRE-LOAD-STAGE stage=load_lease status=%u\n",(unsigned)status);
 	(void)close(fd);
 	if ( status == SPARK_STATUS_OK )
 		SparkWeightdCommitLease(arena,lease);
