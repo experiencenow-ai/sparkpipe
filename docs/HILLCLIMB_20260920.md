@@ -2183,3 +2183,18 @@ resilience). Then the ladder: warm canary → GRAPH → ARRIVAL → clean
   acquire. NEXT: (a) read the ACQUIRE-FAIL verdicts, (b) the
   RESOLVING-stall question (why the resolve's acquire never fires),
   (c) map reconnect still queued.
+
+## 09-23 04:00 TICK — ROUTE-RECLAIM landed; the verdict instrument sits on the wrong IPC kind
+
+- ROUTE-RECLAIM (residentd 110668ee): the stuck scanner now FREES routes
+  owned by a previous client generation (dead-session routes blocked
+  their lane's KV admission forever — every fresh submit BUSY at
+  ADMIT9-KVPHASE; same orphan class as KV-RECLAIM, route level).
+- THE VERDICT INSTRUMENT GAP: ACQUIRE-FAIL logs sit on the ACQUIRE
+  working-set kind, but the map's bulk acquire rides a DIFFERENT IPC
+  handler (the lazy/batch kind) — this boot's prefetch failed 42 layers
+  with ZERO ACQUIRE lines: the failing path never passes my instrument.
+  NEXT: move/add the logging to the bulk/lazy acquire handler; the
+  verdict then names the tail-layer mechanism.
+- Canary16 pending at wrap; submissions flow; admission watermark fix
+  and epoch stack holding throughout.
