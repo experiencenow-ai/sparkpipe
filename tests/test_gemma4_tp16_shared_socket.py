@@ -175,6 +175,7 @@ def test_wrapper(deployment_tree: Path, temporary: Path) -> None:
     check(PACK_SIDECAR.match(sidecars[0].read_text()) is not None,
           "sidecar names exactly its pack")
     check((root / "config/stage.json").exists(), "stage config materialized")
+    check((root / "kv").is_dir(), "kv backing directory materialized (residentd requires a real dir)")
     wrapper_source = WRAPPER.read_text()
     check("SPARK_WEIGHTD_PACK_SHA256" in wrapper_source and
           "SPARK_WEIGHTD_ATTACH=1" in wrapper_source and
