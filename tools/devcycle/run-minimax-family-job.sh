@@ -60,7 +60,7 @@ SESSION_BASE=$((23168 + 64 * LANE))       # 23808..23871 (TP session grid)
 # Fabric rail 0 of the spark8-b quartet (host-rdma transport, rank order).
 RAIL_HOSTS="${MINIMAX_RAIL_HOSTS:-10.10.200.8,10.10.200.9,10.10.200.10,10.10.200.11}"
 
-DEVICE_MIB=17500   # dense interim: pack 16.34 GiB + KV/workspace headroom;
+DEVICE_MIB=18905   # dense interim (lane_budget_calc on smoke_experts.json):
                     # declared honestly at submission (NOT the 6400 lane table
                     # serving budget; bounded-TTL exception per manager ruling)
 
