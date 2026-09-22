@@ -77,3 +77,55 @@ python3 tools/tp_cupti_trace_report.py rank0.cupti.log --clock monotonic --start
 ```
 
 The profiler and timing tool are described in [TP_CUPTI_TRACE.md](TP_CUPTI_TRACE.md).
+
+## Completed requests after the admission repair
+
+The first fleet trace exposed a separate serving defect at submission 193:
+zero-row `CACHE_PUBLISH` was accepted by the module, but its decision reported
+zero available dispatch slots. The generated driver correctly kept returning
+BUSY. Commit `bb94f3eba599a20e2eb7663ed9bdf24f7e75e821` reports the actual
+slot availability before this control branch. The regression executes the real
+GLM module through the generated admission wrapper; the pre-fix code fails.
+
+A fresh coherent build of that commit passed CUDA compilation, retained GPU
+module publication, driver linking/loading and artifact checks. Its bundle
+SHA256 is `a98fc545b31f33b26872fb04a384618a3a4345acbb8b72636f0161aa6ad08528`;
+the loaded driver artifact SHA256 is
+`91e101615753403a428e175637e83a9a41156038470dc9b566d8caf427461ff2`.
+
+All sixteen ranks initialized with hardware waits, graph mode, pinned experts,
+FP8 weights, one active sequence, one execution row and the same 176-token
+quality-fixture prompt. Context capacity was 512, logical/physical page counts
+128, and explicit backing capacity 2 GiB. Each rank used an isolated weightd,
+mesh records, socket, ports and cache root; existing services remained present
+and were idle in the preflight snapshot. CUPTI was disabled for these runs.
+
+| Request | Output tokens | Completion | Decode tok/s | Median interval | First token |
+| --- | ---: | --- | ---: | ---: | ---: |
+| First | 32 | status 0 | 11.384 | 84.352 ms | 17.071 s |
+| Repeat | 32 | status 0 | 9.814 | 99.507 ms | 14.261 s |
+
+Decode rate uses the 31 first-to-last output-token intervals. Engine timestamps
+independently give 11.3835 and 9.8136 tok/s, agreeing with stdout arrival timing.
+Both requests cross the formerly stuck cache boundary and complete their final
+publication/release. Both produce the identical token-list SHA256
+`6955a6afeadbb5b8a88399e8f20a275a22d633fcbafa578ed63e5fdc4e7f87da`.
+This establishes repeatability, not comparison with a trusted model oracle.
+Each CLI invocation creates a new coordinator engine and reports zero cached
+prompt tokens, so this repeat is not a persistent-engine prefix-hit test.
+
+The difference between the runs is retained, not averaged into a claimed
+14 tok/s result. Stage-profile output on the first run reported 16 dropped
+records; it cannot support a complete stage-by-stage decomposition. The earlier
+CUPTI trace has separate zero-loss accounting and remains the compute attribution
+source. All 32 owned fleet processes subsequently exited cleanly with no forced
+kills; process absence was verified on every rank.
+
+Retained local evidence is under
+`/private/tmp/sparkpipe-pr1082-receipts/fleet-performance/sparkpipe-perf-bb94f3eba599-graph-r3/`,
+with the first request in `pass1/` and the second at the root. Event-file SHA256s
+are `6be8fc7af72383fd10a09d1a1a3ce0e8f0e9c498c37865762d21a11e8b6f25c7`
+and `ed94ef6a887e246e871e988b557f034d6462dd75469f9dc2ffb0014d950d528d`.
+The corresponding measurement JSON SHA256s are
+`4b758fb8f6e9287adeca1c691c3a74f92dbb5b7ed7d4b08eaea7bbdb71f8a04e`
+and `67b0b73b50a82034203dd92602b9a9333c0fa7921b38556925710730ab804777`.
