@@ -1121,7 +1121,19 @@ extern "C" cudaError_t SparkGlm5NextMeshHardwarePrepare(void *host,void **device
             return status;
         }
     }
-    return cudaHostGetDevicePointer(device_out,host,0u);
+    status = cudaHostGetDevicePointer(device_out,host,0u);
+    if ( status == cudaSuccess )
+        return status;
+    /* The shared weightd's mesh region cannot always be host-registered
+     * (RDMA-registered shmem pages; lane-0 fleet reproduction glm-mesh-flag-
+     * run), in which case no mapped alias exists. The mesh kernels and the
+     * stream-wait path address this region through the host virtual address
+     * directly (cache-coherent GB10), so fall back to the identity mapping
+     * instead of failing collective initialization. */
+    fprintf(stderr,"MESH-DEVICE-ALIAS-IDENTITY ptr=%p cuda=%d (%s) coherent-host-path\n",
+        host,(int)status,cudaGetErrorString(status));
+    *device_out = host;
+    return cudaSuccess;
 }
 
 static cudaError_t SparkGlm5NextMeshHardwareWait(cudaStream_t stream,

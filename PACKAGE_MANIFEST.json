@@ -4308,8 +4308,8 @@
     },
     {
       "path": "model-families/common/include/sparkpipe/spark_tp_mesh_kernels.cuh",
-      "sha256": "091a9243cb5ab3fdd8b4a9a84d00c527a080c6f2904a292741108076bf91561a",
-      "size_bytes": 48220
+      "sha256": "3e72a0a9f8412a2840f0e4045a75146128a230a3b238bb308885a35a019a03d8",
+      "size_bytes": 48906
     },
     {
       "path": "model-families/common/include/sparkpipe/spark_tp_mesh_register.h",
@@ -7888,8 +7888,8 @@
     },
     {
       "path": "ring/transport/tp_device_collective.c",
-      "sha256": "6ef32bfc26bcf0f611d176f07d5faade44ebb8b00f18d3c1ba6af53e8c779cd7",
-      "size_bytes": 114793
+      "sha256": "a1447d8a154823496eb71708e54d84e924417f2a0118be9e1475ad9513df7fc6",
+      "size_bytes": 115938
     },
     {
       "path": "ring/transport/tp_device_collective_nccl.h",
@@ -10408,8 +10408,8 @@
     },
     {
       "path": "tests/test_tp_allreduce_fuzz.c",
-      "sha256": "bde9e458b1bd6a0013eaafecc021b4dd0ac28dd6003a0d944dd7b4d93bb37006",
-      "size_bytes": 94874
+      "sha256": "bdd08f5f6bc0d907c1f1a3f3038a32a30bbbb65b4c95104a76f649e61aa05006",
+      "size_bytes": 96563
     },
     {
       "path": "tests/test_tp_collective.c",
@@ -16750,5 +16750,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79859288
+  "total_bytes": 79862808
 }
