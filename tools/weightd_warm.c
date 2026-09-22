@@ -187,12 +187,14 @@ int main(int argument_count,char **arguments)
     }
     arguments = filtered;
     argument_count = filtered_count;
-    if ( family != 0 && strcmp(family,"dsv4_pro") != 0 )
+    if ( family != 0 && strcmp(family,"dsv4_pro") != 0 &&
+         strcmp(family,"dsv41_flash") != 0 && strcmp(family,"k3") != 0 &&
+         strcmp(family,"ling") != 0 )
     {
-        fprintf(stderr,"weightd_warm: unknown family %s (dsv4_pro)\n",family);
+        fprintf(stderr,"weightd_warm: unknown family %s (dsv4_pro, dsv41_flash, k3, ling)\n",family);
         goto usage;
     }
-    if ( family != 0 && !world_rank_given )
+    if ( family != 0 && strcmp(family,"dsv4_pro") == 0 && !world_rank_given )
     {
         fprintf(stderr,"weightd_warm: --family dsv4_pro requires --world-rank\n");
         goto usage;
@@ -236,9 +238,11 @@ int main(int argument_count,char **arguments)
          (wset_path == 0 && argument_count > 6 && !parse_positive(arguments[6],UINT32_MAX,&layers)) ||
          (wset_path == 0 && argument_count > 7 && !parse_positive(arguments[7],SPARK_WEIGHTD_EXPERT_COUNT_MAX,&experts)) ||
          (argument_count > 8 && !parse_positive(arguments[8],UINT64_MAX / UINT64_C(1000000000),&seconds)) ||
-         (!identity_print &&
+         (getenv("SPARK_WEIGHTD_EXPERT_POOL_BYTES") != 0 &&
           !parse_positive(getenv("SPARK_WEIGHTD_EXPERT_POOL_BYTES"),
-             SPARK_WEIGHTD_DEVICE_BYTES_MAX_DEFAULT,&request.expert_pool_bytes)) )
+             SPARK_WEIGHTD_DEVICE_BYTES_MAX_DEFAULT,&request.expert_pool_bytes)) ||
+         (!identity_print &&
+          getenv("SPARK_WEIGHTD_EXPERT_POOL_BYTES") == 0) )
         goto usage;
     if ( strlen(arguments[2]) >= sizeof(request.pack_path) ||
          strlen(arguments[3]) != 64u ||
@@ -255,7 +259,39 @@ int main(int argument_count,char **arguments)
     request.identity.abi_version = SPARK_WEIGHTD_IPC_ABI_VERSION;
     request.identity.arena_bytes = (uint64_t)pack.st_size;
     request.identity.topology = (uint32_t)topology;
-    if ( family != 0 )
+    if ( family != 0 && strcmp(family,"dsv41_flash") == 0 )
+    {
+        /* Lane 4 (dsv41_flash): the module pins only the model tag
+         * (SPARK_DSV41_FLASH_MODULE_TAG "dsv41_flash_stage") and sends
+         * revision/topology from its node context, geometry unset (0).
+         * REVISION/TOPOLOGY arguments stay authoritative here - they come
+         * from the stage config - so the family hook pins the tag only. */
+        strcpy(request.identity.model,"dsv41_flash_stage");
+    }
+    else if ( family != 0 && strcmp(family,"ling") == 0 )
+    {
+        /* Lane 9 (ling): the module pins only the model tag
+         * (SPARK_LING_MODULE_TAG "ling_stage") and sends
+         * revision/topology from its stage config (revision = the
+         * stage model_revision, topology = tp_degree), geometry unset
+         * (0). REVISION/TOPOLOGY arguments stay authoritative here -
+         * they come from the stage config - so the family hook pins
+         * the tag only, exactly the dsv41_flash shape. */
+        strcpy(request.identity.model,"ling_stage");
+    }
+    else if ( family != 0 && strcmp(family,"k3") == 0 )
+    {
+        /* Lane 3 (k3): the runner pins model "kimi-k3" / revision
+         * "mxfp4" / topology = tp_degree (4). arena_bytes keeps the
+         * default pack-size fill - the daemon's size-mismatch contract
+         * (WDATTACH) rejects any other value with INVALID_ARGUMENT,
+         * measured against the release-shared weightd. */
+        strcpy(request.identity.model,"kimi-k3");
+        strcpy(request.identity.revision,"mxfp4");
+        request.identity.topology = 4u;
+        request.identity.geometry_fingerprint = 0u;
+    }
+    else if ( family != 0 )
     {
         /* Preserve the pack_sha256/abi/arena_bytes filled above; the
          * family owns model/revision/topology/geometry. */
@@ -283,7 +319,10 @@ int main(int argument_count,char **arguments)
     }
     strcpy(request.pack_path,arguments[2]);
     snprintf(manifest_path,sizeof(manifest_path),"%s.experts",arguments[2]);
-    status = SparkWeightdManifestLoad(manifest_path,request.identity.arena_bytes,&manifest);
+    /* the manifest bound is the PACK size; identity.arena_bytes is the
+     * daemon-side arena identity and for k3 is the pool budget, which
+     * would reject every offset past 3 GiB of a ~98 GiB pack. */
+    status = SparkWeightdManifestLoad(manifest_path,(uint64_t)pack.st_size,&manifest);
     if ( status != SPARK_STATUS_OK || manifest.group_count == 0u )
     {
         fprintf(stderr,"weightd_warm: expert manifest failed status=%d\n",(int)status);
@@ -356,6 +395,11 @@ usage:
         "       weightd_warm SOCKET --reclaim\n"
         "       options (any position): --family dsv4_pro --world-rank R (derive the exact\n"
         "       DSV4 Pro module attach identity; REVISION/TOPOLOGY args are then ignored)\n"
+        "                           --family dsv41_flash (pin the module tag; REVISION/TOPOLOGY stay authoritative)\n"
+        "                           --family ling (pin the module tag; REVISION/TOPOLOGY stay authoritative)\n"
+        "                           --family k3 (pin the k3 runner identity: kimi-k3/mxfp4,\n"
+        "                              topology 4; arena bytes stay the pack size per the\n"
+        "                              daemon's size-mismatch contract)\n"
         "                           --identity-print (print the derived identity and exit)\n"
         "       finite SPARK_WEIGHTD_EXPERT_POOL_BYTES is required\n");
     return 2;

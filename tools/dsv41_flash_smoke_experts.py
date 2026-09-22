@@ -214,6 +214,16 @@ def build_manifest() -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", default=str(MANIFEST_PATH))
+    parser.add_argument("--emit-wset", metavar="PATH",
+                        help="also write the canonical set as a weightd "
+                             ".wset file (native-endian u32 (layer, expert) "
+                             "pairs, tools/weightd_warm.c format)")
+    parser.add_argument("--wset-rank", type=int, metavar="R", default=None,
+                        help="with --emit-wset: keep only the pairs owned by "
+                             "tp rank R (contiguous shard: rank r owns "
+                             "experts [r*384/4, (r+1)*384/4)); the warmer "
+                             "validates keys against the rank pack's own "
+                             ".experts manifest")
     parser.add_argument("--check", action="store_true",
                         help="regenerate and compare against the committed manifest")
     args = parser.parse_args()
@@ -227,6 +237,25 @@ def main() -> int:
         print("dsv41_flash smoke-expert manifest matches regeneration")
         return 0
     Path(args.output).write_text(rendered)
+    if args.emit_wset:
+        shard = sp.ROUTED_EXPERTS // NODES
+        selected = [entry for entry in manifest["experts"]
+                    if args.wset_rank is None
+                    or entry["expert"] // shard == args.wset_rank]
+        if args.wset_rank is not None and not selected:
+            fail(f"--wset-rank {args.wset_rank}: no canonical pairs on that shard")
+        blob = bytearray()
+        for entry in selected:
+            # The rank pack's .experts manifest keys experts LOCALLY
+            # (0..shard-1: the manifest tool writes the per-rank group
+            # index), so a rank-filtered wset remaps global -> local.
+            expert = entry["expert"] if args.wset_rank is None \
+                else entry["expert"] - shard * args.wset_rank
+            blob += struct.pack("<II", entry["layer"], expert)
+        Path(args.emit_wset).write_bytes(bytes(blob))
+        print(f"{args.emit_wset}: {len(selected)} wset pairs "
+              f"({len(blob)} bytes)"
+              + (f" rank {args.wset_rank} (local expert ids)" if args.wset_rank is not None else ""))
     amortized = len(manifest["experts"]) * manifest["provenance"]["per_expert_bytes"] / NODES
     print(f"{args.output}: {len(manifest['experts'])} canonical pairs, "
           f"amortized {amortized / 2**20:.0f} MiB/node, "

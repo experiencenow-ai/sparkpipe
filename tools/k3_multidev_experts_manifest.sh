@@ -12,9 +12,24 @@ PACK="${1:?usage: k3_multidev_experts_manifest.sh PACK_PATH}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CELL="${K3_MANIFEST_CELL:-${TMPDIR:-/tmp}/k3-manifest-cell.$$}"
 [ -f "$PACK" ] || { echo "pack not found: $PACK" >&2; exit 1; }
+# A present sidecar is accepted only when it is a v2 routed-expert
+# manifest with records; the stage-3 packs carried stale v1 files
+# (1,463 group records) that the lazy attach cannot use - regenerate
+# those instead of trusting file existence.
 if [ -f "$PACK.experts" ]; then
-  echo "exists: $PACK.experts"
-  exit 0
+  if python3 - "$PACK.experts" <<'PYVER'
+import struct, sys
+with open(sys.argv[1], "rb") as handle:
+    head = handle.read(16)
+magic, version, count, _ = struct.unpack("<IIII", head)
+raise SystemExit(0 if (magic == 0x58504557 and version == 2 and count > 0) else 1)
+PYVER
+  then
+    echo "exists: $PACK.experts"
+    exit 0
+  fi
+  echo "stale sidecar (not v2/empty): regenerating $PACK.experts" >&2
+  rm -f "$PACK.experts"
 fi
 mkdir -p "$CELL"
 trap 'rm -rf "$CELL"' EXIT
@@ -37,10 +52,6 @@ pack_bytes = pack_path.stat().st_size
 out_path = pack_path.with_suffix(pack_path.suffix + ".experts")
 partial = out_path.with_name(out_path.name + ".partial")
 lib = ctypes.CDLL(lib_path)
-lib.SparkCk128Initialize.argtypes = [ctypes.c_void_p]
-lib.SparkCk128Update.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
-                                 ctypes.c_size_t]
-lib.SparkCk128Finalize.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
 
 class Manifest(ctypes.Structure):
     _fields_ = [(n, ctypes.c_void_p) for n in
@@ -57,11 +68,16 @@ lib.SparkWeightdManifestDestroy.argtypes = [ctypes.POINTER(Manifest)]
 
 
 def ck128(data):
-    context = bytearray(64)
+    # ctypes portability: strict c_void_p argtypes reject bytearray and
+    # array contexts on some fleet Pythons (seen on sparkc, python 3.12);
+    # pass explicit ctypes objects with no argtypes instead - the digests
+    # match the spark7 v2 generator byte for byte.
+    context = (ctypes.c_uint8 * 64)()
     digest = (ctypes.c_uint8 * 16)()
-    lib.SparkCk128Initialize(context)
-    lib.SparkCk128Update(context, data, len(data))
-    lib.SparkCk128Finalize(context, digest)
+    lib.SparkCk128Initialize(ctypes.byref(context))
+    lib.SparkCk128Update(ctypes.byref(context),
+                         ctypes.c_char_p(data), ctypes.c_size_t(len(data)))
+    lib.SparkCk128Finalize(ctypes.byref(context), digest)
     return bytes(digest)
 
 

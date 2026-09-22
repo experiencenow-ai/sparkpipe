@@ -246,12 +246,126 @@ typedef struct SparkK3RunnerState
 	uint32_t *context_length;
 	uint32_t *sequence_of_row;
 	uint32_t *kda_state_index;
+	/* M3 lazy-stray accounting (opt-in: SPARK_K3_STRAY_WSET names the
+	 * preload head .wset; every routed (layer, expert) selection the
+	 * runner demands is checked against it and the receipt prints at
+	 * destroy — the measured stray rate to compare with the manifest's
+	 * pinned head_selection_coverage). */
+	uint8_t *stray_head_bits;
+	uint8_t *stray_seen_bits;
+	uint64_t stray_selections;
+	uint64_t stray_count;
+	uint32_t stray_head_keys;
 	cudaStream_t stream;
 	uint32_t max_rows;
 	uint32_t max_context;
 	uint32_t multiprocessors;
 	uint64_t kv_page_bytes;
 } SparkK3RunnerState;
+
+/* Bit index over the full-model (layer, expert) key space; the head .wset
+ * holds full-model pairs (the census basis), of which only this rank's
+ * PP stage can ever route. */
+#define K3_STRAY_BIT_INDEX(layer, expert) \
+	((uint64_t)(layer) * K3_EXPERTS + (uint64_t)(expert))
+#define K3_STRAY_BIT_BYTES \
+	((K3_STRAY_BIT_INDEX(K3_LAYERS, 0u) + 7u) / 8u)
+
+static void SparkK3RunnerStrayAccount(
+	SparkK3RunnerState *state,
+	const SparkWeightdExpertKey *keys, uint32_t count)
+{
+	uint32_t index;
+	if ( state == 0 || state->stray_head_bits == 0 || keys == 0 )
+		return;
+	for ( index = 0u; index < count; ++index )
+	{
+		uint64_t bit;
+		uint8_t mask;
+		if ( keys[index].layer >= K3_LAYERS ||
+			keys[index].expert >= K3_EXPERTS )
+			continue;
+		bit = K3_STRAY_BIT_INDEX(keys[index].layer, keys[index].expert);
+		mask = (uint8_t)(1u << (bit & 7u));
+		state->stray_selections++;
+		if ( (state->stray_head_bits[bit >> 3] & mask) == 0u )
+		{
+			state->stray_count++;
+			state->stray_seen_bits[bit >> 3] |= mask;
+		}
+	}
+}
+
+static void SparkK3RunnerStrayLoad(SparkK3RunnerState *state)
+{
+	const char *path = getenv("SPARK_K3_STRAY_WSET");
+	FILE *input;
+	uint32_t pair[2];
+	uint32_t loaded = 0u;
+	if ( path == 0 || path[0] == '\0' )
+		return;
+	state->stray_head_bits = (uint8_t *)calloc(K3_STRAY_BIT_BYTES, 1u);
+	state->stray_seen_bits = (uint8_t *)calloc(K3_STRAY_BIT_BYTES, 1u);
+	if ( state->stray_head_bits == 0 || state->stray_seen_bits == 0 )
+	{
+		free(state->stray_head_bits);
+		free(state->stray_seen_bits);
+		state->stray_head_bits = 0;
+		state->stray_seen_bits = 0;
+		fprintf(stderr, "sparkpipe_k3: stray accounting disabled "
+			"(allocation failed)\n");
+		return;
+	}
+	input = fopen(path, "rb");
+	if ( input == 0 )
+	{
+		fprintf(stderr, "sparkpipe_k3: stray accounting disabled "
+			"(cannot open SPARK_K3_STRAY_WSET=%s)\n", path);
+		free(state->stray_head_bits);
+		free(state->stray_seen_bits);
+		state->stray_head_bits = 0;
+		state->stray_seen_bits = 0;
+		return;
+	}
+	while ( fread(pair, 1u, sizeof(pair), input) == sizeof(pair) )
+	{
+		uint64_t bit;
+		if ( pair[0] >= K3_LAYERS || pair[1] >= K3_EXPERTS )
+			continue;
+		bit = K3_STRAY_BIT_INDEX(pair[0], pair[1]);
+		state->stray_head_bits[bit >> 3] |= (uint8_t)(1u << (bit & 7u));
+		loaded++;
+	}
+	(void)fclose(input);
+	state->stray_head_keys = loaded;
+	fprintf(stderr, "sparkpipe_k3: stray accounting armed head_keys=%u "
+		"wset=%s\n", loaded, path);
+}
+
+static void SparkK3RunnerStrayReport(const SparkK3RunnerState *state)
+{
+	uint64_t unique = 0u;
+	uint32_t index;
+	if ( state == 0 || state->stray_head_bits == 0 )
+		return;
+	if ( state->stray_seen_bits != 0 )
+		for ( index = 0u; index < K3_STRAY_BIT_BYTES; ++index )
+		{
+			uint8_t word = state->stray_seen_bits[index];
+			while ( word != 0u )
+			{
+				unique += word & 1u;
+				word >>= 1;
+			}
+		}
+	fprintf(stderr, "K3-STRAY-RECEIPT selections=%llu strays=%llu "
+		"stray_rate=%.4f unique_stray_pairs=%llu head_keys=%u\n",
+		(unsigned long long)state->stray_selections,
+		(unsigned long long)state->stray_count,
+		state->stray_selections != 0u ?
+			(double)state->stray_count / (double)state->stray_selections : 0.0,
+		(unsigned long long)unique, state->stray_head_keys);
+}
 
 static SparkK3RunnerTpContext *K3RunnerTpContextAcquire(
 	SparkK3RunnerState *state)
@@ -641,6 +755,7 @@ static int32_t SparkK3RunnerLazyAcquire(void *context, uint32_t layer,
 		SPARK_WEIGHTD_LEASE_GROUPS_MAX, &count);
 	if ( status != SPARK_STATUS_OK )
 		return status;
+	SparkK3RunnerStrayAccount(state, keys, count);
 	status = SparkWeightdMapAcquire(map, keys, count,
 		&state->lease_identifier, SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
 	if ( state->lease_identifier != 0u )
@@ -721,6 +836,7 @@ SparkStatus SparkK3StageRunnerInitialize(
 	memset(runner, 0, sizeof(*runner));
 	state = new SparkK3RunnerState;
 	memset(state, 0, sizeof(*state));
+	SparkK3RunnerStrayLoad(state);
 	{
 		uint32_t pool_index;
 		for (pool_index = 0u;
@@ -820,7 +936,11 @@ SparkStatus SparkK3StageRunnerInitialize(
 		snprintf(request.identity.model, sizeof(request.identity.model), "kimi-k3");
 		snprintf(request.identity.revision, sizeof(request.identity.revision), "mxfp4");
 		request.identity.abi_version = SPARK_WEIGHTD_IPC_ABI_VERSION;
-		request.identity.arena_bytes = expert_pool;
+		/* the daemon's size-mismatch contract: identity.arena_bytes must
+		 * equal the pack file size (WDATTACH rejects anything else with
+		 * INVALID_ARGUMENT - measured against the release-shared weightd;
+		 * the campaign-era daemon tolerated the old pool-sized value) */
+		request.identity.arena_bytes = state->module.pack.file_bytes;
 		request.identity.topology = configuration->tp_degree;
 		memcpy(request.pack_path, configuration->rank_pack_path,
 			strlen(configuration->rank_pack_path) + 1u);
@@ -1286,6 +1406,13 @@ void SparkK3StageRunnerDestroy(SparkK3StageRunner *runner)
 	if ( runner == 0 || runner->private_state == 0 )
 		return;
 	state = (SparkK3RunnerState *)runner->private_state;
+	/* the M3 stray receipt prints on every teardown path, including
+	 * partial ones (early returns below) — the counters are the point */
+	SparkK3RunnerStrayReport(state);
+	free(state->stray_head_bits);
+	free(state->stray_seen_bits);
+	state->stray_head_bits = 0;
+	state->stray_seen_bits = 0;
 	if ( state->device_collective_created != 0 )
 	{
 		SparkTpDeviceCollectiveDestroy(&state->device_collective);

@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
@@ -6,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include "cuda.h"
 #include "sparkpipe/spark_ck128.h"
@@ -87,6 +89,67 @@ static void write_fixture(const char *path,const char *manifest_path)
 	assert(fclose(manifest) == 0);
 }
 
+/* Scan /tmp/spark-weightd-spine for the receipt bound to this pack's
+ * (size,mtime,ctime) - the same binding the loader validates - and hand
+ * back its path and proof basis. Used to assert the prong-1 trust chain:
+ * client full hash writes proof 0, the daemon recorder writes proof 1,
+ * tampered bases are re-proven. */
+static int find_spine_receipt(const char *pack_path,char *out,size_t out_bytes,
+	uint64_t *proof)
+{
+	static const char directory_path[] = "/tmp/spark-weightd-spine";
+	DIR *directory = opendir(directory_path);
+	struct dirent *entry;
+	struct stat st;
+	int found = 0;
+	if ( directory == 0 || stat(pack_path,&st) != 0 )
+	{
+		if ( directory != 0 )
+			closedir(directory);
+		return(0);
+	}
+	while ( found == 0 && (entry = readdir(directory)) != 0 )
+	{
+		char path[512];
+		uint8_t raw[88];
+		FILE *file;
+		uint64_t magic,size,mtime_ns,ctime_ns,recorded;
+		if ( entry->d_name[0] == '.' )
+			continue;
+		snprintf(path,sizeof(path),"%s/%s",directory_path,entry->d_name);
+		file = fopen(path,"rb");
+		if ( file == 0 || fread(raw,1u,sizeof(raw),file) != sizeof(raw) )
+		{
+			if ( file != 0 )
+				fclose(file);
+			continue;
+		}
+		fclose(file);
+		memcpy(&magic,raw,8u);
+		memcpy(&size,raw + 8u,8u);
+		memcpy(&mtime_ns,raw + 16u,8u);
+		memcpy(&ctime_ns,raw + 24u,8u);
+		memcpy(&recorded,raw + 80u,8u);
+		if ( magic != UINT64_C(0x5350494e45524531) ||
+			size != (uint64_t)st.st_size )
+			continue;
+#if defined(__APPLE__)
+		if ( mtime_ns != ((uint64_t)st.st_mtimespec.tv_sec * UINT64_C(1000000000) + (uint64_t)st.st_mtimespec.tv_nsec) ||
+			ctime_ns != ((uint64_t)st.st_ctimespec.tv_sec * UINT64_C(1000000000) + (uint64_t)st.st_ctimespec.tv_nsec) )
+			continue;
+#else
+		if ( mtime_ns != ((uint64_t)st.st_mtim.tv_sec * UINT64_C(1000000000) + (uint64_t)st.st_mtim.tv_nsec) ||
+			ctime_ns != ((uint64_t)st.st_ctim.tv_sec * UINT64_C(1000000000) + (uint64_t)st.st_ctim.tv_nsec) )
+			continue;
+#endif
+		snprintf(out,out_bytes,"%s",path);
+		*proof = recorded;
+		found = 1;
+	}
+	closedir(directory);
+	return(found);
+}
+
 static void check_spine_load(const char *path,const char *manifest_path)
 {
 	SparkWeightdManifest manifest;
@@ -112,6 +175,52 @@ static void check_spine_load(const char *path,const char *manifest_path)
 		cursor = (manifest.spine[i].compact_offset + manifest.spine[i].bytes);
 		for (j=manifest.spine[i].compact_offset; j<cursor; j++)
 			assert(destination[j] == ((manifest.spine[i].offset + j - manifest.spine[i].compact_offset) == 512u ? 255u : 0u));
+	}
+	/* Prong-1 trust chain: the load above (full client hash) recorded a
+	 * proof-0 receipt; the daemon recorder writes the same binding with
+	 * the proof-1 basis and the loader accepts it; a tampered basis is
+	 * treated as absent and re-proven by a full hash (proof back to 0). */
+	{
+		char receipt[512];
+		uint8_t sha_bytes[32];
+		uint64_t proof = 99u;
+		int nibble,index;
+		assert(find_spine_receipt(path,receipt,sizeof(receipt),&proof) == 1);
+		assert(proof == UINT64_C(0));
+		for (index=0; index<64; index++)
+		{
+			char letter = digest[index];
+			nibble = letter >= 'a' ? letter - 'a' + 10 : letter - '0';
+			if ( (index % 2) == 0 )
+				sha_bytes[index / 2] = (uint8_t)(nibble << 4);
+			else
+				sha_bytes[index / 2] |= (uint8_t)nibble;
+		}
+		assert(SparkWeightdSpineReceiptRecordDaemon(fd,digest,sha_bytes) == SPARK_STATUS_OK);
+		assert(find_spine_receipt(path,receipt,sizeof(receipt),&proof) == 1);
+		assert(proof == UINT64_C(1));
+		memset(destination,0xa5,(size_t)manifest.spine_allocation_bytes);
+		assert(SparkWeightdSpineLoad(fd,&manifest,PACK_BYTES,digest,destination,manifest.spine_allocation_bytes) == SPARK_STATUS_OK);
+		cursor = 0u;
+		for (i=0u; i<manifest.spine_count; i++)
+		{
+			for (j=cursor; j<manifest.spine[i].compact_offset; j++)
+				assert(destination[j] == 0xa5);
+			cursor = (manifest.spine[i].compact_offset + manifest.spine[i].bytes);
+			for (j=manifest.spine[i].compact_offset; j<cursor; j++)
+				assert(destination[j] == ((manifest.spine[i].offset + j - manifest.spine[i].compact_offset) == 512u ? 255u : 0u));
+		}
+		{
+			FILE *file = fopen(receipt,"r+b");
+			uint64_t bad = UINT64_C(2);
+			assert(file != 0);
+			assert(fseek(file,80L,SEEK_SET) == 0);
+			assert(fwrite(&bad,8u,1u,file) == 1u);
+			assert(fclose(file) == 0);
+		}
+		assert(SparkWeightdSpineLoad(fd,&manifest,PACK_BYTES,digest,destination,manifest.spine_allocation_bytes) == SPARK_STATUS_OK);
+		assert(find_spine_receipt(path,receipt,sizeof(receipt),&proof) == 1);
+		assert(proof == UINT64_C(0));
 	}
 	// Changing an expert byte must invalidate the whole-pack identity too.
 	assert(pwrite(fd,&value,1u,0) == 1);
@@ -784,6 +893,44 @@ static void check_lazy_pack(const char *socket_path,const char *path,const char 
 	assert(SparkWeightdLazyPackSlice(pack,512u,1u,&pointer) == SPARK_STATUS_OK);
 	assert(*(const uint8_t *)pointer == 255u);
 	assert(SparkWeightdLazyPackSlice(pack,0u,64u,&pointer) == SPARK_STATUS_NOT_FOUND && pointer == 0);
+	/* Prong 2 (hill-climb): the D2D arena spine copy must assemble exactly
+	 * the bytes the proven file path produces for the same manifest - the
+	 * lazy pack above already built its spine through MapSpineCopy (the
+	 * pool is mapped in this flow), and this cross-check pins the two
+	 * sources byte-identical before any later file mutation. */
+	{
+		SparkWeightdManifest verify;
+		uint8_t *from_arena,*from_file;
+		uint64_t capacity;
+		int32_t verify_fd;
+		assert(SparkWeightdManifestLoad(manifest_path,PACK_BYTES,&verify) == SPARK_STATUS_OK);
+		capacity = verify.spine_allocation_bytes;
+		if ( capacity != 0u )
+		{
+			SparkStatus copied;
+			assert(posix_memalign((void **)&from_arena,256u,(size_t)capacity) == 0);
+			assert(posix_memalign((void **)&from_file,256u,(size_t)capacity) == 0);
+			memset(from_arena,0xa5,(size_t)capacity);
+			memset(from_file,0xa5,(size_t)capacity);
+			copied = SparkWeightdMapSpineCopy(pack->map,&verify,from_arena,capacity);
+			/* UNSUPPORTED = the pool is not mapped in this configuration and
+			 * the lazy pack took the proven file fallback; where the pool IS
+			 * mapped, the D2D result must be byte-identical to the file. */
+			if ( copied == SPARK_STATUS_OK )
+			{
+				verify_fd = open(path,O_RDONLY);
+				assert(verify_fd >= 0);
+				assert(SparkWeightdSpineLoad(verify_fd,&verify,PACK_BYTES,request.identity.pack_sha256,from_file,capacity) == SPARK_STATUS_OK);
+				assert(memcmp(from_arena,from_file,(size_t)capacity) == 0);
+				(void)close(verify_fd);
+			}
+			else
+				assert(copied == SPARK_STATUS_UNSUPPORTED);
+			free(from_arena);
+			free(from_file);
+		}
+		SparkWeightdManifestDestroy(&verify);
+	}
 	assert(SparkWeightdMapAcquire(pack->map,&key,1u,&lease,TIMEOUT) == SPARK_STATUS_OK);
 	assert(SparkWeightdLazyPackDestroy(pack) == SPARK_STATUS_BUSY);
 	assert(SparkWeightdLazyPackSlice(pack,512u,1u,&pointer) == SPARK_STATUS_INVALID_ARGUMENT);

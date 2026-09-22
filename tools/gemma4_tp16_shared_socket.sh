@@ -48,6 +48,16 @@ fi
 
 fail() { printf 'gemma4_tp16_shared_socket: FAIL: %s\n' "$1" >&2; exit 1; }
 
+# Hard rule (fleet ruling, issue #1125 class): refuse to run without a finite
+# queue-provided memory bound - an unbounded unit fences all co-admission on
+# its node until exit. The queue exports SPARK_QUEUE_MEMORY_MIB on every
+# properly submitted job; missing/zero means unbounded.
+if [ -z "${SPARK_QUEUE_MEMORY_MIB:-}" ] || [ "${SPARK_QUEUE_MEMORY_MIB}" = "0" ]; then
+    printf '%s
+' "gemma4_tp16_shared_socket: FAIL: SPARK_QUEUE_MEMORY_MIB is unset/zero - submit through the queue with --memory-mib (finite MemoryMax is a hard requirement)" >&2
+    exit 2
+fi
+
 [ -n "${SPARK_QUEUE_RANK:-}" ] || fail "SPARK_QUEUE_RANK is not set (run inside a spark_queue job)"
 RANK="$SPARK_QUEUE_RANK"
 case "$RANK" in (*[!0-9]*|'') fail "SPARK_QUEUE_RANK is not a rank: $RANK";; esac
@@ -92,6 +102,13 @@ case "$SHA_HEX" in
 esac
 [ "${#SHA_HEX}" -eq 64 ] || fail "malformed pack digest sidecar: $PACK_DIR/$PACK_NAME.sha256"
 [ "$SHA_NAME" = "$PACK_NAME" ] || fail "sidecar names '$SHA_NAME', expected '$PACK_NAME'"
+
+# The pack-identity attach path requires the digest env (no fallback:
+# runtime/spark_weightd_attach.c fails "no_identity" without it) plus the
+# explicit opt-in; the model identity is pinned for deterministic receipts.
+export SPARK_WEIGHTD_ATTACH=1
+export SPARK_WEIGHTD_PACK_SHA256="$SHA_HEX"
+export SPARK_WEIGHTD_IDENTITY_MODEL=spark.gemma4.31b.resident_decode_stage.bf16.linear_bf16.kv_bf16.h5376.l60.v1
 
 if [ "$DRY_RUN" -eq 0 ]; then
     [ -S "$WEIGHTD_SOCKET" ] || fail "shared weightd socket is not present: $WEIGHTD_SOCKET (weightd is operator-managed; never start it by hand)"

@@ -61,8 +61,19 @@ def deployment_gates(deployment, runtime_root, socket, failures):
     check(deployment["weightd"]["socket_path"] == socket, failures,
           "weightd socket path must be the shared socket")
     limits = deployment["runtime_limits"]
+    # residentd's runtime-limits check fails closed on zeros: kv_physical
+    # >= max_active_sequences and kv_logical >= resident_sequence_capacity.
+    # k3's honest bound: resident capacity x the adapter's kv_pages per
+    # sequence (the per-sequence token ceiling the seam commits to).
+    expected_pages = limits["resident_sequence_capacity"] * lane.KV_PAGES_PER_SEQUENCE
     for key in ("kv_logical_page_capacity", "kv_physical_page_capacity"):
-        check(limits[key] == 0, failures, f"{key} must stay 0 for k3")
+        check(limits[key] == expected_pages, failures,
+              f"{key} must equal resident_capacity x kv_pages "
+              f"({expected_pages}), got {limits[key]}")
+    check(limits["kv_physical_page_capacity"] >= limits["max_active_sequences"],
+          failures, "kv_physical_page_capacity must cover max_active_sequences")
+    check(limits["kv_logical_page_capacity"] >= limits["resident_sequence_capacity"],
+          failures, "kv_logical_page_capacity must cover resident capacity")
     nodes = deployment["nodes"]
     check(len(nodes) == 16, failures, f"expected 16 nodes, got {len(nodes)}")
     endpoints = set()
@@ -164,8 +175,13 @@ def wrapper_contract_gates(failures):
     lane_ranges = "23048:23063,53048:53063,64048:64063"
 
     def run(env):
-        complete = dict(os.environ)
-        complete.pop("SPARK_QUEUE_PORTS", None)
+        # hermetic: strip every queue/lane variable the host may carry -
+        # under a real queue job SPARK_QUEUE_ATTEMPT/RANK/SIZE/RUNTIME_ROOT
+        # leak in through os.environ and flip which fail-closed case fires
+        complete = {key: value for key, value in os.environ.items()
+                    if not (key.startswith("SPARK_QUEUE_")
+                            or key.startswith("K3_")
+                            or key == "SPARK_WEIGHTD_SOCKET")}
         complete.update(env)
         return subprocess.run(["bash", str(script)], env=complete,
                               capture_output=True, text=True)

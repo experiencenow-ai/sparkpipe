@@ -2,7 +2,7 @@
 """Lane-6 gemma4-31b TP16 shared-socket deployment contracts.
 
 Validates tools/gemma4_tp16_gen_deployment.py output against the lane 6
-port blocks (control 23096-23111, collective 53096-53111, transport
+port blocks (control 23096-23111, collective 53200-53215, transport
 64096-64111; tools/devcycle/lane_assignments.json) and the adapter's exact
 configuration members, then exercises tools/gemma4_tp16_shared_socket.sh
 end to end in --dry-run against a synthetic checkout: layout, pack sidecar
@@ -29,7 +29,7 @@ WRAPPER = REPOSITORY / "tools/gemma4_tp16_shared_socket.sh"
 
 RANKS = 16
 LANE_CONTROL_BASE, LANE_CONTROL_END = 23096, 23111
-LANE_COLLECTIVE_BASE, LANE_COLLECTIVE_END = 53096, 53111
+LANE_COLLECTIVE_BASE, LANE_COLLECTIVE_END = 53200, 53215
 LANE_TRANSPORT_BASE, LANE_TRANSPORT_END = 64096, 64111
 MODEL_REVISION = "842da3794eaa0b77d5f08bae87a17459d91ff475"
 ADAPTER_MEMBERS = {"schema_version", "model_revision", "stage_pack_path",
@@ -147,6 +147,7 @@ def run_wrapper(checkout: Path, temporary: Path, rank: int) -> subprocess.Comple
     environment.update({
         "SPARK_QUEUE_RANK": str(rank),
         "SPARK_QUEUE_SIZE": str(RANKS),
+        "SPARK_QUEUE_MEMORY_MIB": "9792",
         "SPARK_QUEUE_RUNTIME_ROOT": str(temporary / f"runtime-{rank}"),
         "GEMMA4_RELEASE_DIR": "build/gemma4_31b_tp16",
         "GEMMA4_DEPLOYMENT_TREE": "deployment/gemma4_31b_tp16_lane6",
@@ -174,6 +175,11 @@ def test_wrapper(deployment_tree: Path, temporary: Path) -> None:
     check(PACK_SIDECAR.match(sidecars[0].read_text()) is not None,
           "sidecar names exactly its pack")
     check((root / "config/stage.json").exists(), "stage config materialized")
+    wrapper_source = WRAPPER.read_text()
+    check("SPARK_WEIGHTD_PACK_SHA256" in wrapper_source and
+          "SPARK_WEIGHTD_ATTACH=1" in wrapper_source and
+          "SPARK_WEIGHTD_IDENTITY_MODEL" in wrapper_source,
+          "wrapper exports the pack-identity attach envs")
     check((root / "config/env.json").exists(), "module env materialized")
 
     # fail-closed: malformed sidecar
@@ -187,6 +193,16 @@ def test_wrapper(deployment_tree: Path, temporary: Path) -> None:
     # fail-closed: rank out of range
     result = run_wrapper(checkout, temporary, 16)
     check(result.returncode != 0, "rank 16 must fail closed")
+    # fail-closed: unbounded memory (the hard rule - refuse queue-less runs)
+    environment = dict(os.environ)
+    environment.update({
+        "SPARK_QUEUE_RANK": "0", "SPARK_QUEUE_RUNTIME_ROOT": str(temporary / "runtime-unbounded"),
+        "GEMMA4_RELEASE_DIR": "build/gemma4_31b_tp16", "GEMMA4_PACK_DIR": str(checkout / "packs"),
+    })
+    environment.pop("SPARK_QUEUE_MEMORY_MIB", None)
+    result = subprocess.run(["bash", str(WRAPPER), "--dry-run"], cwd=checkout, env=environment,
+                            capture_output=True, text=True)
+    check(result.returncode != 0, "missing SPARK_QUEUE_MEMORY_MIB must fail closed (hard rule)")
     # fail-closed: missing release artifacts
     environment = dict(os.environ)
     environment.update({

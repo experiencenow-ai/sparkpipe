@@ -1282,6 +1282,37 @@ static void FuzzRegistrationOwnership(void)
     CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&owners[0],g_regions[1],1u,
         FUZZ_HIDDEN,0u,0) == SPARK_STATUS_UNSUPPORTED,
         "bound collective rejects mapping replacement without changing ownership");
+    {
+        SparkTpDeviceCollective skip_owner;
+        SparkStatus skip_status;
+        uint32_t skip_calls;
+        memset(&skip_owner,0,sizeof(skip_owner));
+        skip_status = SparkTpDeviceCollectiveCreate(&config,&skip_owner);
+        CHECK(skip_status == SPARK_STATUS_OK,"skip-path owner creates");
+        {
+            void *fresh = mmap(0,(size_t)SPARK_WEIGHTD_MESH_REGION_BYTES,
+                PROT_READ | PROT_WRITE,MAP_PRIVATE | MAP_ANONYMOUS,-1,0);
+            CHECK(fresh != MAP_FAILED,"skip-path fresh mapping");
+            if ( fresh != MAP_FAILED )
+            {
+                cuda_stub_host_register_result = 1;
+                skip_calls = cuda_stub_host_register_calls;
+                CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&skip_owner,fresh,1u,
+                    FUZZ_HIDDEN,0u,0) == SPARK_STATUS_OK,
+                    "cudaErrorInvalidValue skips registration on the coherent host path");
+                CHECK(spark_stub_cuda_host_registered(fresh) == 0u &&
+                    cuda_stub_host_register_calls == skip_calls + 1u,
+                    "skip path attempts once, registers nothing, still owns the mapping");
+                CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&skip_owner,fresh,1u,
+                    FUZZ_HIDDEN,0u,0) == SPARK_STATUS_OK &&
+                    cuda_stub_host_register_calls == skip_calls + 1u,
+                    "skipped registration does not retry on reprepare");
+                SparkTpDeviceCollectiveDestroy(&skip_owner);
+                cuda_stub_host_register_result = 0;
+                munmap(fresh,(size_t)SPARK_WEIGHTD_MESH_REGION_BYTES);
+            }
+        }
+    }
     calls = cuda_stub_host_unregister_calls;
     SparkTpDeviceCollectiveDestroy(&owners[0]);
     CHECK(owners[0].implementation == 0 && cuda_stub_host_unregister_calls == calls &&
@@ -2024,6 +2055,7 @@ static int FuzzCudaHostAlloc(void **pointer,size_t bytes,unsigned int flags)
 #define cudaMemcpy FuzzCudaMemcpy
 #define cudaHostAlloc FuzzCudaHostAlloc
 #include "../ring/transport/tp_device_collective.c"
+#include <sys/mman.h>
 #undef calloc
 #undef cudaMalloc
 #undef cudaFree

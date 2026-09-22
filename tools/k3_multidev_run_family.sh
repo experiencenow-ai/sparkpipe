@@ -132,11 +132,12 @@ mkdir -p "$ROOT/bin" "$ROOT/lib" "$ROOT/config" "$ROOT/packs" "$ROOT/kvcache"
 #    serving adapter needs nvcc), or reuse a prior build on this node.
 if [ -n "${K3_PREBUILT_DIR:-}" ]; then
   for artifact in sparkpipe_model_residentd libk3_serving_adapter.so \
-      libhidden_transport_spark_host_rdma_verbs.so; do
+      libhidden_transport_spark_host_rdma_verbs.so weightd_warm; do
     [ -f "$K3_PREBUILT_DIR/$artifact" ] ||
       fail "K3_PREBUILT_DIR missing artifact: $K3_PREBUILT_DIR/$artifact"
   done
   install -m 0755 "$K3_PREBUILT_DIR/sparkpipe_model_residentd" "$ROOT/bin/"
+  install -m 0755 "$K3_PREBUILT_DIR/weightd_warm" "$ROOT/bin/"
   install -m 0644 "$K3_PREBUILT_DIR/libk3_serving_adapter.so" "$ROOT/lib/"
   install -m 0644 "$K3_PREBUILT_DIR/libhidden_transport_spark_host_rdma_verbs.so" \
     "$ROOT/lib/hidden_transport.so"
@@ -146,8 +147,10 @@ else
   make -C "$CHECKOUT" -j1 \
     build/sparkpipe_model_residentd \
     build/libk3_serving_adapter.so \
-    build/libhidden_transport_spark_host_rdma_verbs.so
+    build/libhidden_transport_spark_host_rdma_verbs.so \
+    build/weightd_warm
   install -m 0755 "$CHECKOUT/build/sparkpipe_model_residentd" "$ROOT/bin/"
+  install -m 0755 "$CHECKOUT/build/weightd_warm" "$ROOT/bin/"
   install -m 0644 "$CHECKOUT/build/libk3_serving_adapter.so" "$ROOT/lib/"
   install -m 0644 \
     "$CHECKOUT/build/libhidden_transport_spark_host_rdma_verbs.so" \
@@ -173,7 +176,15 @@ rm -rf "$GENERATED"
 #    expert manifest the lazy attach fails closed without.
 PRIVATE_PACK="$ROOT/packs/$(basename "$DEPLOYED_PACK")"
 ln -sfn "$DEPLOYED_PACK" "$PRIVATE_PACK"
-if [ -f "$DEPLOYED_PACK.experts" ]; then
+if [ -f "$DEPLOYED_PACK.experts" ] && python3 - "$DEPLOYED_PACK.experts" <<'PYVER'
+import struct, sys
+with open(sys.argv[1], "rb") as handle:
+    magic, version, count, _ = struct.unpack("<IIII", handle.read(16))
+raise SystemExit(0 if (magic == 0x58504557 and version == 2 and count > 0) else 1)
+PYVER
+then
+  # only a v2 routed-expert manifest with records is usable by the lazy
+  # attach; stale v1 sidecars regenerate below like missing ones
   ln -sfn "$DEPLOYED_PACK.experts" "$PRIVATE_PACK.experts"
 else
   bash "$CHECKOUT/tools/k3_multidev_experts_manifest.sh" "$PRIVATE_PACK"
@@ -191,6 +202,40 @@ else
 fi
 [ "$(find "$ROOT/packs" -maxdepth 1 -name '*.sha256' | wc -l)" = 1 ] ||
   fail "packs/ must contain exactly one .sha256 sidecar"
+
+# 3b. Optional cold-launch preload (M3): warm the smoke expert set
+#     through the SAME shared socket the resident attaches to, before
+#     exec. Opt-in via K3_PRELOAD_WSET (default: the committed
+#     model-families/k3/smoke-k3-v1.wset when K3_PRELOAD=1). The set is
+#     filtered to this rank's PP-stage layers - a rank pack manifest
+#     holds only its stage's routed layers, so a full-model working set
+#     cannot validate there (weightd_warm fails closed on foreign keys).
+if [ -n "${K3_PRELOAD_WSET:-}" ] || [ "${K3_PRELOAD:-0}" = 1 ]; then
+  WSET_SOURCE="${K3_PRELOAD_WSET:-$CHECKOUT/model-families/k3/smoke-k3-v1.wset}"
+  [ -f "$WSET_SOURCE" ] || fail "preload working set missing: $WSET_SOURCE"
+  python3 - "$CHECKOUT" "$WSET_SOURCE" "$STAGE" "$ROOT/preload.wset" <<'PYW'
+import struct, sys
+sys.path.insert(0, sys.argv[1] + "/tools")
+import k3_smoke_experts as producer
+data = open(sys.argv[2], "rb").read()
+if len(data) == 0 or len(data) % 8 != 0:
+    raise SystemExit("k3 preload: malformed working set")
+pairs = [struct.unpack_from("<II", data, index)
+         for index in range(0, len(data), 8)]
+local = producer.stage_pairs(pairs, int(sys.argv[3]))
+with open(sys.argv[4], "wb") as out:
+    out.write(producer.wset_bytes(local))
+print(f"k3 preload: {len(local)} of {len(pairs)} keys are stage "
+      f"{sys.argv[3]}-local")
+PYW
+  SHA_HEX="$(cat "$ROOT/packs/pack.sha256")"
+  SPARK_WEIGHTD_EXPERT_POOL_BYTES="$K3_EXPERT_POOL_BYTES" \
+    "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" "$SHA_HEX" x 16 \
+    --family k3 --wset "$ROOT/preload.wset" 300 > "$ROOT/warm.log" 2>&1 ||
+    { cat "$ROOT/warm.log" >&2; fail "working set warm failed"; }
+  grep -q "WSET-WARM keys=" "$ROOT/warm.log" ||
+    fail "working set warm produced no WSET-WARM receipt (see $ROOT/warm.log)"
+fi
 
 # ----------------------------- RESIDENT LAUNCH -------------------------------
 
