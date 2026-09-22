@@ -1,5 +1,5 @@
 {
-  "file_count": 3345,
+  "file_count": 3346,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -3395,6 +3395,11 @@
       "path": "examples/release/dsv41_flash_tp4/m3_preload_receipt.json",
       "sha256": "778bb59314522ee12601ee0d863384efe1b7edee170c976bfa5a8fa91775b3d0",
       "size_bytes": 3313
+    },
+    {
+      "path": "examples/release/dsv41_flash_tp4/m3_rank_census_receipt.json",
+      "sha256": "f283f4310c9fd285460385cda0d6e1439f5fcabc86b4dcf8f8c4ed9f6b14d92b",
+      "size_bytes": 4258
     },
     {
       "path": "examples/release/dsv41_flash_tp8/engram_report.json",
@@ -16730,5 +16735,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79695828
+  "total_bytes": 79700086
 }
