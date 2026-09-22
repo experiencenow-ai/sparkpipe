@@ -4713,8 +4713,8 @@
     },
     {
       "path": "model-families/qwen38_max/smoke_experts_pools.json",
-      "sha256": "df5936a85901011d2d91e73b8091cc99153569246eb3e3c9800bc5b0fa3e1915",
-      "size_bytes": 1607
+      "sha256": "ce10e3d958db95831651183f606d6db4594b4a7777395ed0a666898dcf35d09d",
+      "size_bytes": 2468
     },
     {
       "path": "model-families/qwen38_max/src/spark_qwen38_max_work_control.c",
@@ -5933,8 +5933,8 @@
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/source/spark_qwen38_max_resident_decode_stage_cuda.cu",
-      "sha256": "ee2cd3ad6dd43a4c4a2e4069c2e8ff33d3c278f6d081c4fb926d907ad6fa1c2c",
-      "size_bytes": 14944
+      "sha256": "51b2d54b819671ef6c69a3517bfa11add7d4e7b34a7ce3af9ac30b5b57715e9a",
+      "size_bytes": 15293
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/source/spark_qwen38_max_resident_decode_stage_module.c",
@@ -16725,5 +16725,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79685726
+  "total_bytes": 79686936
 }
