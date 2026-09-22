@@ -1302,16 +1302,22 @@ static void SparkMinimaxModuleSnapshotExtend(
 	snapshot->kv_token_capacity = (uint64_t)state->kv_block_count * SPARK_MINIMAX_RESIDENT_DECODE_STAGE_KV_BLOCK_TOKENS;
 }
 
-static void SparkMinimaxModuleStateTeardown(void *module_state)
+static SparkStatus SparkMinimaxModuleStateTeardown(void *module_state)
 {
 	SparkMinimaxModuleState *state = (SparkMinimaxModuleState *)module_state;
 	if ( state->tp_collective_initialized != 0u )
+	{
 		SparkTpDeviceCollectiveDestroy(&state->tp_device_collective);
+		if ( state->tp_device_collective.implementation != 0 )
+			return(SPARK_STATUS_BUSY);
+		state->tp_collective_initialized = 0u;
+	}
 	free(state->host_block_indices);
 	free(state->free_blocks);
 	free(state->lane_block_counts);
 	free(state->lane_context_tokens);
 	SparkStageModuleLedgerRelease(&state->ledger);
+	return(SPARK_STATUS_OK);
 }
 
 static SparkStatus SparkMinimaxModuleInitializeGate(void)
