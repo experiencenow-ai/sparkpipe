@@ -52,8 +52,14 @@ esac
 # (smoke runs, re-emitting one rank); the hostname check below still
 # fails closed unless the rank matches the host.
 RANK="${QMAX_EMIT_RANK:-${SPARK_QUEUE_RANK:?SPARK_QUEUE_RANK is required}}"
-[ "${SPARK_QUEUE_SIZE:-}" = "$WORLD" ] ||
-  fail "SPARK_QUEUE_SIZE must be $WORLD (got '${SPARK_QUEUE_SIZE:-}')"
+if [ -n "${QMAX_EMIT_RANK:-}" ]; then
+  # Targeted single-node emission: one rank, on its own host.
+  [ "${SPARK_QUEUE_SIZE:-}" = "1" ] ||
+    fail "targeted emission is single-node (got size '${SPARK_QUEUE_SIZE:-}')"
+else
+  [ "${SPARK_QUEUE_SIZE:-}" = "$WORLD" ] ||
+    fail "SPARK_QUEUE_SIZE must be $WORLD (got '${SPARK_QUEUE_SIZE:-}')"
+fi
 [ "$RANK" -ge 0 ] && [ "$RANK" -lt "$WORLD" ] ||
   fail "SPARK_QUEUE_RANK must be 0..$((WORLD - 1))"
 
