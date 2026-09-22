@@ -34,7 +34,7 @@ import time
 CHUNK_BYTES = 2 * 1024 * 1024
 RECORD_BYTES = 48
 PACK_TEMPLATE = ("/home/{host}/sparkdata/qwenmax.nvfp4.tp16/packs/"
-                 "qwenmax.nvfp4.tp16.rank{rank}.sp")
+                 "qwenmax.nvfp4.tp16.rank{rank:x}.sp")
 DEFAULT_WSET = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "model-families", "qwen38_max", "smoke_experts.json")

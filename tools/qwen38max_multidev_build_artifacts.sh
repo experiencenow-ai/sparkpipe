@@ -42,11 +42,13 @@ case "${SPARK_QUEUE_SIZE:-1}" in 1|16) ;; *) fail "size must be 1 or 16" ;; esac
 HOST="$(hostname)"
 case "$HOST" in spark[0-9a-f]) ;; *) fail "unexpected hostname '$HOST'" ;; esac
 # This node's OWN placed pack (one pack per node: rank i lives on
-# spark{hex(i)} — tools/qwen38max_multidev_pack_emit.sh placement). The
-# publish validates the module against the same pack this node's driver
-# will attach; a rank0 hardcode would fail the pack check on 15/16 nodes.
+# spark{hex(i)} — tools/qwen38max_multidev_pack_emit.sh placement). Pack
+# names carry the HEX rank suffix (qwenmax.nvfp4.tp16.ranka..rankf for
+# ranks 10-15 — tools/qwen38max_patch_rank.sh printf %x convention;
+# decimal rank10..15 would miss on 6/16 nodes). The publish validates the
+# module against the same pack this node's driver will attach.
 NODE_RANK="$((16#${HOST#spark}))"
-PACK="/home/$HOST/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank$NODE_RANK.sp"
+PACK="/home/$HOST/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank${HOST#spark}.sp"
 
 CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="/home/$HOST/$OUT_REL"

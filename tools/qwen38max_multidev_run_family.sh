@@ -146,7 +146,7 @@ HOST="spark$(printf '%x' "$RANK")"
 $(hostname); --nodes order must stay identical to the mesh map ($MESH_RANKS)"
 
 CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
-DEPLOYED_PACK="/home/$HOST/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank$RANK.sp"
+DEPLOYED_PACK="/home/$HOST/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank${HOST#spark}.sp"
 [ -f "$DEPLOYED_PACK" ] || fail "deployed rank pack missing: $DEPLOYED_PACK \
 (operator-placed set; grep the fleet pack inventory before any warm read)"
 

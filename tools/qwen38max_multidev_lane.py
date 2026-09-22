@@ -12,7 +12,7 @@ Topology: TP16 single stage, 16 world ranks over spark0..sparkf. Logical
 rank = index in --nodes; the mesh map is the identity permutation
 (SPARK_TP_MESH_RANKS=0,...,15), so rank i lives on spark{hex(i)} and its
 pack is the OPERATOR-PLACED set (fleet inventory, Sep 12-15):
-/home/{host}/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank{i}.sp
+/home/{host}/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank{i:x}.sp
 with .experts + .receipt.json sidecars - grep the fleet pack inventory
 before any warm read (the operator's expectation IS the map).
 
@@ -82,7 +82,10 @@ MESH_RANKS = ",".join(str(i) for i in range(WORLD))
 MODEL_REVISION = "d2dc35658bcf77e66643428cb52e774cc3b5bd29"
 NODE_TARGET = "cuda.sm121.qwen38.resident_decode_stage.fp8"
 
-DEPLOYED_PACK_TEMPLATE = "/home/{host}/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank{rank}.sp"
+# Placed-set pack names carry the HEX rank suffix (ranka..rankf for ranks
+# 10-15, matching host names spark0..sparkf — the operator placement
+# convention; decimal rank10..15 would miss on 6/16 nodes).
+DEPLOYED_PACK_TEMPLATE = "/home/{host}/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank{rank:x}.sp"
 DEFAULT_KV_BACKING_BYTES = 8 * 1024 * 1024 * 1024
 DEFAULT_KV_PAGE_CAPACITY = 16 * ((32768 + 63) // 64)
 
@@ -100,7 +103,7 @@ def stage_config(rank: int) -> dict:
     return {
         "schema_version": 1,
         "model_revision": MODEL_REVISION,
-        "stage_pack_path": "packs/qwenmax.nvfp4.tp16.rank%d.sp" % rank,
+        "stage_pack_path": "packs/qwenmax.nvfp4.tp16.rank%x.sp" % rank,
         "max_sequence_positions": 4096,
         "tp_degree": TP,
     }
