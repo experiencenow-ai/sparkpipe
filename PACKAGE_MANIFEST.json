@@ -7888,8 +7888,8 @@
     },
     {
       "path": "ring/transport/rdma.cu",
-      "sha256": "4a4dd37d362ce9dd0401e739780b99187c778211da7b8cd5141dfb77db6960ae",
-      "size_bytes": 12197
+      "sha256": "f8772f45549c81c10cb7d611c353c5d50ef1f8830f83695aa1e07604aa2792bd",
+      "size_bytes": 12163
     },
     {
       "path": "ring/transport/rdma_control.c",
@@ -16835,5 +16835,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80150835
+  "total_bytes": 80150801
 }
