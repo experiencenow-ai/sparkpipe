@@ -129,3 +129,41 @@ and `ed94ef6a887e246e871e988b557f034d6462dd75469f9dc2ffb0014d950d528d`.
 The corresponding measurement JSON SHA256s are
 `4b758fb8f6e9287adeca1c691c3a74f92dbb5b7ed7d4b08eaea7bbdb71f8a04e`
 and `67b0b73b50a82034203dd92602b9a9333c0fa7921b38556925710730ab804777`.
+
+## HC output partition and exact-kernel gate
+
+Production commit `1a08cb81583c93e749707fff80504f0012f1097b` changes only five
+added and two removed lines in `layer.cuh`: HcMix uses three blocks per row,
+partitioning independent output mixes. Every block performs the same input
+staging and RMS reduction; each selected warp retains its original element,
+shuffle and tile accumulation order. No scratch, extra launch, runtime mode or
+Sinkhorn change was added. The 24-block prototype was only about one percent
+faster than three blocks while repeating staging/RMS eight times more often.
+
+The retained `tests/test_glm5_next_hc_mix.cu` includes the actual complete GLM
+CUDA translation unit and a frozen pre-change baseline function. After reversing
+its symbol rename, the fixture is byte-for-byte equal to the unchanged function,
+SHA256 `c87f38f32596a7ba4142db26ea898173ed2d9884c4c0ed0561885ea1ba30fede`.
+It requires finite and bitwise-equal outputs for rows 1, 3 and 5 with signed,
+exponent-varied and cancellation data. All nine cases passed on Spark0 at
+source `012f16a4f25a89cf8ff1745b4bcdfed56b6bebcf`, explicitly LAZY/LAZY, in
+0.890 seconds. Both baseline and actual production kernel use captured graphs
+for the timing comparison.
+
+| 90 B1 HC calls, eight samples after two warmups | Unchanged median | Three-block median |
+| --- | ---: | ---: |
+| One repeatedly reused weight matrix | 4.785056 ms | 1.906800 ms |
+| 90 distinct weight matrices | 11.975744 ms | 4.367024 ms |
+
+The rotating-weight microbenchmark improves 2.74 times and saves 7.609 ms per
+90 calls. This is a same-process kernel comparison, not an end-to-end throughput
+claim. The process exited 0, its PID disappeared, and the two existing GPU owners
+and their allocations were unchanged. No service was restarted by the test.
+
+Binary SHA256:
+`2e0ad3c13b6d6972c19ed155d6a3b50f1c3f6379ac312d84822bd8f35eb1e325`.
+Remote logs are in `spark0:/tmp/sparkpipe-hc-regression-012f16a4/`; the small
+[receipt](receipts/glm5-next-hc-mix-012f16a4.json) retains source, binary, timings
+and process cleanup. The [GPU inventory](SERVING_FUZZ_COVERAGE.md) lists the
+explicit build/run target. Fleet output parity and throughput for this change
+remain separate measurements.

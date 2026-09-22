@@ -201,3 +201,20 @@ drain and replay recovery. It does not establish distributed serving throughput,
 model parity, complete GLM cache restoration or the outer driver unload contract.
 The generated public void destructor still discards a module's retained-cleanup
 status; that ownership boundary remains a concrete item for the deeper review.
+
+## HC output-partition GPU regression
+
+`make build/test_glm5_next_hc_mix` compiles the actual full GLM CUDA translation
+unit. `make test-glm-hc-mix` explicitly runs its bounded GPU test; the binary
+requires `--run` and has a 60-second process alarm. It is a separate GPU target,
+not part of the historical 163-pass host campaign.
+
+At `012f16a4f25a89cf8ff1745b4bcdfed56b6bebcf`, all nine finite/bitwise cases
+passed on Spark0: B1/B3/B5 with signed, exponent-varied and cancellation inputs,
+compared with the frozen unchanged kernel. Captured 90-call timing covers both
+one reused weight matrix and 90 distinct matrices. This proves the tested
+partition's arithmetic preservation and bounded kernel improvement, not model
+quality, distributed cache reuse or fleet throughput. Source/binary/process
+provenance and the exact timings are retained in the
+[HC receipt](receipts/glm5-next-hc-mix-012f16a4.json) and
+[performance report](TP16_HARDWARE_PROFILE_20260922.md).
