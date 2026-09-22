@@ -13,7 +13,20 @@
 set -euo pipefail
 RANK="${SPARK_QUEUE_RANK:?}"
 CHECKOUT="$(pwd)"
-HOST="spark$(printf %x "$RANK")"
+# The node knows its own rank (HOST is authoritative); SPARK_QUEUE_RANK is
+# only the INDEX IN --nodes, which differs from the world rank whenever the
+# node list is a subset (receipt dsv4pro-m1-prep10: a 12-node list remapped
+# spark5's job onto spark2's root). When the full 16-node list is used the
+# two must agree and are cross-checked.
+HOST="$(hostname)"
+case "$HOST" in
+spark*) RANK_HEX="${HOST#spark}"; WORLD_RANK=$((16#$RANK_HEX)) ;;
+*) echo "unexpected host name: $HOST" >&2; exit 2 ;;
+esac
+if [ "$SPARK_QUEUE_SIZE" = "16" ] && [ "$WORLD_RANK" != "$RANK" ]; then
+  echo "rank mismatch: queue index $RANK vs host rank $WORLD_RANK" >&2; exit 2
+fi
+RANK="$WORLD_RANK"
 ROOT="/home/${HOST}/sparkdata/dsv4_pro.tp4pp4"
 PACKS="$ROOT/packs"
 OLD="$(printf 'dsv4_pro.tp4_pp4.rank%02d.spstage' "$RANK")"
