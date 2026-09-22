@@ -127,8 +127,11 @@ The [repeat receipt](receipts/parallel-residents-852e01a2.json) pins every rank.
 The separate mixed-layout probe registered all 55 children and performed numerical
 work, then failed at an eager gather capability check before full qualification.
 The legacy callback check prevented reaching the existing hardware gather path.
-This failure does not invalidate the complete GLM inference receipt and does not
-establish a mixed-topology pass.
+Commit `734c69ee` restricts the legacy callback requirement to the path that
+actually uses it. Hardware and B2+ tree routes exercise their native kernels.
+The focused suite passes 208 common checks, 2,046 fuzzer checks and 1,656 sanitizer
+checks; the original guard fails 28 controlled assertions. The failed hardware
+receipt remains partial evidence; see the release archive for subsequent reruns.
 
 ## Evidence
 

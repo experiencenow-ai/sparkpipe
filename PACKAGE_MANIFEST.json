@@ -1,5 +1,5 @@
 {
-  "file_count": 3261,
+  "file_count": 3262,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -1458,8 +1458,8 @@
     },
     {
       "path": "docs/MULTIDEV_QUICKSTART.md",
-      "sha256": "8bb9148c96a3758bdb709033adc3c4cd9576f5fa596867e0196136811fc59c01",
-      "size_bytes": 4717
+      "sha256": "deb088701f3a0e1af9b30c5bbae70e06afd164ea114d2314f11023ee0496d836",
+      "size_bytes": 4774
     },
     {
       "path": "docs/MULTI_DEV_SMOKE.md",
@@ -1478,8 +1478,8 @@
     },
     {
       "path": "docs/PARALLEL_RESIDENT_QUALIFICATION.md",
-      "sha256": "3847d6c2dd8e109abd92be6fd2c0595d263482616d803062af37721ebf69bdbb",
-      "size_bytes": 7863
+      "sha256": "70c0cfea855724203417d5ea8234b905f894899077d642c06d23e30bad0eebea",
+      "size_bytes": 9254
     },
     {
       "path": "docs/PERFORMANCE_LEDGER.md",
@@ -1523,8 +1523,8 @@
     },
     {
       "path": "docs/SERVING_FUZZ_COVERAGE.md",
-      "sha256": "66886cc6ac4069364bc39a2f65ce9d6a311c0bbaf63279cdf12af20b1a94e7b1",
-      "size_bytes": 20718
+      "sha256": "a40e971b6030ee3978be708db760d1d5f366f93453509e5b4be04118dd5023c8",
+      "size_bytes": 21219
     },
     {
       "path": "docs/SPARKDEV_HANDOFF_GLM53FLASH.md",
@@ -2685,6 +2685,11 @@
       "path": "docs/receipts/parallel-residents-44fe4af7.json",
       "sha256": "6c129d50e2c2e6bc636a5d5d51fab2083065ee28a28094cea1532e07c9b2c448",
       "size_bytes": 6334
+    },
+    {
+      "path": "docs/receipts/parallel-residents-852e01a2.json",
+      "sha256": "6043d7aff65cd29e588d75f8803a065dc512fa08329d6470294be9e0c0a418d9",
+      "size_bytes": 3480
     },
     {
       "path": "docs/receipts/tp-hardware-wait-cd344a64.json",
@@ -7738,8 +7743,8 @@
     },
     {
       "path": "ring/transport/tp_device_collective.c",
-      "sha256": "b265948c81c1143d163cfdd66ebe0393221ec3c3a3a823c6780bf12dec1dc432",
-      "size_bytes": 114567
+      "sha256": "6ef32bfc26bcf0f611d176f07d5faade44ebb8b00f18d3c1ba6af53e8c779cd7",
+      "size_bytes": 114793
     },
     {
       "path": "ring/transport/tp_device_collective_nccl.h",
@@ -10188,8 +10193,8 @@
     },
     {
       "path": "tests/test_tp_allreduce_fuzz.c",
-      "sha256": "f9196f4ef1925c4d144ed90ee070ca276bade8310ca2a5d8322a694560eddcc4",
-      "size_bytes": 94237
+      "sha256": "bde9e458b1bd6a0013eaafecc021b4dd0ac28dd6003a0d944dd7b4d93bb37006",
+      "size_bytes": 94874
     },
     {
       "path": "tests/test_tp_collective.c",
@@ -10203,8 +10208,8 @@
     },
     {
       "path": "tests/test_tp_device_collective_mock.c",
-      "sha256": "c02cf3216064309e99bc259a9b43b6532a6d82ded5e083a09c5e987c2cce46c4",
-      "size_bytes": 25252
+      "sha256": "81a2a9e615457b05de8158dafa2dd2f80be99547985b7256883b44de72001cfe",
+      "size_bytes": 27098
     },
     {
       "path": "tests/test_tp_f32_tree_host.py",
@@ -16310,5 +16315,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 76679268
+  "total_bytes": 76687406
 }
