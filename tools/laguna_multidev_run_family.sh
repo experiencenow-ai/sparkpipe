@@ -275,8 +275,12 @@ fi
   fail "packs/ must contain exactly one .sha256 sidecar"
 
 # 4. Arena-side budgets: default to the exact sidecar-derived numbers for
-#    THIS rank pack (expert span sum + spine complement); the envs only
-#    override (queue cmd stays bare).
+#    THIS rank pack (whole-pack 2 MiB chunk basis for the pool - the
+#    daemon's acquire accounting - and the spine complement); the envs
+#    only override (queue cmd stays bare). Exported HERE: the warm leg
+#    below runs weightd_warm, which requires the pool env (the lane-8
+#    attach-001 finding: the warm hook ran before the launch-block
+#    exports and failed with the weightd_warm usage error).
 BUDGETS="$(python3 "$CHECKOUT/tools/laguna_multidev_lane.py" --budgets "$PRIVATE_PACK")"
 DEFAULT_POOL="${BUDGETS%% *}"
 DEFAULT_SPINE="${BUDGETS##* }"
@@ -284,6 +288,8 @@ DEFAULT_SPINE="${BUDGETS##* }"
 : "${LAGUNA_SPINE_BUDGET_BYTES:=$DEFAULT_SPINE}"
 [ "$LAGUNA_EXPERT_POOL_BYTES" -gt 0 ] && [ "$LAGUNA_SPINE_BUDGET_BYTES" -gt 0 ] ||
   fail "expert-pool/spine budgets must be positive decimal byte counts"
+export SPARK_WEIGHTD_EXPERT_POOL_BYTES="$LAGUNA_EXPERT_POOL_BYTES"
+export SPARK_WEIGHTD_SPINE_BUDGET_BYTES="$LAGUNA_SPINE_BUDGET_BYTES"
 
 # --------------------- COLD-LAUNCH PRELOAD (milestone 3) ---------------------
 
@@ -314,8 +320,7 @@ export SPARK_WEIGHTD_ATTACH=1
 export SPARK_WEIGHTD_SOCKET="$SOCKET"
 export SPARK_WEIGHTD_LANE="$LANE"
 export SPARK_TP_MESH_RANKS="$MESH_RANKS"
-export SPARK_WEIGHTD_EXPERT_POOL_BYTES="$LAGUNA_EXPERT_POOL_BYTES"
-export SPARK_WEIGHTD_SPINE_BUDGET_BYTES="$LAGUNA_SPINE_BUDGET_BYTES"
+# Budget envs were exported at derivation time (the warm leg needs them).
 # Pinned CUDA environment for shared-lane smoke (template hard rule).
 export CUDA_MODULE_LOADING=LAZY
 export CUDA_MODULE_DATA_LOADING=LAZY
