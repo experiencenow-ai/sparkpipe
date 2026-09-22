@@ -70,6 +70,8 @@ include_flags=(
 	-I"${repository_root}/modules/dsv4_resident_decode_stage/source"
 	-I"${repository_root}/modules/qwen38_27b_resident_decode_stage/include"
 	-I"${repository_root}/modules/qwen38_27b_resident_decode_stage/source"
+	-I"${repository_root}/modules/minimax_resident_decode_stage/include"
+	-I"${repository_root}/modules/minimax_resident_decode_stage/source"
 )
 object_flags=(
 	-std=c++17
