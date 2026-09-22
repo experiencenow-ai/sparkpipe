@@ -2009,6 +2009,20 @@ static SparkStatus SparkGlm5NextModuleCombineU64Max(
 	return(SparkStageModuleCudaStatus(SPARK_GLM5_NEXT_MODULE_TAG,error,"tp_all_reduce_max_u64"));
 }
 
+static SparkStatus SparkGlm5NextRequestedMeshLane(uint32_t *lane)
+{
+	const char *text = getenv("SPARK_WEIGHTD_LANE");
+	if ( text == 0 )
+	{
+		*lane = SPARK_WEIGHTD_LANE_NONE;
+		return(SPARK_STATUS_OK);
+	}
+	if ( text[0] == '\0' )
+		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	return(SparkStageModuleEnvironmentUnsignedOrDefault(SPARK_GLM5_NEXT_MODULE_TAG,
+	    "SPARK_WEIGHTD_LANE",0u,SPARK_WEIGHTD_MESH_MAX_LANES - 1u,0u,lane));
+}
+
 static SparkStatus SparkGlm5NextModuleInitializeTpCollective(
 	SparkGlm5NextModuleState *state,
 	const SparkGlm5NextResidentDecodeStageNodeContext *context)
@@ -2023,6 +2037,10 @@ static SparkStatus SparkGlm5NextModuleInitializeTpCollective(
 	if ( state->lane_client == 0 )
 	{
 		const char *socket = getenv("SPARK_WEIGHTD_SOCKET");
+		uint32_t requested_lane;
+		status = SparkGlm5NextRequestedMeshLane(&requested_lane);
+		if ( status != SPARK_STATUS_OK )
+			SPARK_RETURN(status);
 		if ( socket == 0 || socket[0] == '\0' )
 			SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
 		if ( SparkWeightdClientConnect(socket,&state->lane_client,0) != SPARK_STATUS_OK )
@@ -2030,15 +2048,19 @@ static SparkStatus SparkGlm5NextModuleInitializeTpCollective(
 			state->lane_client = 0;
 			SPARK_FAIL(SPARK_STATUS_IO_ERROR);
 		}
-		status = SparkWeightdClientLaneAcquire(state->lane_client,&state->tp_lane,
+		status = SparkWeightdClientLaneAcquire(state->lane_client,requested_lane,&state->tp_lane,
 			(uint64_t)context->tp_connect_timeout_milli * 1000000ull);
 		if ( status != SPARK_STATUS_OK )
 		{
 			(void)SparkWeightdClientClose(state->lane_client);
 			state->lane_client = 0;
-			fprintf(stderr,"GLM mesh lane acquire failed: no free lane (status=%d)\n",(int32_t)status);
+			fprintf(stderr,"GLM mesh lane acquire failed requested=%u capacity=%u status=%d\n",
+			    requested_lane,SPARK_WEIGHTD_MESH_MAX_LANES,(int32_t)status);
 			SPARK_RETURN(status);
 		}
+		fprintf(stderr,"GLM mesh lane mode=%s requested=%u resolved=%u capacity=%u rank=%u\n",
+		    requested_lane == SPARK_WEIGHTD_LANE_NONE ? "automatic" : "explicit",
+		    requested_lane,state->tp_lane,SPARK_WEIGHTD_MESH_MAX_LANES,state->tp_rank);
 	}
 	probe_connect_timeout_milli = context->tp_connect_timeout_milli;
 	if ( SparkGlm5NextProbeEnabled() )

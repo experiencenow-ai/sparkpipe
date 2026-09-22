@@ -22,6 +22,35 @@ is the module library's runtime twin — content-addressing throughout.
 READ-ONLY EXPORT: VMM access flags map consumers read-only (the
 marketplace tenant-scribble protection for free).
 
+## Concurrent GLM mesh reservations
+
+Weightd IPC ABI 7 extends the existing `LANE_ACQUIRE` request with an exact
+`requested_lane`. Each lane owns two mesh bands. A coordinator must assign a
+unique lane from 0 through 7 to each concurrent GLM job and set
+`SPARK_WEIGHTD_LANE` to that same value on every participating rank. Local
+first-free allocation alone is insufficient: reversed job startup order on two
+hosts can otherwise assign one job different bands.
+
+An occupied explicit lane returns `NO_LANE`; it never redirects to another
+lane. A second acquire on an owning connection returns `DUPLICATE`, preserving
+its original reservation. The client validates that the returned lane matches
+its request. GLM logs mode, requested lane, resolved lane, capacity and rank.
+The multi-job runner checks every rank's log. An absent environment variable
+retains the existing automatic single-job mode and logs it explicitly; an
+empty or malformed value fails initialization.
+
+Normal GLM teardown keeps its reservation until collective drain and cleanup
+succeed. Closing one idle owner releases only its lane. An unexpected active
+producer disconnect retains the existing daemon-wide orphan fence, including
+new lane acquisition, because GPU drain is unproven. This is fail-closed
+behavior, not independent crash recovery for other jobs. Lane reservation does
+not partition the shared expert-memory budget.
+
+`test_weightd_mesh_mock` runs two actual IPC servers with reversed 2-, 3- and
+4-job startup order across 24 seeded lane permutations, plus capacity,
+occupied/duplicate rejection, neighbor retention and reuse. CUDA and verbs are
+host mocks; concurrent real-model inference needs a separate fleet receipt.
+
 ## The perf notes (preserved verbatim from the analysis)
 
 - Consumers' kernels read the same physical DRAM pages — zero copies

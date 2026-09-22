@@ -2682,12 +2682,28 @@ static uint32_t SparkWeightdServerDispatch(SparkWeightdServer *server,
     {
         SparkWeightdIpcLaneAcquireResult *result =
             (SparkWeightdIpcLaneAcquireResult *)response;
+        const SparkWeightdIpcLaneAcquire *acquire =
+            (const SparkWeightdIpcLaneAcquire *)request_header;
         uint32_t lane;
         memset(result,0,sizeof(*result));
         SparkWeightdBuildHeader(response,result_kind,request_id);
-        result->status = (uint32_t)SPARK_STATUS_NO_LANE;
+        result->lane = SPARK_WEIGHTD_LANE_NONE;
+        if (acquire->reserved != 0u ||
+            (acquire->requested_lane != SPARK_WEIGHTD_LANE_NONE &&
+             acquire->requested_lane >= SPARK_WEIGHTD_MESH_MAX_LANES))
+            result->status = (uint32_t)SPARK_STATUS_INVALID_ARGUMENT;
+        else if (server->orphan_mesh_owners != 0u)
+            result->status = (uint32_t)SPARK_STATUS_IO_ERROR;
+        else if (connection->lane_mask != 0u)
+            result->status = (uint32_t)SPARK_STATUS_DUPLICATE;
+        else
+            result->status = (uint32_t)SPARK_STATUS_NO_LANE;
+        if (result->status != (uint32_t)SPARK_STATUS_NO_LANE)
+            return sizeof(*result);
         for (lane = 0u; lane < SPARK_WEIGHTD_MESH_MAX_LANES; lane++)
-            if (server->lane_owner[lane] == 0u)
+            if (server->lane_owner[lane] == 0u &&
+                (acquire->requested_lane == SPARK_WEIGHTD_LANE_NONE ||
+                 acquire->requested_lane == lane))
             {
                 server->lane_owner[lane] =
                     (uint16_t)(connection - server->connections) + 1u;
@@ -3930,13 +3946,15 @@ SparkStatus SparkWeightdClientMeshBroadcast(
 }
 
 SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
-    uint32_t *lane_out, uint64_t timeout_nanoseconds)
+    uint32_t requested_lane, uint32_t *lane_out, uint64_t timeout_nanoseconds)
 {
     SparkWeightdIpcLaneAcquire wire;
     SparkWeightdIpcLaneAcquireResult wire_result;
     SparkStatus status;
 
-    if ( client == 0 || lane_out == 0 )
+    if ( client == 0 || lane_out == 0 ||
+         (requested_lane != SPARK_WEIGHTD_LANE_NONE &&
+          requested_lane >= SPARK_WEIGHTD_MESH_MAX_LANES) )
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
     memset(&wire, 0, sizeof(wire));
     wire.header.magic = SPARK_WEIGHTD_IPC_MAGIC;
@@ -3945,6 +3963,7 @@ SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
     wire.header.body_bytes =
         sizeof(wire) - SPARK_WEIGHTD_IPC_HEADER_BYTES;
     wire.header.request_id = ++client->next_request_id;
+    wire.requested_lane = requested_lane;
     memset(&wire_result, 0, sizeof(wire_result));
     status = SparkWeightdClientExchange(client, &wire,
         (uint32_t)sizeof(wire), &wire_result,
@@ -3953,7 +3972,9 @@ SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
         SPARK_RETURN(status);
     if ( wire_result.status != (uint32_t)SPARK_STATUS_OK )
         return SparkWeightdStatusFromWire(wire_result.status);
-    if ( wire_result.lane >= SPARK_WEIGHTD_MESH_MAX_LANES )
+    if ( wire_result.lane >= SPARK_WEIGHTD_MESH_MAX_LANES ||
+         (requested_lane != SPARK_WEIGHTD_LANE_NONE &&
+          wire_result.lane != requested_lane) )
         SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
     *lane_out = wire_result.lane;
     return SPARK_STATUS_OK;

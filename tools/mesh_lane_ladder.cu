@@ -97,7 +97,7 @@ static int ladder_acquire_lane(const char *socket_path,
             socket_path);
         return 2;
     }
-    status = SparkWeightdClientLaneAcquire(client,&lane,LADDER_WAIT_NS);
+    status = SparkWeightdClientLaneAcquire(client,SPARK_WEIGHTD_LANE_NONE,&lane,LADDER_WAIT_NS);
     if (status != SPARK_STATUS_OK)
     {
         fprintf(stderr,"LADDER lane_acquire=FAILED status=%s\n",
@@ -586,7 +586,7 @@ static int ladder_evict_matrix(const char *socket_path,uint32_t lanes,
             fprintf(stderr,"EVICT connect failed lane-index=%u\n",i);
             return 2;
         }
-        status = SparkWeightdClientLaneAcquire(clients[i],&released,
+        status = SparkWeightdClientLaneAcquire(clients[i],SPARK_WEIGHTD_LANE_NONE,&released,
             LADDER_WAIT_NS);
         if (status != SPARK_STATUS_OK || released != i)
         {

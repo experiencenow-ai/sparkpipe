@@ -15,7 +15,7 @@ extern "C" {
 
 #define SPARK_WEIGHTD_CLIENT_TIMEOUT_DEFAULT_NS UINT64_C(10000000000)
 
-#define SPARK_WEIGHTD_IPC_ABI_VERSION 6u
+#define SPARK_WEIGHTD_IPC_ABI_VERSION 7u
 #define SPARK_WEIGHTD_IPC_MAGIC UINT32_C(0x57444953)
 
 #define SPARK_WEIGHTD_ID_BYTES 64u
@@ -343,6 +343,8 @@ typedef struct SparkWeightdIpcEpochExportResult
 typedef struct SparkWeightdIpcLaneAcquire
 {
     SparkWeightdIpcHeader header;
+    uint32_t requested_lane;
+    uint32_t reserved;
 } SparkWeightdIpcLaneAcquire;
 
 typedef struct SparkWeightdIpcLaneAcquireResult
@@ -721,6 +723,7 @@ SparkStatus SparkWeightdClientEpochExport(SparkWeightdClient *client,
     uint64_t timeout_nanoseconds);
 
 SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
+    uint32_t requested_lane,
     uint32_t *lane_out,
     uint64_t timeout_nanoseconds);
 

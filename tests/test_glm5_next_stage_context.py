@@ -1289,6 +1289,23 @@ static void check_checkpoint_finish(uint32_t fail_copy,uint32_t prefix_tokens,ui
 static void check_execution_environment(void)
 {
 	uint64_t budget = 0u;
+	uint32_t lane;
+	const char *invalid_lanes[] = {"", "-1", "8", "4294967295", "1x", " 1", "+1"};
+	assert(unsetenv("SPARK_WEIGHTD_LANE") == 0);
+	assert(SparkGlm5NextRequestedMeshLane(&lane) == SPARK_STATUS_OK && lane == SPARK_WEIGHTD_LANE_NONE);
+	for (uint32_t index=0u; index<sizeof(invalid_lanes)/sizeof(invalid_lanes[0]); index++)
+	{
+		assert(setenv("SPARK_WEIGHTD_LANE",invalid_lanes[index],1) == 0);
+		assert(SparkGlm5NextRequestedMeshLane(&lane) == SPARK_STATUS_INVALID_ARGUMENT);
+	}
+	for (uint32_t index=0u; index<SPARK_WEIGHTD_MESH_MAX_LANES; index++)
+	{
+		char value[16];
+		(void)snprintf(value,sizeof(value),"%u",index);
+		assert(setenv("SPARK_WEIGHTD_LANE",value,1) == 0);
+		assert(SparkGlm5NextRequestedMeshLane(&lane) == SPARK_STATUS_OK && lane == index);
+	}
+	assert(unsetenv("SPARK_WEIGHTD_LANE") == 0);
 	const char *invalid[] = {"", "0", "-1", "18446744073709551615", "invalid"};
 	assert(unsetenv("SPARK_GLM5_NEXT_PREFETCH") == 0);
 	assert(unsetenv("SPARK_GLM5_NEXT_GRAPH_PATH") == 0);

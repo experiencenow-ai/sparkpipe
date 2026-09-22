@@ -545,12 +545,12 @@ static void test_mesh_hardware_wait(void)
     uint64_t *peer2 = test_peer_tail(band,2u,tag);
     uint64_t id,old_error,old_diag;
     uint32_t first,last,invalid;
-    CHECK(SPARK_WEIGHTD_IPC_ABI_VERSION == 6u &&
+    CHECK(SPARK_WEIGHTD_IPC_ABI_VERSION == 7u &&
         SPARK_WEIGHTD_MESH_WAIT_OFFSET - SPARK_WEIGHTD_MESH_DOORBELL_OFFSET == 11264u &&
         (uint8_t *)test_wait_request(15u,15u) + sizeof(*request) <=
             (uint8_t *)weightd_mesh.recv_buffer + SPARK_WEIGHTD_MESH_REGION_BYTES &&
         sizeof(*request) == 128u && offsetof(SparkWeightdMeshWaitRequest,ready) == 64u,
-        "ABI6 gate geometry has separate producer and terminal cache lines within registered region");
+        "ABI7 gate geometry has separate producer and terminal cache lines within registered region");
     CHECK(SparkWeightdMeshSetActivity(1u) == SPARK_STATUS_OK,
         "hardware wait producer begins before publishing any GPU request");
     id = test_wait_publish(request,SPARK_WEIGHTD_MESH_WAIT_SHIPPED,0u,0u,0u);
@@ -688,6 +688,127 @@ static void test_mesh_hardware_wait(void)
     *cancel = 0u;
 }
 
+static void test_mesh_lane_protocol(void)
+{
+    SparkWeightdServerConfig config = {0};
+    TestMeshActivityThread servers[2] = {{0},{0}};
+    pthread_t threads[2];
+    SparkWeightdClient *clients[2][SPARK_WEIGHTD_MESH_MAX_LANES] = {{0}};
+    SparkWeightdClient *contender;
+    char paths[2][128];
+    uint32_t seed = 0x719e4a31u,lane,out,count,round,rank,job,attempt;
+    const uint64_t timeout = UINT64_C(1000000000);
+    SparkStatus status;
+    for (rank=0u; rank<2u; rank++)
+    {
+        (void)snprintf(paths[rank],sizeof(paths[rank]),
+            "/tmp/spark-lanes-%ld-%u.sock",(long)getpid(),rank);
+        config.socket_path = paths[rank];
+        config.device_bytes_max = UINT64_C(1048576);
+        assert(SparkWeightdServerCreate(&config,&servers[rank].server) == SPARK_STATUS_OK);
+        assert(pthread_create(&threads[rank],0,test_mesh_server_run,&servers[rank]) == 0);
+    }
+    for (count=2u; count<=4u; count++)
+        for (round=0u; round<8u; round++)
+        {
+            uint32_t lanes[SPARK_WEIGHTD_MESH_MAX_LANES];
+            for (lane=0u; lane<SPARK_WEIGHTD_MESH_MAX_LANES; lane++)
+                lanes[lane] = lane;
+            for (lane=SPARK_WEIGHTD_MESH_MAX_LANES - 1u; lane>0u; lane--)
+            {
+                uint32_t other,saved;
+                seed = seed * 1664525u + 1013904223u;
+                other = seed % (lane + 1u);
+                saved = lanes[lane];
+                lanes[lane] = lanes[other];
+                lanes[other] = saved;
+            }
+            fprintf(stderr,"lane protocol seed=0x719e4a31 jobs=%u schedule=%u\n",count,round);
+            for (rank=0u; rank<2u; rank++)
+            {
+                for (job=0u; job<count; job++)
+                {
+                    uint32_t ordered = rank == 0u ? job : count - job - 1u;
+                    assert(SparkWeightdClientConnect(paths[rank],&clients[rank][ordered],0) == SPARK_STATUS_OK);
+                    out = SPARK_WEIGHTD_LANE_NONE;
+                    for (attempt=0u; attempt<1000u; attempt++)
+                    {
+                        status = SparkWeightdClientLaneAcquire(clients[rank][ordered],
+                            lanes[ordered],&out,timeout);
+                        if (status != SPARK_STATUS_NO_LANE)
+                            break;
+                        test_sleep_ns(UINT64_C(1000000));
+                    }
+                    CHECK(status == SPARK_STATUS_OK && out == lanes[ordered],
+                        "reversed job startup preserves coordinator lane across ranks");
+                    out = SPARK_WEIGHTD_LANE_NONE;
+                    CHECK(SparkWeightdClientLaneAcquire(clients[rank][ordered],
+                        lanes[count],&out,timeout) == SPARK_STATUS_DUPLICATE &&
+                        out == SPARK_WEIGHTD_LANE_NONE,
+                        "duplicate acquisition cannot reserve a second lane");
+                }
+                assert(SparkWeightdClientConnect(paths[rank],&contender,0) == SPARK_STATUS_OK);
+                out = SPARK_WEIGHTD_LANE_NONE;
+                CHECK(SparkWeightdClientLaneAcquire(contender,SPARK_WEIGHTD_MESH_MAX_LANES,
+                    &out,timeout) == SPARK_STATUS_INVALID_ARGUMENT && out == SPARK_WEIGHTD_LANE_NONE,
+                    "out of range lane does not reserve or alter result");
+                CHECK(SparkWeightdClientLaneAcquire(contender,lanes[0],&out,timeout) == SPARK_STATUS_NO_LANE &&
+                    out == SPARK_WEIGHTD_LANE_NONE,"occupied explicit lane never redirects to a free lane");
+                SparkWeightdClientClose(clients[rank][0]);
+                clients[rank][0] = 0;
+                for (attempt=0u; attempt<1000u; attempt++)
+                {
+                    status = SparkWeightdClientLaneAcquire(contender,lanes[0],&out,timeout);
+                    if (status != SPARK_STATUS_NO_LANE)
+                        break;
+                    test_sleep_ns(UINT64_C(1000000));
+                }
+                CHECK(status == SPARK_STATUS_OK && out == lanes[0],
+                    "closed idle owner releases only its reserved lane");
+                SparkWeightdClientClose(contender);
+                assert(SparkWeightdClientConnect(paths[rank],&contender,0) == SPARK_STATUS_OK);
+                for (job=1u; job<count; job++)
+                {
+                    out = SPARK_WEIGHTD_LANE_NONE;
+                    CHECK(SparkWeightdClientLaneAcquire(contender,lanes[job],&out,timeout) == SPARK_STATUS_NO_LANE &&
+                        out == SPARK_WEIGHTD_LANE_NONE,"another job remains reserved after neighbor disconnect and reuse");
+                    SparkWeightdClientClose(clients[rank][job]);
+                    clients[rank][job] = 0;
+                }
+                SparkWeightdClientClose(contender);
+            }
+        }
+    for (rank=0u; rank<2u; rank++)
+    {
+        uint32_t observed = 0u;
+        for (job=0u; job<SPARK_WEIGHTD_MESH_MAX_LANES; job++)
+        {
+            assert(SparkWeightdClientConnect(paths[rank],&clients[rank][job],0) == SPARK_STATUS_OK);
+            for (attempt=0u; attempt<1000u; attempt++)
+            {
+                status = SparkWeightdClientLaneAcquire(clients[rank][job],SPARK_WEIGHTD_LANE_NONE,&out,timeout);
+                if (status != SPARK_STATUS_NO_LANE)
+                    break;
+                test_sleep_ns(UINT64_C(1000000));
+            }
+            CHECK(status == SPARK_STATUS_OK && out < SPARK_WEIGHTD_MESH_MAX_LANES &&
+                (observed & (1u << out)) == 0u,"automatic mode reserves distinct free lanes up to capacity");
+            if (out < SPARK_WEIGHTD_MESH_MAX_LANES)
+                observed |= 1u << out;
+        }
+        assert(SparkWeightdClientConnect(paths[rank],&contender,0) == SPARK_STATUS_OK);
+        CHECK(SparkWeightdClientLaneAcquire(contender,SPARK_WEIGHTD_LANE_NONE,&out,timeout) == SPARK_STATUS_NO_LANE &&
+            observed == (1u << SPARK_WEIGHTD_MESH_MAX_LANES) - 1u,
+            "ninth owner cannot alias any occupied pair of bands");
+        SparkWeightdClientClose(contender);
+        for (job=0u; job<SPARK_WEIGHTD_MESH_MAX_LANES; job++)
+            SparkWeightdClientClose(clients[rank][job]);
+        __atomic_store_n(&servers[rank].stop,1,__ATOMIC_SEQ_CST);
+        assert(pthread_join(threads[rank],0) == 0);
+        SparkWeightdServerDestroy(servers[rank].server);
+    }
+}
+
 static void test_mesh_activity_protocol(uint32_t pending_first)
 {
     SparkWeightdServerConfig config;
@@ -696,7 +817,7 @@ static void test_mesh_activity_protocol(uint32_t pending_first)
     TestMeshActivityThread server = {0},waiter = {0};
     pthread_t server_thread,wait_thread;
     char path[128];
-    uint32_t post_first,post_last,round;
+    uint32_t post_first,post_last,round,lane;
     const uint64_t timeout = UINT64_C(1000000000);
     test_complete_range(pending_first,spark_stub_ibv_posted_count());
     assert(test_mesh_owner_count() == 0u);
@@ -708,6 +829,9 @@ static void test_mesh_activity_protocol(uint32_t pending_first)
     assert(pthread_create(&server_thread,0,test_mesh_server_run,&server) == 0);
     assert(SparkWeightdClientConnect(path,&first,&hello) == SPARK_STATUS_OK);
     assert(SparkWeightdClientConnect(path,&second,&hello) == SPARK_STATUS_OK);
+    CHECK(SparkWeightdClientLaneAcquire(first,0u,&lane,timeout) == SPARK_STATUS_OK && lane == 0u &&
+        SparkWeightdClientLaneAcquire(second,1u,&lane,timeout) == SPARK_STATUS_OK && lane == 1u,
+        "active owners retain distinct reserved lanes");
     assert(pthread_create(&wait_thread,0,test_mesh_wait,&waiter) == 0);
     while ( atomic_load(&waiter.waiting) == 0u )
         test_sleep_ns(UINT64_C(100000));
@@ -804,6 +928,14 @@ static void test_mesh_activity_protocol(uint32_t pending_first)
     test_sleep_ns(UINT64_C(50000000));
     CHECK(SparkWeightdClientMeshActivity(second,2u,1u,timeout) == SPARK_STATUS_IO_ERROR &&
         test_mesh_owner_count() == 1u,"unexpected active disconnect retains producer and blocks new work");
+    {
+        SparkWeightdClient *replacement = 0;
+        assert(SparkWeightdClientConnect(path,&replacement,0) == SPARK_STATUS_OK);
+        lane = SPARK_WEIGHTD_LANE_NONE;
+        CHECK(SparkWeightdClientLaneAcquire(replacement,0u,&lane,timeout) == SPARK_STATUS_IO_ERROR &&
+            lane == SPARK_WEIGHTD_LANE_NONE,"undrained disconnected producer fences lane reuse");
+        SparkWeightdClientClose(replacement);
+    }
     SparkWeightdClientClose(second);
     __atomic_store_n(&server.stop,1,__ATOMIC_SEQ_CST);
     assert(pthread_join(server_thread,0) == 0);
@@ -1052,6 +1184,7 @@ int main(void)
     }
     CHECK(spark_stub_ibv_post_send_calls() - post_before == 6u,
         "TP4 B1 posts payload and tail to three peers only");
+    test_mesh_lane_protocol();
     test_mesh_activity_protocol(protocol_post_first);
     test_rank_mask = 0xffu;
     CHECK(test_write_record(1u,9u) == 0,"peer with inconsistent group published");
