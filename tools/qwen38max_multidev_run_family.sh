@@ -156,7 +156,13 @@ mkdir -p "$ROOT/bin" "$ROOT/lib" "$ROOT/config" "$ROOT/packs" "$ROOT/kvcache"
 
 # 1. Coherent artifacts: build the exact synced source (GPU job: the module
 #    archive and driver need nvcc), or reuse a prior build on this node.
-if [ -n "${QMAX_PREBUILT_DIR:-}" ]; then
+# PREBUILT_DIR resolves without env syntax (bare queue cmd): explicit
+# override, else the build arm's standard node-local layout.
+PREBUILT_CANDIDATE="${QMAX_PREBUILT_DIR:-/home/$HOST/sparkdata/qwen38max.tp16/build-latest}"
+if [ -d "$PREBUILT_CANDIDATE" ]; then
+  QMAX_PREBUILT_DIR="$PREBUILT_CANDIDATE"
+fi
+if [ -n "${QMAX_PREBUILT_DIR:-}" ] && [ -d "$QMAX_PREBUILT_DIR" ]; then
   for artifact in sparkpipe_model_residentd model_serving_adapter.so \
       model_driver.so hidden_transport.so weightd_warm; do
     [ -f "$QMAX_PREBUILT_DIR/$artifact" ] ||
