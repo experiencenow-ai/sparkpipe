@@ -188,9 +188,10 @@ int main(int argument_count,char **arguments)
     arguments = filtered;
     argument_count = filtered_count;
     if ( family != 0 && strcmp(family,"dsv4_pro") != 0 &&
-         strcmp(family,"dsv41_flash") != 0 && strcmp(family,"k3") != 0 )
+         strcmp(family,"dsv41_flash") != 0 && strcmp(family,"k3") != 0 &&
+         strcmp(family,"ling") != 0 )
     {
-        fprintf(stderr,"weightd_warm: unknown family %s (dsv4_pro, dsv41_flash, k3)\n",family);
+        fprintf(stderr,"weightd_warm: unknown family %s (dsv4_pro, dsv41_flash, k3, ling)\n",family);
         goto usage;
     }
     if ( family != 0 && strcmp(family,"dsv4_pro") == 0 && !world_rank_given )
@@ -266,6 +267,17 @@ int main(int argument_count,char **arguments)
          * REVISION/TOPOLOGY arguments stay authoritative here - they come
          * from the stage config - so the family hook pins the tag only. */
         strcpy(request.identity.model,"dsv41_flash_stage");
+    }
+    else if ( family != 0 && strcmp(family,"ling") == 0 )
+    {
+        /* Lane 9 (ling): the module pins only the model tag
+         * (SPARK_LING_MODULE_TAG "ling_stage") and sends
+         * revision/topology from its stage config (revision = the
+         * stage model_revision, topology = tp_degree), geometry unset
+         * (0). REVISION/TOPOLOGY arguments stay authoritative here -
+         * they come from the stage config - so the family hook pins
+         * the tag only, exactly the dsv41_flash shape. */
+        strcpy(request.identity.model,"ling_stage");
     }
     else if ( family != 0 && strcmp(family,"k3") == 0 )
     {
@@ -384,6 +396,7 @@ usage:
         "       options (any position): --family dsv4_pro --world-rank R (derive the exact\n"
         "       DSV4 Pro module attach identity; REVISION/TOPOLOGY args are then ignored)\n"
         "                           --family dsv41_flash (pin the module tag; REVISION/TOPOLOGY stay authoritative)\n"
+        "                           --family ling (pin the module tag; REVISION/TOPOLOGY stay authoritative)\n"
         "                           --family k3 (pin the k3 runner identity: kimi-k3/mxfp4,\n"
         "                              topology 4; arena bytes stay the pack size per the\n"
         "                              daemon's size-mismatch contract)\n"

@@ -1,5 +1,5 @@
 {
-  "file_count": 3363,
+  "file_count": 3364,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -10563,8 +10563,13 @@
     },
     {
       "path": "tests/test_weightd_warm_family_dsv41_flash.py",
-      "sha256": "05be5b55733ceeda939895a8e102e2701410f6e5d489166c4b1679dccf580e88",
-      "size_bytes": 6077
+      "sha256": "a4e3b001034670d922fae4a2af82c2c9b08c0472880724a64cbc35f1603f5788",
+      "size_bytes": 6256
+    },
+    {
+      "path": "tests/test_weightd_warm_family_ling.py",
+      "sha256": "5808035338a8df69ce112fca0337ceedd3cd9d9f1eaece282613db38a2aa69e6",
+      "size_bytes": 5431
     },
     {
       "path": "tests/test_weightd_worker.c",
@@ -13568,8 +13573,8 @@
     },
     {
       "path": "tools/weightd_warm.c",
-      "sha256": "b78b96cca20fbb5ee59a54185357eb71d852fb1fce12623d06c71b159cf1a307",
-      "size_bytes": 17707
+      "sha256": "3bd615575adf3e2d9fd36564f2c9fa19884a47a8e9f8498a5a37af04e5ed1e04",
+      "size_bytes": 18442
     },
     {
       "path": "tools/weightdctl.c",
@@ -16820,5 +16825,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80134452
+  "total_bytes": 80140797
 }
