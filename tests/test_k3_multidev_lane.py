@@ -164,8 +164,13 @@ def wrapper_contract_gates(failures):
     lane_ranges = "23048:23063,53048:53063,64048:64063"
 
     def run(env):
-        complete = dict(os.environ)
-        complete.pop("SPARK_QUEUE_PORTS", None)
+        # hermetic: strip every queue/lane variable the host may carry -
+        # under a real queue job SPARK_QUEUE_ATTEMPT/RANK/SIZE/RUNTIME_ROOT
+        # leak in through os.environ and flip which fail-closed case fires
+        complete = {key: value for key, value in os.environ.items()
+                    if not (key.startswith("SPARK_QUEUE_")
+                            or key.startswith("K3_")
+                            or key == "SPARK_WEIGHTD_SOCKET")}
         complete.update(env)
         return subprocess.run(["bash", str(script)], env=complete,
                               capture_output=True, text=True)
