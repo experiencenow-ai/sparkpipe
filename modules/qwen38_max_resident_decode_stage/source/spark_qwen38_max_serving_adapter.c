@@ -372,6 +372,7 @@ static const SparkModelServingAdapterDescriptor SparkQwen38MaxServingDescriptor 
 	.max_resident_sequence_count = SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT,
 	.max_output_token_count = SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT,
 	.max_speculative_token_count = SPARK_QWEN38_MAX_MODEL_MTP_LAYER_COUNT,
+	.cache_block_token_count = SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_KV_BLOCK_TOKENS,
 	/* single-stage whole-model layout: all LAYER_COUNT layers in stage 0
 	   (SparkDescriptorCheckStageLayerTotals rejects zero stage counts). */
 	.stage_layer_counts = {SPARK_QWEN38_MAX_MODEL_LAYER_COUNT,0u,0u,0u},
