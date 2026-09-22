@@ -65,7 +65,7 @@ SIZE_FILE="$(stat -Lc %s "$NEW")"
 [ "$SIZE_HEADER" = "$SIZE_FILE" ] || { echo "size mismatch: header $SIZE_HEADER file $SIZE_FILE" >&2; exit 4; }
 printf '%s  %s\n' "$SHA" "$NEW" > "$NEW.sha256"
 
-cc -O2 -Iinclude -o /tmp/dsv4pro_em_"$$" \
+cc -O2 -I"$CHECKOUT/include" -o /tmp/dsv4pro_em_"$$" \
   "$CHECKOUT/tools/dsv4_pro_experts_manifest.c" \
   "$CHECKOUT/runtime/spark_weightd_manifest.c" \
   "$CHECKOUT/src/spark_ck128.c"
