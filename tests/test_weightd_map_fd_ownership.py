@@ -92,6 +92,164 @@ int main(void)
 '''
 
 
+CREATE_HARNESS = r'''
+#include <assert.h>
+#include <fcntl.h>
+#include <unistd.h>
+static int test_close(int fd);
+#define close test_close
+#include "MAP_SOURCE"
+#undef close
+static unsigned init_fault,cleanup_faults,cleanup_hits,events,live_events[SPARK_WEIGHTD_LEASE_COUNT_MAX];
+static unsigned handles[2],mappings[2],reserved,imports,maps,accesses;
+static int fds[2],closes[2];
+static const CUdeviceptr base=65536u;
+static int cleanup(unsigned phase)
+{
+    unsigned bit=1u<<phase;
+    if ((cleanup_faults & bit)==0u) return 0;
+    cleanup_faults &= ~bit;
+    cleanup_hits |= bit;
+    return 1;
+}
+static int test_close(int fd)
+{
+    unsigned i=fd==fds[0]?0u:1u;
+    assert(fd==fds[i] && closes[i]++==0);
+    return close(fd);
+}
+cudaError_t cudaGetDevice(int *device) { *device=0;return cudaSuccess; }
+CUresult cuCtxGetCurrent(CUcontext *context) { *context=(CUcontext)1;return CUDA_SUCCESS; }
+cudaError_t cudaEventCreateWithFlags(cudaEvent_t *event,unsigned flags)
+{
+    assert(flags==cudaEventDisableTiming && events<SPARK_WEIGHTD_LEASE_COUNT_MAX);
+    live_events[events]=1u;*event=(cudaEvent_t)(uintptr_t)(++events);
+    return cudaSuccess;
+}
+cudaError_t cudaEventDestroy(cudaEvent_t event)
+{
+    unsigned i=(unsigned)(uintptr_t)event-1u;
+    assert(i<events && live_events[i]);
+    if (cleanup(5u)) return 1;
+    live_events[i]=0u;return cudaSuccess;
+}
+CUresult cuMemGetAllocationGranularity(size_t *value,const CUmemAllocationProp *prop,
+    CUmemAllocationGranularity_flags flags)
+{
+    (void)prop;(void)flags;*value=4096u;return CUDA_SUCCESS;
+}
+CUresult cuMemAddressReserve(CUdeviceptr *address,size_t bytes,size_t alignment,
+    CUdeviceptr hint,unsigned long long flags)
+{
+    assert(bytes==12288u && alignment==0u && hint==0u && flags==0u && reserved==0u);
+    reserved=1u;*address=base;return CUDA_SUCCESS;
+}
+CUresult cuMemImportFromShareableHandle(CUmemGenericAllocationHandle *handle,
+    void *fd,CUmemAllocationHandleType type)
+{
+    unsigned i=(intptr_t)fd==fds[0]?0u:1u;
+    assert((intptr_t)fd==fds[i] && type==CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR);
+    imports++;
+    if (init_fault==1u+3u*i) return CUDA_ERROR_INVALID_VALUE;
+    assert(handles[i]==0u);handles[i]=1u;*handle=(CUmemGenericAllocationHandle)(uintptr_t)(i+1u);
+    return CUDA_SUCCESS;
+}
+CUresult cuMemMap(CUdeviceptr address,size_t bytes,size_t offset,
+    CUmemGenericAllocationHandle handle,unsigned long long flags)
+{
+    unsigned i=(unsigned)(uintptr_t)handle-1u;
+    assert(i<2u && handles[i] && !mappings[i] && reserved);
+    assert(address==base+(i==0u?8192u:0u));
+    assert(bytes==(i==0u?4096u:8192u) && offset==0u && flags==0u);
+    maps++;
+    if (init_fault==2u+3u*i) return CUDA_ERROR_INVALID_VALUE;
+    mappings[i]=1u;return CUDA_SUCCESS;
+}
+CUresult cuMemSetAccess(CUdeviceptr address,size_t bytes,
+    const CUmemAccessDesc *descriptors,size_t count)
+{
+    unsigned i=address==base?1u:0u;
+    assert(mappings[i] && count==1u && bytes==(i==0u?4096u:8192u));
+    assert(descriptors->flags==(i==0u?CU_MEM_ACCESS_FLAGS_PROT_READ:CU_MEM_ACCESS_FLAGS_PROT_READWRITE));
+    accesses++;
+    if (init_fault==3u+3u*i) return CUDA_ERROR_INVALID_VALUE;
+    return CUDA_SUCCESS;
+}
+CUresult cuMemUnmap(CUdeviceptr address,size_t bytes)
+{
+    unsigned i=address==base?1u:0u;
+    assert(address==base+(i==0u?8192u:0u));
+    assert(bytes==(i==0u?4096u:8192u) && mappings[i] && reserved);
+    if (cleanup(i)) return CUDA_ERROR_INVALID_VALUE;
+    mappings[i]=0u;return CUDA_SUCCESS;
+}
+CUresult cuMemRelease(CUmemGenericAllocationHandle handle)
+{
+    unsigned i=(unsigned)(uintptr_t)handle-1u;
+    assert(i<2u && handles[i] && !mappings[i]);
+    if (cleanup(2u+i)) return CUDA_ERROR_INVALID_VALUE;
+    handles[i]=0u;return CUDA_SUCCESS;
+}
+CUresult cuMemAddressFree(CUdeviceptr address,size_t bytes)
+{
+    assert(address==base && bytes==12288u && reserved);
+    assert(!mappings[0] && !mappings[1] && !handles[0] && !handles[1]);
+    if (cleanup(4u)) return CUDA_ERROR_INVALID_VALUE;
+    reserved=0u;return CUDA_SUCCESS;
+}
+static void check(unsigned fault,unsigned failures)
+{
+    SparkWeightdLazyAttachResult attached={0};
+    SparkWeightdMap *map=0;
+    unsigned retries=0u;
+    init_fault=fault;cleanup_faults=failures;cleanup_hits=0u;
+    events=0u;imports=maps=accesses=0u;
+    for (unsigned i=0u;i<2u;i++)
+    {
+        assert(!handles[i] && !mappings[i]);
+        fds[i]=open("/dev/null",O_RDONLY);assert(fds[i]>=0);closes[i]=0;
+    }
+    assert(!reserved);
+    attached.status=SPARK_STATUS_OK;attached.arena_generation=1u;
+    attached.arena_bytes=8192u;attached.chunk_bytes=4096u;attached.chunk_count=2u;
+    SparkStatus status=SparkWeightdMapCreate((SparkWeightdClient *)1,&attached,
+        fds[0],fds[1],&map);
+    assert(status==(fault?SPARK_STATUS_IO_ERROR:SPARK_STATUS_OK));
+    for (unsigned i=0u;i<2u;i++) assert(closes[i]==1 && fcntl(fds[i],F_GETFD)==-1);
+    assert(imports==(fault && fault<4u?1u:2u));
+    assert(maps==(fault==1u?0u:fault && fault<5u?1u:2u));
+    assert(accesses==(fault && fault<3u?0u:fault && fault<6u?1u:2u));
+    assert((map!=0)==(fault==0u || failures!=0u));
+    if (fault && map) assert(map->failure==SPARK_STATUS_IO_ERROR);
+    while (map)
+    {
+        status=SparkWeightdMapDestroy(map);
+        if (status==SPARK_STATUS_OK) map=0;
+        else
+        {
+            assert(status==SPARK_STATUS_IO_ERROR && map->failure!=SPARK_STATUS_OK);
+            assert(++retries<=6u);
+        }
+    }
+    assert(cleanup_hits==failures && cleanup_faults==0u && !reserved);
+    assert(!handles[0] && !handles[1] && !mappings[0] && !mappings[1]);
+    for (unsigned i=0u;i<events;i++) assert(live_events[i]==0u);
+}
+int main(void)
+{
+    for (unsigned phase=0u;phase<=6u;phase++) check(phase,0u);
+    for (unsigned phase=0u;phase<6u;phase++)
+    {
+        check(0u,1u<<phase);
+        check(6u,1u<<phase);
+    }
+    check(0u,63u);check(6u,63u);
+    puts("PASS weightd map create: 21 actual-source cases; six init failures, six cleanup retry boundaries, combined retries, exact resource ownership");
+    return 0;
+}
+'''
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--source', type=Path, default=ROOT / 'runtime/spark_weightd_map.c')
@@ -100,7 +258,6 @@ def main():
     with tempfile.TemporaryDirectory(prefix='weightd-map-fd-') as directory:
         temp = Path(directory)
         source = temp / 'test.c'
-        source.write_text(HARNESS.replace('MAP_SOURCE', str(args.source.resolve())))
         command = [os.environ.get('CC', 'cc'), '-std=c11', '-D_POSIX_C_SOURCE=200809L',
                    '-ffunction-sections', '-fdata-sections', '-I' + str(ROOT / 'include'),
                    '-I' + str(ROOT / 'tests/cuda_stub'), str(source), '-pthread',
@@ -108,8 +265,10 @@ def main():
                    '-o', str(temp / 'test')]
         if args.sanitize:
             command += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
-        subprocess.run(command, check=True)
-        subprocess.run([str(temp / 'test')], check=True, timeout=10)
+        for harness in (HARNESS, CREATE_HARNESS):
+            source.write_text(harness.replace('MAP_SOURCE', str(args.source.resolve())))
+            subprocess.run(command, check=True)
+            subprocess.run([str(temp / 'test')], check=True, timeout=10)
 
 
 if __name__ == '__main__':
