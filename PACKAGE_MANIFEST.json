@@ -1,5 +1,5 @@
 {
-  "file_count": 3324,
+  "file_count": 3328,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "15a73b7d2f83b57ae43ad535ff9ba6ff6eb6c708eea98d040471cec3ff6aa873",
-      "size_bytes": 127119
+      "sha256": "b713549e1e7df7ae1ef8ac34361a15e5180e522cf619b7396f0fd0ced09afe7a",
+      "size_bytes": 127153
     },
     {
       "path": "Makefile.rej",
@@ -9522,6 +9522,11 @@
       "size_bytes": 1373
     },
     {
+      "path": "tests/test_k3_multidev_lane.py",
+      "sha256": "382c45e0a832d80e7c0444a3f75e2aea0d560275fcd7e2efae8913aaa762315c",
+      "size_bytes": 12357
+    },
+    {
       "path": "tests/test_k3_pack.py",
       "sha256": "1dcf8bc2bdbf32569c6e372881cc5bd6aa140ab83ab200d638bf122b3277c1ab",
       "size_bytes": 17308
@@ -12085,6 +12090,21 @@
       "path": "tools/k3_keepalive.sh",
       "sha256": "7d69449b0c8312747950b6424af4393f4662e369eeee7b989fc049a494f7031e",
       "size_bytes": 4904
+    },
+    {
+      "path": "tools/k3_multidev_experts_manifest.sh",
+      "sha256": "8183ee04d017ce51a4442df17af705e5145b2b7e4184f997bf51626c352dd258",
+      "size_bytes": 4551
+    },
+    {
+      "path": "tools/k3_multidev_lane.py",
+      "sha256": "14483b82cf0a78c663bc1e49acf15a888d2accc3bdb8a003d8cb8bb8ebe4b309",
+      "size_bytes": 11036
+    },
+    {
+      "path": "tools/k3_multidev_run_family.sh",
+      "sha256": "00c43b84c5f5be3400fe64ad316ce444a9054c38710fd7a2f970d58de36601e1",
+      "size_bytes": 9694
     },
     {
       "path": "tools/k3_pack.py",
@@ -16625,5 +16645,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79523168
+  "total_bytes": 79560840
 }

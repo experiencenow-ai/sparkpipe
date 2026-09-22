@@ -427,6 +427,7 @@ PYTHON_TESTS := \
 	tests/test_k3_engine.py \
 	tests/test_k3_kv_geometry.py \
 	tests/test_k3_layer_host.py \
+	tests/test_k3_multidev_lane.py \
 	tests/test_k3_pack.py \
 	tests/test_k3_pack_layout.py \
 	tests/test_k3_quant_recipe.py \
