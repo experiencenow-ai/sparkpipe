@@ -1,5 +1,5 @@
 {
-  "file_count": 3362,
+  "file_count": 3363,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -5858,8 +5858,8 @@
     },
     {
       "path": "modules/qwen38_27b_resident_decode_stage/Makefile",
-      "sha256": "7b846b85e344d19a35f69b4eb0da9d4127d1ca3abef3b9653e337009c8c927d1",
-      "size_bytes": 3874
+      "sha256": "43db916c15e3e239015b2f3d3ec9697279d01cb2a9c0c4aefcb9a9333227d59a",
+      "size_bytes": 4381
     },
     {
       "path": "modules/qwen38_27b_resident_decode_stage/README.md",
@@ -5893,8 +5893,8 @@
     },
     {
       "path": "modules/qwen38_27b_resident_decode_stage/source/spark_qwen38_27b_resident_decode_stage_cuda.cu",
-      "sha256": "13c68841c3b848b425e210f4f615047f56e26a10fa4352839e500f28061ce901",
-      "size_bytes": 102905
+      "sha256": "2f245cce6768abb7e9536b8a83d4d7284c5e36f404940d2dbc7d5664f11551cf",
+      "size_bytes": 102952
     },
     {
       "path": "modules/qwen38_27b_resident_decode_stage/source/spark_qwen38_27b_resident_decode_stage_module.c",
@@ -5903,8 +5903,8 @@
     },
     {
       "path": "modules/qwen38_27b_resident_decode_stage/source/spark_qwen38_27b_serving_adapter.c",
-      "sha256": "1aa79a8cce0a35bc4443d6c5ec9e93ed15acc5ec9230a32bdcd37ff28e5f3689",
-      "size_bytes": 110713
+      "sha256": "035ddb1ac2be2ca582ae4a3f5db4749e73a2a7e93a810f23470ec5b99472ab27",
+      "size_bytes": 111907
     },
     {
       "path": "modules/qwen38_27b_resident_decode_stage/source/spark_qwen38_27b_stagepack_format.h",
@@ -12792,14 +12792,19 @@
       "size_bytes": 6874
     },
     {
+      "path": "tools/qwen38_27b_lane_build_release.sh",
+      "sha256": "9eb10545c595d796713d0a3fcd1cc7190316b86d461441789e0f27d1d78156bb",
+      "size_bytes": 8178
+    },
+    {
       "path": "tools/qwen38_27b_lane_deployment.py",
       "sha256": "b16d2eed239eb7165be2c2342ecbfb8fbf8c0f4b8b9df7d7fad9c1010d0943f4",
       "size_bytes": 20311
     },
     {
       "path": "tools/qwen38_27b_lane_launch.sh",
-      "sha256": "5051808fd86d3618da63f20b3f11b1513bc8b3baf33fe32d898930ff4b73b826",
-      "size_bytes": 2897
+      "sha256": "8446031189ecd1394d2d213890ec8ebfd1c07f5eb43354cd9ace0098c13e086b",
+      "size_bytes": 7187
     },
     {
       "path": "tools/qwen38_27b_nvfp4_smoke.cu",
@@ -16815,5 +16820,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80119578
+  "total_bytes": 80133794
 }
