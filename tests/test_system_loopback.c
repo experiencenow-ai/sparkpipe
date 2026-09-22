@@ -61,6 +61,8 @@ typedef struct TestLoopbackStack
 
 static TestLoopbackStack TestLoopbackTracked;
 static uint32_t TestLoopbackTrackArmed;
+static uint32_t TestLoopbackSendChunk;
+static uint32_t TestLoopbackDisconnectAt;
 
 static uint64_t TestLoopbackNowMs(void)
 {
@@ -393,8 +395,8 @@ static int32_t TestLoopbackHttpPost(
 	struct sockaddr_in address;
 	struct timeval timeout;
 	uint64_t started,now;
-	ssize_t chunk;
-	size_t body_length,received,sent,sent_total;
+	ssize_t chunk,sent;
+	size_t body_length,received,sent_total;
 	char request[4096];
 	int32_t fd;
 	int32_t status;
@@ -426,7 +428,15 @@ static int32_t TestLoopbackHttpPost(
 	sent_total = 0u;
 	while ( sent_total < strlen(request) )
 	{
-		sent = send(fd,request + sent_total,strlen(request) - sent_total,0);
+		size_t remaining = strlen(request) - sent_total;
+		if ( TestLoopbackSendChunk != 0u && remaining > TestLoopbackSendChunk )
+			remaining = TestLoopbackSendChunk;
+		if ( TestLoopbackDisconnectAt != 0u && sent_total >= TestLoopbackDisconnectAt )
+		{
+			close(fd);
+			return(0);
+		}
+		sent = send(fd,request + sent_total,remaining,0);
 		if ( sent <= 0 )
 		{
 			close(fd);
@@ -435,6 +445,11 @@ static int32_t TestLoopbackHttpPost(
 			return(0);
 		}
 		sent_total += (size_t)sent;
+	}
+	if ( TestLoopbackDisconnectAt == UINT32_MAX )
+	{
+		close(fd);
+		return(0);
 	}
 	received = 0u;
 	for (;;)
@@ -505,7 +520,7 @@ static uint32_t TestLoopbackScanTokenArray(
 	return(count);
 }
 
-static void TestLoopbackExpectServed(
+static uint64_t TestLoopbackExpectServed(
 	const TestLoopbackStack *stack,
 	uint32_t max_tokens,
 	uint64_t deadline_ms,
@@ -515,7 +530,7 @@ static void TestLoopbackExpectServed(
 	char response[65536];
 	uint32_t tokens[512];
 	uint32_t token_count,index;
-	uint64_t elapsed;
+	uint64_t elapsed,signature = 0u;
 	int32_t status;
 	assert(snprintf(body,sizeof(body),
 		"{\"prompt_token_ids\":[11,12],\"max_tokens\":%u}",max_tokens) > 0);
@@ -528,11 +543,13 @@ static void TestLoopbackExpectServed(
 	assert(elapsed <= elapsed_limit_ms);
 	token_count = TestLoopbackScanTokenArray(TestLoopbackResponseBody(response),
 		tokens,512u);
-	assert(token_count >= 1u);
-	assert(token_count <= max_tokens);
+	assert(token_count == max_tokens);
 	for (index=0u; index<token_count; index++)
-		assert(tokens[index] >= TEST_LOOPBACK_TOKEN_FLOOR &&
-			tokens[index] < TEST_LOOPBACK_TOKEN_CEILING);
+	{
+		assert(tokens[index] >= TEST_LOOPBACK_TOKEN_FLOOR && tokens[index] < TEST_LOOPBACK_TOKEN_CEILING);
+		signature = signature * 16u + tokens[index] - TEST_LOOPBACK_TOKEN_FLOOR;
+	}
+	return(signature);
 }
 
 static pid_t TestLoopbackForkRequest(
@@ -552,8 +569,15 @@ static pid_t TestLoopbackForkRequest(
 		status = TestLoopbackHttpPost(port,body,response,sizeof(response),
 			deadline_ms,&elapsed);
 		if ( status == 200 )
+		{
+			uint32_t tokens[16],count,index;
+			count = TestLoopbackScanTokenArray(TestLoopbackResponseBody(response),tokens,16u);
+			assert(count == 4u);
+			for (index=0u; index<count; index++)
+				assert(tokens[index] >= TEST_LOOPBACK_TOKEN_FLOOR && tokens[index] < TEST_LOOPBACK_TOKEN_CEILING);
 			_exit(0);
-		if ( status > 0 )
+		}
+		if ( status >= 500 && status <= 599 && strstr(response,"error") != 0 )
 		{
 			fprintf(stderr,"test_system_loopback: in-flight request answered "
 				"status=%d after %llums\n",(int)status,(unsigned long long)elapsed);
@@ -671,24 +695,86 @@ static void TestLoopbackResurrectMidFlight(TestLoopbackStack *stack)
 	printf("test_system_loopback: mid-flight rank kill -> recover -> serve OK\n");
 }
 
-static void TestLoopbackFuzz(TestLoopbackStack *stack,uint32_t rounds)
+static void TestLoopbackFuzz(TestLoopbackStack *stack,uint32_t rounds,uint32_t seed)
 {
-	uint32_t round,rank,seed;
-	uint64_t started,elapsed;
-	seed = (uint32_t)time(0) ^ ((uint32_t)getpid() << 16);
-	started = TestLoopbackNowMs();
+	uint32_t round,rank,kind,initial_seed = seed;
+	uint32_t seen[8][TEST_LOOPBACK_RANK_COUNT] = {{0}};
+	uint64_t started = TestLoopbackNowMs();
 	for (round=0u; round<rounds; round++)
 	{
+		char response[65536];
+		pid_t requests[3];
+		uint32_t index;
+		int32_t outcome;
 		seed = seed * UINT32_C(1664525) + UINT32_C(1013904223);
-		rank = (seed >> 16) % TEST_LOOPBACK_RANK_COUNT;
-		TestLoopbackKillRank(stack,rank);
-		TestLoopbackRestartRank(stack,rank);
-		TestLoopbackExpectServed(stack,4u,(uint64_t)TEST_LOOPBACK_FUZZ_DEADLINE_MS,
-			(uint64_t)TEST_LOOPBACK_FUZZ_DEADLINE_MS);
+		kind = round < 24u ? round / TEST_LOOPBACK_RANK_COUNT : (seed >> 16) % 8u;
+		rank = round < 24u ? round % TEST_LOOPBACK_RANK_COUNT : (seed >> 8) % TEST_LOOPBACK_RANK_COUNT;
+		seen[kind][rank]++;
+		fprintf(stderr,"loopback seed=%u round=%u kind=%u rank=%u root=%s\n",
+			initial_seed,round,kind,rank,stack->root);
+		TestLoopbackSendChunk = 1u + seed % 31u;
+		switch (kind)
+		{
+		case 0u:
+			break;
+		case 1u:
+			TestLoopbackKillRank(stack,rank);
+			TestLoopbackRestartRank(stack,rank);
+			break;
+		case 2u:
+			TestLoopbackKillApi(stack,SIGKILL);
+			TestLoopbackStartApi(stack);
+			break;
+		case 3u:
+			for (index=0u; index<TEST_LOOPBACK_RANK_COUNT; index++)
+				TestLoopbackKillRank(stack,index);
+			for (index=0u; index<TEST_LOOPBACK_RANK_COUNT; index++)
+				TestLoopbackRestartRank(stack,index);
+			break;
+		case 4u:
+			for (index=0u; index<3u; index++)
+				requests[index] = TestLoopbackForkRequest(stack->api_port,
+					"{\"prompt_token_ids\":[11,12],\"max_tokens\":4}",TEST_LOOPBACK_HTTP_DEADLINE_MS);
+			for (index=0u; index<3u; index++)
+				assert(TestLoopbackJoinRequest(requests[index],TEST_LOOPBACK_HTTP_DEADLINE_MS) == 0);
+			break;
+		case 5u:
+			assert(TestLoopbackHttpPost(stack->api_port,"{",response,sizeof(response),
+				TEST_LOOPBACK_HTTP_DEADLINE_MS,0) == 400);
+			break;
+		case 6u:
+			TestLoopbackDisconnectAt = 1u + seed % 80u;
+			assert(TestLoopbackHttpPost(stack->api_port,
+				"{\"prompt_token_ids\":[11,12],\"max_tokens\":4}",response,sizeof(response),
+				TEST_LOOPBACK_HTTP_DEADLINE_MS,0) == 0);
+			TestLoopbackDisconnectAt = UINT32_MAX;
+			assert(TestLoopbackHttpPost(stack->api_port,
+				"{\"prompt_token_ids\":[11,12],\"max_tokens\":4}",response,sizeof(response),
+				TEST_LOOPBACK_HTTP_DEADLINE_MS,0) == 0);
+			TestLoopbackDisconnectAt = 0u;
+			break;
+		case 7u:
+			assert(kill(stack->residents[rank],SIGSTOP) == 0);
+			requests[0] = TestLoopbackForkRequest(stack->api_port,
+				"{\"prompt_token_ids\":[11,12],\"max_tokens\":4}",TEST_LOOPBACK_HTTP_DEADLINE_MS);
+			TestLoopbackSleepMs(100u);
+			TestLoopbackKillRank(stack,rank);
+			TestLoopbackRestartRank(stack,rank);
+			outcome = TestLoopbackJoinRequest(requests[0],TEST_LOOPBACK_HTTP_DEADLINE_MS);
+			assert(outcome == 0 || outcome == 10);
+			break;
+		}
+		TestLoopbackExpectServed(stack,1u + seed % 8u,TEST_LOOPBACK_HTTP_DEADLINE_MS,
+			TEST_LOOPBACK_HTTP_DEADLINE_MS);
+		assert(waitpid(stack->api_child,0,WNOHANG) == 0);
+		for (index=0u; index<TEST_LOOPBACK_RANK_COUNT; index++)
+			assert(waitpid(stack->residents[index],0,WNOHANG) == 0);
 	}
-	elapsed = TestLoopbackNowMs() - started;
-	printf("test_system_loopback: fuzz %u rounds, 0 unrecovered (%llums)\n",
-		rounds,(unsigned long long)elapsed);
+	for (kind=0u; kind<8u; kind++)
+		for (rank=0u; rank<TEST_LOOPBACK_RANK_COUNT; rank++)
+			assert(seen[kind][rank] != 0u);
+	printf("test_system_loopback: seed=%u rounds=%u scenarios=24 elapsed_ms=%llu\n",
+		initial_seed,rounds,(unsigned long long)(TestLoopbackNowMs() - started));
 }
 
 static void TestLoopbackRemoveTree(const TestLoopbackStack *stack)
@@ -743,11 +829,9 @@ static void TestLoopbackBoot(TestLoopbackStack *stack)
 	TestLoopbackTrackReset();
 	assert(setenv("SPARK_BATCH_INFLIGHT_BUDGET_NS","5000000000",1) == 0);
 	stack->control_tcp_port = TestLoopbackProbeFreeTcpPort();
-	if ( stack->control_tcp_port == 0u )
-		stack->control_tcp_port = 30000u + ((uint32_t)getpid() % 20000u);
+	assert(stack->control_tcp_port != 0u);
 	stack->api_port = TestLoopbackProbeFreeTcpPort();
-	if ( stack->api_port == 0u || stack->api_port == stack->control_tcp_port )
-		stack->api_port = 40000u + ((uint32_t)getpid() % 20000u);
+	assert(stack->api_port != 0u && stack->api_port != stack->control_tcp_port);
 	TestLoopbackSetupRoot(stack);
 	TestLoopbackWriteDeployment(stack);
 	TestLoopbackStartResidents(stack);
@@ -761,16 +845,26 @@ int main(int argc,char **argv)
 	assert(atexit(TestLoopbackReapOrphans) == 0);
 	assert(signal(SIGABRT,TestLoopbackFatalSignal) != SIG_ERR);
 	assert(signal(SIGSEGV,TestLoopbackFatalSignal) != SIG_ERR);
-	if ( argc == 3 && strcmp(argv[1],"--fuzz") == 0 )
+	assert(signal(SIGPIPE,SIG_IGN) != SIG_ERR);
+	if ( (argc == 3 || argc == 4) && strcmp(argv[1],"--fuzz") == 0 )
 	{
-		long rounds;
+		unsigned long rounds,seed = 1u;
 		char *end;
-		rounds = strtol(argv[2],&end,10);
-		assert(end != argv[2] && *end == '\0' && rounds > 0);
+		errno = 0;
+		rounds = strtoul(argv[2],&end,10);
+		if ( errno != 0 || end == argv[2] || *end != '\0' || rounds < 24u || rounds > 100000u )
+			return(2);
+		if ( argc == 4 )
+		{
+			errno = 0;
+			seed = strtoul(argv[3],&end,10);
+			if ( errno != 0 || end == argv[3] || *end != '\0' || seed > UINT32_MAX )
+				return(2);
+		}
 		TestLoopbackBoot(&stack);
-		TestLoopbackExpectServed(&stack,4u,(uint64_t)TEST_LOOPBACK_HTTP_DEADLINE_MS,
-			(uint64_t)TEST_LOOPBACK_HTTP_DEADLINE_MS);
-		TestLoopbackFuzz(&stack,(uint32_t)rounds);
+		assert(TestLoopbackExpectServed(&stack,4u,(uint64_t)TEST_LOOPBACK_HTTP_DEADLINE_MS,
+			(uint64_t)TEST_LOOPBACK_HTTP_DEADLINE_MS) == UINT64_C(0x3010));
+		TestLoopbackFuzz(&stack,(uint32_t)rounds,(uint32_t)seed);
 		TestLoopbackStopStack(&stack);
 		return(0);
 	}

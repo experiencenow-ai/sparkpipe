@@ -162,17 +162,8 @@ static void SparkTpDeviceCollectiveInvokeCompletion(
 
 static void SparkTpDeviceCollectiveQueueCompletion(
     SparkTpDeviceCollectiveImplementation *implementation,
-    const SparkTpDeviceCollectiveSubmission *submission,
-    uint64_t ordinal,
-    SparkStatus status)
+    SparkTpDeviceCollectiveCompletionNode *node)
 {
-    SparkTpDeviceCollectiveCompletionNode *node = calloc(1u,sizeof(*node));
-    if ( node == 0 )
-        return;
-    node->implementation = implementation;
-    node->submission = *submission;
-    node->ordinal = ordinal;
-    node->status = status;
     pthread_mutex_lock(&implementation->completion_lock);
     if ( implementation->completion_tail == 0 )
         implementation->completion_head = node;
@@ -494,8 +485,11 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
                 SparkTpDeviceCollectiveBaseCellOffset(band_index),8u,0ull,0ull,
                 implementation->round_timeout_ns);
             if ( bcast != SPARK_STATUS_OK )
+            {
                 fprintf(stderr,"CKEY-BCAST-FAIL rank=0 epoch=%llu status=%d\n",
                     (unsigned long long)epoch,(int)bcast);
+                return bcast;
+            }
         }
     }
     else
@@ -1126,9 +1120,6 @@ combine_done:
          SparkGlm5NextLaunchMeshGuard(submission->cuda_stream,
              implementation->error_word,submission->full_device) != 0 )
         return(SPARK_STATUS_IO_ERROR);
-    if ( implementation->capture_armed == 0u )
-        SparkTpDeviceCollectiveQueueCompletion(implementation,submission,
-            ordinal,SPARK_STATUS_OK);
     return(SPARK_STATUS_OK);
 }
 
@@ -1142,6 +1133,18 @@ SparkStatus SparkTpDeviceCollectiveCreate(
     if ( config == 0 || collective_out == 0 )
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
     memset(collective_out,0,sizeof(*collective_out));
+    if ( config->abi_version != SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION )
+        SPARK_FAIL(SPARK_STATUS_ABI_MISMATCH);
+    if ( config->tp_degree == 0u ||
+         config->tp_degree > SPARK_TP_DEVICE_COLLECTIVE_MAX_DEGREE ||
+         config->tp_rank >= config->tp_degree ||
+         config->local_hidden_dimension == 0u ||
+         config->max_active_sequence_count == 0u ||
+         config->operation_timeout_milli == 0u )
+        SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+    if ( config->backend_kind !=
+            SPARK_TP_DEVICE_COLLECTIVE_BACKEND_HIDDEN_TRANSPORT )
+        SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
     collective_out->abi_version = SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION;
     collective_out->backend_kind = config->backend_kind;
     collective_out->tp_degree = config->tp_degree;
@@ -1205,6 +1208,29 @@ SparkStatus SparkTpDeviceCollectiveCreate(
     return SPARK_STATUS_OK;
 }
 
+static SparkStatus SparkTpDeviceCollectiveValidateSubmission(
+    const SparkTpDeviceCollective *collective,
+    const SparkTpDeviceCollectiveSubmission *submission)
+{
+    if ( collective == 0 || collective->implementation == 0 || submission == 0 )
+        SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+    if ( submission->abi_version != SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION ||
+         submission->descriptor_bytes != sizeof(*submission) )
+        SPARK_FAIL(SPARK_STATUS_ABI_MISMATCH);
+    if ( submission->local_device == 0 ||
+         submission->full_device == 0 || submission->cuda_stream == 0 ||
+         submission->active_sequence_count == 0u ||
+         submission->logical_sequence_count == 0u ||
+         submission->active_sequence_count >
+             collective->max_active_sequence_count ||
+         submission->reserved0 != 0u ||
+         (submission->flags &
+             ~SPARK_TP_DEVICE_COLLECTIVE_SUBMISSION_KNOWN_FLAGS) != 0u ||
+         submission->ordinal == UINT64_MAX )
+        SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+    return SPARK_STATUS_OK;
+}
+
 static SparkStatus SparkTpDeviceCollectiveSubmitInternal(
     SparkTpDeviceCollective *collective,
     const SparkTpDeviceCollectiveSubmission *submission,
@@ -1212,13 +1238,13 @@ static SparkStatus SparkTpDeviceCollectiveSubmitInternal(
 {
     SparkTpDeviceCollectiveImplementation *implementation;
     SparkTpDeviceCollectiveSubmission round;
+    SparkTpDeviceCollectiveCompletionNode *completion = 0;
     SparkStatus status;
 
-    if ( collective == 0 || collective->implementation == 0 ||
-         submission == 0 || submission->local_device == 0 ||
-         submission->full_device == 0 || submission->cuda_stream == 0 ||
-         submission->active_sequence_count == 0u ||
-         submission->ordinal == UINT64_MAX )
+    status = SparkTpDeviceCollectiveValidateSubmission(collective,submission);
+    if ( status != SPARK_STATUS_OK )
+        return status;
+    if ( operation_kind > SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_REDUCE_MAX_U64 )
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
     implementation = collective->implementation;
     if ( implementation->mesh_buffer == 0 )
@@ -1227,12 +1253,28 @@ static SparkStatus SparkTpDeviceCollectiveSubmitInternal(
          submission->completion_function == 0 )
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
     round = *submission;
+    if ( implementation->capture_armed == 0u )
+    {
+        completion = calloc(1u,sizeof(*completion));
+        if ( completion == 0 )
+            SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
+        completion->submission = round;
+        completion->ordinal = round.ordinal;
+        completion->status = SPARK_STATUS_OK;
+    }
     {
         uint64_t round_start_ns = SparkTpDeviceCollectiveTimeNs();
         status = SparkTpDeviceCollectiveRunRound(implementation,&round,
             operation_kind);
         implementation->round_ns_total += SparkTpDeviceCollectiveTimeNs() - round_start_ns;
         implementation->round_count++;
+    }
+    if ( completion != 0 )
+    {
+        if ( status == SPARK_STATUS_OK )
+            SparkTpDeviceCollectiveQueueCompletion(implementation,completion);
+        else
+            free(completion);
     }
     return status;
 }
@@ -1268,7 +1310,6 @@ static SparkStatus SparkTpDeviceCollectiveEnqueueRoundsInternal(
     uint32_t round_count)
 {
     SparkTpDeviceCollectiveImplementation *implementation;
-    SparkTpDeviceCollectiveSubmission round;
     uint64_t bytes;
     uint64_t parity;
     uint64_t deadline;
@@ -1277,11 +1318,10 @@ static SparkStatus SparkTpDeviceCollectiveEnqueueRoundsInternal(
     SparkStatus status;
     volatile uint64_t *cancel_cell;
 
-    if ( collective == 0 || collective->implementation == 0 ||
-         submission == 0 || submission->local_device == 0 ||
-         submission->full_device == 0 || submission->cuda_stream == 0 ||
-         submission->active_sequence_count == 0u ||
-         submission->ordinal == UINT64_MAX || round_count == 0u )
+    status = SparkTpDeviceCollectiveValidateSubmission(collective,submission);
+    if ( status != SPARK_STATUS_OK )
+        return status;
+    if ( round_count == 0u )
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
     implementation = collective->implementation;
     if ( implementation->mesh_buffer == 0 )
@@ -1353,7 +1393,6 @@ static SparkStatus SparkTpDeviceCollectiveEnqueueRoundsInternal(
             return SPARK_STATUS_IO_ERROR;
         }
     }
-    round = *submission;
     implementation->round_index += (uint64_t)round_count;
     started_ns = SparkTpDeviceCollectiveTimeNs();
     if ( SparkGlm5NextLaunchMeshRoundLoop(submission->cuda_stream,
@@ -1415,9 +1454,6 @@ static SparkStatus SparkTpDeviceCollectiveEnqueueRoundsInternal(
             (unsigned long long)implementation->round_control_host.diag_word);
         status = SPARK_STATUS_BUSY;
     }
-    if ( status == SPARK_STATUS_OK )
-        SparkTpDeviceCollectiveQueueCompletion(implementation,&round,
-            round.ordinal,status);
     return status;
 }
 
@@ -1426,8 +1462,25 @@ SparkStatus SparkTpDeviceCollectiveEnqueueRounds(
     const SparkTpDeviceCollectiveSubmission *submission,
     uint32_t round_count)
 {
-    return SparkTpDeviceCollectiveEnqueueRoundsInternal(collective,
+    SparkTpDeviceCollectiveCompletionNode *completion;
+    SparkStatus status;
+    status = SparkTpDeviceCollectiveValidateSubmission(collective,submission);
+    if ( status != SPARK_STATUS_OK )
+        return status;
+    completion = calloc(1u,sizeof(*completion));
+    if ( completion == 0 )
+        SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
+    completion->submission = *submission;
+    completion->ordinal = submission->ordinal;
+    completion->status = SPARK_STATUS_OK;
+    status = SparkTpDeviceCollectiveEnqueueRoundsInternal(collective,
         submission,round_count);
+    if ( status == SPARK_STATUS_OK )
+        SparkTpDeviceCollectiveQueueCompletion(collective->implementation,
+            completion);
+    else
+        free(completion);
+    return status;
 }
 
 uint64_t SparkTpDeviceCollectiveDeviceRoundsDone(

@@ -11,9 +11,26 @@ enum
 	MOCK_CALL_PREPARE,
 	MOCK_CALL_CONTINUE,
 	MOCK_CALL_COMMIT,
-	MOCK_CALL_ABORT
+	MOCK_CALL_ABORT,
+	MOCK_CALL_CAN_CONTINUE,
+	MOCK_CALL_CAN_COMMIT,
+	MOCK_CALL_CAN_ABORT,
+	MOCK_CALL_COUNT
 };
 
+enum
+{
+	MOCK_EVENT_RESULT,
+	MOCK_EVENT_DECISION,
+	MOCK_EVENT_COMPLETION,
+	MOCK_EVENT_COUNT
+};
+
+void MockResidentClientScriptCallStatus(uint32_t stage_index, uint32_t kind, SparkStatus status);
+uint64_t MockResidentClientPendingEvent(uint32_t stage_index, uint32_t kind, uint32_t ordinal);
+uint32_t MockResidentClientDeliverEvent(uint32_t stage_index, uint64_t submission_id,
+    uint32_t kind, SparkStatus status, uint32_t deliver);
+uint32_t MockResidentClientPendingCount(uint32_t stage_index);
 SparkModelResidentClient *MockResidentClientByRank(uint32_t stage_index);
 uint32_t MockResidentClientCalls(uint32_t stage_index, uint32_t kind);
 uint64_t MockResidentClientGeneration(uint32_t stage_index);

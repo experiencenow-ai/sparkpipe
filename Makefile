@@ -1002,7 +1002,7 @@ build/test_tp_device_collective_mock: tests/test_tp_device_collective_mock.c rin
 	$(CC) $(CPPFLAGS) $(CUDA_STUB_INCLUDE_FLAGS) $(CFLAGS) tests/test_tp_device_collective_mock.c ring/transport/tp_device_collective.c tests/cuda_stub/cuda_runtime_stub.c $(CORE_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@
 
 build/test_tp_allreduce_fuzz: tests/test_tp_allreduce_fuzz.c ring/transport/tp_device_collective.c tests/cuda_stub/cuda_runtime_stub.c $(CORE_LIBRARY)
-	$(CC) $(CPPFLAGS) $(CUDA_STUB_INCLUDE_FLAGS) $(CFLAGS) tests/test_tp_allreduce_fuzz.c ring/transport/tp_device_collective.c tests/cuda_stub/cuda_runtime_stub.c $(CORE_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@
+	$(CC) $(CPPFLAGS) $(CUDA_STUB_INCLUDE_FLAGS) $(CFLAGS) tests/test_tp_allreduce_fuzz.c tests/cuda_stub/cuda_runtime_stub.c $(CORE_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@
 
 build/test_kv_lane_fuzz: tests/test_kv_lane_fuzz.c build/libsparkpipe_model_common.a build/libsparkpipe_core.a
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_kv_lane_fuzz.c build/libsparkpipe_model_common.a build/libsparkpipe_core.a $(LDFLAGS) $(LDLIBS) -o $@

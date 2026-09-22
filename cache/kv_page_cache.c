@@ -1195,29 +1195,10 @@ static SparkStatus SparkKvLaneTransactionAbort(SparkKvLaneTransactions *transact
 static SparkStatus SparkKvLaneTransactionsRequire(SparkKvLaneTransactions *transactions,const SparkModelDriverAdmissionRequest *request,uint32_t phase)
 {
 	SparkKvLaneTransaction *owner;
-	SparkStatus status;
 	uint32_t index;
 	for (index=0u; index<request->cache_lane_count; index++)
 	{
 		owner = &transactions->lanes[request->cache_lanes[index].resident_sequence_slot];
-		if ( owner->phase != SPARK_KV_LANE_TRANSACTION_EMPTY &&
-			SparkKvLaneTransactionMatches(owner,request,&request->cache_lanes[index]) == 0u &&
-			owner->request.deadline_time_ns != 0u &&
-			owner->request.deadline_time_ns < request->deadline_time_ns )
-		{
-			status = SparkKvLaneTransactionAbort(transactions,owner);
-			if ( status != SPARK_STATUS_OK )
-				SPARK_RETURN(status);
-			fprintf(stderr,
-				"KV-RECLAIM slot=%u owner_req=%llu owner_sub=%llu owner_deadline=%llu — superseded by req=%llu deadline=%llu (the owner's own expiry; its abort never arrived)\n",
-				(unsigned)request->cache_lanes[index].resident_sequence_slot,
-				(unsigned long long)owner->request.request_id,
-				(unsigned long long)owner->request.submission_id,
-				(unsigned long long)owner->request.deadline_time_ns,
-				(unsigned long long)request->request_id,
-				(unsigned long long)request->deadline_time_ns);
-			owner = &transactions->lanes[request->cache_lanes[index].resident_sequence_slot];
-		}
 		if ( owner->phase != phase )
 		{
 			fprintf(stderr,"ADMIT9-KVPHASE slot=%u owner_phase=%u want_phase=%u owner_req=%llu owner_seq=%llu req=%llu seq=%llu pos=%u\n",
@@ -1254,39 +1235,6 @@ static SparkStatus SparkKvLaneTransactionsPrepare(SparkKvLaneTransactions *trans
 	uint32_t index,owned = 0u;
 	uint64_t offset;
 	SparkStatus status,rollback;
-	for (index=0u; index<request->cache_lane_count; index++)
-	{
-		struct timespec now_ts;
-		uint64_t now_ns = clock_gettime(CLOCK_MONOTONIC,&now_ts) == 0 ?
-		    (uint64_t)now_ts.tv_sec * UINT64_C(1000000000) + (uint64_t)now_ts.tv_nsec : 0u;
-		owner = &transactions->lanes[request->cache_lanes[index].resident_sequence_slot];
-		if ( (owner->phase == SPARK_KV_LANE_TRANSACTION_COMMITTED ||
-		       (owner->phase == SPARK_KV_LANE_TRANSACTION_EXECUTING &&
-		        owner->executing_since_ns != 0u && now_ns - owner->executing_since_ns > UINT64_C(60000000000)) ||
-		       (owner->phase == SPARK_KV_LANE_TRANSACTION_PREPARED &&
-		        owner->prepared_since_ns != 0u && now_ns - owner->prepared_since_ns > UINT64_C(60000000000))) &&
-		     request->request_id != owner->request.request_id )
-		{
-			SparkStatus takeover;
-			fprintf(stderr,
-			    "KV-TAKEOVER slot=%u phase=%u new_req=%llu old_req=%llu seq=%llu\n",
-			    request->cache_lanes[index].resident_sequence_slot,
-			    (unsigned)owner->phase,
-			    (unsigned long long)request->request_id,
-			    (unsigned long long)owner->request.request_id,
-			    (unsigned long long)request->cache_lanes[index].sequence_id);
-			if ( owner->phase == SPARK_KV_LANE_TRANSACTION_PREPARED )
-			{
-				owner->phase = SPARK_KV_LANE_TRANSACTION_EMPTY;
-				owner->page_count = 0u;
-				takeover = SPARK_STATUS_OK;
-			}
-			else
-				takeover = SparkKvLaneTransactionAbort(transactions,owner);
-			if ( takeover != SPARK_STATUS_OK )
-				SPARK_RETURN(takeover);
-		}
-	}
 	for (index=0u; index<request->cache_lane_count; index++)
 		owned += transactions->lanes[request->cache_lanes[index].resident_sequence_slot].phase != SPARK_KV_LANE_TRANSACTION_EMPTY ? 1u : 0u;
 	if ( owned != 0u )
@@ -1484,36 +1432,6 @@ static SparkStatus SparkKvLaneTransactionsDiscardCompleted(SparkKvLaneTransactio
 	return(failure);
 }
 
-void SparkKvLaneTransactionsForceCleanup(
-    SparkKvLaneTransactions *transactions,
-    const uint32_t *resident_slots,
-    uint32_t lane_count)
-{
-    uint32_t index;
-    if ( transactions == 0 || resident_slots == 0 || lane_count == 0u )
-        return;
-    for (index=0u; index<lane_count; index++)
-    {
-        uint32_t slot = resident_slots[index];
-        SparkKvLaneTransaction *owner;
-        if ( slot >= transactions->cache->sequence_capacity )
-            continue;
-        owner = &transactions->lanes[slot];
-        if ( owner->phase == SPARK_KV_LANE_TRANSACTION_EMPTY )
-            continue;
-        if ( owner->phase == SPARK_KV_LANE_TRANSACTION_EXECUTING )
-        {
-            (void)SparkKvLaneTransactionAbort(transactions,owner);
-        }
-        else if ( owner->phase == SPARK_KV_LANE_TRANSACTION_PREPARED ||
-                  owner->phase == SPARK_KV_LANE_TRANSACTION_COMMITTED )
-        {
-            owner->phase = SPARK_KV_LANE_TRANSACTION_EMPTY;
-            owner->page_count = 0u;
-        }
-    }
-}
-
 SparkStatus SparkKvLaneTransactionsFinish(SparkKvLaneTransactions *transactions,const uint32_t *resident_slots,uint32_t lane_count,SparkStatus execution_status,uint32_t extra_tokens)
 {
 	uint32_t index,slot;
@@ -1579,10 +1497,7 @@ SparkStatus SparkKvLaneTransactionsReset(SparkKvLaneTransactions *transactions)
 	cache = transactions->cache;
 	for (slot=0u; slot<cache->sequence_capacity; slot++)
 		if ( transactions->lanes[slot].phase >= SPARK_KV_LANE_TRANSACTION_EXECUTING )
-			fprintf(stderr,"KV-RECOVER aborting orphaned executing lane slot=%u sequence=%llu request=%llu (a full quiesce already proved its owner cannot complete)\n",
-				slot,
-				(unsigned long long)cache->sequences[slot].sequence_id,
-				(unsigned long long)transactions->lanes[slot].request.request_id);
+			SPARK_FAIL(SPARK_STATUS_BUSY);
 	for (slot=0u; slot<cache->sequence_capacity; slot++)
 	{
 		if ( transactions->lanes[slot].phase != SPARK_KV_LANE_TRANSACTION_EMPTY )
