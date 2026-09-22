@@ -188,8 +188,8 @@
     },
     {
       "path": "common/common_gdn_stage_kernels.cu",
-      "sha256": "76f5488cc5b0adf4cfe151cc11a7afb04ef7cbd427338984e4a085a7e0c0570e",
-      "size_bytes": 73750
+      "sha256": "3e26494ba18d349958647b289cd8ff403172e1329e35299d98db60379f73549a",
+      "size_bytes": 74178
     },
     {
       "path": "common/common_gdn_stage_kernels.h",
@@ -16730,5 +16730,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79704835
+  "total_bytes": 79705263
 }
