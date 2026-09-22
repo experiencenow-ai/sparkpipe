@@ -49,7 +49,8 @@ NODES = 16
 CODEC = "nvfp4"
 EXPERT_TENSOR = re.compile(
     r"^model\.layers\.(\d+)\.mlp\.experts\.(\d+)\."
-    r"(gate_proj|up_proj|down_proj)\.weight(_scale|_2)?$")
+    r"(gate_proj|up_proj|down_proj)\."
+    r"(weight(?:_scale_2|_scale|_2)?|input_scale)$")
 # Smoke context floor for kv_floor_bytes: prompts_tiny tops out at 12
 # positions; 128 tokens x 8 concurrent sequences bounds the smoke harness.
 KV_FLOOR_TOKENS = 128
