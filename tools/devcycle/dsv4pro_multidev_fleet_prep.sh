@@ -57,7 +57,7 @@ fi
 SIZE_HEADER="$(python3 - "$NEW" <<'PY'
 import struct, sys
 with open(sys.argv[1], 'rb') as fh:
-    h = struct.unpack('<16I2Q', fh.read(64))
+    h = struct.unpack('<16I2Q', fh.read(80))
 print(h[17])
 PY
 )"
