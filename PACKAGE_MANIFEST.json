@@ -11618,8 +11618,8 @@
     },
     {
       "path": "tools/gemma4_tp16_shared_socket.sh",
-      "sha256": "061031cc76eea84a5ff9e89ad37770f0ca705ca73fb5923c1be7358503b45134",
-      "size_bytes": 8201
+      "sha256": "48e8af7a4e714acc8e9b6d1da8484968520f44ac7f47c86134dd520aa4f5e6f5",
+      "size_bytes": 8372
     },
     {
       "path": "tools/gen_geometry_header.py",
@@ -17020,5 +17020,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80666963
+  "total_bytes": 80667134
 }
