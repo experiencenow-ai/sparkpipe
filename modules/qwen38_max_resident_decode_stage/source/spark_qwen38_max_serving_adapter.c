@@ -34,7 +34,11 @@
 #define SPARK_QWEN38_MAX_SERVING_TARGET \
 	"cuda.sm121.qwen38.resident_decode_stage.fp8"
 #define SPARK_QWEN38_MAX_SERVING_PROGRAM_NAME "resident_decode"
-#define SPARK_QWEN38_MAX_SERVING_STAGE_COUNT 16u
+/* Single-stage whole-model serving: one stage carries all layers (the
+   16 was the TP4-PP4 pipeline shape; the descriptor checks reject
+   zero-layer stages, so the stale count failed validation at every
+   stage past 0). */
+#define SPARK_QWEN38_MAX_SERVING_STAGE_COUNT 1u
 #define SPARK_QWEN38_MAX_SERVING_DEFAULT_TP_DEGREE 4u
 #define SPARK_QWEN38_MAX_SERVING_MAX_PP_STAGE_COUNT 4u
 #define SPARK_QWEN38_MAX_SERVING_MAX_SEQUENCE_POSITIONS_CAP \
@@ -64,9 +68,7 @@
 #define SPARK_QWEN38_SERVING_ADAPTER_MODEL_REVISION QWEN38_MODEL_REVISION
 #define SPARK_QWEN38_SERVING_ADAPTER_CONTRACT_SHA256 QWEN38_CONTRACT_SHA256
 #define SPARK_QWEN38_SERVING_ADAPTER_TP_DEGREE_VALID(tp_degree) \
-	((tp_degree) != 0u && \
-	 SPARK_QWEN38_MAX_SERVING_STAGE_COUNT % (tp_degree) == 0u && \
-	 (tp_degree) <= SPARK_QWEN38_MAX_SERVING_STAGE_COUNT)
+	((tp_degree) != 0u && (tp_degree) <= 16u)
 #define SPARK_QWEN38_SERVING_ADAPTER_ENV_STAGE_COUNT(state) \
 	SPARK_QWEN38_MAX_SERVING_STAGE_COUNT
 #define SPARK_QWEN38_SERVING_ADAPTER_ENV_STAGE_INDEX(state) (state)->stage_index
@@ -148,6 +150,8 @@ typedef struct SparkQwen38MaxServingState
 	SparkSpeculationProvider provider;
 	uint32_t provider_bound;
 	SparkSpeculationSeam *seam;
+	uint64_t reset_generation;
+	uint32_t reset_active;
 } SparkQwen38MaxServingState;
 
 
@@ -378,5 +382,82 @@ static const SparkModelServingAdapterDescriptor SparkQwen38MaxServingDescriptor 
 	.stage_layer_counts = {SPARK_QWEN38_MAX_MODEL_LAYER_COUNT,0u,0u,0u},
 	.minimum_efficient_submission_row_count = 0u
 };
+
+/* The interface contract requires non-null prefetch/resolve/reset (the
+   residentd's SPARK_REQUIRE_SERVING_OPERATION set). This family claims
+   no CACHE_PUBLISH capability, so prefetch validates and admits without
+   cache staging; reset quiesces then takes the driver's RESET admission
+   (the qwen38_27b serving pattern). */
+#include <stdatomic.h>
+static SparkStatus SparkQwen38MaxServingValidateSubmissionBase(
+	SparkQwen38MaxServingState *state,
+	const SparkModelServingSubmission *submission);
+static SparkStatus SparkQwen38MaxServingQuiesce(
+	void *adapter_state,
+	uint64_t deadline_time_ns);
+static SparkStatus SparkQwen38MaxServingPrefetch(
+	void *adapter_state,const SparkModelServingSubmission *submissions,uint32_t submission_count)
+{
+	SparkQwen38MaxServingState *state = (SparkQwen38MaxServingState *)adapter_state;
+	uint32_t index;
+	if ( state == 0 || state->program == 0 || submissions == 0 || submission_count == 0u )
+		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	for (index = 0u; index < submission_count; index++)
+	{
+		SparkStatus status = SparkQwen38MaxServingValidateSubmissionBase(state,&submissions[index]);
+		if ( status != SPARK_STATUS_OK )
+			SPARK_RETURN(status);
+	}
+	return(SPARK_STATUS_OK);
+}
+
+static SparkStatus SparkQwen38MaxServingResolvePrefetch(
+	void *adapter_state,const SparkModelServingSubmission *submission,uint32_t resolution)
+{
+	SparkQwen38MaxServingState *state = (SparkQwen38MaxServingState *)adapter_state;
+	if ( state == 0 || submission == 0 ||
+		(resolution != SPARK_MODEL_SERVING_PREFETCH_RESOLUTION_COMMIT &&
+		 resolution != SPARK_MODEL_SERVING_PREFETCH_RESOLUTION_ABORT) )
+		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	return(SPARK_STATUS_OK);
+}
+
+static SparkStatus SparkQwen38MaxServingReset(void *adapter_state,uint64_t control_generation)
+{
+	SparkQwen38MaxServingState *state = (SparkQwen38MaxServingState *)adapter_state;
+	SparkModelDriverAdmissionRequest request;
+	SparkModelDriverAdmissionDecision decision;
+	SparkStatus status;
+	uint32_t expected = 0u;
+	if ( state == 0 || control_generation == 0u ||
+		control_generation <= state->reset_generation )
+		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	if ( atomic_compare_exchange_strong_explicit(&state->reset_active,&expected,1u,memory_order_acquire,memory_order_relaxed) == 0 )
+		return(SPARK_STATUS_BUSY);
+	status = SparkQwen38MaxServingQuiesce(state,UINT64_MAX);
+	if ( status == SPARK_STATUS_OK )
+	{
+		memset(&request,0,sizeof(request));
+		request.descriptor_bytes = sizeof(request);
+		request.program_id = state->program->program_id;
+		request.control_generation = control_generation;
+		request.admission_flags = SPARK_MODEL_DRIVER_ADMISSION_FLAG_RESET;
+		SparkModelDriverInitializeAdmissionDecision(&decision);
+		status = state->driver.interface->admit(state->driver_instance,&request,&decision);
+		if ( status == SPARK_STATUS_OK && decision.accepted == 0u )
+			status = SPARK_STATUS_VALIDATION_FAILED;
+	}
+	if ( status == SPARK_STATUS_OK )
+	{
+		state->reset_generation = control_generation;
+		state->quiescing = 0u;
+	}
+	atomic_store_explicit(&state->reset_active,0u,memory_order_release);
+	return(status);
+}
+
+#define SPARK_QWEN38_SERVING_ADAPTER_PREFETCH SparkQwen38MaxServingPrefetch
+#define SPARK_QWEN38_SERVING_ADAPTER_RESOLVE_PREFETCH SparkQwen38MaxServingResolvePrefetch
+#define SPARK_QWEN38_SERVING_ADAPTER_RESET SparkQwen38MaxServingReset
 
 #include "sparkpipe/spark_qwen38_pp_serving_adapter_common.h"
