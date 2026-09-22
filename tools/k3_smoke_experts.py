@@ -291,6 +291,31 @@ def fixture_census(repo):
     return manifest, touched, positions, used
 
 
+WSET_NAME = "smoke-k3-v1.wset"
+STAGE_LAYERS = ((0, 23), (24, 46), (47, 69), (70, 92))
+
+
+def wset_bytes(pairs):
+    return b"".join(struct.pack("<II", layer, expert)
+                    for layer, expert in sorted(pairs))
+
+
+def stage_pairs(pairs, stage):
+    """Rank-local preload pairs: the layers of this PP stage only.
+
+    A rank pack's manifest holds only its stage's routed layers, so a
+    full-model working set cannot validate there (weightd_warm fails
+    closed on any key absent from the pack manifest). k3's head spans
+    all 92 routed layers, unlike dsv4's stage-0-local set.
+    """
+    first, last = STAGE_LAYERS[stage]
+    local = [pair for pair in pairs if first <= pair[0] <= last]
+    if not local:
+        raise SystemExit("k3_smoke_experts: FAIL: stage "
+                         f"{stage} preload subset is empty")
+    return local
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dump-rank", metavar="PACK",
@@ -300,8 +325,32 @@ def main():
     parser.add_argument("--repo", default=os.path.dirname(
         os.path.dirname(os.path.abspath(__file__))))
     parser.add_argument("--emit", default=None)
+    parser.add_argument("--emit-wset", action="store_true",
+                        help="derive the binary working set from the "
+                             "committed manifest (writes "
+                             "model-families/k3/" + WSET_NAME + ")")
     parser.add_argument("--check", action="store_true")
     arguments = parser.parse_args()
+    repo = arguments.repo
+
+    if arguments.emit_wset:
+        manifest_path = os.path.join(
+            repo, "model-families", FAMILY, "smoke_experts.json")
+        document = json.load(open(manifest_path))
+        pairs = [(entry["layer"], entry["expert"])
+                 for entry in document["experts"]]
+        if len(set(pairs)) != len(pairs):
+            fail("committed manifest experts are not deduplicated")
+        target = os.path.join(repo, "model-families", FAMILY, WSET_NAME)
+        temporary = target + f".tmp.{os.getpid()}"
+        with open(temporary, "wb") as handle:
+            handle.write(wset_bytes(pairs))
+        os.replace(temporary, target)
+        print(f"wrote {target}: {len(pairs)} key pairs "
+              f"({len(pairs) * 8} bytes); per-stage subsets: "
+              + ", ".join(f"s{s}={len(stage_pairs(pairs, s))}"
+                          for s in range(4)))
+        return 0
 
     if arguments.dump_rank:
         dump_rank(arguments.dump_rank)
@@ -309,7 +358,6 @@ def main():
     if not arguments.ranks_json:
         parser.error("producer mode requires --ranks-json")
 
-    repo = arguments.repo
     emit_path = arguments.emit or os.path.join(
         repo, "model-families", FAMILY, "smoke_experts.json")
 

@@ -1,5 +1,5 @@
 {
-  "file_count": 3353,
+  "file_count": 3355,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -4525,6 +4525,11 @@
       "path": "model-families/k3/include/sparkpipe/spark_k3_runtime_contract.h",
       "sha256": "ccd72f516054d80f9be8a592774789852505e36203e7c6bd457d45551a48da1f",
       "size_bytes": 1863
+    },
+    {
+      "path": "model-families/k3/smoke-k3-v1.wset",
+      "sha256": "1ed3064e70810a25e45b77d46006f99267c8d853dfc8f9d7c8aad7e4bf0059e4",
+      "size_bytes": 10200
     },
     {
       "path": "model-families/k3/smoke_experts.json",
@@ -9613,8 +9618,8 @@
     },
     {
       "path": "tests/test_k3_smoke_experts.py",
-      "sha256": "a5859a75ef5456abdcbbf9e3aeaa66cda0f09b0db90a920fa153a6279436f3d1",
-      "size_bytes": 9584
+      "sha256": "5b752278895cdeb93c9d19441b40b056f37740d65e0c27d3893e71f0485bda3d",
+      "size_bytes": 11541
     },
     {
       "path": "tests/test_k3_spec_verify.py",
@@ -10972,6 +10977,11 @@
       "size_bytes": 2417
     },
     {
+      "path": "tools/devcycle/k3_warm_receipt.sh",
+      "sha256": "94d280ac2226407c966d9af07292b7186683016cab2ec7e60f663f1d29cf3e2f",
+      "size_bytes": 7080
+    },
+    {
       "path": "tools/devcycle/lane_assignments.json",
       "sha256": "feb34165e6c370d35ae3cfec5bb2a0ad1fdd6788cb0ad97d49b8c0b49ec63162",
       "size_bytes": 9943
@@ -12193,8 +12203,8 @@
     },
     {
       "path": "tools/k3_multidev_run_family.sh",
-      "sha256": "59b2040f83a7341235c61662886ddea543820c78871fb4b2397c7a299d4720fd",
-      "size_bytes": 10097
+      "sha256": "009846ad24f23696f2960d630e25728a5b1e72e1cc6f706799ed97979db41ff8",
+      "size_bytes": 12061
     },
     {
       "path": "tools/k3_pack.py",
@@ -12233,8 +12243,8 @@
     },
     {
       "path": "tools/k3_smoke_experts.py",
-      "sha256": "e385b2b7d7a4103406a3235615a649803a58132576105c11d5fac1cd05168b8d",
-      "size_bytes": 17412
+      "sha256": "891a848f25288c17e6167b3082f8ef7762639600de3cc69d9c7928d0d0201fbd",
+      "size_bytes": 19421
     },
     {
       "path": "tools/k3_smoke_rank0.sh",
@@ -13518,8 +13528,8 @@
     },
     {
       "path": "tools/weightd_warm.c",
-      "sha256": "c2cc15ad57ff4f660b022c7b9de1ec03180b46298a168662075ee06b9163b5de",
-      "size_bytes": 16491
+      "sha256": "c79fba7324c54e40018f642edecc5fded83e2fddd4bfb8bd73958a3bc8e7f451",
+      "size_bytes": 17504
     },
     {
       "path": "tools/weightdctl.c",
@@ -16770,5 +16780,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79877656
+  "total_bytes": 79901879
 }

@@ -188,9 +188,9 @@ int main(int argument_count,char **arguments)
     arguments = filtered;
     argument_count = filtered_count;
     if ( family != 0 && strcmp(family,"dsv4_pro") != 0 &&
-         strcmp(family,"dsv41_flash") != 0 )
+         strcmp(family,"dsv41_flash") != 0 && strcmp(family,"k3") != 0 )
     {
-        fprintf(stderr,"weightd_warm: unknown family %s (dsv4_pro, dsv41_flash)\n",family);
+        fprintf(stderr,"weightd_warm: unknown family %s (dsv4_pro, dsv41_flash, k3)\n",family);
         goto usage;
     }
     if ( family != 0 && strcmp(family,"dsv4_pro") == 0 && !world_rank_given )
@@ -264,6 +264,21 @@ int main(int argument_count,char **arguments)
          * REVISION/TOPOLOGY arguments stay authoritative here - they come
          * from the stage config - so the family hook pins the tag only. */
         strcpy(request.identity.model,"dsv41_flash_stage");
+    }
+    else if ( family != 0 && strcmp(family,"k3") == 0 )
+    {
+        /* Lane 3 (k3): the runner pins model "kimi-k3" / revision
+         * "mxfp4", topology = tp_degree (4), and - critically -
+         * identity.arena_bytes = the EXPERT POOL budget, NOT the pack
+         * size (modules/k3_resident_decode_stage/source/
+         * spark_k3_resident_decode_stage_runner.cu). The warm must
+         * present the identical arena identity or the daemon keys a
+         * second arena and the preload never meets the resident. */
+        strcpy(request.identity.model,"kimi-k3");
+        strcpy(request.identity.revision,"mxfp4");
+        request.identity.topology = 4u;
+        request.identity.arena_bytes = request.expert_pool_bytes;
+        request.identity.geometry_fingerprint = 0u;
     }
     else if ( family != 0 )
     {
@@ -367,6 +382,8 @@ usage:
         "       options (any position): --family dsv4_pro --world-rank R (derive the exact\n"
         "       DSV4 Pro module attach identity; REVISION/TOPOLOGY args are then ignored)\n"
         "                           --family dsv41_flash (pin the module tag; REVISION/TOPOLOGY stay authoritative)\n"
+        "                           --family k3 (pin the k3 runner identity: kimi-k3/mxfp4,\n"
+        "                              topology 4, arena bytes = the expert pool budget)\n"
         "                           --identity-print (print the derived identity and exit)\n"
         "       finite SPARK_WEIGHTD_EXPERT_POOL_BYTES is required\n");
     return 2;
