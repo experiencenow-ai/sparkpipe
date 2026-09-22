@@ -1,5 +1,5 @@
 {
-  "file_count": 3328,
+  "file_count": 3333,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -3823,8 +3823,8 @@
     },
     {
       "path": "include/sparkpipe/spark_stagepack_format.h",
-      "sha256": "0f48957e86144678310341b711ae97078e5ef9d212d314f5ce7d8d657925d628",
-      "size_bytes": 6067
+      "sha256": "2d6d5aebd1bd55f7dc1cbdb4bf322885230f2b9d023adb53fb68dae16182fcdd",
+      "size_bytes": 6351
     },
     {
       "path": "include/sparkpipe/spark_state_pool.h",
@@ -4578,8 +4578,8 @@
     },
     {
       "path": "model-families/mimo26/FACTS.md",
-      "sha256": "0c691cf508723f1a7eaa5f010dbba584a4fed339db3fae1d122e0cb5b25115f6",
-      "size_bytes": 5336
+      "sha256": "f106ca7687c5456a09c934401c93b30686de11a32b6e4e88bd54d3d0d9ef4691",
+      "size_bytes": 6405
     },
     {
       "path": "model-families/mimo26/census/distill_census.json",
@@ -5755,6 +5755,11 @@
       "path": "modules/ling_resident_decode_stage/validation/validate_ling_resident_decode_stage_cuda.sh",
       "sha256": "d677c9059aaead65914d1d557f792bfc17f40781254b54770f7f5ec37e17ac82",
       "size_bytes": 1873
+    },
+    {
+      "path": "modules/mimo26_resident_decode_stage/source/spark_mimo26_stagepack_format.h",
+      "sha256": "dca334db8fa3b8ff9fbdd3568d7e29b1277de697498b032d3637746b5517de2c",
+      "size_bytes": 5415
     },
     {
       "path": "modules/muse_glimmer_resident_decode_stage/Makefile",
@@ -9767,6 +9772,16 @@
       "size_bytes": 7488
     },
     {
+      "path": "tests/test_mimo26_stagepack.py",
+      "sha256": "82ba4b57021643cc827cc20f4bc3db8e8f48727c80368e7ee80f45f6e8d27350",
+      "size_bytes": 12270
+    },
+    {
+      "path": "tests/test_mimo26_stagepack_format.py",
+      "sha256": "9d17c16b212fc5856fadba7a473500af4b87607c2d3b79082ac5c7012b94c3cc",
+      "size_bytes": 2881
+    },
+    {
       "path": "tests/test_mla_absorption.py",
       "sha256": "c8e2abab435c6983a9d2e89439bdf16c54b766ccc697c6958afd211cd3ab7c17",
       "size_bytes": 10079
@@ -12312,9 +12327,19 @@
       "size_bytes": 16108
     },
     {
+      "path": "tools/mimo26_emit_rank.sh",
+      "sha256": "08e622c4a3ced13f1c553a4a8387f3c41a98602784d7527b47912008f135ab00",
+      "size_bytes": 3440
+    },
+    {
       "path": "tools/mimo26_param_budget.py",
       "sha256": "296d9458ccadc69e60af0753be7b50f0516dc4ad1cadfe9bc90662c51bae218b",
       "size_bytes": 6867
+    },
+    {
+      "path": "tools/mimo26_stagepack.py",
+      "sha256": "2f0dfe15adfc7841ef9cf2e0f9e1913c5ec8095652c8ae459099f4440b6f79da",
+      "size_bytes": 37874
     },
     {
       "path": "tools/minimax_stagepack.py",
@@ -13048,8 +13073,8 @@
     },
     {
       "path": "tools/stagepack_naming.json",
-      "sha256": "ab8619b157c827e179b78a61fac79acda4ef4a67cbda7d99381c40fd8ed0c443",
-      "size_bytes": 2041
+      "sha256": "411b32067126bf44de6348742b09900090d758e59a21a7466ac7f0e466b668ca",
+      "size_bytes": 2173
     },
     {
       "path": "tools/staging_manifest.py",
@@ -16645,5 +16670,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79560840
+  "total_bytes": 79624205
 }
