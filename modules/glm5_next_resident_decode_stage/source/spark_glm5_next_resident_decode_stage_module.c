@@ -3924,6 +3924,22 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 			(double)state->chain_stage_ns[5] / 1000000.0,
 			(double)state->chain_stage_ns[6] / 1000000.0,
 			(double)state->chain_stage_ns[7] / 1000000.0);
+		{
+			SparkTpDeviceCollectiveHardwareTiming main_timing = {0},hc_timing = {0};
+			SparkStatus main_status = SparkTpDeviceCollectiveHardwareStats(
+				&state->tp_device_collective,&main_timing);
+			SparkStatus hc_status = state->tp_device_collective_hc_initialized != 0u ?
+				SparkTpDeviceCollectiveHardwareStats(&state->tp_device_collective_hc,&hc_timing) : SPARK_STATUS_OK;
+			if ( main_status == SPARK_STATUS_OK && hc_status == SPARK_STATUS_OK )
+				fprintf(stderr,"COLLECTIVE-GPU-TIME slot=%u source_wait_ms=%.3f peer_wait_ms=%.3f copy_ms=%.3f combine_ms=%.3f\n",
+					async->slot_index,(double)(main_timing.source_wait_ns + hc_timing.source_wait_ns) / 1000000.0,
+					(double)(main_timing.peer_wait_ns + hc_timing.peer_wait_ns) / 1000000.0,
+					(double)(main_timing.copy_ns + hc_timing.copy_ns) / 1000000.0,
+					(double)(main_timing.combine_ns + hc_timing.combine_ns) / 1000000.0);
+			else if ( main_status != SPARK_STATUS_UNSUPPORTED )
+				fprintf(stderr,"COLLECTIVE-GPU-TIME-UNAVAILABLE slot=%u main=%d hc=%d\n",
+					async->slot_index,(int)main_status,(int)hc_status);
+		}
 		memset(state->chain_stage_ns,0,sizeof(state->chain_stage_ns));
 		state->chain_profile_last_ns = 0ull;
 	}

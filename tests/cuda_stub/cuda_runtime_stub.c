@@ -1621,3 +1621,41 @@ cudaError_t SparkGlm5NextLaunchMeshRoundLoop(cudaStream_t stream,
     }
     return cudaSuccess;
 }
+
+uint32_t cuda_stub_mesh_hardware_calls;
+int cuda_stub_mesh_hardware_prepare_result;
+int cuda_stub_mesh_hardware_launch_result = cudaErrorUnknown;
+void *cuda_stub_mesh_hardware_alias;
+void *cuda_stub_mesh_hardware_band;
+void *cuda_stub_mesh_hardware_gate;
+void *cuda_stub_mesh_hardware_control;
+uint64_t cuda_stub_mesh_hardware_elements;
+uint32_t cuda_stub_mesh_hardware_operation;
+uint32_t cuda_stub_mesh_hardware_logical_rows;
+
+cudaError_t SparkGlm5NextMeshHardwarePrepare(void *host,void **device)
+{
+    if ( cuda_stub_mesh_hardware_prepare_result != 0 )
+        return cuda_stub_mesh_hardware_prepare_result;
+    *device = cuda_stub_mesh_hardware_alias != 0 ? cuda_stub_mesh_hardware_alias : host;
+    return cudaSuccess;
+}
+
+cudaError_t SparkGlm5NextLaunchMeshHardware(cudaStream_t stream,void *band,
+    uint64_t slot_bytes,uint64_t slots_per_rank,volatile void *entry,void *gate,
+    void *round_control,uint32_t rank,uint32_t degree,const void *local,
+    void *output,void *scratch,uint64_t elements,uint32_t operation,
+    uint32_t rounds,uint32_t logical_rows,uint64_t timeout_ns)
+{
+    (void)stream;(void)slot_bytes;(void)slots_per_rank;(void)entry;
+    (void)round_control;(void)rank;(void)degree;(void)local;(void)output;
+    (void)scratch;(void)rounds;(void)timeout_ns;
+    cuda_stub_mesh_hardware_calls++;
+    cuda_stub_mesh_hardware_band = band;
+    cuda_stub_mesh_hardware_gate = gate;
+    cuda_stub_mesh_hardware_control = round_control;
+    cuda_stub_mesh_hardware_elements = elements;
+    cuda_stub_mesh_hardware_operation = operation;
+    cuda_stub_mesh_hardware_logical_rows = logical_rows;
+    return cuda_stub_mesh_hardware_launch_result;
+}

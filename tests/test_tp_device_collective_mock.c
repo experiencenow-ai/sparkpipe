@@ -9,6 +9,7 @@
 
 #include "sparkpipe/spark_tp_device_collective.h"
 #include "sparkpipe/spark_weightd.h"
+#include "sparkpipe/spark_tp_mesh_round_control.h"
 
 #define _GNU_SOURCE 1
 #include <cuda_runtime.h>
@@ -29,6 +30,18 @@ static uint32_t test_checks;
 extern uint32_t cuda_stub_mesh_publish_calls;
 extern uint32_t cuda_stub_mesh_publish_null_seq_cell;
 extern uint32_t cuda_stub_mesh_publish_null_epoch_cell;
+
+extern uint32_t cuda_stub_mesh_hardware_calls;
+extern int cuda_stub_mesh_hardware_prepare_result;
+extern int cuda_stub_mesh_hardware_launch_result;
+extern void *cuda_stub_mesh_hardware_alias;
+extern void *cuda_stub_mesh_hardware_band;
+extern void *cuda_stub_mesh_hardware_gate;
+extern void *cuda_stub_mesh_hardware_control;
+extern cudaError_t cuda_stub_stream_query_result;
+extern uint64_t cuda_stub_mesh_hardware_elements;
+extern uint32_t cuda_stub_mesh_hardware_operation;
+extern uint32_t cuda_stub_mesh_hardware_logical_rows;
 
 static uint64_t mock_client_alive = 1u;
 
@@ -194,6 +207,107 @@ static void TestTopologySlice(void)
 	    "slice rejects overflowed first rank");
 }
 
+static void TestHardwareDispatch(SparkTpDeviceCollectiveConfig config,void *mesh)
+{
+    SparkTpDeviceCollective collective = {0};
+    SparkTpDeviceCollectiveSubmission submission = {0};
+    uint16_t local[256] = {0},output[512] = {0};
+    uint32_t logical,operation;
+    uint32_t old_publish = cuda_stub_mesh_publish_calls;
+    SparkWeightdMeshWaitRequest *request = (SparkWeightdMeshWaitRequest *)
+        ((uint8_t *)mesh + SPARK_WEIGHTD_MESH_WAIT_ENTRY(0u,0u));
+    config.combine_gather_bf16_function = TestCombineFusedBf16;
+    setenv("SPARK_TP_WAIT_MODE","automatic",1);
+    CHECK(SparkTpDeviceCollectiveCreate(&config,&collective) == SPARK_STATUS_INVALID_ARGUMENT,
+        "unknown wait mode fails instead of silently selecting spin");
+    setenv("SPARK_TP_WAIT_MODE","hardware",1);
+    CHECK(SparkTpDeviceCollectiveCreate(&config,&collective) == SPARK_STATUS_OK,"hardware create");
+    cuda_stub_mesh_hardware_prepare_result = cudaErrorUnknown;
+    CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&collective,mesh,2u,64u,0u,0) == SPARK_STATUS_IO_ERROR,
+        "unsupported hardware wait preparation fails explicitly");
+    cuda_stub_mesh_hardware_prepare_result = 0;
+    request->version = SPARK_WEIGHTD_MESH_WAIT_VERSION + 1u;
+    CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&collective,mesh,2u,64u,0u,0) == SPARK_STATUS_ABI_MISMATCH,
+        "hardware gate rejects unsupported record version");
+    request->version = 0u;
+    request->request_id = UINT64_MAX;
+    CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&collective,mesh,2u,64u,0u,0) == SPARK_STATUS_CAPACITY_EXCEEDED,
+        "hardware gate rejects exhausted request IDs");
+    request->request_id = 1u;
+    CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&collective,mesh,2u,64u,0u,0) == SPARK_STATUS_BUSY,
+        "hardware gate refuses a previous owner's pending request");
+    memset(request,0,sizeof(*request));
+    cuda_stub_mesh_hardware_alias = (uint8_t *)mesh + 64u;
+    CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&collective,mesh,2u,64u,0u,0) == SPARK_STATUS_OK,
+        "failed hardware preparation retains ownership for retry");
+    CHECK(SparkTpDeviceCollectiveChainKey(&collective,777u) == SPARK_STATUS_OK,"hardware chain key");
+    CHECK(SparkTpDeviceCollectiveArmCapture(&collective) == SPARK_STATUS_OK,"hardware arm capture");
+    submission.abi_version = SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION;
+    submission.descriptor_bytes = sizeof(submission);
+    submission.active_sequence_count = 2u;
+    submission.local_device = local;
+    submission.full_device = output;
+    submission.cuda_stream = (void *)1;
+    submission.completion_function = TestComplete;
+    cuda_stub_mesh_hardware_launch_result = 0;
+    cuda_stub_mesh_hardware_calls = 0u;
+    for ( logical = 1u; logical <= 2u; logical++ )
+    {
+        submission.logical_sequence_count = logical;
+        for ( operation = 0u; operation < 3u; operation++ )
+        {
+            uint64_t expected_elements = operation == 2u ? 2u : operation == 0u ? 256u : 128u;
+            CHECK(SparkTpDeviceCollectiveEnqueue(&collective,&submission,operation) == SPARK_STATUS_OK,
+                "captured B1 and B2 operations select hardware launcher");
+            CHECK(cuda_stub_mesh_hardware_logical_rows == logical &&
+                cuda_stub_mesh_hardware_operation == operation &&
+                cuda_stub_mesh_hardware_elements == expected_elements,
+                "hardware launcher receives exact logical and payload geometry");
+            CHECK(cuda_stub_mesh_hardware_band == cuda_stub_mesh_hardware_alias &&
+                cuda_stub_mesh_hardware_gate == (uint8_t *)cuda_stub_mesh_hardware_alias +
+                    SPARK_WEIGHTD_MESH_WAIT_ENTRY(0u,0u),
+                "hardware kernels use actual mapped device alias");
+        }
+    }
+    CHECK(cuda_stub_mesh_hardware_calls == 6u && cuda_stub_mesh_publish_calls == old_publish,
+        "hardware capture never dispatches spinning publish or wait path");
+    CHECK(SparkTpDeviceCollectiveDisarmCapture(&collective) == SPARK_STATUS_OK,"hardware disarm capture");
+    cuda_stub_mesh_hardware_launch_result = cudaErrorUnknown;
+    submission.logical_sequence_count = 1u;
+    CHECK(SparkTpDeviceCollectiveEnqueue(&collective,&submission,1u) == SPARK_STATUS_IO_ERROR,
+        "eager hardware launch failure is returned without fallback");
+    CHECK(cuda_stub_mesh_publish_calls == old_publish,"failed hardware launch never selects spin path");
+    {
+        SparkTpMeshRoundControl *control = cuda_stub_mesh_hardware_control;
+        SparkTpDeviceCollectiveHardwareTiming timing = {0};
+        control->source_wait_ns = 100u;
+        control->peer_wait_ns = 200u;
+        control->copy_ns = 300u;
+        control->combine_ns = 400u;
+        cuda_stub_stream_query_result = cudaErrorNotReady;
+        CHECK(SparkTpDeviceCollectiveHardwareStats(&collective,&timing) == SPARK_STATUS_BUSY,
+            "hardware metrics cannot synchronize or read an active stream");
+        cuda_stub_stream_query_result = cudaSuccess;
+        CHECK(SparkTpDeviceCollectiveHardwareStats(&collective,&timing) == SPARK_STATUS_OK &&
+            timing.source_wait_ns == 100u && timing.peer_wait_ns == 200u &&
+            timing.copy_ns == 300u && timing.combine_ns == 400u,
+            "terminal hardware metric readback preserves each measured phase");
+        request->request_id = UINT64_MAX;
+        CHECK(SparkTpDeviceCollectiveChainKey(&collective,778u) == SPARK_STATUS_CAPACITY_EXCEEDED,
+            "cached mapped alias still validates request IDs before new chain");
+        request->request_id = 0u;
+        CHECK(SparkTpDeviceCollectiveChainKey(&collective,778u) == SPARK_STATUS_OK &&
+            SparkTpDeviceCollectiveHardwareStats(&collective,&timing) == SPARK_STATUS_OK &&
+            timing.source_wait_ns == 0u && timing.peer_wait_ns == 0u &&
+            timing.copy_ns == 0u && timing.combine_ns == 0u,
+            "new chain resets timing without erasing gate generation");
+    }
+    SparkTpDeviceCollectiveDestroy(&collective);
+    CHECK(collective.implementation == 0,"hardware mapping owner destroys after terminal stream");
+    cuda_stub_mesh_hardware_alias = 0;
+    unsetenv("SPARK_TP_WAIT_MODE");
+}
+
 int main(void)
 {
 	SparkTpDeviceCollectiveConfig config;
@@ -311,6 +425,7 @@ int main(void)
 	}
 
 	SparkTpDeviceCollectiveDestroy(&collective);
+	TestHardwareDispatch(config,mesh_buffer);
 	free(mesh_buffer);
 
 	fprintf(stderr,"%s: %u checks, %u failures (publish=%u combine=%u)\n",

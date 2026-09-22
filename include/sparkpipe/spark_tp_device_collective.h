@@ -352,6 +352,18 @@ SparkStatus SparkTpDeviceCollectiveWaitAllRoutes(
     SparkTpDeviceCollective *collective,
     uint32_t timeout_milli);
 
+typedef struct SparkTpDeviceCollectiveHardwareTiming
+{
+    uint64_t source_wait_ns;
+    uint64_t peer_wait_ns;
+    uint64_t copy_ns;
+    uint64_t combine_ns;
+} SparkTpDeviceCollectiveHardwareTiming;
+
+SparkStatus SparkTpDeviceCollectiveHardwareStats(
+    SparkTpDeviceCollective *collective,
+    SparkTpDeviceCollectiveHardwareTiming *timing_out);
+
 void SparkTpDeviceCollectiveRoundStats(
     SparkTpDeviceCollective *collective,
     uint64_t *count_out,
