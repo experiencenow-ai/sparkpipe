@@ -1,5 +1,5 @@
 {
-  "file_count": 3262,
+  "file_count": 3265,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -10802,14 +10802,29 @@
       "size_bytes": 5723
     },
     {
+      "path": "tools/devcycle/templates/README.md",
+      "sha256": "865b5c0c03f8b81b36f17efdc766630f8450d8dea320714a6b4ffad6652c4123",
+      "size_bytes": 4884
+    },
+    {
       "path": "tools/devcycle/templates/dsv4_flash_tp4_stage.template.json",
       "sha256": "da7a672f47d9174de09f3d348a2154475a5efcbf8e6735efe7684cde457d7993",
       "size_bytes": 1197
     },
     {
+      "path": "tools/devcycle/templates/family_deployment.template.json",
+      "sha256": "83e8a131ff2d860f7708a477d88cbb9b1a9a71ca5d91b3d58eabc22e30f1931a",
+      "size_bytes": 1764
+    },
+    {
       "path": "tools/devcycle/templates/model_resident.template.json",
       "sha256": "aa9e098fbd6a34e9bc3c47d71ccff2981d2451a79ee038e3bbc50b2b2122ef6b",
       "size_bytes": 2881
+    },
+    {
+      "path": "tools/devcycle/templates/run-family-job.sh.template",
+      "sha256": "2d981289715cec0c50f3a68f9dfe21597baa6f669d69eaf62ea30b63b0c4221d",
+      "size_bytes": 13224
     },
     {
       "path": "tools/devcycle/term_by_cwd_sweep.sh",
@@ -16315,5 +16330,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 76687406
+  "total_bytes": 76707278
 }
