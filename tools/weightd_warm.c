@@ -237,9 +237,11 @@ int main(int argument_count,char **arguments)
          (wset_path == 0 && argument_count > 6 && !parse_positive(arguments[6],UINT32_MAX,&layers)) ||
          (wset_path == 0 && argument_count > 7 && !parse_positive(arguments[7],SPARK_WEIGHTD_EXPERT_COUNT_MAX,&experts)) ||
          (argument_count > 8 && !parse_positive(arguments[8],UINT64_MAX / UINT64_C(1000000000),&seconds)) ||
-         (!identity_print &&
+         (getenv("SPARK_WEIGHTD_EXPERT_POOL_BYTES") != 0 &&
           !parse_positive(getenv("SPARK_WEIGHTD_EXPERT_POOL_BYTES"),
-             SPARK_WEIGHTD_DEVICE_BYTES_MAX_DEFAULT,&request.expert_pool_bytes)) )
+             SPARK_WEIGHTD_DEVICE_BYTES_MAX_DEFAULT,&request.expert_pool_bytes)) ||
+         (!identity_print &&
+          getenv("SPARK_WEIGHTD_EXPERT_POOL_BYTES") == 0) )
         goto usage;
     if ( strlen(arguments[2]) >= sizeof(request.pack_path) ||
          strlen(arguments[3]) != 64u ||
@@ -308,7 +310,10 @@ int main(int argument_count,char **arguments)
     }
     strcpy(request.pack_path,arguments[2]);
     snprintf(manifest_path,sizeof(manifest_path),"%s.experts",arguments[2]);
-    status = SparkWeightdManifestLoad(manifest_path,request.identity.arena_bytes,&manifest);
+    /* the manifest bound is the PACK size; identity.arena_bytes is the
+     * daemon-side arena identity and for k3 is the pool budget, which
+     * would reject every offset past 3 GiB of a ~98 GiB pack. */
+    status = SparkWeightdManifestLoad(manifest_path,(uint64_t)pack.st_size,&manifest);
     if ( status != SPARK_STATUS_OK || manifest.group_count == 0u )
     {
         fprintf(stderr,"weightd_warm: expert manifest failed status=%d\n",(int)status);

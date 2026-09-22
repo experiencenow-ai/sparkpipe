@@ -13528,8 +13528,8 @@
     },
     {
       "path": "tools/weightd_warm.c",
-      "sha256": "c79fba7324c54e40018f642edecc5fded83e2fddd4bfb8bd73958a3bc8e7f451",
-      "size_bytes": 17504
+      "sha256": "fa1cec95f583d0a5c916848eeba561b19c0976c702bf8672ab84f4f7b6608272",
+      "size_bytes": 17828
     },
     {
       "path": "tools/weightdctl.c",
@@ -16780,5 +16780,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79901879
+  "total_bytes": 79902203
 }
