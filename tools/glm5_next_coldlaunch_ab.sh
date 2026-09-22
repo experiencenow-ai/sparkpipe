@@ -188,6 +188,22 @@ for suffix in (".sha256", ".experts"):
     packs.joinpath(sidecar.name).write_bytes(sidecar.read_bytes())
 if len(list(packs.glob("*.sha256"))) != 1:
     fail("packs/ must hold exactly one digest")
+# symlink every binary the deployment loads (adapter, driver, transport and
+# the collective backend module) from the qualified NVMe runtime root; the
+# resident resolves these RELATIVE to runtime_root (a2 r2 postmortem:
+# adapter_load not_found with a packs/-only runtime)
+assets = {deployment["adapter"]["shared_object_path"], deployment["driver"]["shared_object_path"],
+          deployment["transport"]["shared_object_path"]}
+backend = config.get("tp_collective", {}).get("backend_module_path")
+if backend:
+    assets.add(backend)
+for relative in sorted(assets):
+    source = Path(family_root) / relative
+    if not source.is_file():
+        fail(f"runtime asset missing on the family root: {relative}")
+    target = runtime / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.symlink_to(source.resolve())
 (runtime / config_name).parent.mkdir(parents=True, exist_ok=True)
 (runtime / config_name).write_text(json.dumps(config) + "\n")
 (root / "kv").mkdir(exist_ok=True)
