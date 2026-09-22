@@ -1,5 +1,5 @@
 {
-  "file_count": 3363,
+  "file_count": 3365,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -9748,8 +9748,8 @@
     },
     {
       "path": "tests/test_ling_multidev_lane.py",
-      "sha256": "533a70d02e0af587c386dd1289de3d99348ebaa950275eb6ba9f45054555a9f1",
-      "size_bytes": 16172
+      "sha256": "efe8156aa5c69d4bddfd97dfdacd03acee20457a7ded0c188831f8628bcbe86f",
+      "size_bytes": 16315
     },
     {
       "path": "tests/test_ling_serving_adapter.c",
@@ -11015,6 +11015,11 @@
       "path": "tools/devcycle/lane_budget_calc.py",
       "sha256": "1d8237db634477bd3a3488b1b0b51b0d55fd8a868800cc411479894fef75e45a",
       "size_bytes": 4697
+    },
+    {
+      "path": "tools/devcycle/ling_warm_receipt.sh",
+      "sha256": "332161fdfe4f12a9c4814f46d734eae1e5822a5fa689c0727f0b505d60a8d2f2",
+      "size_bytes": 6349
     },
     {
       "path": "tools/devcycle/migrate_dev_system.sh",
@@ -12392,14 +12397,19 @@
       "size_bytes": 6950
     },
     {
+      "path": "tools/ling_multidev_build.sh",
+      "sha256": "1007d98a6f7e0e1ca76f994a0814cd3007efff7f6f4ebc36353a0d39924d19e3",
+      "size_bytes": 3839
+    },
+    {
       "path": "tools/ling_multidev_lane.py",
       "sha256": "edf8db5a7c7e8451d1c16c618208f7e373f885113cc1b16c2b411a8d420dc362",
       "size_bytes": 14821
     },
     {
       "path": "tools/ling_multidev_run_family.sh",
-      "sha256": "c78a20d7b284a992b252c62c10c9f01aa200e71987dbe1f178975fe820fdb0d9",
-      "size_bytes": 13714
+      "sha256": "00fbd400bf7408af949d9c0bac106a53aa281582890ce456ca2e60248b97586e",
+      "size_bytes": 13859
     },
     {
       "path": "tools/ling_smoke_experts.py",
@@ -16820,5 +16830,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80124644
+  "total_bytes": 80135120
 }

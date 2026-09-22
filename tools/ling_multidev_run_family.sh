@@ -268,9 +268,11 @@ if [ -n "${LING_WORKING_SET:-}" ]; then
   WSET="$ROOT/smoke.wset"
   python3 "$CHECKOUT/tools/ling_multidev_lane.py" --emit-wset "$WSET"
   REVISION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["model_revision"])' "$ROOT/config/adapter.json")"
+  # --family ling pins the module tag so the warm keys the SAME arena
+  # the residentd attaches to (identity equality; PR #1146).
   "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
     "$(cat "$ROOT/packs/pack.sha256")" "$REVISION" "$WORLD" \
-    --wset "$WSET" 300 > "$ROOT/warm.log" 2>&1
+    --family ling --wset "$WSET" 300 > "$ROOT/warm.log" 2>&1
   grep -q "WSET-WARM keys=" "$ROOT/warm.log" ||
     fail "working set warm failed (see $ROOT/warm.log)"
 fi

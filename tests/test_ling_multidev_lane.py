@@ -285,7 +285,9 @@ def main() -> int:
                   "wset hook must fail closed without the committed manifest")
 
     # Wrapper parses (bash -n) and holds the template contract text.
-    for script in ("tools/ling_multidev_run_family.sh",):
+    for script in ("tools/ling_multidev_run_family.sh",
+                   "tools/ling_multidev_build.sh",
+                   "tools/devcycle/ling_warm_receipt.sh"):
         path = ROOT / script
         proc = subprocess.run(["bash", "-n", str(path)],
                               capture_output=True, text=True)
@@ -298,7 +300,8 @@ def main() -> int:
                   "53000 + 16 * LANE", "23000 + 16 * LANE", "64000 + 16 * LANE",
                   "23168 + 64 * LANE", "SESSION_BASE",
                   "LING_EXPERT_POOL_BYTES", "LING_SPINE_BUDGET_BYTES",
-                  "0x58504557", "ling_resident_decode_stage"):
+                  "0x58504557", "ling_resident_decode_stage",
+                  "--family ling"):
         check(token in wrapper, failures, f"wrapper missing {token}")
     for legacy in LEGACY_TOKENS:
         check(legacy not in wrapper, failures,
