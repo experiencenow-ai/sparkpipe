@@ -1293,77 +1293,14 @@ SparkStatus SparkStageModuleLoadPipelineRegion(
     uint64_t bytes,
     void **pointer)
 {
-    void *device = 0;
-    SparkStatus status;
-    uint64_t moved;
-
     if (pipeline == 0 || ledger == 0 || pointer == 0 || bytes == 0u ||
         bytes > (uint64_t)SIZE_MAX || offset > UINT64_MAX - bytes)
     {
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
     }
     *pointer = 0;
-    status = SparkWeightdAttachRequested();
-    if (status != SPARK_STATUS_OK)
-    {
-        fprintf(stderr,"stage-module direct pipeline load refused: weightd attach is mandatory\n");
-        SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
-    }
-    if (pipeline->failure != SPARK_STATUS_OK)
-    {
-        return pipeline->failure;
-    }
-    status = SparkStageModuleDeviceAllocate(ledger, bytes, &device);
-    if (status != SPARK_STATUS_OK)
-    {
-        SPARK_RETURN(status);
-    }
-    status = SPARK_STATUS_OK;
-    moved = 0u;
-    while (status == SPARK_STATUS_OK && moved < bytes)
-    {
-        uint64_t chunk_bytes = bytes - moved;
-        uint64_t slot;
-        if (chunk_bytes > pipeline->slot_bytes)
-        {
-            chunk_bytes = pipeline->slot_bytes;
-        }
-        pthread_mutex_lock(&pipeline->mutex);
-        while (pipeline->failure == SPARK_STATUS_OK &&
-            pipeline->enqueued_count - pipeline->copy_issued_count >=
-                SPARK_STAGE_MODULE_LOAD_PIPELINE_SLOTS)
-        {
-            if (SparkStageModuleLoadPipelineIssueNext(pipeline) != 0)
-            {
-                continue;
-            }
-            pthread_cond_wait(&pipeline->progress, &pipeline->mutex);
-        }
-        if (pipeline->failure != SPARK_STATUS_OK)
-        {
-            pthread_mutex_unlock(&pipeline->mutex);
-            status = pipeline->failure;
-            break;
-        }
-        slot = pipeline->enqueued_count % SPARK_STAGE_MODULE_LOAD_PIPELINE_SLOTS;
-        pipeline->chunk_ring[slot].file_offset = offset + moved;
-        pipeline->chunk_ring[slot].bytes = chunk_bytes;
-        pipeline->chunk_ring[slot].device_address = (uint8_t *)device + moved;
-        pipeline->chunk_ring[slot].status = SPARK_STATUS_INTERNAL_ERROR;
-        pipeline->enqueued_count++;
-        pthread_cond_broadcast(&pipeline->progress);
-        pthread_mutex_unlock(&pipeline->mutex);
-        moved += chunk_bytes;
-    }
-    if (status == SPARK_STATUS_OK)
-        status = SparkStageModuleLoadPipelineDrain(pipeline, 0);
-    if (status != SPARK_STATUS_OK)
-    {
-        SparkStageModuleReleaseLastAllocation(ledger, device);
-        SPARK_RETURN(status);
-    }
-    *pointer = device;
-    return SPARK_STATUS_OK;
+    fprintf(stderr,"stage-module direct-copy pipeline is unsupported; use weightd mapped pack regions\n");
+    SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
 }
 
 SparkStatus SparkStageModuleLoadPipelineFinish(

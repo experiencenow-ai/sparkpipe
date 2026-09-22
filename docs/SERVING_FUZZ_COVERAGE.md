@@ -151,3 +151,11 @@ registration, not an execution verdict or a complete semantic audit.
 real CUDA runtime even when the rest of the campaign uses host stubs. Unselected
 Python files remain listed separately in each receipt. Host reference results
 do not qualify model inference, GPU lifetimes or real RDMA transfers.
+
+The W1 loader gate now verifies real weightd attachment, shared mapped-region
+bytes and pointer offsets, short-pack bounds, and missing-attach rejection.
+It also rejects the obsolete direct-copy pipeline with a configured daemon:
+setting an environment variable is not proof that an allocation belongs to
+weightd. This gate makes no pipeline-overlap claim. The unused direct-copy
+worker and loader benchmark remain a concrete removal item for the subsequent
+code review; their public region operation now returns `UNSUPPORTED`.
