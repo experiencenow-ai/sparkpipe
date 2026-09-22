@@ -4108,8 +4108,8 @@
     },
     {
       "path": "mock-pipeline-deployment.json",
-      "sha256": "9b22b10ef537c775ac864451d3b393d38ac03252d19f3534557b30709af834c8",
-      "size_bytes": 1765
+      "sha256": "68d360cffe596ea816e0ce1316755440179f3f16fa8f8c0b696719c0e82b1ec7",
+      "size_bytes": 1687
     },
     {
       "path": "model-families/common/include/sparkpipe/llm_specifics.h",
@@ -16145,5 +16145,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 75894060
+  "total_bytes": 75893982
 }
