@@ -8,7 +8,7 @@
         "architecture": "gemma4_resident_decode_stage",
         "purpose": "resident decode-stage firmware for Gemma-4-26B-A4B: 5:1 sliding to full attention with per-head q/k norms and k_eq_v on full layers, hybrid dense-MLP + routed-MoE block (128 experts, top-8, per-expert scales), BF16 spine, layer scalars, partial rotary on full layers",
         "provenance": {
-            "status": "in bring-up; ACC-2 checkpoint-faithful packs (rank0 stage2 FULL 134/134, rank3 66/134), first serving arm is this lane",
+            "status": "chain-tier GPU validation defect fixed (host mirror row overrun + missing chain weight uploads, lane/gemma4-chain-fix); no green publish-gate GPU receipt exists for this arm yet - GPU_VALIDATED is retracted until the fixed validator produces one",
             "disclosed_source": [
                 "google/gemma-4-26b-a4b-it warm snapshot, contract source_revision 4d7ae4984b7db7de8f8457170b3f1a419ee76d52"
             ]
@@ -69,7 +69,7 @@
                             "name": "gemma4_resident_decode_stage",
                             "module": "spark.gemma4.26b-a4b.resident_decode_stage.bf16.linear_bf16.kv_bf16.h2816.l30.e128k8.v1",
                             "configuration": {
-                                "qualification_status": "GPU_VALIDATED",
+                                "qualification_status": "GPU_VALIDATION_PENDING_RECEIPT",
                                 "production_ready": false,
                                 "fallback_allowed": false,
                                 "runtime_backend_selection": "forbidden"
