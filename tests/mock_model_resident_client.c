@@ -142,6 +142,21 @@ uint32_t MockResidentClientPendingCount(uint32_t stage_index)
 	return(c != 0 ? c->inflight_count + c->pending_decision_count : 0u);
 }
 
+uint32_t MockResidentClientOwnsSubmission(uint32_t stage_index, uint64_t submission_id)
+{
+	SparkModelResidentClient *c = MockResidentClientByRank(stage_index);
+	uint32_t k;
+	if ( c == 0 )
+		return(0u);
+	for (k=0u; k<c->inflight_count; k++)
+		if ( c->inflight[k].submission_id == submission_id )
+			return(1u);
+	for (k=0u; k<c->pending_decision_count; k++)
+		if ( c->pending_decisions[k].submission_id == submission_id )
+			return(1u);
+	return(0u);
+}
+
 void MockResidentClientFireResult(uint32_t stage_index, uint64_t submission_id, SparkStatus status)
 {
 	SparkModelResidentClient *c = MockResidentClientByRank(stage_index);

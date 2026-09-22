@@ -101,6 +101,8 @@ static void SparkTestTokenizerLoadFixture(
     configuration.tokenizer_json_path = SparkTestTokenizerJsonPath();
     assert(SparkTokenizerLoadHuggingFaceJson(tokenizer, &configuration) ==
         SPARK_STATUS_OK);
+    assert(tokenizer->vocabulary_count == 13u);
+    assert(tokenizer->maximum_token_id == SPARK_TEST_TOKEN_ROLE);
 }
 
 static void SparkTestTokenizerEncodesByteBpeAndSpecialTokens(void)
@@ -315,6 +317,8 @@ static void SparkTestTokenizerCompiledFileAndConfiguredBatch(void)
         SPARK_STATUS_OK);
     assert(SparkTokenizerLoadCompiledFile(&loaded_tokenizer, &compiled_configuration) ==
         SPARK_STATUS_OK);
+    assert(loaded_tokenizer.vocabulary_count == 13u);
+    assert(loaded_tokenizer.maximum_token_id == SPARK_TEST_TOKEN_ROLE);
 
     texts[0u] = "abc";
     text_bytes[0u] = 3u;
