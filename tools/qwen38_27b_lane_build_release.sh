@@ -67,7 +67,9 @@ cc --version >> "$receipts/toolchain.txt"
 # PRIVATE weightd inside this job cgroup - the qualified single-node
 # validation shape; it never touches the node's shared daemon.
 pack_sha=$(cut -d' ' -f1 "$PACK.sha256")
-weightd_socket="$PWD/build/.qwen38-27b-lane-build-weightd.sock"
+# sockaddr_un caps the path at 108 bytes and the queue checkout path is
+# long: keep the private validation socket under /tmp instead.
+weightd_socket="/tmp/qwen38-27b-lane-build-weightd-${SPARK_QUEUE_ATTEMPT:-$$}.sock"
 rm -f "$weightd_socket"
 # Private in-job daemon: unique latch port (the 61900 default can collide
 # with another lane's build weightd on the node); build-validation only.

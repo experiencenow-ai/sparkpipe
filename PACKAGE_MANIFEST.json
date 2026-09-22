@@ -12433,8 +12433,8 @@
     },
     {
       "path": "tools/qwen38_27b_lane_build_release.sh",
-      "sha256": "5ea86cef91e017345d5dcfefa02773838d67c7ec3a0d910b436bd14f1d5e1c7f",
-      "size_bytes": 7753
+      "sha256": "80b3fcd00887199a00d18b23e6c25a25b4e542d3e1b5762224c39e2c5d8444e3",
+      "size_bytes": 7908
     },
     {
       "path": "tools/qwen38_27b_lane_deployment.py",
@@ -16430,5 +16430,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78200938
+  "total_bytes": 78201093
 }
