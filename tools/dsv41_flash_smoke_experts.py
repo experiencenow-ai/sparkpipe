@@ -19,12 +19,17 @@ scale) = 18,800,640 B per (layer, expert) - the m7 attach receipt's
 36,097,228,800 B per TP8 rank / (40 layers x 48 experts) is exactly
 this number).
 
-Spine note: the kind-map tp=1 spine (9,531,704,768 B) runs 4.8% above
-the placed-pack directory census (2,914,592,448 B at TP8 vs
-3,061,536,448 B kind-map); the delta is recorded in the manifest notes
-and reconciles inside the lane calculator's 1.08 margin. Follow-up:
-reconcile the 146,944,000 B against the pack directory during the
-milestone-3 preload measurement on the repacked TP4 set.
+Spine note: the kind-map tp=1 spine (9,531,704,768 B) matches the
+placed r2 mxfp4 tp8 packs exactly (plan.json on the r2 build: tp8
+spine_bytes 3,061,536,448 == kind-map tp8; pack 39,158,874,624 =
+spine + experts 36,097,228,800). The older m7_attach_receipt spine
+census (2,914,592,448 B/rank) is the r1 pack, before the o_a
+rows-slice repack (+146,944,000 B/rank = o_a rows x FULL 4096 cols +
+[32,128] scale x 40 layers, commit bbb8821c) - no unexplained delta
+remains. The pack/expert bytes live in the operator's shared weightd
+arena (tracked 29,184 MiB/node, additional to lane budgets, manager
+ruling 2026-09-22); the lane DEVICE budget covers the resident side
+only.
 
 Usage:
   python3 tools/dsv41_flash_smoke_experts.py \
@@ -191,11 +196,17 @@ def build_manifest() -> dict:
             "per_node_pair_counts": per_node_counts,
             "per_node_worst_expert_bytes": worst_node_bytes,
             "per_node_spine_bytes_tp4_kind_map": spine_bytes_per_node(NODES),
-            "spine_note": "kind-map tp=1 spine; the placed mxfp4 tp8 pack "
-                          "directory census is 2914592448 B/rank vs kind-map "
-                          "3061536448 B/rank (delta 146944000 B, 4.8%, inside "
-                          "the lane calculator 1.08 margin; reconcile on the "
-                          "TP4 repack during the preload measurement)",
+            "spine_note": "kind-map tp=1 spine; matches the placed r2 "
+                          "mxfp4 tp8 packs exactly (r2 plan.json tp8 spine "
+                          "3,061,536,448 B == kind-map tp8; the older "
+                          "m7_attach_receipt 2,914,592,448 B/rank census is "
+                          "the r1 pack before the o_a rows-slice repack "
+                          "+146,944,000 B/rank, commit bbb8821c - no "
+                          "unexplained delta remains). Pack/expert bytes "
+                          "live in the shared weightd arena (tracked "
+                          "29,184 MiB/node, additional to lane budgets, "
+                          "manager ruling 2026-09-22); lane DEVICE covers "
+                          "the resident side only",
         },
     }
 

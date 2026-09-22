@@ -258,22 +258,22 @@
     },
     {
       "path": "deployment/dsv41_flash_tp4/config/stage_00.json",
-      "sha256": "1b2038069772b8532cb82f038c43703d9af09e0f1f93b0a69b3df54f0a07e2be",
+      "sha256": "ae3b5af052da86edda24aeff98f06cfe1586475d5f08059bcf4af816bb7107e5",
       "size_bytes": 1202
     },
     {
       "path": "deployment/dsv41_flash_tp4/config/stage_01.json",
-      "sha256": "3ee607fa5525f095473341c080f9f1c31e92c51e4ae5b734fdf27f44bf75f59f",
+      "sha256": "1180b8924920c6c57ef5b8da27c765b41be03a5d6d812d1e803348adb4b3e572",
       "size_bytes": 1202
     },
     {
       "path": "deployment/dsv41_flash_tp4/config/stage_02.json",
-      "sha256": "3207d4a8e9c52d397a3a73107395d8f5dad40895191a203cbbcc4e1f85e6b09f",
+      "sha256": "b2ff3c0d7ff1cc2728a6b25bb0abdb7c39fcc9a0dc2487e40e8f1d804676faa8",
       "size_bytes": 1202
     },
     {
       "path": "deployment/dsv41_flash_tp4/config/stage_03.json",
-      "sha256": "4745205d738c4bfa21abc42ee9d6fb471ffde83b99d21ee92132c739352c03fb",
+      "sha256": "68fd95df3d670b70e0c346b56c28229279d2c2118830c4c1958904a9de96c9e2",
       "size_bytes": 1202
     },
     {
@@ -4363,8 +4363,8 @@
     },
     {
       "path": "model-families/dsv41_flash/smoke_experts.json",
-      "sha256": "10ccaaaf2278bfd9a958017d26324592b29ad677195310434367267c3c249345",
-      "size_bytes": 42414
+      "sha256": "7d019c11a032136518513f90598f42d8876c0e3254e0782c06fb91e9ecd498cd",
+      "size_bytes": 42646
     },
     {
       "path": "model-families/gemma4/include/sparkpipe/llm_defines.h",
@@ -8813,8 +8813,8 @@
     },
     {
       "path": "tests/test_dsv41_flash_shared_lane.py",
-      "sha256": "5c62f74572ae99d18d5f09b8e3ec031be34934dfaf10f565d90613344244f643",
-      "size_bytes": 9625
+      "sha256": "b5449fa0dbdfce76cbcff0a902b025ce4d3e5b17f92a88fb162f03cc9eab2d72",
+      "size_bytes": 9672
     },
     {
       "path": "tests/test_dsv41_flash_smoke_experts.py",
@@ -10908,8 +10908,8 @@
     },
     {
       "path": "tools/dsv41_flash_gen_deployment.py",
-      "sha256": "e730fbc8827dfb23462ad7c81005c2dd8d584221cad3a31c60c839da1d910f7a",
-      "size_bytes": 8595
+      "sha256": "299cb419b150635294683aa4ee9a26affbdeb1939f0ec3659901feb8c9dcacdc",
+      "size_bytes": 8683
     },
     {
       "path": "tools/dsv41_flash_index_census.py",
@@ -10933,8 +10933,8 @@
     },
     {
       "path": "tools/dsv41_flash_smoke_experts.py",
-      "sha256": "a9f4f70dc766118d759692a8fc65c9b53eb39cfcdcf251696cab507b880eeb1b",
-      "size_bytes": 9570
+      "sha256": "8aefbde68ac2a6d7d443299759efb01bcf3bcabb8eabeddeb2b94a2a0c56d371",
+      "size_bytes": 10257
     },
     {
       "path": "tools/dsv41_flash_stagepack.py",
@@ -16400,5 +16400,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78166086
+  "total_bytes": 78167140
 }

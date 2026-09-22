@@ -5,7 +5,7 @@ verified with the stdlib alone.
 Lane 4 locks (PR #1083 lane_assignments.json / fleet registry band):
   1. the generated tree carries TP4 stage configs whose tp_rank/tp_degree
      and collective listener ports match the lane's node order and the
-     67064-67079 collective block; control endpoints sit in 23064-23079;
+     53064-53079 collective block; control endpoints sit in 23064-23079;
      the transport base is 64064; every generated listener is inside a
      lane-4 reserved block.
   2. the stage config member set is exactly the dsv41_flash module node
@@ -28,7 +28,7 @@ GENERATOR = ROOT / "tools/dsv41_flash_gen_deployment.py"
 WRAPPER = ROOT / "tools/dsv41_flash_shared_lane.sh"
 LANE_HOSTS = ["spark4", "spark5", "spark6", "spark7"]
 LANE_CONTROL = (23064, 23079)
-LANE_COLLECTIVE = (67064, 67079)
+LANE_COLLECTIVE = (53064, 53079)   # PR #1094 renumber (67064+ is not bindable)
 LANE_TRANSPORT = (64064, 64079)
 
 STAGE_MEMBERS = {
@@ -75,11 +75,11 @@ def main() -> int:
         collective = stage["tp_collective"]
         if not in_block(collective["listen_port"], LANE_COLLECTIVE):
             failures.append(f"stage {rank}: collective listen {collective['listen_port']}")
-        if collective["listen_port"] != 67064 + rank:
+        if collective["listen_port"] != 53064 + rank:
             failures.append(f"stage {rank}: listener not rank-offset")
         if collective["peer_hosts"] != LANE_HOSTS:
             failures.append(f"stage {rank}: peers {collective['peer_hosts']}")
-        if collective["peer_ports"] != [67064 + r for r in range(4)]:
+        if collective["peer_ports"] != [53064 + r for r in range(4)]:
             failures.append(f"stage {rank}: peer ports {collective['peer_ports']}")
         for rail in collective["rail_peer_hosts"]:
             if len(rail) != 4:

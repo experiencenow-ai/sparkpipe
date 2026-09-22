@@ -2778,7 +2778,7 @@
   "per_node_spine_bytes_tp4_kind_map": 3985846208,
   "per_node_worst_expert_bytes": 2331279360,
   "prompts_sha256": "6b458e452a80eecf8782a6b778ddd1f11268583d1f389a644016bb4d074c248d",
-  "spine_note": "kind-map tp=1 spine; the placed mxfp4 tp8 pack directory census is 2914592448 B/rank vs kind-map 3061536448 B/rank (delta 146944000 B, 4.8%, inside the lane calculator 1.08 margin; reconcile on the TP4 repack during the preload measurement)"
+  "spine_note": "kind-map tp=1 spine; matches the placed r2 mxfp4 tp8 packs exactly (r2 plan.json tp8 spine 3,061,536,448 B == kind-map tp8; the older m7_attach_receipt 2,914,592,448 B/rank census is the r1 pack before the o_a rows-slice repack +146,944,000 B/rank, commit bbb8821c - no unexplained delta remains). Pack/expert bytes live in the shared weightd arena (tracked 29,184 MiB/node, additional to lane budgets, manager ruling 2026-09-22); lane DEVICE covers the resident side only"
  },
  "schema_version": 1,
  "spine_bytes": 9531704768,
