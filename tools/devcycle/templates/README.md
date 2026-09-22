@@ -38,9 +38,11 @@ rank map. Nothing here starts a daemon in shared-socket mode.
    build prefix, deployment source path, family env flags.
 3. Generate the pack sidecars with the family manifest tooling
    (`tools/<family>_experts_manifest.c` precedent): `<pack>.experts` for
-   routed-expert identity and the exact `<pack>.sha256`. Loading fails
-   closed without them - generic byte segments do not substitute for
-   routed-expert IDs.
+   routed-expert identity and the exact `<pack>.sha256`. The release shared
+   weightd additionally requires the whole-pack `<pack>.ck128` sidecar
+   (stamp once per node; glm5_next precedent:
+   `tools/glm5_next_ck128_stamp.sh`). Loading fails closed without them -
+   generic byte segments do not substitute for routed-expert IDs.
 4. Reserve every listener with `--ports` at submission: control
    `23000+16L..+15`, collective `53000+16L..+15`, transport
    `64000+16L..+15` (from `tools/devcycle/lane_assignments.json`,

@@ -186,9 +186,11 @@ if not source_pack.is_file():
 packs = runtime / "packs"
 packs.mkdir()
 packs.joinpath(source_pack.name).symlink_to(source_pack.resolve())
-for suffix in (".sha256", ".experts"):
+for suffix in (".sha256", ".experts", ".ck128"):
     sidecar = Path(str(source_pack) + suffix)
     if not sidecar.is_file():
+        if suffix == ".ck128":
+            fail("missing .ck128 whole-pack sidecar - run tools/glm5_next_ck128_stamp.sh once per node (release shared weightd requirement)")
         fail(f"missing sidecar {suffix}")
     packs.joinpath(sidecar.name).write_bytes(sidecar.read_bytes())
 if len(list(packs.glob("*.sha256"))) != 1:

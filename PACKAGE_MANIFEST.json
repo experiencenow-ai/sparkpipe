@@ -1,5 +1,5 @@
 {
-  "file_count": 3283,
+  "file_count": 3284,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -10868,8 +10868,8 @@
     },
     {
       "path": "tools/devcycle/templates/README.md",
-      "sha256": "b04f4d99a0148844680aba9fb219b01eab2a9bb832c5a3005923444d11c556f6",
-      "size_bytes": 7887
+      "sha256": "4127bf066fab09fac202d3806dc5197c4d59f3fe8b4111148801797007d88183",
+      "size_bytes": 8058
     },
     {
       "path": "tools/devcycle/templates/dsv4_flash_tp4_stage.template.json",
@@ -11392,9 +11392,14 @@
       "size_bytes": 9290
     },
     {
+      "path": "tools/glm5_next_ck128_stamp.sh",
+      "sha256": "c1d5d1502b2ef091656359647a560748e1f687b86080529677b6df77afd637d3",
+      "size_bytes": 1317
+    },
+    {
       "path": "tools/glm5_next_coldlaunch_ab.sh",
-      "sha256": "ac81a3033f8eb45e082fefbc8d7de97e5cdad971124ee94dbba21e4731f9d478",
-      "size_bytes": 15836
+      "sha256": "3c7b9a2392e07db61b7cf8340cd6a54cc4eb6431496b8760ce81330effc42c5d",
+      "size_bytes": 16019
     },
     {
       "path": "tools/glm5_next_compsec17.py",
@@ -16420,5 +16425,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78340265
+  "total_bytes": 78341936
 }
