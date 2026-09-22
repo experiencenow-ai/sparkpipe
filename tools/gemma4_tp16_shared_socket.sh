@@ -103,6 +103,13 @@ esac
 [ "${#SHA_HEX}" -eq 64 ] || fail "malformed pack digest sidecar: $PACK_DIR/$PACK_NAME.sha256"
 [ "$SHA_NAME" = "$PACK_NAME" ] || fail "sidecar names '$SHA_NAME', expected '$PACK_NAME'"
 
+# The pack-identity attach path requires the digest env (no fallback:
+# runtime/spark_weightd_attach.c fails "no_identity" without it) plus the
+# explicit opt-in; the model identity is pinned for deterministic receipts.
+export SPARK_WEIGHTD_ATTACH=1
+export SPARK_WEIGHTD_PACK_SHA256="$SHA_HEX"
+export SPARK_WEIGHTD_IDENTITY_MODEL=spark.gemma4.31b.resident_decode_stage.bf16.linear_bf16.kv_bf16.h5376.l60.v1
+
 if [ "$DRY_RUN" -eq 0 ]; then
     [ -S "$WEIGHTD_SOCKET" ] || fail "shared weightd socket is not present: $WEIGHTD_SOCKET (weightd is operator-managed; never start it by hand)"
 fi
