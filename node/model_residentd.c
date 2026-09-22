@@ -231,6 +231,7 @@ typedef struct SparkModelResidentdRuntime
 	int32_t candidate_fd;
 	uint32_t candidate_input_bytes;
 	uint8_t candidate_input[512];
+	uint32_t client_reset_on_hello;
 	int32_t wake_read_fd;
 	int32_t wake_write_fd;
 	uint32_t control_endpoint_kind;
@@ -1793,8 +1794,12 @@ static SparkStatus SparkModelResidentdProcessHello(
 		runtime->client.hello_complete = 1u;
 		runtime->client.session_epoch = hello->session_epoch;
 		runtime->client.last_submission_id = 0u;
-		runtime->client.pending_client_reset = runtime->client.generation;
-		runtime->client.reset_attempt_ns = 0u;
+		if ( runtime->client_reset_on_hello != 0u )
+		{
+			runtime->client.pending_client_reset = runtime->client.generation;
+			runtime->client.reset_attempt_ns = 0u;
+			runtime->client_reset_on_hello = 0u;
+		}
 		{
 			uint32_t slot_index;
 			uint32_t released_claims = 0u;
@@ -1889,6 +1894,7 @@ static SparkStatus SparkModelResidentdAdoptCandidate(
 		runtime->client.generation += 1u;
 		if ( runtime->client.generation == 0u )
 			runtime->client.generation = 1u;
+		runtime->client_reset_on_hello = 1u;
 	}
 	runtime->client.fd = fd;
 	runtime->client.input_bytes = 0u;
