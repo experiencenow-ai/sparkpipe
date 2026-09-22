@@ -5713,8 +5713,8 @@
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_resident_decode_stage_module.c",
-      "sha256": "af42616357c2061044ce78f582681dda26d13cbf297df14771431eef638b7f88",
-      "size_bytes": 114654
+      "sha256": "1e11463b07986f6da86e77fbe63f2b87e56afb66b6767c51ca65957193bf7e3a",
+      "size_bytes": 115181
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_serving_adapter.c",
@@ -9838,8 +9838,8 @@
     },
     {
       "path": "tests/test_laguna_multidev_lane.py",
-      "sha256": "bd66d0ce84dc2fc7188c08938c52b8e8fab9d7beed6676a82bdb3ce679a07e7e",
-      "size_bytes": 22022
+      "sha256": "66967de82c6fc7ec78827cec900dac976a4d094abc7af68d0049c973d5364c63",
+      "size_bytes": 22279
     },
     {
       "path": "tests/test_laguna_smoke_experts.py",
@@ -12533,8 +12533,8 @@
     },
     {
       "path": "tools/laguna_multidev_experts_manifest.sh",
-      "sha256": "dc44c294e07ce14209d9254213749a67ad0013c795964d22e4dd3ba698ff6c60",
-      "size_bytes": 8737
+      "sha256": "a0c04dbb7b7e222c5e763655b386ee5f097473873f825fe6c9efb35c8ee573e9",
+      "size_bytes": 9407
     },
     {
       "path": "tools/laguna_multidev_lane.py",
@@ -12543,8 +12543,8 @@
     },
     {
       "path": "tools/laguna_multidev_run_family.sh",
-      "sha256": "b0b7f614a35cf2c5fad11965bf38ac136135a3679721ab64fb42f5ce5f420051",
-      "size_bytes": 16065
+      "sha256": "abd5e513ac38f2b37d45fea548ae98cbee0d74ef4beb18fdcebc8f3f0715da15",
+      "size_bytes": 16343
     },
     {
       "path": "tools/laguna_smoke_experts.py",
@@ -17020,5 +17020,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80658494
+  "total_bytes": 80660226
 }
