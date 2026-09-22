@@ -8,6 +8,7 @@ PREFIX = r'''
 #include <stdio.h>
 #include <string.h>
 #include "sparkpipe/spark_tp_device_collective.h"
+#include "sparkpipe/spark_error_site.h"
 typedef struct
 {
     uint32_t tp_degree,tp_collective_disabled,mtp_active;
@@ -23,6 +24,11 @@ typedef struct
     TestBatch *batch;
     uint32_t tp_hc_op_index,tp_op_index,slot_index,wave_rows;
 } SparkGlm5NextTpChain;
+static SparkStatus SparkGlm5NextWeightdHealth(SparkGlm5NextModuleState *state)
+{
+    (void)state;
+    return(SPARK_STATUS_OK);
+}
 static uint32_t advanced,enqueued;
 static SparkStatus enqueue_status;
 static SparkTpDeviceCollective *observed_collective;

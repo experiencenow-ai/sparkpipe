@@ -117,7 +117,8 @@ static __global__ void SparkGlm5NextHeadMaxlocUnpackKernel(
 	uint32_t row;
 	row = blockIdx.x * blockDim.x + threadIdx.x;
 	if ( row < row_count )
-		token_ids[row] = UINT32_MAX - (uint32_t)maxloc[row];
+		token_ids[row] = maxloc[row] == UINT64_MAX ? UINT32_MAX :
+			UINT32_MAX - (uint32_t)maxloc[row];
 }
 extern "C" cudaError_t SparkGlm5NextLaunchHeadMaxlocPack(cudaStream_t stream,const float *scores,const uint32_t *token_ids,uint64_t *maxloc,uint32_t row_count,uint32_t rank_offset)
 {
@@ -133,7 +134,7 @@ extern "C" cudaError_t SparkGlm5NextLaunchHeadMaxlocUnpack(cudaStream_t stream,c
 	SparkGlm5NextHeadMaxlocUnpackKernel<<<(row_count + 255u) / 256u,256u,0u,stream>>>(maxloc,token_ids,row_count);
 	return(cudaPeekAtLastError());
 }
-static uint32_t SparkGlm5NextProbeReduction(cudaStream_t stream,const uint16_t *const *ranks,uint32_t local_rank,uint32_t rows,uint32_t width)
+__attribute__((unused)) static uint32_t SparkGlm5NextProbeReduction(cudaStream_t stream,const uint16_t *const *ranks,uint32_t local_rank,uint32_t rows,uint32_t width)
 {
 	static uint32_t count = 0u;
 	uint32_t rank;

@@ -212,7 +212,3 @@ SparkStatus SparkKvLaneTransactionsFinish(
 #ifdef __cplusplus
 }
 #endif
-void SparkKvLaneTransactionsForceCleanup(
-    SparkKvLaneTransactions *transactions,
-    const uint32_t *resident_slots,
-    uint32_t lane_count);

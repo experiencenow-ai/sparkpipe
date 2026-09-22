@@ -1129,7 +1129,7 @@ cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
 {
     (void)stream;(void)round_seq;(void)bytes;
     (void)slots_per_rank;(void)error_word;
-    cuda_stub_mesh_publish_calls++;
+    (void)__sync_add_and_fetch(&cuda_stub_mesh_publish_calls,1u);
     if ( seq_cell == NULL )
         cuda_stub_mesh_publish_null_seq_cell++;
     if ( epoch_cell == NULL )
@@ -1140,9 +1140,11 @@ cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
         volatile uint64_t *ent = (volatile uint64_t *)entry;
         ent[2] = slot_index;
         ent[1] = bytes;
+        __sync_synchronize();
         *(volatile uint64_t *)slot_tail = tag;
         *(uint64_t *)round_seq = tag;
         *(uint64_t *)seq_cell = *(uint64_t *)seq_cell + 1u;
+        __sync_synchronize();
         ent[0] = tag;
     }
     return cudaSuccess;

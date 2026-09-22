@@ -1122,15 +1122,18 @@ void SparkTokenizerDestroy(
     {
         return;
     }
-    for (entry_index = 0u; entry_index < tokenizer->vocabulary_count; ++entry_index)
+    for (entry_index = 0u; tokenizer->vocabulary_entries != 0 &&
+         entry_index < tokenizer->vocabulary_count; ++entry_index)
     {
         free(tokenizer->vocabulary_entries[entry_index].text);
     }
-    for (entry_index = 0u; entry_index < tokenizer->merge_count; ++entry_index)
+    for (entry_index = 0u; tokenizer->merge_entries != 0 &&
+         entry_index < tokenizer->merge_count; ++entry_index)
     {
         free(tokenizer->merge_entries[entry_index].text);
     }
-    for (entry_index = 0u; entry_index < tokenizer->special_token_count; ++entry_index)
+    for (entry_index = 0u; tokenizer->special_tokens != 0 &&
+         entry_index < tokenizer->special_token_count; ++entry_index)
     {
         free(tokenizer->special_tokens[entry_index].text);
     }

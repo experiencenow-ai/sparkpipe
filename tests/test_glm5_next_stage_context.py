@@ -17,6 +17,26 @@ static SparkGlm5NextModuleState state;
 static uint32_t COPY_COUNT;
 static cudaError_t DRAIN_STATUS;
 
+uint32_t SparkWeightdClientAlive(const SparkWeightdClient *client)
+{
+    (void)client;
+    return(1u);
+}
+
+void SparkTpDeviceCollectiveBroadcastCancel(SparkTpDeviceCollective *collective)
+{
+    (void)collective;
+}
+
+void SparkTpDeviceCollectiveRoundStats(SparkTpDeviceCollective *collective,
+    uint64_t *count,uint64_t *elapsed,uint32_t reset)
+{
+    (void)collective;
+    (void)reset;
+    *count = 0u;
+    *elapsed = 0u;
+}
+
 cudaError_t cudaMalloc(void **pointer,size_t bytes)
 {
 	*pointer = malloc(bytes);
@@ -540,6 +560,36 @@ static void check_checkpoint_finish(uint32_t fail_copy)
 	assert(pthread_mutex_destroy(&state.kv_mutex) == 0 && unlink(path) == 0 && unlink(kv_path) == 0);
 }
 
+static void check_execution_environment(void)
+{
+	uint64_t budget = 0u;
+	const char *invalid[] = {"", "0", "-1", "18446744073709551615", "invalid"};
+	assert(unsetenv("SPARK_GLM5_NEXT_PREFETCH") == 0);
+	assert(unsetenv("SPARK_GLM5_NEXT_GRAPH_PATH") == 0);
+	assert(SparkGlm5NextConfigureExecution(&state) == SPARK_STATUS_INVALID_ARGUMENT);
+	assert(setenv("SPARK_GLM5_NEXT_GRAPH_PATH","",1) == 0);
+	assert(SparkGlm5NextConfigureExecution(&state) == SPARK_STATUS_INVALID_ARGUMENT);
+	assert(setenv("SPARK_GLM5_NEXT_GRAPH_PATH","2",1) == 0);
+	assert(SparkGlm5NextConfigureExecution(&state) == SPARK_STATUS_INVALID_ARGUMENT);
+	assert(setenv("SPARK_GLM5_NEXT_GRAPH_PATH","0",1) == 0);
+	assert(SparkGlm5NextConfigureExecution(&state) == SPARK_STATUS_OK && state.graph_path_enabled == 0u);
+	assert(setenv("SPARK_GLM5_NEXT_GRAPH_PATH","1",1) == 0);
+	assert(SparkGlm5NextConfigureExecution(&state) == SPARK_STATUS_OK && state.graph_path_enabled == 1u);
+	assert(setenv("SPARK_GLM5_NEXT_PREFETCH","1",1) == 0);
+	assert(SparkGlm5NextConfigureExecution(&state) == SPARK_STATUS_UNSUPPORTED);
+	assert(unsetenv("SPARK_GLM5_NEXT_PREFETCH") == 0);
+	assert(unsetenv("SPARK_WEIGHTD_EXPERT_POOL_BYTES") == 0);
+	assert(SparkGlm5NextExpertPoolBudget(&budget) == SPARK_STATUS_INVALID_ARGUMENT);
+	for (uint32_t index = 0u; index < sizeof(invalid) / sizeof(invalid[0]); index++)
+	{
+		assert(setenv("SPARK_WEIGHTD_EXPERT_POOL_BYTES",invalid[index],1) == 0);
+		assert(SparkGlm5NextExpertPoolBudget(&budget) == SPARK_STATUS_INVALID_ARGUMENT);
+	}
+	assert(setenv("SPARK_WEIGHTD_EXPERT_POOL_BYTES","34359738368",1) == 0);
+	assert(SparkGlm5NextExpertPoolBudget(&budget) == SPARK_STATUS_OK && budget == UINT64_C(34359738368));
+	assert(unsetenv("SPARK_WEIGHTD_EXPERT_POOL_BYTES") == 0);
+}
+
 static void check_module_reset(void)
 {
 	SparkTestKvTransactions fixture;
@@ -564,7 +614,7 @@ static void check_module_reset(void)
 	state.kda_window_layer_stride_bytes = 16u;
 	state.kda_state_pools = recurrent;
 	state.kda_window_pools = windows;
-	state.control_generation = 2u;
+	state.control_generation = UINT64_MAX - 1u;
 	assert(pthread_mutex_init(&state.kv_mutex,0) == 0);
 	request.descriptor_bytes = sizeof(request);
 	request.program_id = 1u;
@@ -579,7 +629,7 @@ static void check_module_reset(void)
 	assert(state.reset_generation == 0u && fixture.owners[0].phase == SPARK_KV_LANE_TRANSACTION_PREPARED);
 	SparkStageModuleIndexSetRelease(state.slot_states,2u,&slot,1u);
 	assert(SparkGlm5NextResidentDecodeStageAdmit(&state,&request,&decision) == SPARK_STATUS_OK && decision.accepted != 0u);
-	assert(state.reset_generation == 3u && fixture.pages.cache.live_sequence_count == 0u);
+	assert(state.reset_generation == 3u && state.control_generation == 0u && fixture.pages.cache.live_sequence_count == 0u);
 	for (index=0u; index<sizeof(recurrent); index++)
 		assert(recurrent[index] == 0u);
 	for (index=0u; index<sizeof(windows); index++)
@@ -587,7 +637,11 @@ static void check_module_reset(void)
 	for (index=0u; index<16u; index++)
 		assert(shadow[index] == UINT32_MAX);
 	assert(SparkGlm5NextResidentDecodeStageAdmit(&state,&request,&decision) == SPARK_STATUS_VALIDATION_FAILED);
+	assert(SparkGlm5NextAdmissionPredicate(&state,&fixture.request,&decision) == SPARK_STATUS_OK);
+	assert(state.control_generation == fixture.request.control_generation);
+	fixture.request.control_generation = UINT64_MAX - 2u;
 	assert(SparkGlm5NextAdmissionPredicate(&state,&fixture.request,&decision) == SPARK_STATUS_VALIDATION_FAILED);
+	assert(state.control_generation != fixture.request.control_generation);
 	request.control_generation = 4u;
 	DRAIN_STATUS = cudaErrorInvalidValue;
 	assert(SparkGlm5NextResidentDecodeStageAdmit(&state,&request,&decision) == SPARK_STATUS_PENDING);
@@ -720,6 +774,7 @@ int32_t main(void)
 	check_checkpoint_finish(0u);
 	check_checkpoint_finish(1u);
 	check_module_reset();
+	check_execution_environment();
 	check_small_kv();
 	if ( check_rank_state() != 0 )
 		return(3);

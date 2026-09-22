@@ -1130,7 +1130,7 @@ int main(int argc, char **argv)
 		{
 			char actual_sha256[SPARK_SHA256_HEX_BYTES];
 			uint32_t mismatch = 0u;
-			if (Sidecar.tokenizer.vocabulary_count != dep.tokenizer_vocabulary_size)
+			if ((uint64_t)Sidecar.tokenizer.maximum_token_id + 1u != dep.tokenizer_vocabulary_size)
 				mismatch |= 1u;
 			if (SparkSha256File(asset_path, actual_sha256) != SPARK_STATUS_OK ||
 				strcmp(actual_sha256, dep.tokenizer_asset_sha256) != 0)
@@ -1138,20 +1138,20 @@ int main(int argc, char **argv)
 			if (mismatch != 0u)
 			{
 				fprintf(stderr, "model_api: tokenizer asset %s does not match the "
-					"deployment (%s%s): declared vocab=%u sha256=%s, actual vocab=%u; "
+					"deployment (%s%s): declared vocab=%u sha256=%s, actual vocab=%llu; "
 					"refusing to start\n",
 					asset_path,
 					(mismatch & 1u) != 0u ? "vocabulary_size " : "",
 					(mismatch & 2u) != 0u ? "sha256" : "",
 					dep.tokenizer_vocabulary_size, dep.tokenizer_asset_sha256,
-					Sidecar.tokenizer.vocabulary_count);
+					(unsigned long long)Sidecar.tokenizer.maximum_token_id + 1ull);
 				return 1;
 			}
 		}
 		HaveSidecar = 1;
 		fprintf(stderr, "model_api: tokenizer sidecar ready format=%u "
-			"vocab=%u asset=%s\n", Sidecar.format,
-			Sidecar.tokenizer.vocabulary_count, asset_path);
+			"vocab=%llu asset=%s\n", Sidecar.format,
+			(unsigned long long)Sidecar.tokenizer.maximum_token_id + 1ull, asset_path);
 	}
 	else
 		fprintf(stderr, "model_api: no tokenizer in deployment; text prompts "

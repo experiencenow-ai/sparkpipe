@@ -68,6 +68,7 @@ typedef struct TestDsv4ServingDriver
 	uint32_t cuda_graph_count;
 	uint64_t submitted_count;
 	uint64_t completed_count;
+	uint64_t reset_generation;
 	TestDsv4ServingCacheAdmission cache_admissions[
 		SPARK_DSV4_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
 } TestDsv4ServingDriver;
@@ -267,6 +268,17 @@ static SparkStatus TestDsv4ServingDriverAdmit(
 	if ( driver == 0 || request == 0 || decision == 0 ||
 		SparkModelDriverAdmissionRequestIsValid(request) == 0u )
 		return(SPARK_STATUS_INVALID_ARGUMENT);
+	if ( request->admission_flags == SPARK_MODEL_DRIVER_ADMISSION_FLAG_RESET )
+	{
+		if ( request->control_generation <= driver->reset_generation )
+			return(SPARK_STATUS_VALIDATION_FAILED);
+		if ( driver->submitted_count != driver->completed_count )
+			return(SPARK_STATUS_BUSY);
+		memset(driver->cache_admissions,0,sizeof(driver->cache_admissions));
+		driver->reset_generation = request->control_generation;
+		TestDsv4ServingAcceptAdmission(decision);
+		return(SPARK_STATUS_OK);
+	}
 	release = (request->frame_flags &
 		SPARK_MODEL_DRIVER_FRAME_FLAG_CACHE_RELEASE) != 0u ? 1u : 0u;
 	if ( release != 0u )

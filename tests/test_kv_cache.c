@@ -1633,6 +1633,8 @@ static void SparkTestKvResetTransactions(void)
 	assert(SparkKvLaneTransactionsAdmit(&fixture.transactions,&fixture.request) == SPARK_STATUS_OK);
 	frame = SparkTestKvTransactionFrame(&fixture.request);
 	assert(SparkKvLaneTransactionsClaim(&fixture.transactions,&frame) == SPARK_STATUS_OK);
+	assert(SparkKvLaneTransactionsReset(&fixture.transactions) == SPARK_STATUS_BUSY);
+	assert(SparkKvLaneTransactionsFinish(&fixture.transactions,(uint32_t[]){0u,1u},2u,SPARK_STATUS_IO_ERROR,0u) == SPARK_STATUS_IO_ERROR);
 	assert(SparkKvLaneTransactionsReset(&fixture.transactions) == SPARK_STATUS_OK);
 	for (index=0u; index<2u; index++)
 	{

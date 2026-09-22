@@ -11,7 +11,6 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <dirent.h>
 
 #include "sparkpipe/spark_status.h"
 #include "sparkpipe/spark_weightd.h"
@@ -99,113 +98,22 @@ static int SparkWeightdLatchBind(uint16_t port)
     return(fd);
 }
 
-static int SparkWeightdLatchHolderAlive(uint16_t port)
-{
-    struct sockaddr_in address;
-    int fd = socket(AF_INET,SOCK_STREAM,0);
-    int alive;
-    if ( fd < 0 )
-        return(0);
-    memset(&address,0,sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = htons(port);
-    alive = connect(fd,(const struct sockaddr *)&address,sizeof(address)) == 0 ? 1 : 0;
-    (void)close(fd);
-    return(alive);
-}
-
-static void SparkWeightdLatchKillHolder(uint16_t port)
-{
-    char line[512];
-    char path[256];
-    FILE *table = fopen("/proc/net/tcp","r");
-    DIR *procs;
-    struct dirent *entry;
-    if ( table == 0 )
-        return;
-    while ( fgets(line,sizeof(line),table) != 0 )
-    {
-        unsigned long inode = 0ul;
-        char state[4] = {0};
-        char local[32] = {0};
-        if ( sscanf(line,"%*s %31s %*s %3s %*s %*s %*s %*s %*s %lu",
-                local,state,&inode) < 3 || inode == 0ul )
-            continue;
-        {
-            const char *port_text = strrchr(local,':');
-            unsigned long listen_port = port_text != 0 ?
-                strtoul(port_text + 1u,0,16) : 0ul;
-            if ( listen_port != (unsigned long)port || strcmp(state,"0A") != 0 )
-                continue;
-        }
-        procs = opendir("/proc");
-        if ( procs == 0 )
-            break;
-        while ( (entry = readdir(procs)) != 0 )
-        {
-            char link_target[192];
-            int probe_fd;
-            pid_t victim;
-            if ( entry->d_name[0] < '0' || entry->d_name[0] > '9' )
-                continue;
-            snprintf(path,sizeof(path),"/proc/%.16s/fd/%lu",entry->d_name,inode);
-            probe_fd = open(path,O_RDONLY);
-            if ( probe_fd < 0 )
-                continue;
-            if ( readlink(path,link_target,sizeof(link_target) - 1u) > 0 &&
-                 strncmp(link_target,"socket:[",8u) == 0 )
-            {
-                char exe[128];
-                char exe_path[160];
-                victim = (pid_t)strtol(entry->d_name,0,10);
-                snprintf(exe_path,sizeof(exe_path),"/proc/%d/exe",victim);
-                if ( readlink(exe_path,exe,sizeof(exe) - 1u) > 0 &&
-                     strstr(exe,"sparkpipe_weightd") != 0 )
-                {
-                    fprintf(stderr,
-                        "weightd latch: port %u held by wedged pid %d (%s); killing\n",
-                        (unsigned)port,(int)victim,exe);
-                    (void)kill(victim,SIGKILL);
-                }
-            }
-            (void)close(probe_fd);
-        }
-        closedir(procs);
-    }
-    fclose(table);
-}
-
 static int SparkWeightdLatchAcquire(uint16_t port)
 {
-    uint32_t attempt;
     if ( port == 0u )
-        return(1);
-    for ( attempt = 0u; attempt < 8u; attempt++ )
     {
-        spark_weightd_latch_fd = SparkWeightdLatchBind(port);
-        if ( spark_weightd_latch_fd >= 0 )
-        {
-            fprintf(stderr,"weightd latch: acquired port %u\n",(unsigned)port);
-            return(1);
-        }
-        if ( SparkWeightdLatchHolderAlive(port) )
-        {
-            fprintf(stderr,
-                "weightd latch: port %u held by a live weightd; exiting 0 (idempotent)\n",
-                (unsigned)port);
-            return(0);
-        }
-        fprintf(stderr,
-            "weightd latch: port %u busy but unresponsive; hunting the holder\n",
-            (unsigned)port);
-        SparkWeightdLatchKillHolder(port);
-        sleep(1);
+        fprintf(stderr,"weightd latch: port must be nonzero\n");
+        return(-1);
     }
-    fprintf(stderr,
-        "weightd latch: cannot acquire port %u and no holder to correct; failing loudly\n",
-        (unsigned)port);
-    return(-1);
+    spark_weightd_latch_fd = SparkWeightdLatchBind(port);
+    if ( spark_weightd_latch_fd < 0 )
+    {
+        fprintf(stderr,"weightd latch: cannot own port %u: %s; existing owner untouched\n",
+            (unsigned)port,strerror(errno));
+        return(-1);
+    }
+    fprintf(stderr,"weightd latch: acquired port %u\n",(unsigned)port);
+    return(1);
 }
 
 int main(int argument_count, char **arguments)
@@ -404,11 +312,21 @@ int main(int argument_count, char **arguments)
         uint16_t latch_port = SPARK_WEIGHTD_LATCH_PORT_DEFAULT;
         const char *latch_env = getenv("SPARK_WEIGHTD_LATCH_PORT");
         int latch;
-        if ( latch_env != 0 && latch_env[0] != '\0' )
-            latch_port = (uint16_t)strtoul(latch_env,0,10);
+        if ( latch_env != 0 )
+        {
+            char *end;
+            unsigned long value;
+            errno = 0;
+            value = strtoul(latch_env,&end,10);
+            if ( errno != 0 || end == latch_env || *end != '\0' ||
+                 latch_env[0] == '-' || value == 0ul || value > UINT16_MAX )
+            {
+                fprintf(stderr,"weightd: invalid SPARK_WEIGHTD_LATCH_PORT\n");
+                return 2;
+            }
+            latch_port = (uint16_t)value;
+        }
         latch = SparkWeightdLatchAcquire(latch_port);
-        if ( latch == 0 )
-            return 0;
         if ( latch < 0 )
             return 1;
     }

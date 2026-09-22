@@ -84,7 +84,6 @@ __global__ void SparkGlm5NextMeshGuardKernel(
 	if ( *error_word != 0ull )
 	{
 		output[0] = 0xFFFFFFFFFFFFFFFFull;
-		*error_word = 0ull;
 		printf("MESH-GUARD-POISON\\n");
 	}
 }
@@ -100,7 +99,8 @@ __global__ void SparkGlm5NextMeshWaitKernel(
     unsigned long long deadline_ns,
     unsigned long long *diag_word,
     volatile uint64_t *cancel_cell,
-    const unsigned long long *cancel_expected)
+    const unsigned long long *cancel_expected,
+    unsigned long long *arrival_ring)
 {
 	uint32_t peer;
 	volatile uint64_t *end_word;
@@ -148,7 +148,7 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 					return;
 				}
 				spins++;
-				if ( (spins & 4095ull) == 0ull &&
+				if ( (spins & 255ull) == 0ull &&
 				     ( spins >= spin_cap ||
 				       SparkGlm5NextGlobalTimerNs() >= stop_at ) )
 				{
@@ -164,10 +164,11 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 					atomicExch((unsigned long long *)error_word,sequence);
 					return;
 				}
-				__nanosleep(200u);
 			}
 		}
 	}
+	if ( arrival_ring != 0 && threadIdx.x == 0u && blockIdx.x == 0u )
+		arrival_ring[sequence & 255ull] = SparkGlm5NextGlobalTimerNs();
 }
 
 
@@ -625,7 +626,8 @@ extern "C" cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
     volatile void *band_base,uint64_t slot_bytes,const void *round_seq,
     uint64_t slots_per_rank,uint32_t rank,uint32_t degree,
     void *error_word,unsigned long long deadline_ns,void *diag_word,
-    volatile void *cancel_cell,const void *cancel_expected)
+    volatile void *cancel_cell,const void *cancel_expected,
+    void *arrival_ring)
 {
 	SparkGlm5NextMeshWaitKernel<<<1,32,0u,stream>>>(
 		(volatile uint64_t *)band_base,slot_bytes,
@@ -633,7 +635,8 @@ extern "C" cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
 		degree,(unsigned long long *)error_word,deadline_ns,
 		(unsigned long long *)diag_word,
 		(volatile uint64_t *)cancel_cell,
-		(const unsigned long long *)cancel_expected);
+		(const unsigned long long *)cancel_expected,
+		(unsigned long long *)arrival_ring);
 	return cudaPeekAtLastError();
 }
 

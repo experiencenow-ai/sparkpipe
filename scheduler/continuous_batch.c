@@ -265,7 +265,7 @@ SparkStatus SparkContinuousBatchOffer(
 	const SparkContinuousBatchRequest *offer,
 	SparkContinuousBatchDecision *decision_out)
 {
-	SparkContinuousBatchDecision decision;
+	SparkContinuousBatchDecision decision = {0};
 	uint32_t reason,eligible_ahead;
 	if ( controller == 0 || offer == 0 || decision_out == 0 )
 		return(SPARK_STATUS_INVALID_ARGUMENT);

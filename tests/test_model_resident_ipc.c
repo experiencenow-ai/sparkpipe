@@ -51,13 +51,18 @@ static void TestHello(void)
 	limits.resident_sequence_capacity = 64u;
 	limits.kv_logical_page_capacity = 256u;
 	limits.kv_physical_page_capacity = 8u;
-	assert(SparkModelResidentIpcInitializeHello(&hello,7u,1u,1u,&descriptor) == SPARK_STATUS_OK);
+	assert(SparkModelResidentIpcInitializeHello(&hello,7u,1u,1u,0x1234u,&descriptor) == SPARK_STATUS_OK);
+	assert(hello.session_epoch == 0x1234u);
 	assert(SparkModelResidentIpcValidateHello(&hello,sizeof(hello),1u,1u,&descriptor) == SPARK_STATUS_OK);
 	hello.model_revision[0] = 'x';
 	assert(SparkModelResidentIpcValidateHello(&hello,sizeof(hello),1u,1u,&descriptor) == SPARK_STATUS_TARGET_MISMATCH);
+	hello.model_revision[0] = '\0';
+	hello.session_epoch = 0u;
+	assert(SparkModelResidentIpcValidateHello(&hello,sizeof(hello),1u,1u,&descriptor) == SPARK_STATUS_TARGET_MISMATCH);
+	hello.session_epoch = 0x1234u;
 	assert(SparkModelResidentIpcInitializeHelloAck(&ack,7u,SPARK_STATUS_OK,1u,
-		1u,13u,&descriptor,&limits) == SPARK_STATUS_OK);
-	assert(SparkModelResidentIpcValidateHelloAck(&ack,sizeof(ack),7u,1u,1u,&descriptor,&limits) == SPARK_STATUS_OK);
+		1u,13u,0x1234u,&descriptor,&limits) == SPARK_STATUS_OK);
+	assert(SparkModelResidentIpcValidateHelloAck(&ack,sizeof(ack),7u,1u,1u,0x1234u,&descriptor,&limits) == SPARK_STATUS_OK);
 	assert(ack.header.kind == SPARK_MODEL_RESIDENT_IPC_KIND_HELLO_ACK);
 	assert(ack.client_generation == 13u);
 	assert(ack.max_inflight_submission_count == 2u);
@@ -74,7 +79,7 @@ static void TestHello(void)
 	assert(ack.input_sideband_bytes_per_sequence == 8192u);
 	assert(ack.output_sideband_kind == 0u);
 	ack.boundary_element_count++;
-	assert(SparkModelResidentIpcValidateHelloAck(&ack,sizeof(ack),7u,1u,1u,&descriptor,&limits) == SPARK_STATUS_TARGET_MISMATCH);
+	assert(SparkModelResidentIpcValidateHelloAck(&ack,sizeof(ack),7u,1u,1u,0x1234u,&descriptor,&limits) == SPARK_STATUS_TARGET_MISMATCH);
 }
 
 static void TestSubmitResult(void)

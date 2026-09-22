@@ -97,11 +97,12 @@ SparkStatus SparkModelResidentIpcInitializeHello(
 	uint64_t message_id,
 	uint32_t rank_index,
 	uint32_t stage_index,
+	uint64_t session_epoch,
 	const SparkModelServingAdapterDescriptor *descriptor)
 {
 	SparkStatus status;
 	status = SparkModelServingAdapterValidateDescriptor(descriptor);
-	if ( hello == 0 || message_id == 0u )
+	if ( hello == 0 || message_id == 0u || session_epoch == 0u )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	if ( status != SPARK_STATUS_OK )
 		SPARK_RETURN(status);
@@ -109,6 +110,7 @@ SparkStatus SparkModelResidentIpcInitializeHello(
 	SparkModelResidentIpcInitializeHeader(&hello->header,SPARK_MODEL_RESIDENT_IPC_KIND_HELLO,SPARK_MODEL_RESIDENT_IPC_HELLO_BYTES,SPARK_MODEL_RESIDENT_IPC_HELLO_BYTES,message_id);
 	hello->rank_index = rank_index;
 	hello->stage_index = stage_index;
+	hello->session_epoch = session_epoch;
 	status = SparkModelResidentIpcCopyText(hello->adapter_id,sizeof(hello->adapter_id),descriptor->adapter_id);
 	if ( status == SPARK_STATUS_OK )
 		status = SparkModelResidentIpcCopyText(hello->model_id,sizeof(hello->model_id),descriptor->model_id);
@@ -133,7 +135,7 @@ SparkStatus SparkModelResidentIpcValidateHello(
 	status = SparkModelServingAdapterValidateDescriptor(descriptor);
 	if ( status != SPARK_STATUS_OK )
 		SPARK_RETURN(status);
-	if ( hello->rank_index != rank_index || hello->stage_index != stage_index || SparkModelResidentIpcTextMatches(hello->adapter_id,sizeof(hello->adapter_id),descriptor->adapter_id) == 0u || SparkModelResidentIpcTextMatches(hello->model_id,sizeof(hello->model_id),descriptor->model_id) == 0u || SparkModelResidentIpcTextMatches(hello->model_revision,sizeof(hello->model_revision),descriptor->model_revision) == 0u || SparkModelResidentIpcTextMatches(hello->artifact_sha256,sizeof(hello->artifact_sha256),descriptor->artifact_sha256) == 0u )
+	if ( hello->rank_index != rank_index || hello->stage_index != stage_index || hello->session_epoch == 0u || SparkModelResidentIpcTextMatches(hello->adapter_id,sizeof(hello->adapter_id),descriptor->adapter_id) == 0u || SparkModelResidentIpcTextMatches(hello->model_id,sizeof(hello->model_id),descriptor->model_id) == 0u || SparkModelResidentIpcTextMatches(hello->model_revision,sizeof(hello->model_revision),descriptor->model_revision) == 0u || SparkModelResidentIpcTextMatches(hello->artifact_sha256,sizeof(hello->artifact_sha256),descriptor->artifact_sha256) == 0u )
 		SPARK_FAIL(SPARK_STATUS_TARGET_MISMATCH);
 	return(SPARK_STATUS_OK);
 }
@@ -145,6 +147,7 @@ SparkStatus SparkModelResidentIpcInitializeHelloAck(
 	uint32_t rank_index,
 	uint32_t stage_index,
 	uint64_t client_generation,
+	uint64_t session_epoch,
 	const SparkModelServingAdapterDescriptor *descriptor,
 	const SparkModelServingRuntimeLimits *runtime_limits)
 {
@@ -176,6 +179,7 @@ SparkStatus SparkModelResidentIpcInitializeHelloAck(
 	SparkModelResidentIpcInitializeHeader(&ack->header,SPARK_MODEL_RESIDENT_IPC_KIND_HELLO_ACK,SPARK_MODEL_RESIDENT_IPC_HELLO_ACK_BYTES,SPARK_MODEL_RESIDENT_IPC_HELLO_ACK_BYTES,message_id);
 	ack->status = (uint32_t)status;
 	ack->client_generation = client_generation;
+	ack->session_epoch = session_epoch;
 	ack->rank_index = rank_index;
 	ack->stage_index = stage_index;
 	ack->adapter_capability_flags = descriptor->capability_flags;
@@ -217,6 +221,7 @@ SparkStatus SparkModelResidentIpcValidateHelloAck(
 	uint64_t message_id,
 	uint32_t rank_index,
 	uint32_t stage_index,
+	uint64_t session_epoch,
 	const SparkModelServingAdapterDescriptor *descriptor,
 	const SparkModelServingRuntimeLimits *runtime_limits)
 {
@@ -234,7 +239,7 @@ SparkStatus SparkModelResidentIpcValidateHelloAck(
 			(unsigned)descriptor->stage_count);
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	}
-	if ( ack->status > SPARK_STATUS_UNSUPPORTED || ack->client_generation == 0u || ack->header.message_id != message_id || ack->rank_index != rank_index || ack->stage_index != stage_index || ack->adapter_capability_flags != descriptor->capability_flags || ack->max_inflight_submission_count != runtime_limits->max_inflight_submission_count || ack->max_active_sequence_count != runtime_limits->max_active_sequence_count || ack->max_input_row_count != runtime_limits->max_input_row_count || ack->resident_sequence_capacity != runtime_limits->resident_sequence_capacity || ack->kv_logical_page_capacity != runtime_limits->kv_logical_page_capacity || ack->kv_physical_page_capacity != runtime_limits->kv_physical_page_capacity || ack->boundary_format != descriptor->boundary_format || ack->boundary_element_count != descriptor->boundary_element_count || ack->boundary_element_bytes != descriptor->boundary_element_bytes || ack->linear_weight_codec != descriptor->linear_weight_codec || ack->expert_weight_codec != descriptor->expert_weight_codec || ack->kv_cache_codec != descriptor->kv_cache_codec )
+	if ( ack->status > SPARK_STATUS_UNSUPPORTED || ack->client_generation == 0u || ack->session_epoch != session_epoch || ack->header.message_id != message_id || ack->rank_index != rank_index || ack->stage_index != stage_index || ack->adapter_capability_flags != descriptor->capability_flags || ack->max_inflight_submission_count != runtime_limits->max_inflight_submission_count || ack->max_active_sequence_count != runtime_limits->max_active_sequence_count || ack->max_input_row_count != runtime_limits->max_input_row_count || ack->resident_sequence_capacity != runtime_limits->resident_sequence_capacity || ack->kv_logical_page_capacity != runtime_limits->kv_logical_page_capacity || ack->kv_physical_page_capacity != runtime_limits->kv_physical_page_capacity || ack->boundary_format != descriptor->boundary_format || ack->boundary_element_count != descriptor->boundary_element_count || ack->boundary_element_bytes != descriptor->boundary_element_bytes || ack->linear_weight_codec != descriptor->linear_weight_codec || ack->expert_weight_codec != descriptor->expert_weight_codec || ack->kv_cache_codec != descriptor->kv_cache_codec )
 		SPARK_FAIL(SPARK_STATUS_TARGET_MISMATCH);
 	if ( ack->input_sideband_kind != (stage_index != 0u ? descriptor->boundary_sideband_kinds[stage_index - 1u] : 0u) || ack->input_sideband_bytes_per_sequence != (stage_index != 0u ? descriptor->boundary_sideband_bytes_per_sequence[stage_index - 1u] : 0u) || ack->output_sideband_kind != (stage_index + 1u < descriptor->stage_count ? descriptor->boundary_sideband_kinds[stage_index] : 0u) || ack->output_sideband_bytes_per_sequence != (stage_index + 1u < descriptor->stage_count ? descriptor->boundary_sideband_bytes_per_sequence[stage_index] : 0u) )
 		SPARK_FAIL(SPARK_STATUS_TARGET_MISMATCH);

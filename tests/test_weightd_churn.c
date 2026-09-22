@@ -280,13 +280,14 @@ static void check_midbake_death(const char *socket_path,const char *path)
 
 int main(void)
 {
-	char root[] = "/tmp/weightd-churn-XXXXXX",path[256],manifest[272],socket_path[256];
+	char root[] = "/tmp/weightd-churn-XXXXXX",path[256],manifest[272],recording[272],socket_path[256];
 	TestServer state = {0};
 	SparkWeightdServerConfig config = {0};
 	pthread_t thread;
 	assert(mkdtemp(root) != 0);
 	snprintf(path,sizeof(path),"%s/pack",root);
 	snprintf(manifest,sizeof(manifest),"%s.experts",path);
+	snprintf(recording,sizeof(recording),"%s.wset",path);
 	snprintf(socket_path,sizeof(socket_path),"%s/socket",root);
 	write_fixture(path,manifest);
 	config.socket_path = socket_path;
@@ -300,7 +301,7 @@ int main(void)
 	SparkWeightdServerDestroy(state.server);
 	CHECK( spark_stub_cuda_outstanding_allocs() == 0u,
 		"no allocations leak across the whole churn run");
-	assert(unlink(manifest) == 0 && unlink(path) == 0 && rmdir(root) == 0);
+	assert(unlink(recording) == 0 && unlink(manifest) == 0 && unlink(path) == 0 && rmdir(root) == 0);
 	fprintf(stderr,"test_weightd_churn: %s\n",
 		test_failures == 0u ? "PASS" : "FAILED");
 	return( test_failures != 0u ? 1 : 0 );

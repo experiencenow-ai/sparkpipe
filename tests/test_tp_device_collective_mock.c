@@ -176,6 +176,7 @@ int main(void)
 		submission.descriptor_bytes = sizeof(submission);
 		submission.slot_index = 0u;
 		submission.active_sequence_count = 2u;
+		submission.logical_sequence_count = 2u;
 		submission.ordinal = 1u;
 		submission.local_device = device_scratch;
 		submission.full_device = device_scratch;

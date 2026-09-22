@@ -296,6 +296,110 @@ static void check_transaction(SparkWeightdClient *client,uint64_t generation,uin
 	release(client,generation,result.lease_identifier);
 }
 
+static uint64_t working_set_seed = 7u;
+static uint32_t working_set_rounds = 300u;
+
+static void check_seeded_leases(SparkWeightdClient *a,SparkWeightdClient *b,uint64_t generation,uint64_t base)
+{
+    struct { uint64_t id; uint32_t owner,expert; } leases[16] = {{0}};
+    SparkWeightdClient *clients[2] = {a,b};
+    SparkWeightdWorkingSetResult result;
+    SparkWeightdExpertKey keys[3];
+    uint64_t random = working_set_seed,stale = UINT64_MAX;
+    uint32_t step,slot,i,owner,expert,mask,operation,coverage[7] = {0};
+    SparkStatus expected,actual;
+    for (step=0u; step<working_set_rounds + 7u; step++)
+    {
+        random = random * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
+        slot = (uint32_t)((random >> 17u) % 16u);
+        owner = (uint32_t)((random >> 27u) & 1u);
+        expert = (uint32_t)((random >> 32u) % 3u);
+        operation = step < 7u ? step : (uint32_t)((random >> 39u) % 7u);
+        if ( step < 3u )
+        {
+            slot = step == 1u ? 1u : 0u;
+            owner = 0u;
+            expert = step == 1u ? 1u : 0u;
+        }
+        if ( operation == 2u && leases[slot].id == 0u ) operation = 6u;
+        coverage[operation]++;
+        mask = 0u;
+        for (i=0u; i<16u; i++)
+            if ( leases[i].id != 0u ) mask |= leases[i].expert < 2u ? 3u : 4u;
+        if ( operation == 0u || operation == 1u )
+        {
+            if ( leases[slot].id != 0u )
+            {
+                release(clients[leases[slot].owner],generation,leases[slot].id);
+                stale = leases[slot].id;
+                leases[slot].id = 0u;
+                mask = 0u;
+                for (i=0u; i<16u; i++)
+                    if ( leases[i].id != 0u ) mask |= leases[i].expert < 2u ? 3u : 4u;
+            }
+            keys[0] = (SparkWeightdExpertKey){0u,expert};
+            keys[1] = keys[0];
+            keys[2] = keys[0];
+            expected = (mask | (expert < 2u ? 3u : 4u)) == 7u ? SPARK_STATUS_CAPACITY_EXCEEDED : SPARK_STATUS_OK;
+            actual = SparkWeightdClientAcquire(clients[owner],generation,keys,operation == 0u ? 1u : 3u,&result,TIMEOUT);
+            if ( actual != expected )
+                fprintf(stderr,"working-set seed=%llu step=%u op=%u pinned=%u expert=%u expected=%u actual=%u\n",(unsigned long long)working_set_seed,step,operation,mask,expert,(unsigned)expected,(unsigned)actual);
+            assert(actual == expected && result.status == expected);
+            assert((result.lease_identifier != 0u) == (expected == SPARK_STATUS_OK));
+            if ( actual == SPARK_STATUS_OK )
+            {
+                leases[slot].id = result.lease_identifier;
+                leases[slot].owner = owner;
+                leases[slot].expert = expert;
+            }
+        }
+        else if ( operation == 2u && leases[slot].id != 0u )
+        {
+            assert(SparkWeightdClientRelease(clients[leases[slot].owner ^ 1u],generation,leases[slot].id,&result,TIMEOUT) == SPARK_STATUS_NOT_FOUND);
+            check_export_refused(clients[leases[slot].owner ^ 1u],generation,leases[slot].id);
+        }
+        else if ( operation == 3u )
+        {
+            keys[0] = (SparkWeightdExpertKey){0u,expert};
+            assert(SparkWeightdClientAcquire(clients[owner],generation + 1u,keys,1u,&result,TIMEOUT) == SPARK_STATUS_NOT_FOUND);
+            assert(result.lease_identifier == 0u);
+        }
+        else if ( operation == 4u )
+        {
+            keys[0] = (SparkWeightdExpertKey){0u,0u};
+            keys[1] = (SparkWeightdExpertKey){0u,2u};
+            assert(SparkWeightdClientAcquire(clients[owner],generation,keys,2u,&result,TIMEOUT) == SPARK_STATUS_CAPACITY_EXCEEDED);
+            assert(result.lease_identifier == 0u);
+        }
+        else if ( operation == 5u )
+        {
+            keys[0] = (SparkWeightdExpertKey){0u,3u};
+            expected = (mask & 3u) != 0u ? SPARK_STATUS_CAPACITY_EXCEEDED : SPARK_STATUS_HASH_MISMATCH;
+            assert(SparkWeightdClientAcquire(clients[owner],generation,keys,1u,&result,TIMEOUT) == expected);
+            assert(result.lease_identifier == 0u);
+        }
+        else
+        {
+            assert(SparkWeightdClientRelease(clients[owner],generation,stale,&result,TIMEOUT) == SPARK_STATUS_NOT_FOUND);
+            check_export_refused(clients[owner],generation,stale);
+        }
+        for (i=0u; i<16u; i++)
+            if ( leases[i].id != 0u ) check_ranges(base,leases[i].expert);
+        assert(result.resident_bytes <= 4u * CHUNK);
+    }
+    for (i=0u; i<16u; i++)
+        if ( leases[i].id != 0u ) release(clients[leases[i].owner],generation,leases[i].id);
+    for (i=0u; i<7u; i++) assert(coverage[i] != 0u);
+    (void)acquire(a,generation,3u,SPARK_STATUS_HASH_MISMATCH);
+    result = acquire(a,generation,2u,SPARK_STATUS_OK);
+    check_ranges(base,2u);
+    release(a,generation,result.lease_identifier);
+    result = acquire(b,generation,0u,SPARK_STATUS_OK);
+    check_ranges(base,0u);
+    release(b,generation,result.lease_identifier);
+    printf("PASS working-set lifecycle seed=%llu rounds=%u cases=7\n",(unsigned long long)working_set_seed,working_set_rounds);
+}
+
 static void check_map_lifetime(SparkWeightdClient *client,uint64_t generation,uint64_t daemon_base)
 {
 	SparkWeightdLazyAttachResult attached = {0};
@@ -379,7 +483,7 @@ static void check_orphan(SparkWeightdClient *a,uint64_t generation,uint64_t base
 
 static void check_many_exports(void)
 {
-	char root[] = "/tmp/weightd-many-XXXXXX",path[256],manifest[272],socket_path[256];
+	char root[] = "/tmp/weightd-many-XXXXXX",path[256],manifest[272],socket_path[256],wset[272];
 	TestServer state = {0};
 	SparkWeightdServerConfig config = {0};
 	SparkWeightdClient *client;
@@ -392,6 +496,7 @@ static void check_many_exports(void)
 	assert(mkdtemp(root) != 0);
 	snprintf(path,sizeof(path),"%s/pack",root);
 	snprintf(manifest,sizeof(manifest),"%s.experts",path);
+	snprintf(wset,sizeof(wset),"%s.wset",path);
 	snprintf(socket_path,sizeof(socket_path),"%s/socket",root);
 	write_many(path,manifest);
 	config.socket_path = socket_path;
@@ -421,12 +526,12 @@ static void check_many_exports(void)
 	assert(pthread_join(thread,0) == 0);
 	SparkWeightdServerDestroy(state.server);
 	assert(spark_stub_cuda_outstanding_allocs() == 0u);
-	assert(unlink(manifest) == 0 && unlink(path) == 0 && rmdir(root) == 0);
+	assert(unlink(manifest) == 0 && unlink(path) == 0 && unlink(wset) == 0 && rmdir(root) == 0);
 }
 
 static void check_pooled_attach(void)
 {
-	char root[] = "/tmp/weightd-pool-XXXXXX",path[256],manifest[272],socket_path[256];
+	char root[] = "/tmp/weightd-pool-XXXXXX",path[256],manifest[272],socket_path[256],wset[272];
 	SparkWeightdServerConfig config = {0};
 	SparkWeightdLazyAttachRequest request = {0};
 	SparkWeightdLazyAttachResult result;
@@ -441,6 +546,7 @@ static void check_pooled_attach(void)
 	assert(mkdtemp(root) != 0);
 	snprintf(path,sizeof(path),"%s/pack",root);
 	snprintf(manifest,sizeof(manifest),"%s.experts",path);
+	snprintf(wset,sizeof(wset),"%s.wset",path);
 	snprintf(socket_path,sizeof(socket_path),"%s/socket",root);
 	write_many(path,manifest);
 	config.socket_path = socket_path;
@@ -478,7 +584,7 @@ static void check_pooled_attach(void)
 	assert(pthread_join(thread,0) == 0);
 	SparkWeightdServerDestroy(state.server);
 	assert(spark_stub_cuda_outstanding_allocs() == 0u);
-	assert(unlink(manifest) == 0 && unlink(path) == 0 && rmdir(root) == 0);
+	assert(unlink(manifest) == 0 && unlink(path) == 0 && unlink(wset) == 0 && rmdir(root) == 0);
 }
 
 static SparkStatus reject_manifest(const SparkWeightdManifest *manifest,void *context)
@@ -553,17 +659,51 @@ static void check_lazy_pack(const char *socket_path,const char *path,const char 
 	assert(SparkWeightdLazyPackDestroy(pack) == SPARK_STATUS_OK);
 }
 
-int main(void)
+static void check_budget_contract(SparkWeightdClient *client,const char *path)
 {
-	char root[] = "/tmp/weightd-set-XXXXXX",path[256],manifest[272],socket_path[256];
+	SparkWeightdLazyAttachRequest request = {0};
+	SparkWeightdLazyAttachResult result;
+	SparkWeightdDetachResult detached;
+	request.identity.abi_version = SPARK_WEIGHTD_IPC_ABI_VERSION;
+	request.identity.arena_bytes = PACK_BYTES;
+	memcpy(request.identity.model,"working-set-test",17u);
+	memset(request.identity.pack_sha256,'a',64u);
+	snprintf(request.pack_path,sizeof(request.pack_path),"%s",path);
+	request.expert_pool_bytes = UINT64_MAX;
+	assert(SparkWeightdClientAttachLazy(client,&request,&result,TIMEOUT) == SPARK_STATUS_INVALID_ARGUMENT);
+	assert(result.arena_count == 0u);
+	request.expert_pool_bytes = 5u * CHUNK;
+	assert(SparkWeightdClientAttachLazy(client,&request,&result,TIMEOUT) == SPARK_STATUS_INVALID_ARGUMENT);
+	assert(result.arena_count == 0u);
+	request.expert_pool_bytes = 2u * CHUNK;
+	assert(SparkWeightdClientAttachLazy(client,&request,&result,TIMEOUT) == SPARK_STATUS_OK);
+	assert(SparkWeightdClientDetach(client,result.arena_generation,&detached,TIMEOUT) == SPARK_STATUS_OK);
+	assert(detached.status == SPARK_STATUS_OK);
+	request.expert_pool_bytes = 3u * CHUNK;
+	assert(SparkWeightdClientAttachLazy(client,&request,&result,TIMEOUT) == SPARK_STATUS_INVALID_ARGUMENT);
+	request.expert_pool_bytes = CHUNK;
+	assert(SparkWeightdClientAttachLazy(client,&request,&result,TIMEOUT) == SPARK_STATUS_INVALID_ARGUMENT);
+	request.expert_pool_bytes = 2u * CHUNK;
+	assert(SparkWeightdClientAttachLazy(client,&request,&result,TIMEOUT) == SPARK_STATUS_OK);
+	assert(SparkWeightdClientDetach(client,result.arena_generation,&detached,TIMEOUT) == SPARK_STATUS_OK);
+	assert(detached.status == SPARK_STATUS_OK);
+	assert(result.expert_pool_bytes == 2u * CHUNK);
+}
+
+int main(int argc,char **argv)
+{
+	char root[] = "/tmp/weightd-set-XXXXXX",path[256],manifest[272],socket_path[256],wset[272];
 	TestServer state = {0};
 	SparkWeightdServerConfig config = {0};
 	SparkWeightdClient *a,*b;
 	pthread_t thread;
 	uint64_t generation,base,other_base;
+	if ( argc > 1 ) working_set_seed = strtoull(argv[1],0,0);
+	if ( argc > 2 ) working_set_rounds = (uint32_t)strtoul(argv[2],0,0);
 	assert(mkdtemp(root) != 0);
 	snprintf(path,sizeof(path),"%s/pack",root);
 	snprintf(manifest,sizeof(manifest),"%s.experts",path);
+	snprintf(wset,sizeof(wset),"%s.wset",path);
 	snprintf(socket_path,sizeof(socket_path),"%s/socket",root);
 	write_fixture(path,manifest);
 	check_spine_load(path,manifest);
@@ -573,10 +713,12 @@ int main(void)
 	assert(pthread_create(&thread,0,run_server,&state) == 0);
 	assert(SparkWeightdClientConnect(socket_path,&a,0) == SPARK_STATUS_OK);
 	assert(SparkWeightdClientConnect(socket_path,&b,0) == SPARK_STATUS_OK);
+	check_budget_contract(a,path);
 	generation = attach(a,path,&base);
 	assert(attach(b,path,&other_base) == generation && other_base == base);
 	check_two_clients(a,b,generation,base);
 	check_transaction(a,generation,base);
+	check_seeded_leases(a,b,generation,base);
 	check_map_lifetime(a,generation,base);
 	check_orphan(a,generation,base,socket_path,path);
 	SparkWeightdClientClose(b);
@@ -592,7 +734,7 @@ int main(void)
 	assert(pthread_join(thread,0) == 0);
 	SparkWeightdServerDestroy(state.server);
 	assert(spark_stub_cuda_outstanding_allocs() == 0u);
-	assert(unlink(manifest) == 0 && unlink(path) == 0 && rmdir(root) == 0);
+	assert(unlink(manifest) == 0 && unlink(path) == 0 && unlink(wset) == 0 && rmdir(root) == 0);
 	check_many_exports();
 	check_pooled_attach();
 	puts("PASS working-set IPC: all ranges, leases, rollback, scoped imports, 65-chunk exports and pooled single-alloc attach");

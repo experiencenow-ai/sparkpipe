@@ -1321,8 +1321,14 @@ static SparkStatus SparkGlm5NextServingProgress(
 	void *adapter_state,
 	uint32_t maximum_step_count)
 {
+	SparkGlm5NextServingState *state = adapter_state;
+	SparkModelDriverRuntimeSnapshot snapshot;
 	(void)maximum_step_count;
-	return(adapter_state != 0 ? SPARK_STATUS_OK : SPARK_STATUS_INVALID_ARGUMENT);
+	if ( state == 0 )
+		return(SPARK_STATUS_INVALID_ARGUMENT);
+	memset(&snapshot,0,sizeof(snapshot));
+	return(state->driver.interface->snapshot(state->driver_instance,
+		state->program->program_id,&snapshot));
 }
 
 static SparkStatus SparkGlm5NextServingQuiesce(

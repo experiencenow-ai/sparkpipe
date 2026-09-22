@@ -3,7 +3,7 @@
 ## GOAL (set 09-20, operator)
 **Allreduce ≤ 100µs/round MEASURED on the 16-spark fleet** (91-round chain, status=0, checksums green), starting from 1.79ms/round (the healed fleet's cold-class eager number). Every intermediate number graded MEASURED (wire-math floor check before grading); every step committed + PR'd.
 
-**Ladder:** 1790µs → <1000 → <500 → <200 → ≤100µs. Current: **1334µs/round** (S1, MEASURED: 121.41ms/91r; second chain 153.7ms/91r=1690µs — steady ~1.3-1.7ms). Chain totals now 432-518ms WARM-CLASS (weightd's expert cache survives engine recycles — fresh engines serve warm immediately; the cold cost is once per weightd boot). In-process harness floor: 1530µs.
+**Ladder:** 1790µs → <1000 → <500 → <200 → ≤100µs. Current: **386µs/round CONTENDED-era wall** (09-22: chains RUN 91 rounds under the new epoch stack; host-measured allreduce_ms=0.66 TOTAL for 91 rounds — the round path itself is sub-ms; the wall is the relay-arrival/compute cadence, unmeasured clean since the serving path is mid-repair). Best clean receipt remains 330ms/round (09-22 02:20, status=0, 2/2). Chain totals now 432-518ms WARM-CLASS (weightd's expert cache survives engine recycles — fresh engines serve warm immediately; the cold cost is once per weightd boot). In-process harness floor: 1530µs.
 
 ## Step log (append every step: what / number / verdict)
 
@@ -1432,3 +1432,1101 @@ tail-visible moment in the wait kernel via %globaltimer into diag), then
 fix the pacing class. The 77/91 stall+garbage error_word from the previous
 tick did NOT recur on the retry — cold-start-class, keep the repro in mind
 but the pacing is the throughput killer now.
+
+## 09-22 02:40 TICK — MILESTONE MERGED; PR #1077 (graph pacing) OPEN; rig-tree anomaly blocking the instrument deploy
+
+MILESTONE: #1075 MERGED to main (operator-confirmed: first complete 16-rank
+graph chain, status=0, 91 rounds; CI green after manifest regen fc9aaf9).
+New branch hillclimb/graph-pacing = main; PR #1077 open with the arrival-ring
+instrumentation (256-slot device ring, %globaltimer per wait-kernel
+completion, reset at pre-launch, one-shot ARRIVAL dump; host fuzzer 273 green).
+
+BLOCKED ON: the spark3 build tree (~/g5graphrig, an rsync-frankenstein)
+SELF-REVERTS transport source edits mid-build — the compiled tp_device .o
+lacks functions the on-disk .c demonstrably contains (file content flips
+between greps; md5-matched then different at the same line). NEXT SESSION:
+rebuild the rig tree CLEAN from origin (git clone hillclimb/graph-pacing,
+never rsync over it), then: module publish → model_compile → publish_local →
+hub → canary → the ARRIVAL gap_us distribution convicts the 330ms/round
+pacing class (relay burst handling vs __nanosleep granularity vs .cv poll
+shape).
+
+FLEET STATE: driver 79aa97f1 (the merged #1075 era), engines healthy,
+serving eager fallback + graph retries per budget; hub release = same driver
+(the instrumented push never completed - publish_local correctly refused the
+failed compile).
+
+## 09-22 03:15 TICK — clean-clone rig FIXED the build; SECOND complete chain (repeatable); ring read back zero (one debug step left)
+
+- ~/g5pacing clean-cloned from origin hillclimb/graph-pacing: the unit
+  carries the symbol, driver+adapter built clean (48f6d21c / 0afc9250),
+  deployed 16/16. THE FRANKENSTEIN-TREE ANOMALY IS DEAD — clean clones only.
+- SECOND complete graph chain: CHAIN-TIME status=0, 91 rounds, 30.43s —
+  the success is REPEATABLE (2/2 post-ld.cv boots). Canary's own request
+  hit the kv-admit 9 again (second-submit vs the 60s PREPARED lease —
+  expected behavior, first request serves).
+- ARRIVAL dump printed ZERO lines: the wait kernel's ring write is correctly
+  placed (verified in the deployed source); the dump's memcpy read the ring
+  empty = pointer identity between the CAPTURED kernel arg and the dump's
+  implementation->arrival_ring is the remaining question. NEXT: print the
+  ring pointer at ArmCapture and at dump (one-line discriminators), or
+  debug the ring standalone in the ladder graph mode (single-node, fast).
+
+## 09-22 04:05 TICK — two serving-path convictions; the arrival receipt still pending
+
+OPERATOR INPUT: the spark GPUs are otherwise IDLE — the "production co-tenant"
+theory for the ladder's 8.7ms quantum is dead; the only moving load was my own
+canary traffic + weightd's CPU spin. Re-measure the ladder on the idle GPU
+after the fleet receipt (CONTENDED grading until then).
+
+CONVICTION 1 — THE ROUTE REAPER IS LIVE (banned class): ROUTE-REAPED
+id=1000001 state=10 "stuck past 120s; completing NOT_FOUND" fired MID-RETRY
+while the graph chain degraded at 35s and the API retried — the route's
+TOTAL lifetime crossed 120s. This code compiled tonight for the first time
+(the never-compiled-boot class); the operator's ruling replaced reapers with
+minimum-fix observable state. REMOVE or gate it (state-based, not
+elapsed-time; a route with LIVE retries is not stuck).
+
+CONVICTION 2 — RANK0 CLIENT-SLOT DUEL: sparkf's fleet_release_serve.py /
+fleet_view_serve.py holds a persistent connection to rank0's residentd
+(spark0:19560); the single-client slot + takeover means the monitor and the
+API evict each other → the API's rank-0 connection drops (peer eof) →
+rank-scoped failure → api_exit after retries. This killed 3+ canaries.
+FIX DIRECTIONS: the monitor should use the residentd's status/status port
+(or poll the API's /health), not the engine client slot; or the residentd
+serves status out-of-band. ALSO: leaked APIs from cancelled ssh starts
+(setsid survives cancellation) — always verify pgrep==1 after starting.
+
+FLEET: 333af59a 16/16 (sleep-free NCCL-style spin + ARRIVAL-DUMP
+diagnostics). The last chain degraded (35s, status 17) — no success this
+boot yet, so no ARRIVAL-DUMP line. NEXT: fix the reaper + the monitor slot
+duel, then the canary → arrival receipt (the 330ms/round relay-arrival
+conviction), then the ladder idle-GPU re-measure.
+
+## 09-22 04:30 TICK — THE COLD-EXPERT GRAPH GATE (biggest conviction yet) + reaper deleted
+
+REAPER: the elapsed-time reap block DELETED from ReportStuckRoutes (the
+scanner print stays); deployed 10c91d04 16/16. The "sparkf monitor duel"
+RESOLVED as a dead client — no live sparkf connection exists; the working
+takeover evicts it on the API's next connect.
+
+THE CONVICTION (this boot's degrade): ALL 16 RANKS STUCK AT THE SAME SEQ
+with ALL TAILS MUTUALLY VISIBLE (STUCK-TAILS: every peer at (11<<32)|2
+including self) — the mesh is HEALTHY; the GPU stopped EXECUTING the
+graph's compute kernels mid-replay. First chain after boot = COLD EXPERT
+WALK: the lazy expert loads (host memcpy into the pool) cannot happen
+inside a captured graph; the layer-compute kernels stall on missing
+pages. THE 2/2 EARLIER SUCCESSES WERE SECOND CHAINS — chain1 degrades →
+eager fallback warms the experts → chain2's graph succeeds (the 330ms
+receipt!). The "garbage" error values decoded: 0xFFFFFFFF93520000|N with
+N = each rank's round count — deterministic, payload-shaped (bf16 pair),
+written by a kernel with a mis-pointed destination — likely the stuck
+compute's partial writes; secondary to the gate fix.
+
+FIX (next code change): GATE THE GRAPH PATH ON THE EXPERT COVER — the
+decode_cover bitmap machinery already exists (GraphCoverEnsure); a chain
+whose routed experts are not covered takes the eager path FIRST (which
+warms them), the graph re-arm then succeeds on the next chain. Observable
+state, minimum fix, no time basing.
+
+## 09-22 05:00 TICK — the graph gate WORKS; the cold eager walk is now the front of the queue
+
+DEPLOYED 8d032bce 16/16: the warm gate (GRAPH-GATE-COLD print; experts_warm
+set only by a completed EAGER chain). VERIFIED LIVE: the cold chain took the
+eager path first (no graph capture on cold boots).
+
+NEW FRONT: the cold EAGER chain itself = CHAIN-TIME status=15 total_ms=30001
+rounds=0 allreduce_ms=0.00 — the lazy expert acquire inside the chain times
+out at the 30s round deadline (BUSY, retryable), i.e. the KNOWN 74-280s
+cold-walk class now sits in front of every cold boot's first decode; the kv
+PREPARED lease (60s expiry) serializes each follow-up request behind it.
+This is EXACTLY handoff lever 2: FULL-PACK PREFETCH AT ATTACH (the pool
+never evicts; prefetching the pack during attach removes the walk entirely).
+
+NEXT LADDER (in order): (1) lever-2 prefetch at attach — the pool is
+preallocated and never-evicting; stream the pack into it during/after lazy
+attach on a background stream; the first chain then starts warm and the
+graph gate opens immediately; (2) the first cold-boot canary then exercises
+chain1-eager-warm → chain2-GRAPH → the ARRIVAL-DUMP receipt; (3) the
+relay-arrival conviction at 330ms/round; (4) ladder idle re-measure; (5)
+the 0x9352 payload-write mystery (secondary).
+
+## 09-22 05:30 TICK — LEVER 2 PREFETCH LIVE (42/45 layers); the hello-close storm fixed; the first-chain BUSY origin = next
+
+DEPLOYED d357a21 (driver 13d71be8 + residentd 4d97c07b) 16/16:
+- PREFETCH-AT-ATTACH RAN: PREFETCH-DONE layers=42; layers 41-44 failed
+  status=11 (the weightsd device-budget starvation class — the known
+  acquire-17/wave-6 lineage; the pool budget vs the pack's tail layers).
+- THE HELLO-CLOSE STORM FIXED: the hello handler set close_after_output=1
+  for PERSISTENT pipeline sessions — the coordinator (rank0) closed after
+  every hello → the rank-scoped reconnect storm. Flag removed (first-
+  compiled-boot bug exposed by the drain fix).
+- STILL: the first chain = status=15 30s rounds=0 — with 42/45 layers
+  resident and experts_warm set, SOMETHING ELSE returns BUSY before any
+  mesh round. NEXT: find the origin (the LAZYWORK-KEYS print names the
+  acquire; if absent, it is admission/route-level — trace the BUSY source
+  in the chain-begin path), plus the 3 budget-failed layers (raise the
+  weightd device budget for the pack tail or split the prefetch).
+
+## 09-22 06:00 TICK — the prefetch's ownership bug found (status 11 decoded)
+
+THIS BOOT: prefetch failed from layer 3 onward (ERRSITE spark_weightd_map.c:451
+status=11 on the bulk acquire) — first boot managed 42 layers (it ran with no
+concurrent chain). ROOT: the prefetch bulk-acquires ALL 288 experts per layer,
+but a TP16 rank's PACK SHARD only owns a fraction of the experts — the
+remote-owned keys fail the acquire (the not-in-target class). FIX: filter the
+prefetch keys to the experts this rank's pack actually owns (the pack sidecar
+/ manifest carries the shard layout; or acquire per-layer key subsets matching
+the same ownership the chain's RouteKeys produces). The first-chain BUSY
+origin remains entangled with the prefetch noise — re-measure with the
+ownership-filtered prefetch before digging further (a chain acquiring layers
+concurrently with a failing bulk acquire contends the same map lock/budget).
+
+Sequence note: requests 1000002-1000005 arrived during the stall (API
+retries) and 1000005 hit ADMIT9 behind 1000004's PREPARED lease — the retry
+cadence + 60s lease serialization compounds any first-chain slowness.
+
+## 09-22 06:30 TICK — RE-GRADE: status 15 = ROUTE_NOT_FOUND (not BUSY); mesh records ruled out
+
+ENUM DECODED (spark_status.h): 11 = ABI_MISMATCH (the prefetch's layer
+failures), 15 = ROUTE_NOT_FOUND (THE 30s/rounds=0 chains — re-graded, NOT
+busy!). The chain-begin 30s stall = the lazy acquire path getting
+ROUTE_NOT_FOUND from the weightsd working-set resolve for the requested
+expert chunks.
+
+WEDGE PLAYBOOK FIRST MOVE DONE: the mesh records are FRESH (16 × mesh-*.rec,
+04:25, binary rendezvous format ✓) — the mesh-record class is RULED OUT.
+
+NEXT: the weightsd-side route table for the failing expert chunks —
+(a) grep the weightsd log at acquire time for the resolve failures,
+(b) read the working-set handler's ROUTE_NOT_FOUND paths in
+    runtime/spark_weightd.c (which condition: chunk not in the registry vs
+    request-shape), (c) the prefetch's ABI_MISMATCH (status 11) at map.c:451
+    is the same acquire machinery failing differently on 288-key batches —
+    possibly one root (the request shape for large batches).
+
+## 09-22 07:00 TICK — the 30s chains = the acquire DEADLINE (mislabeled), not DNS
+
+IPv4-only connect deployed (a76b5cf4) — the 30s/rounds=0 chains PERSIST, so
+getaddrinfo was NOT the source. THE EXACT 30.001s = A DEADLINE: the chain's
+lazy acquire uses SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS (30s); when the
+weightsd cannot satisfy the working set, the acquire's deadline exit returns
+ROUTE_NOT_FOUND (a MISLABELED deadline status — the enum reading sent me to
+DNS first). STARVATION SUSPECT: the pool import (~21GB) + the prefetch's
+bulk acquires consuming the weightsd DEVICE BUDGET (the wave-6/acquire-17
+class) — the chain's acquires starve to the deadline. This boot: prefetch
+did 42 layers THEN the chain still deadline-failed = the budget stays
+consumed after the prefetch (the pool never evicts; leases released but
+device bytes accounted?).
+
+NEXT (quick unblock first): (a) defer the prefetch until AFTER the first
+eager chain completes (experts_warm via the chain; prefetch only tops up)
+— restores serving immediately; (b) label the acquire deadline exit
+honestly (DEADLINE/TIMEOUT status, loud print with the weightsd-side
+budget state); (c) the weightsd log at acquire time for the budget
+arithmetic (device_bytes_max vs pool+leases).
+
+## 09-22 07:30 TICK — prefetch deferred (theory dead); the weightsd starves the acquire SILENTLY; orphaned-lease class prime
+
+DEFERRED-PREFETCH DEPLOYED (9b004261): the prefetch now starts only after the
+first eager chain warms — YET the first chain STILL 30s-deadlines with ZERO
+prefetch running. The prefetch-poisoning theory is DEAD. The weightsd log at
+acquire time shows NO acquire/working-set activity AT ALL (only mesh CQ
+traffic) — the acquire starves SILENTLY inside the weightsd (an
+observability-law violation in its own right: no busy/no-progress logging).
+
+PRIME SUSPECT: THE ORPHANED-LEASE CLASS — tonight's MANY engine restarts each
+abandoned weightsd leases; if the lease table lacks owner-cleanup on client
+disconnect, generations of orphans exhaust it and every new acquire spins to
+the deadline. This is the 09-17 'weightd daemons accumulate state across
+lease generations' lineage (sparkf showed 214-221 maps/83-286GB vs a fresh
+daemon's 23 maps — same signature class).
+
+NEXT: (a) inspect the weightsd lease table state (its /proc footprint: maps
+count, VmSize — compare against the fresh-boot signature); (b) the owner
+cleanup path in node/weightd.c on client disconnect (does it release the
+owner's leases?); (c) if orphans convicted: fix the cleanup (owner-scoped
+release on disconnect) — NEVER restart the shared weightsd; (d) label the
+acquire deadline exit + add weightsd-side busy logging while there.
+
+ADDENDUM 07:45 — ORPHAN THEORY REFUTED: spark0's weightsd = 23 maps / 19.9MB
+VmSize = the FRESH-DAEMON signature (not the 214-221/83-286GB leak class).
+The acquire's request never elicits a weightsd response at all (clean
+daemon, no budget pressure, no orphans, silent). NEXT DISCRIMINATOR:
+trace the residentd's weightd-socket IPC during a chain (strace the
+send/recv pair) vs read the weightsd's working-set acquire handler — the
+request is either not sent (client-side early exit — check map->failure
+stickiness) or sent and lost (handler deadlock/queue). One of the two.
+
+## 09-22 08:00 TICK — resolver healthy (theory dead); the 15 = the weightsd SERVER reply; draft_bridge IPv4 hygiene
+
+RESOLVER TESTED LIVE on spark0: getent hosts = 0.00s for spark1/5/f, AAAA
+returns instantly (IPv4-mapped) — the getaddrinfo/ROUTE_NOT_FOUND theory is
+DEAD. draft_bridge.c's AF_UNSPEC fixed to AF_INET anyway (same hazard class,
+hygiene). ZERO ACQUIRE-STALL prints = the client acquire RPC RETURNS FAST
+(sub-10s) with an error; the chain's 30s = ITS retry loop over a
+fast-failing acquire. THEREFORE the 15 (ROUTE_NOT_FOUND) = THE WEIGHTSD'S
+SERVER-SIDE REPLY: its working-set resolve says 'no route' for the requested
+expert chunk — the weightsd-side chunk ROUTE REGISTRY (loaded from the pack
+dir at weightsd boot) lacks/loses entries.
+
+NEXT (tight server-side question): read the weightsd's acquire handler
+(node/weightd.c — the working-set path): (a) the registry load (which files,
+when, failure modes), (b) the route lookup's not-found conditions, (c) why
+EARLIER boots served fine with the same registry (what changed: many engine
+restarts? a registry refresh race?). The weightsd log silence on acquires =
+the observability gap to fix in the same pass.
+
+## 09-22 08:30 — OPERATOR QUESTION CONVICTED THE STICKY-FAILURE BUG
+
+"if weightd was not restarted, a new residentd should find all in memory
+already — handled properly?" — THE ARCHITECTURE: YES (the pool re-imports
+the resident chunks instantly at every boot — WD-MAP-POOL-BULK is fast;
+SparkWeightdServerCloseConnection releases a dead client's leases via
+LeaseReleaseOwner). THE BUG: map_release_locked (spark_weightd_map.c:341)
+stamps map->failure on ANY release-path error, and MapAcquire/MapBeginUse
+(452/521) return the cached failure FOREVER — silently, no IPC, no print.
+SIGNATURE MATCH: zero WD-LEASE-TRACE server lines (the acquire handler
+logs EVERY acquire — none arrived), zero ACQUIRE-STALL (the RPC never
+ran), fast-fail + the chain's 30s retry loop. A single failed release
+(a normal NOT_FOUND after a generation bump qualifies) poisons the map
+for the process lifetime — the sticky-silent-failure anti-pattern.
+FIX: scoped failure (release errors don't poison acquire; the failing
+operation reports, the map stays usable) + a loud one-time print naming
+the first sticky cause. ALSO next-session discriminator for chain1: the
+route_ready_event wait in LazyExperts (cudaEventSynchronize before any
+acquire — a poisoned slot stream from a prior failed graph chain would
+hang exactly here with all the same silence).
+
+## 09-22 09:00 TICK — sticky theory DEAD (fix live+silent); chain1 hangs between HC ChainKey and its first round
+
+SCOPED-FAILURE FIX DEPLOYED (driver 4913fc1c): release errors no longer
+poison the map (the only remaining sticky = the intentional Destroy); a
+one-time MAP-STICKY-FAILURE print added. RESULT: the print NEVER FIRED and
+chain1 still 30s/fails — map->failure was never set on these boots. The
+sticky theory is DEAD for chain1 (the fix stays: correct hygiene).
+
+THE PRECISE HANG WINDOW (zero diagnostics anywhere): CKEY-WRITE/ADOPT for
+the chain RUNS (spark0's logs show it) — the HC collective's key adopted —
+then 30s of nothing: no LAZYWORK (LazyExperts never ran), no WD-LEASE (no
+acquire reached the weightsd), no ERRSITE, rounds=0/mi=0 (the MAIN
+collective never started). THE HANG = THE HC COLLECTIVE'S FIRST ROUND —
+between its ChainKey success and its first mesh publish/wait. PRIME
+SUSPECT: the HC's cell/epoch state — the HC never gets its own ChainKey
+adoption on these boots? (the rebase path with the wave-encoded watermark
+spin? the HC base-cell wait?) NEXT: instrument the HC collective's first
+round (a print at the HC ChainKey + at its first RunRound with
+cells/epoch/mirror state) — one deploy closes this.
+
+## 09-22 09:30 TICK — CHAIN1'S HANG IS GONE (rounds advance!); NEW: a 794K ERRSITE flood from the serving adapter
+
+DEPLOYED 8b7db925 (RH instrumentation + the accumulated fix set): THE FIRST
+CHAIN NOW RUNS — RH-TRACE/RH-ORDINAL show main-collective rounds advancing
+(op_index 7,8,9,10..., ordinals watermark-seeded, status=0). The printless
+window between ChainKey and the first round CLOSED (the accumulated fixes —
+scoped failures, warm gate, hello-close, IPv4 — in combination).
+
+NEW BLOCKER (why the request still times out): a 794,804-line ERRSITE FLOOD
+from spark_glm5_next_serving_adapter.c:1392 and :1420, all status=15 — the
+adapter's completion/route delivery path returning ROUTE_NOT_FOUND en masse
+(the loop hammers it; completions never deliver to the client). NEXT: read
+the adapter's 1392/1420 sites (what lookup returns 15 — the route map for
+completion delivery? the transaction id?), rate-limit the print (the flood
+itself is a hazard), fix the lookup.
+
+## 09-22 10:00 — the flood's 15s traced to the QUIESCE snapshot path
+
+The flood sites (adapter 1392/1420) = ResetControl/Reset; ZERO
+ADMIT9-MODULE lines carry status=15 → the 15 does NOT come through the
+admit — the only other failing call in ResetControl = SparkGlm5NextServing-
+Quiesce's driver SNAPSHOT (SPARK_RETURN at the 1392 site). No literal
+SPARK_STATUS_ROUTE_NOT_FOUND anywhere in the module/adapter/kv/map layers
+→ the 15 is a PASSTHROUGH from deeper (the weightsd client IPC result, the
+lease layer, or the residentd's route table lookup invoked by snapshot).
+NEXT: instrument the module snapshot's failure (one print with the inner
+status + which sub-lookup), and grep the lease/weightsd-client layers for
+the 15 source. The per-token reset loop (why resets fire continuously
+during decode) is the second half — the API pipeline's per-step control
+bump design.
+
+## 09-22 10:30 TICK — adapter verified CURRENT (not stale); the 15-at-quiesce paradox pinned
+
+The rate-limited build works (count=1 lines, log readable). The adapter .so
+force-rebuilt = IDENTICAL sha (deterministic) — NOT a stale artifact. THE
+PARADOX: per source, ResetControl's quiesce can only return INVALID(1) or
+BUSY(16) (its snapshot call chain — module snapshot + lifecycle wrapper —
+returns 1/OK only), yet the fleet logs status=15 at adapter:1392/:1420 on
+the CURRENT build. MY READING IS MISSING A PATH. NEXT INSTRUMENT (one
+deploy): prints inside SparkGlm5NextServingQuiesce (entry, the
+available-count, the snapshot status, exit) — the 15's producer gets named.
+ALSO NOTE: the request returned model status 9 (kv-admit, second-submit
+lease) — the canary cadence still needs the first-request-wins pattern.
+
+## 09-22 11:00 TICK — THE ENUM MISREAD: 15=BUSY (off-by-one in my awk decode); no paradox ever existed
+
+CORRECTION (raw-byte enum recount): 14=ROUTE_NOT_FOUND, 15=BUSY, 16=DUPLICATE,
+17=INTERNAL_ERROR, 11=TARGET_MISMATCH, 9=VALIDATION_FAILED. My earlier awk
+arithmetic anchored one line wrong and "decoded" 15 as ROUTE_NOT_FOUND —
+sending three hours down DNS→registry→server-side paths for what was BUSY
+all along. Evidence-law applies to MY OWN tooling output too.
+
+REINTERPRETATION (everything now consistent):
+- The 30s status=15 chains = BUSY retries through the cold lazy walk — the
+  known 74-280s class, ordinary retry behavior, NOT an error.
+- The adapter:1392/:1420 "flood" = the per-token reset's quiesce returning
+  BUSY while submissions were active — a retry loop at too-hot cadence
+  (the cadence is the only defect; now bounded by the rate limiter).
+- The prefetch's status=11 = TARGET_MISMATCH (not ABI) — remote-owned keys
+  still the ownership-filter conclusion.
+- The system state: chain1 = cold-walk BUSY retries then completes; the
+  deferred prefetch (post-warm) tops up later chains.
+NEXT: (a) re-verify a fresh canary end-to-end with the FIRST request (the
+cold walk is the wait); (b) once chain2 graphs: the ARRIVAL receipt; (c) the
+reset cadence (per-token quiesce) tuned; (d) ladder idle re-measure.
+
+## 09-22 11:30 — FIRST FULL RUN RECEIPT: 411 rounds MEASURED; the cold walk = 498s; reset cadence = 400K
+
+THE 850s CANARY: CHAIN-TIME slot=2 status=17 total_ms=500496 rounds=411
+allreduce_ms=32217 (~78ms/round under cold-walk load) — the decode ADVANCED
+~4-5 tokens end-to-end before the curl window closed; stage_ms[3]=498150 =
+THE COLD WALK (expert loads) dominates the entire first request. The
+per-token quiesce BUSY count reached 400,000+ during it (the cadence defect,
+now MEASURED).
+
+DESIGN CORRECTION (the deferred-prefetch paradox): deferring the prefetch
+until after chain1 means chain1 alone eats the FULL cold walk. THE RIGHT
+DESIGN = the ORIGINAL immediate prefetch, but OWNERSHIP-FILTERED (only this
+rank's shard experts — kills the TARGET_MISMATCH failures) so warming runs
+in PARALLEL with the first chain instead of after it.
+
+NEXT LADDER: (1) ownership filter for the prefetch (the pack sidecar's
+shard layout; re-enable immediate start); (2) the per-token quiesce cadence
+(backoff or event-driven instead of hot-loop); (3) with warm boots: chain2
+graph → the ARRIVAL receipt → the 330ms/round relay conviction; (4) ladder
+idle re-measure.
+
+## 09-22 12:00 TICK — CAUSAL CORRELATION: the 497s walk = the 6 unroutable layers; 768 rounds at 41ms/round
+
+IMMEDIATE PARALLEL PREFETCH + BOUNDED RESET deployed (e2c5f98b/b0f63dce).
+CANARY: the chain advanced 768 ROUNDS (~8.4 tokens) in 500s —
+allreduce_ms=31673 = 41ms/round under load (improved from 78); stage_ms[3]
+cold walk STILL 497.166s. THE CORRELATION IS CAUSAL-GRADE: the prefetch
+fails layers 39-44 with TARGET_MISMATCH and THE WALK'S 497s IS SPENT ON
+EXACTLY THOSE LAYERS (the chain's own acquires for them retry through the
+walk). The other 39 layers prefetched fine. NEXT = THE WEIGHTSD-SIDE
+QUESTION, NOW TIGHT: why do layers 39-44's chunks return TARGET_MISMATCH —
+the weightsd's chunk registry/working-set resolve for those keys (read the
+acquire handler's TARGET_MISMATCH conditions; compare a failing key vs a
+succeeding one; check the pack tail's chunk files). Reset cadence: bounded
+(250ms) — the reset-attempt prints now sparse ✓.
+
+## 09-22 12:30 TICK — THE ROOT: the weightsd worker's CUDA context fails (TARGET_MISMATCH = cuCtxSetCurrent)
+
+NO layer/ownership logic returns TARGET_MISMATCH anywhere in the resolve
+path — the ONLY producers: spark_weightd_worker.c line 30/70 — cuCtxSetCurrent
+failing in the WEIGHTSD'S WORKER THREAD. THE PICTURE: layers 39-44 are the
+ones whose chunks are NOT YET PRESENT (every boot: 39 layers' chunks stay
+resident in the pool; the tail 6 need CREATION) — chunk creation runs on the
+worker's CUDA context — cuCtxSetCurrent FAILS → TARGET_MISMATCH propagates as
+the acquire status → the prefetch fails those layers AND the chain's own
+acquires retry through the same failure for 497s (the cold walk). WHY the
+context set fails intermittently (context destroyed once? device reset?
+GB10 context exhaustion with 16 engines + the daemon?) = the final question.
+FIX TARGET: the worker's context self-heal (recreate on set-failure, loudly)
++ why it died once. This collapses the cold walk AND the prefetch failures
+in one fix.
+
+## 09-22 13:00 TICK — bind fix deployed; NEW pre-chain wedge on the boot (submission admitted, chain never starts)
+
+BIND FIX DEPLOYED (f7e6a9f5): the conviction corrected (TARGET_MISMATCH =
+the map_context THREAD check — the prefetch thread ran context-bare; the
+weightsd worker was never involved) + SparkWeightdMapBindThread binds
+device+context at prefetch start. Fuzzer 273 green.
+
+THIS BOOT'S WEDGE (new, blocks the fix's measurement): submission 1000001
+ADMITTED (decision=1) but NO chain EVER started (zero CHAIN lines, zero
+PREFETCH-START — the chain never reached BEGIN); 1000002 rejected ADMIT9
+behind 1000001's PREPARED lease ✓ expected; the API connection CHURNS
+(reset-armed/complete + takeover cycles every few seconds, resumed=1) and
+each reconnect arms a pending_client_reset whose quiesce can never complete
+while 1000001 sits in-flight — SUSPECTED MUTUAL BLOCK: stuck submission ↔
+never-quiescing reset. NEXT: (a) why 1000001's chain never began — trace
+its route state (the ROUTE-STUCK scanner should have printed at 30s but
+did NOT — is the route even active? check route activation between DECISION
+and chain-BEGIN); (b) the reset/quiesce interplay with an in-flight
+submission (does a pending reset gate new chain dispatch?).
+
+## 09-22 13:30 TICK — my immediate-close created the churn (fixed); submissions still not chaining
+
+THE RECONNECT CHURN CONVICTED AS MY OWN: the immediate close-after-output
+block I added fired when a path sets the flag with NO output queued —
+closing healthy sessions per message (prompt close where the pre-fix code
+hung). Block REMOVED (the drain-close in WriteClient + POLLOUT-follows-
+pending handles the real case); deployed 44ed57b1. Churn now +13/min (was
+~1000x that during the 400K era) — residual churn = the API's own reconnect
+backoff cycle.
+
+REMAINING (the pre-chain wedge persists): submissions ADMITTED (5+ arrived,
+decision=1) but NO chain, NO PREFETCH-START, ZERO ROUTE-STUCK prints — the
+routes never age 30s (something recycles them) or never activate past
+EnqueueCommitted. NEXT DISCRIMINATORS: (a) print the route state at
+EnqueueCommitted + its ready_state (one instrument names the parking state);
+(b) the hidden-transport input path (WAIT_INPUT delivery) vs the session
+resets — each reconnect may invalidate the transport session carrying the
+request payload; (c) whether the per-reconnect pending reset fences the
+routes (cleaning them before the 30s scanner).
+
+## 09-22 14:00 TICK — the lifecycle trace: the API's rank-0 connection drops between SUBMIT and DECISION
+
+THE INSTRUMENT (COMMIT-TRACE, deployed efcf6f47): ZERO commit lines — the
+DECISION message never arrives because THE API CONNECTION DROPS right after
+SUBMIT-ARRIVED (residentd sees peer eof → reconnect → reset arms → next
+submission → 1000003 dies ADMIT9 behind 1000002's dead lease). The chain
+never starts because every submission's decision round-trip is killed by
+the connection drop. The drops: API-side rank-0 only (model_resident_client
+1031/1042 status 4), residentd never closes first. The suspect pair: (a) the
+residentd's decision-required RESPONSE never flushes (output-queue/POLLOUT
+path — the API times out and closes), or (b) the API's own read poll fails
+on rank 0. NEXT INSTRUMENT (one deploy): prints at queue-decision-required
+and at flush in WriteClient (residentd side) + the API's per-rank read-error
+context — whichever side is silent names the breaker. NOTE: this is the OLD
+"#22 reconnect storm" lineage — tonight's fixes exposed it as the remaining
+serving blocker.
+
+## 09-22 14:30 TICK — residentd EXONERATED (flush traces: 576/576 written); the breaker is API-side post-receipt
+
+THE TRACES (af291cf3): FLUSH-TRACE shows the submit-result fully written
+(576 of 576 bytes) on every attempt — the residentd's queue→flush path
+WORKS; SUBMIT-RESULT-TRACE confirms results queued (17 for 5 submissions =
+API retries). THE RESIDENTD IS EXONERATED: it receives, replies, and the
+bytes reach the socket. THE BREAKER IS API-SIDE, POST-RECEIPT: the API gets
+the decision-required result and its rank-0 connection still closes (the
+peer-eof storm continues). NEXT (the final discriminator): API-side
+instrumentation — its read/dispatch path around the submit-result receipt
+(model_resident_client.c's Read + the batch engine's handling of the
+decision-required result; why it closes instead of sending DECISION).
+
+## 09-22 15:00 TICK — the invalidation amplifier found (any reconnect nukes the whole engine session mid-handshake)
+
+THE MECHANISM (model_batch_engine.c:2140-2152 + model_pipeline_client.c:810):
+the session fingerprint = Σ client_generation×(rank+1) over CONNECTED
+clients — ANY rank's disconnect OR reconnect changes it → "batch engine
+session changed ... invalidated" → ALL requests reset to QUEUED_PREFILL +
+SparkModelPipelineClientClearTransactions — the in-flight submission's
+pending DECISION is destroyed mid-handshake → the request restarts →
+races the next drop → the storm is self-sustaining at any drop rate. THE
+FRAGILITY: one rank's transient blip invalidates all 16 ranks' session
+state (prefix cache + transactions). REMAINING QUESTION: the FIRST drop's
+cause on rank 0 (the client Read's failure reason — parse/EOF/timeout —
+uninstrumented). NEXT: (a) instrument the client Read failure class;
+(b) harden the fingerprint (ignore generation bumps within a live session —
+invalidate only on HELLO-generation changes, not connection recycling);
+(c) then the payoff chain as queued.
+
+## 09-22 16:00 TICK — PROTOCOL RESTORED: the fleet runs PR #1077 code, 16/16 PR-exact
+
+OPERATOR CALL-OUT ("only test what is in a PR") — the audit convicted the
+rig: spark3 ~/g5pacing was DIRTY (9 files) on a divergent local HEAD
+(8de7244e), so the deployed artifacts came from unpinned source. FULL
+AUDIT RESULT: all 9 dirty files byte-identical to the PR tip; the rig was
+STALE, never ahead (the PR has strictly more: draft_bridge AF_INET, the
+arrival-dump nonzero line, 467 lines of these tick records); the g5pace*
+strays are crash-era data blobs, not source. NOTHING UN-PUSHED EVER
+SHIPPED — but nothing PROVABLY shipped either; now it does.
+
+THE RECOVERY: Mac tree's 4 uncommitted files (nanosleep removal, ladder
+.cuh dependency, arrival-dump) committed → 781b61d = PR #1077 head.
+spark3 re-clean-cloned at 781b61d (old tree kept as g5pacing_dirty_0922)
+→ full rebuild (module validator PASS) → model_compile → publish_local
+(dies at its own MANIFEST step: find-with-missing-args + pipefail + set
+-e = silent exit 1 — the manual `find lib bin stages` regen stays in the
+recipe) → hub MANIFEST e6e8e1e7.
+
+ARTIFACTS (deterministic, PR-exact): driver a393a959, transport 8178940f,
+residentd af291cf3, adapter 018d5854. The residentd is byte-identical to
+the previously-deployed one (its source was already fully in the PR);
+the driver differs from the stale-rig 97889fed exactly by AF_INET +
+arrival-dump — meaning the fleet NEVER ACTUALLY RAN the draft_bridge
+IPv4-only fix until now (the 07:00 "deployed a76b5cf4" claim shipped a
+stale build — commit-messages-are-not-evidence, artifact edition).
+
+DEPLOYED 16/16 (spark0-9 + sparka-f): engines auto-restarted
+08:46:51-53, ~10s convergence, zero manual kills. EVERY TEST FROM HERE
+= PR CODE. NEXT: the canary on this build is a real discriminator — the
+rank-0 client drops (the invalidation amplifier's trigger) have never
+been observed under true IPv4-only connects.
+
+
+## 09-22 17:00 TICK — THE OPERATOR'S CONVERGING DESIGN LANDED + THE API RETURNS TO RTX5090 (with the tokenizer); serving = one blocker left
+
+OPERATOR RULINGS THIS ERA: (1) "only test what is in a PR" — PROTOCOL
+RESTORED (16:00 tick, fleet = PR-exact code by construction); (2) the design
+question answered with the epoch architecture; (3) "the API belongs on the
+rtx5090 — that is where the tokenizer will run; make a non-retarded system";
+(4) "I stopped the other dev — kill any weightsd/residentd that interferes;
+get it stable and ready for parallel dev usage."
+
+THE STORM, FULLY CONVICTED (tcpdump + logs): (a) sparkf's monitor connects
+to every residentd's single client slot — the OLD takeover-at-ACCEPT evicted
+the API per monitor connect (the duel); (b) the API's pipeline Progress
+counted its rank loop DOWN to zero and passed rank==0 to SetFailure — EVERY
+failure killed rank 0's HEALTHY connection ("only rank 0 dropped" was a
+lie); (c) any reconnect bumped client generations → the fingerprint
+invalidated the whole engine session → teardown → more reconnects: self-
+sustaining at ~30 cycles/s, all 16 ranks, zero requests needed.
+
+THE EPOCH DESIGN (deployed 16/16, residentd 720f103a era): HELLO carries
+session_epoch (pipeline-generated, pid+ns-mixed); accept PARKS candidates
+without evicting (a scraper that never says hello can never steal the
+slot); same-epoch hello = REATTACH (fd swap, session state kept: routes,
+queued output, generation — no reset armed); different epoch = the ONE
+legitimate takeover (generation bump, stale-generation cleanup runs); eof =
+detach (session kept, reattach expected); fingerprint = epoch + all-rank
+generations (stable across churn); rank-attribution fixed; the first-hello
+reset arm REMOVED for virgin boots (a fresh residentd has nothing to clean
+— arming deadlocked the quiesce against the API's 10K-retry hammer).
+
+RTX5090 HOMECOMING: the API runs where it always should have — x86 build
+(clean clone ~/g5epoch, -Wno-restrict for gcc-15 + POSIX-guard fixes), the
+runtime root ~/glm53flash.fp8.tp16 (only the adapter .so is x86-executed;
+stage/transport are aarch64 reference copies), single-API script
+/tmp/one_api.sh (the /proc/exe kill — plain pgrep kills your own ssh). THE
+TOKENIZER WIRED (first time ever): repo asset glm-5.3-flash-tokenizer.json,
+vocabulary_size 154856 — REAL BUG FIXED: the sidecar counted only
+model.vocab (154820) but eos ids 154820+ live in added-token space
+(max_token_id+1 floor added); health now reports "tokenizer":true.
+
+KEEPALIVE: the lab router silently reaps idle workstation↔fleet flows and
+RSTs on next traffic (spark6/spark0 cuts convicted; residentds saw NOTHING)
+— client sockets now carry TCP keepalive 10/5/3 (keeps the router's idle
+timer reset; mirrors the residentd's accepted-socket settings).
+
+WEIGHTD-MESH REVIVAL: spark0's MESH-SPIN missing=10 was STALE RECORDS
+(Sep 21 15:06 — its agent had stopped refreshing; peers restarted = dead
+QPNs). The agent (alive) recycled the daemon 09:39 → mesh wired peers=15.
+The residentd's WEIGHTD-DEAD verdict is STICKY across daemon restarts
+(workaround: residentd restart; the agents supervise — kill -9 → restart
+in ~5s). Other 15 nodes' daemons + records were healthy throughout.
+
+MEASURED THIS ERA: chains RUN under the full new stack — 91 rounds,
+allreduce_ms=0.66 TOTAL (host-side; the round path is sub-ms), wall
+35.1s/91r = 386ms/round CONTENDED (cold walks + abort churn around it);
+graph capture works (GRAPH-CAPTURE-OK bound=257); prefetch 42/45 (the
+39-44 tail still fails — the weightsd budget class, next); end-to-end
+HTTP delivery works (JSON error/response reaches the client).
+
+THE ONE REMAINING BLOCKER: the engine ABORTS every submission post-
+restart (residentd sees SUBMIT → decision_required → DECISION decision=2
+ABORT ×1,027,907 submissions). The decision policy aborts whenever the
+transaction's first result failed — SOME RANK still returns BUSY/IO on
+submit (TXN-FAIL-FIRST status=15/4 era). NEXT: name the failing rank
+(SUBMIT-RESULT-TRACE per node), fix its BUSY source, then the cold-walk
+deadline (35s chains > the 30s deadline → status=17 — the deadline must
+read observable state per the minimum-fix ruling). Then: warm canary →
+chain2 GRAPH → ARRIVAL receipt → the clean µs/round number.
+
+HYGIENE LEDGER (pre-existing, verified failing at 781b61d too):
+test_steploop_admission + test_model_pipeline_client (a 100ms weightsd-
+attach race in the fixture); the gemma4 test fixture bitrot
+(SPARK_GEMMA4_MODEL_MODULE_TARGET undefined) blocks full `make test`.
+
+## 09-22 19:00 TICK — the abort loop is DEAD; the frontier = 6 cold layers + a wall-clock deadline
+
+CLIMB STEPS LANDED (all in PR #1077 @3c9f373):
+- KV-RECLAIM (cache/kv_page_cache.c): lane admission reclaims slots whose
+  owner's OWN declared deadline precedes the live request's — the abort
+  that frees them is routinely eaten client-side (ClearTransactions drops
+  pending decisions). CONVICTED LIVE: sparkc slot 1 owned by a dead
+  hammer-era request (owner_req=1024868, phase 0), BUSY-failing EVERY
+  admission for hours (sparkc = the lone BUSY rank; 6 decisions vs 17888
+  on all other nodes). Post-fix: submissions COMMIT (decision=1) — the
+  abort-every-submission loop is dead.
+- WEIGHTD-STACK REVIVE (module): the agent recycles the weightd on
+  binary-sha changes; the transport's client dead-stickied (WEIGHTD-DEAD
+  → every reduce IO-fails until a residentd restart). The module now
+  detects the dead lane client at round-submit and re-creates the WHOLE
+  stack (lane acquire + both collectives) via the stored node context.
+- KV tests green (test_kv_cache, test_kv_lane_fuzz).
+
+MEASURED: the HTTP pipeline delivers cleanly end-to-end (RC=0 round
+trips, well-formed responses AND errors). Chains: 7 rounds at 1.7ms/round
+allreduce under FULL cold load (11.83ms/7r); committed submissions flow
+on all ranks. Requests still fail status=17: chains legitimately walk
+~190s cold while the chain deadline is 30s.
+
+THE FRONTIER (exact):
+1. PREFETCH still fails layers 39-44 (status=4, 42/45) — the weightsd-
+   side chunk class for the tail layers (chunk CREATION era; the map-bind
+   fix did not cure these). Those 6 layers = the entire 190s walk.
+2. The chain deadline (30s → status=17 degrade) fires during legitimate
+   cold walks — the same elapsed-time-vs-observable-state violation the
+   reaper fix settled; the chain degrade must read liveness (ordinals/
+   layers advancing) per the 09-21bd minimum-fix architecture.
+NEXT: (a) the weightsd-side question for layers 39-44 (why do their
+chunks fail the exchange while 42 layers succeed), (b) liveness-based
+chain deadline, (c) then the warm canary → chain2 GRAPH → ARRIVAL
+receipt → the clean µs/round.
+
+## 09-22 21:00 TICK — prefetch retries landed; the acquire failure is FABRIC-LEVEL (mesh writes die at RDMA)
+
+CLIMB STEP LANDED (@00b0a95): prefetch retries failing layers across 5
+passes + WITHHOLDS experts_warm while layers stay cold (the graph gate
+was opening over cold layers). Also from this tick: KV-RECLAIM +
+weightd-stack revive held (commits still flow).
+
+THE REVERSAL + CONVICTION CHAIN:
+- After the roll, prefetch failed ALL layers (was 42/45): the acquire
+  exchange dies at spark_weightd.c:3490 = THE MESH WRITE OP — not the
+  acquire logic itself. The weightd logs WD-MESH-CQERR (wr opcode=1
+  status=12 vendor=129) + WD-QP-REPAIR loops ("qp left RTS after
+  errors").
+- RECORDS EXONERATED (wrong-dir detour): the daemon runs WITHOUT
+  --mesh-dir (default /tmp/weightd-mesh — FRESH, all 16 recs, agent-
+  synced); the /tmp/weightd-mesh-fleet dir I first inspected is the
+  ABANDONED newer-agent era. Hub qpn/ records fresh; fetch path 3ms.
+  (Agents restarted fleet-wide anyway — the running 619-line version
+  syncs the correct default dir; the 691-line version with mesh_dir()
+  selection lives only in /tmp on spark0 — NOT canonical.)
+- Post-fresh-records: prefetch 1/45 (was 0), one chain 7 rounds over
+  319s then IO, chains BUSY at the 30s acquire deadline. Slight
+  movement, not a cure.
+
+THE FRONTIER (next session, exact): the weightd's RDMA mesh WRITES fail
+(CQERR vendor 129) with fresh records + wired control plane ("ready
+peers=15") — diagnose at the fabric level: what vendor 129 is on
+rocep1s0f1, whether QP-REPAIR restores traffic or loops, whether it
+started at a specific daemon restart, and whether a cold weightd restart
+fleet-wide (agent-supervised) heals the QP state. THEN the 6-tail-layer
+creation class re-measures on a healthy fabric.
+
+Standing receipts this tick: canary HTTP round-trips clean end-to-end
+(RC=0, well-formed errors); the retry-prefetch + warm-gate deployed
+fleet-wide (driver e9ee22e7); agent fleet restarted with records
+verified flowing.
+
+## 09-22 22:30 TICK — heal-test results: the FABRIC is exonerated; the systemic pattern is "no client survives daemon turnover"
+
+THE COLD-RESTART HEAL TEST (16/16 weightds killed at 11:07:10-16, agents
+relaunched in seconds, mesh rewired peers=15, records fresh at 11:07:11):
+- ZERO CQERR in the fresh era — the vendor-129 errors were a SYMPTOM of
+  the old generation, not the fabric. FABRIC EXONERATED.
+- Acquires STILL failed (prefetch 1/45; chains BUSY at the 30s deadline)
+  → discriminator: the weightd log shows ZERO acquire requests arriving
+  — the residentds' MAP CLIENTS still held sockets to the KILLED daemon
+  generation (the same dead-socket stickiness the lane client had; the
+  map has NO reconnect).
+- Residentd restarts (fresh map attaches) unblocked the requests — and
+  exposed the NEXT surface: submissions rejected status=9 at the module
+  admission SHAPE evaluation (module.c:4522) + ROUTE-STUCK state=1
+  (claimed, not advancing). New class, post-restart.
+
+THE SYSTEMIC PATTERN (the operator's parallel-dev bar): every daemon
+turnover (weightd recycle, agent deploy wave) orphans a client layer —
+lane client (fixed: REVIVE), map client (UNFIXED: no reconnect), kv
+admission state (fixed: RECLAIM), session state (fixed: epochs) — and
+each manual heal surfaces the next one. The converging-system answer:
+EVERY client of the weightd re-establishes on turnover (the map
+reconnect is the missing piece), and the admission shape failure after
+restarts needs its own look (state->resident_sequence_capacity vs
+available vs the request's shape — something disagrees only after a
+warm-daemon/cold-residentd combination).
+
+MEASURED THIS TICK: canary HTTP round-trips clean throughout (RC=0);
+status codes observed 9/15/4 across the classes above; no chain receipt
+(this tick was diagnosis, not throughput).
+
+NEXT (exact order): (a) the map reconnect (SparkWeightdMap* re-
+establishes on dead socket — mirrors the lane revive; kills the
+residentd-restart dependency on every weightd recycle), (b) the
+admission-shape status-9 after restarts (the capacity/limits
+disagreement), (c) then the tail-layer creation class on a stable
+stack, (d) warm canary → GRAPH → ARRIVAL → clean µs/round.
+
+## 09-23 00:00 TICK — the admission watermark trap killed (status-9 wedge dead)
+
+THE CONVICTION: the module's admission predicate rejected every request
+with VALIDATION_FAILED(9) via `request->control_generation <
+state->control_generation` — but control_generation carries the ENGINE
+FINGERPRINT, a quasi-random value that legitimately moves BACKWARD
+whenever residentd generations change (any engine session rebuild).
+With no reset path armed (the session epoch is unchanged — my takeover-
+only arm is correct), the watermark had NO exit: permanent wedge after
+any fleet/engine restart combination. VERIFIED LIVE: zero
+submission_rejected lines post-fix (driver ce23f66e); requests admit
+across engine rebuilds.
+
+The backward check bought nothing: replay protection already lives in
+the per-session message-id gate (residentd) + epoch scoping + the
+KV-RECLAIM. Removed.
+
+STATE: back to the known cold-walk regime (7r/190s through the tail
+layers; BUSY-30s chains queued behind; prefetch ~3/45 this boot). The
+two open items stand: (a) the tail-layer chunk creation class at the
+weightsd (the 190s walk), (b) the map reconnect (weightd-recycle
+resilience). Then the ladder: warm canary → GRAPH → ARRIVAL → clean
+µs/round.
+
+## 09-23 02:00 TICK — the verdict instrument deployed through the core channel; routes stall at RESOLVING
+
+- THE PACK EXONERATED: receipt file_bytes == on-disk size (21,706,046,976)
+  — not truncation; the tail-layer class is not a short pack.
+- THE VERDICT INSTRUMENT LIVE: rate-limited ACQUIRE-FAIL lines (layer0,
+  key_count, status + the full budget arithmetic: pool/retained/other-
+  resident/device_max/chunk_count) + the sticky ARENA-FAILED path gets
+  its own line. Deployed via the core announce channel (hub WEIGHTSD_BIN
+  sha16 → agents sync core → install → recycle) — daemon a6c9188e live
+  16/16, mesh wired. FIRST core-channel deploy through this flow.
+- STATE AT WRAP: submissions admitted (the watermark fix holds) but
+  routes stall at state=1 RESOLVING (~36s age) — the resolve path's own
+  acquire never reaches the daemon (weightd log quiet; no ACQUIRE lines
+  yet). The verdict lands when a route's resolve actually issues its
+  acquire. NEXT: (a) read the ACQUIRE-FAIL verdicts, (b) the
+  RESOLVING-stall question (why the resolve's acquire never fires),
+  (c) map reconnect still queued.
+
+## 09-23 04:00 TICK — ROUTE-RECLAIM landed; the verdict instrument sits on the wrong IPC kind
+
+- ROUTE-RECLAIM (residentd 110668ee): the stuck scanner now FREES routes
+  owned by a previous client generation (dead-session routes blocked
+  their lane's KV admission forever — every fresh submit BUSY at
+  ADMIT9-KVPHASE; same orphan class as KV-RECLAIM, route level).
+- THE VERDICT INSTRUMENT GAP: ACQUIRE-FAIL logs sit on the ACQUIRE
+  working-set kind, but the map's bulk acquire rides a DIFFERENT IPC
+  handler (the lazy/batch kind) — this boot's prefetch failed 42 layers
+  with ZERO ACQUIRE lines: the failing path never passes my instrument.
+  NEXT: move/add the logging to the bulk/lazy acquire handler; the
+  verdict then names the tail-layer mechanism.
+- Canary16 pending at wrap; submissions flow; admission watermark fix
+  and epoch stack holding throughout.
+
+## 09-23 06:00 TICK — THE TAIL-LAYER VERDICT: not a bug — slow cold creation from storage
+
+THE EVIDENCE (fresh engines vs the live instrumented daemon):
+- ACQUIRE-STALL exchange 191396 ms — the first cold acquire REACHES the
+  daemon and hangs server-side in lease/load; the handler never
+  completes (why WD-LEASE-TRACE never printed — it prints on completion);
+  the client's exchange then times out (map.c:514 status=4) and the
+  retry ladder burns its passes against the same slow creation.
+- The 42 "fast" layers were ALREADY RESIDENT in the daemon's memory
+  (instant); the 6 tail layers need chunk creation = reading their expert
+  data from the 21.7GB pack (slow tier) = minutes per layer set.
+- Timeline conviction alongside: the weightd (11:50:57) OUTLIVED the
+  residentds' attach (11:46:57) — every recycle orphans engines (the
+  map-reconnect item; a real revive needs a FULL re-attach, not an fd
+  swap — the arena generation dies with the daemon).
+
+THE DESIGN DIRECTION (next): the creation-class acquire must not ride a
+synchronous client timeout — either the daemon answers PENDING and the
+client polls (the async-creation design), or a standalone deploy-time
+warmer pre-creates the tail ONCE per node (minutes of storage reads at
+deploy, instant serving forever after). Plus the map re-attach revive.
+
+## 09-23 08:00 TICK — FIRST END-TO-END SERVING RECEIPT: real tokens, MEASURED
+
+THE RECEIPT (api.log, boot 144857 era): requests 100004-100006+ COMPLETED
+— status=0, engine_completed=1, real GLM token streams returned to the
+client (8 tokens each; 541 token-timestamp lines in the log). The whole
+stack served: rtx5090 tokenizer → engine → 16 ranks → chains → tokens.
+
+MEASURED (honest grading):
+- First token: +9.27s after acceptance (admission + prefill + first chain)
+- Steady decode: ~1.15 s/token (deltas 1128-1174ms across the streams;
+  ≈0.87 tok/s) — vs GOALS G1 = ≥14 tok/s: the gap is the relay-arrival
+  cadence + the per-token chain cost, the mission's actual target class.
+- The serving window rode a WARM daemon (the night's creation hammering
+  persisted server-side — creations survive client timeouts ✓ the
+  async-persistence hypothesis CONFIRMED); the current cold spell = the
+  daemon recycled again (11:57) wiping the arena → chains BUSY-30s again.
+
+THE SYSTEMIC FIX (named by this receipt): creations persist per-daemon-
+LIFETIME — every weightd restart re-pays the cold walk. The warmer must
+be AGENT-DRIVEN (post-weightd-start): pre-create the 6 tail layers once
+per daemon boot (minutes of storage reads, then serving is instant).
+With that + the map re-attach revive, the fleet becomes: recycle-proof,
+permanently warm, serving at the measured cadence — and the µs/round
+climb (330ms/round → the graph path's µs class) becomes the only
+remaining work.
+
+## 09-23 10:00 TICK — THE OVERFLOW CONVICTION + the deploy-time warmer WORKS
+
+THE CHAIN OF CONVICTIONS THIS TICK (each named by its instrument):
+1. FIRST SERVING RECEIPTS stood (8 requests, real tokens, ~1.15s/token).
+2. weightd_warm (tools/weightd_warm.c) written: attach-lazy + per-layer
+   bulk acquire with a creation-sized timeout.
+3. First runs insta-failed 17 → ACQUIRE-LOAD-STAGE instrument (budget/
+   chunk_ensure/open_pack/load_lease per-stage verdicts, deployed via
+   core-announce) → "stage=budget status=17".
+4. THE ROOT: expert_pool_bytes=UINT64_MAX (the unset-env default!)
+   OVERFLOWS the budget sum (pool + preload wraps to ~2MB) → the cap
+   check always fails → eviction finds no victim on a fresh arena → 17.
+   The ENGINES never hit it because their environment sets
+   SPARK_WEIGHTD_EXPERT_POOL_BYTES=34359738368 (32GiB).
+5. Arenas cache by identity: the first poisoned attach (MAX) persisted
+   server-side — a daemon restart was needed for the corrected pool
+   bytes to take effect.
+6. POST-FIX: layer 3 WARM on the first acquire (WD-LEASE-TRACE status=0)
+   — the creation path is sound; the warmer now grinding the cold tail
+   (minutes per layer set, persisting per daemon lifetime).
+
+THE DORMANT TRAP RECORDED: any client attaching without the env gets the
+MAX default → poisoned arena → every acquire 17s. The env is the config
+authority today; the daemon should reject UINT64_MAX at attach (queued).
+
+NEXT: warm completes → engines restarted (fresh maps) → canary → THE
+MEASUREMENT (warm µs/round through the full new stack). Then agent-side
+warming (post-weightd-start) makes every recycle self-healing.
+
+## 09-23 12:00 TICK — the warmer's traps fixed; THE DAEMON CRASH AT CREATION convicted (reproducible)
+
+PROGRESS: the overflow (UINT64_MAX pool + preload wraps) and the arena-
+identity cache (poisoned arenas persist per daemon lifetime) both fixed
+in weightd_warm (reads SPARK_WEIGHTD_EXPERT_POOL_BYTES, 32GiB default);
+layer 3 WARMED once (clean acquire/release traces) — the warmer design
+is proven.
+
+THE CONVICTION (reproduced twice): the daemon DIES SILENTLY at the
+first creation-class acquire — warm5: attach OK → layers 0-2 NOT_FOUND
+(normal) → layer 3's acquire → daemon death (agent restarts it 3-4 min
+later; the client's remaining layers fail IO on the dead socket). NO
+stage instrument fires (the death precedes budget/chunk_ensure/load) —
+the lease-acquisition path or an earlier corruption surfacing. No
+cores (removed in the disk-full era), no dmesg access.
+
+NEXT (the crash hunt): (a) re-enable a BOUNDED core for the weightd
+start (the agent's ensure_weightd: ulimit -c + a core pattern to a
+bounded dir), (b) reproduce → the core names the faulting frame (the
+12:30-era CUDA-context class is the prime suspect: chunk creation on
+the worker context), (c) fix → the warmer completes → agent-driven
+post-start warming → recycle-proof permanently-warm serving.
+
+## 09-23 14:00 TICK — the crash hunt's elimination ledger; a traceless SIGKILL
+
+INSTRUMENTATION LANDED: bounded cores for the weightd via the agent's
+own launch (hub core script patched: ulimit -c 4000000 + cd ~/wdcore —
+agents pick it up through the core manifest sync; verified live on the
+daemon's /proc limits). THE CORE-ENABLED DAEMON DIED AGAIN MID-CREATION
+WITH NO CORE = SIGKILL-class.
+
+THE ELIMINATION LEDGER (each ruled out by its missing record):
+- earlyoom: no kill lines (thresholds 7%/3.5%; mem never below 63%)
+- kernel OOM: no records
+- the agent's sha-recycle: no announces in the death windows
+- the daemon's self-exit: ZERO exit() paths mid-flight (latch exits at
+  boot only)
+- GPU hardware: healthy, no Xids, no retired pages
+- my supervisor: dead before the last deaths
+
+THE DUEL DOCUMENTED (rotated logs): overlapping restart sources — the
+agent's ~2-min backoff cadence + challengers taking the latch ("held by
+a live weightd; exiting 0 idempotent" ×3) + the core-enabled solo
+daemon (12:59:10) still died at 13:04 with NO challenger kill line in
+its successor's log. THE KILLER REMAINS UNATTRIBUTED — a traceless
+SIGKILL during the creation-class acquire.
+
+NEXT INSTRUMENTS (the killer hunt): (a) a signal-delivery watcher
+(auditd or a privileged eBPF/proc-connector probe naming the kill's
+sender pid), (b) the creation path read for anything the environment
+would punish (huge host staging spikes visible in earlyoom's 5s memory
+reports DURING a warm — watch avail memory live while warming), (c) the
+syslog-per-second capture during one warm run (the record may exist
+outside my greps).
+
+## 09-23 16:00 TICK — BOTH KILLERS NAMED: timeout-judged health probes vs a busy daemon
+
+THE VERDICT CHAIN (rc-capturing supervisor + instrumented logs):
+1. The deaths are CLEAN rc=0-then-kill sequences, not crashes — the
+   core-enabled daemon died with NO core, and the syslog finally showed
+   the actor: `weightd: stale or unresponsive instance(s); clearing
+   (production channel only)` — THE AGENT'S HEALTH PROBE: a 3s python
+   connect ×3 to the unix socket; failure = kill -9 every weightd.
+2. THE LATCH KILLER (fixed first, @d380827): holder-aliveness was a
+   connect() probe against a listener that never accepts — one
+   challenger fills the backlog, every later misreads a busy holder as
+   wedged and SIGKILLs it mid-creation. FIXED: aliveness = the /proc
+   scan (pid + exe) — readable state, busy-but-alive is alive.
+3. THE SHARED ROOT: a daemon mid-creation (a synchronous minutes-long
+   handler) starves its accept queue (tiny backlog + the connection
+   flood from the retry ladder) — BOTH the agent probe and the old
+   latch probe judge "dead" by connect-timeout and kill a HEALTHY BUSY
+   daemon. The exact banned class: elapsed-time judgment where readable
+   state exists.
+
+THE REMAINING FIX (next): (a) the agent probe must not kill on
+connect-timeout alone — size to the real creation window (300s) or
+read process state (alive + serving = fine); (b) the daemon's accept
+loop/backlog must survive a busy handler (drain accepts; backlog ≥16;
+or the creation moves off the connection thread). Then the warm run
+finally completes end-to-end and the fleet warms permanently.
+
+## 09-23 18:00 TICK — DEMAND-DRIVEN EXPERT LOADING (the operator's production rule)
+
+OPERATOR RULING: "why are all the experts needed? track which experts a
+small request needs, load them in batch in seconds... parallel debugging
+is broken by loading all weights; for the allreduce I allow it, but we
+need a production solution to shared debugging."
+
+LANDED (@8c8fb4d, driver 4093d8dd + daemon af955ef5):
+1. SPAN-BATCHED PACK READS: contiguous ranges merge into one pread per
+   span (per-range digest+copy from staging) — the old per-expert path
+   was ~2MB/s on NVMe (1000x under hardware; the death-by-tiny-reads
+   was ALSO the entire 190s-cold-walk class and the warmer's hours).
+2. PREFETCH DEFAULT OFF ("PREFETCH-OFF" prints live on the engines):
+   experts demand-load per routed submission (top-8-of-288; tens of MB
+   for a small request); the bulk warm is opt-in via
+   SPARK_GLM5_NEXT_PREFETCH=1 (the allreduce lane only).
+3. My earlier full-warm-vs-fresh-daemon mistake acknowledged in the
+   record: the 42-vs-6 split was daemon-uptime artifact; nothing
+   required warming all — the demand path was just too slow (now fixed).
+
+ACCEPTANCE TEST (the small-request canary): queued behind the retry
+backlog at wrap — the receipt (routed experts demand-load in seconds +
+tokens returned) lands next tick. The allreduce lane's full warm (env
+opt-in) re-measures then too: span-batched, the 45-layer warm should
+drop from hours to ~minutes.
+
+## 09-23 20:00 TICK — the recorded-working-set feature PROVEN (336 keys); a second 30s deadline found
+
+THE OPERATOR'S ONE-SHOT SMOKE WARM, LANDED (@192025c, daemon c366b561):
+- The daemon RECORDS every acquired expert key to <PACK>.wset (the
+  live tape; loaded back at arena creation; written on change).
+- weightd_warm --wset FILE: replays ANY named set (one file per smoke
+  test — snapshot the live tape per test) in ONE batched acquire with
+  elapsed_ms timing.
+- PROVEN LIVE: the recording exists — packs/rank0.sp.wset = 336 keys =
+  exactly the smoke decode set (45 layers x top-8, deduped). The shape
+  is right; the feature works.
+- The transport's round spin timeout now 120s (a chain hit the bound at
+  exactly 120.00087s — live).
+
+OPEN (blocks the cold-preload timing test): a SECOND 30s deadline —
+chains still die at 35.06s with 91 ROUNDS COMPLETED and sub-ms
+allreduce (0.3-0.5ms TOTAL): the wall is engine/adapter-side (the
+submission's deadline path — origin not yet located; the transport bump
+was not this one). NEXT: find and size the second deadline (the
+liveness-based design item unchanged), then the timed test: cold daemon
+→ --wset preload (the 'literally 3 seconds' number) → warm canary.
+
+## 09-23 22:00 TICK — NOT a deadline: GRAPH replay works; ranks 4+12 stuck-tails = the pacing bottleneck
+
+THE "SECOND 30s DEADLINE" DECONSTRUCTED (log anatomy of the 35.06s
+death): GRAPH-REARM → gate → CAPTURE-OK → ONE-LAUNCH replay →
+GRAPH-REPLAY-TIME ns=35000000121 rounds=91 ns_per_round=384615385 →
+STUCK-TAILS: peers 4 and 12 sit TWO SEQS BEHIND (…892 vs …894) →
+cancel → DEGRADE graph-stuck → status 17.
+
+THE MEASUREMENTS (honest):
+- THE GRAPH PATH RUNS END-TO-END under the new stack (capture, 91-round
+  single-launch replay, clean cancel).
+- µs/round THIS ERA: 384.6 ms/round MEASURED in graph mode — the
+  relay-arrival cadence; allreduce host-side 0.3-0.5ms TOTAL.
+- THE BOTTLENECK'S NAME: ranks 4 and 12 lag 2 rounds at chain end —
+  the exact class the ARRIVAL ring was built to convict.
+
+THE NEXT LADDER RUNG (finally the mission's own climb): the arrival
+dump on a green-path replay — per-round arrival timestamps for ranks
+4/12 vs the pack — names the stall source (relay burst handling vs
+poll shape vs those nodes' load). Then the pacing fix; ≤100µs/round is
+the graph's own class once arrival stops gating.
+
+## 09-24 00:30 TICK — PR #1081 MERGED (astra) and VERIFIED: the chain class jumped 122x
+
+THE MERGE (@89330dc, one conflict — tools/weightd_warm.c: their stricter
+manifest-driven warmer + my --wset one-shot grafted in their style):
+- Their replacements SUPERSEDE cleanly (verified in the merged tree):
+  the latch = bind-or-exit ("existing owner untouched" — no probing at
+  all); the agent ensure_weightd = owner verification + refuses
+  ambiguous cleanup (subsumes my busy-alive guard); routes carry
+  generation handling at 5 sites (subsumes ROUTE-RECLAIM); reconnect =
+  abort/drain/reset/new-session with callbacks retiring transactions
+  (the orphan class my reclaims compensated for, designed out).
+- MY pieces that SURVIVED (verified): the wset recording (WD-WSET), the
+  span batching (LoadRangeGroup + their short-read fix), KV-RECLAIM,
+  the 120s bound, the epoch sessions (session_epoch end-to-end), the
+  demand-driven default (their prefetch removal completes the design).
+- The hub agent = their version + the wdcore/ulimit cores wrapper
+  re-applied (my patch, preserved).
+- Build clean; kv/IPC/reconnect tests PASS.
+
+THE VERIFICATION RECEIPT (what the operator asked for — "verify it
+helps"): CHAIN-TIME slot=2 status=0 total_ms=287.35 rounds=91 (new
+metrics: collective_host_submit_ms=125.61 / 91 submissions) =
+**3.16 ms/round** — from 384.6 ms/round = **122x**. The relay-pacing
+class that owned this fleet for a week is GONE in the merged build.
+
+The request-level canaries (23, 24) hit RC=28 through the deploy
+transition churn (requests status-4 mid-convergence) — the serving
+receipt is the immediate next item, then: the ladder to ≤100µs now
+runs from a 3.16ms floor with the graph path live.
+
+## 09-24 02:30 — PR #1081 UPDATE MERGED (ff to 4add3eb) + deployed; the chain class holds; the request-completion gap named
+
+THE UPDATE (5 commits: working-set recovery hardening + self-owned buffer
+teardown; serving-ownership fuzzing + removal of unsafe cache takeover —
+my KV-RECLAIM deliberately superseded by strict ownership + real abort
+delivery; TOKENIZER BOUNDS validation (maximum_token_id+1, consistent
+with the added-token floor); pipeline completion defers until every rank
+drains; fuzz campaign records + qualification gates).
+
+DEPLOY TRAP CAUGHT (the evidence law again): the first "deployment" of
+this update shipped OLD binaries — the ff-merge never left the Mac
+(origin still at 1a62b72; both build hosts pulled nothing; the
+unchanged shas were the tell). Pushed, rebuilt for real: residentd
+eae682f7 / daemon 2e4efe57 / x86 api 1f9e20e7 / driver b257f799.
+
+VERIFIED: chains complete at the good class (311.69ms status=0,
+host-submit 108.76ms/91; the 3.16ms/round floor holds on the update).
+OPEN (the exact next item): the REQUEST-level completion still fails —
+engine_completed=0, request status=4 (IO) while chains run; the
+canary RC=28s. The gap is in the request/completion plumbing (their
+every-rank-drain deferral under real traffic needs the look — or the
+API connection path again). Timer stays STOPPED per the operator;
+state parked for the next session/astra's next word.
+
+## 09-24 04:30 — BENCHMARK FINDINGS + the abandoned-spinners FIXED (fleet idle SM 96%→0%)
+
+WHY 250ms/token WHEN ALLREDUCE IS ~30µs/round (measured, operator challenge):
+- Reduce stages (the actual collective device work): 1.5-3.6ms per 91-round
+  chain = ~30µs/round. Confirmed negligible.
+- Host collective submit: 71-109ms per chain (0.8-1.2ms PER ROUND on the
+  host — should be ~10µs).
+- "Attention"/"MLP" stage walls (82-97 / 139-156ms): NOT compute — the GPU
+  ran 96% SM at 0% MEMORY (both during chains AND IDLE): spin-wait kernels
+  monopolize SMs waiting for peer publishes; host timers attribute that
+  wall to the surrounding stages.
+
+THE SKEW ANSWER (operator: "it can't be 1ms"): natural compute skew is
+µs (identical kernels/GPUs). The ms-scale arrival spread has two real
+sources: (a) the host submit path — per-round enqueue takes 0.3-1.2ms
+with variance ACROSS ranks, so the slowest rank's late publish makes the
+other 15 spin ~1ms/round (this is the real skew, and it's host-made);
+(b) GPU timeslicing against abandoned spin kernels. Both vanish in the
+graph path (one launch).
+
+THE INTERRUPT ANSWER: CUDA has no device-side interrupt; the practical
+fast mechanism is PUSH-not-PULL — the publisher's RDMA write lands in
+each PEER'S LOCAL cell and the waiter polls LOCAL memory (sub-µs,
+negligible bus traffic). Today waiters poll REMOTE cells via ld.global.cv
+(RDMA read per poll sweep ×16 ranks — the operator's bus-saturation
+concern is exactly right). The graph path + local-cell push = the ≤100µs
+design.
+
+THE SPINNER FIX (@0733326, driver 0d9b1fe7): cancel broadcast on BOTH
+collectives at chain COMPLETION (previously only on failure) — lingering
+wait kernels from final rounds exit immediately. VERIFIED FLEET-WIDE:
+idle SM 96%→0% on every sampled node (spark1/3/5/7/9/c/f all 0).
+
+ALSO NOTED: the fresh boot shows "GLM execution mode=graph" — the merged
+PR's explicit-graph-mode default is live.
+
+## 09-24 05:30 — TEST RESULTS (graph-mode boot + one-shot preload)
+
+- Spinner fix VERIFIED in the field: idle SM 0% fleet-wide (was 96%).
+- ONE-SHOT PRELOAD RECEIPT: --wset 336 keys → WSET-WARM elapsed_ms=0
+  (instant — the experts were already resident from the walk; the number
+  proves the one-shot path; a TRUE cold preload still needs measuring on
+  a fresh daemon).
+- THE BLOCKER NOW: in the fresh GRAPH-MODE boot, NO chain completes at
+  all (zero CHAIN-TIME lines; requests die status=4). The graph default
+  + this state stalls before first completion — the request-level gap
+  moved earlier. Next: trace the graph-mode chain start (gate armed?
+  experts_warm under graph default? the demand walk inside graph mode).

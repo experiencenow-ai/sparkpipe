@@ -111,13 +111,13 @@ int main(void)
 	SparkGlm5NextTpChain chain = {0};
 	SparkGlm5NextTpChain *recovered;
 	SparkWeightdLazyPack pack = {0};
-	uint32_t offsets[289],i,scenario;
+	uint32_t offsets[SPARK_GLM5_NEXT_MODEL_LAYER_COUNT * 289u] = {0},i,scenario;
 	cudaEvent_t event;
 	check_manifest_geometry();
 	atomic_init(&state.lazy_retained[0],0);
 	assert(cudaEventCreateWithFlags(&event,cudaEventDisableTiming) == cudaSuccess);
 	assert(cudaEventRecord(event,0) == cudaSuccess);
-	for (i=0u; i<289u; i++) offsets[i] = i == 0u ? 0u : (i <= 17u ? 4u : 8u);
+	for (i=0u; i<289u; i++) offsets[3u * 289u + i] = i == 0u ? 0u : (i <= 17u ? 4u : 8u);
 	state.lazy_pack = &pack;
 	slot.route_ready_event = event;
 	slot.route_recorded = 1u;
