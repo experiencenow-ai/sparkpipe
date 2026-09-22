@@ -230,6 +230,8 @@ static uint32_t SparkModelPipelineClientCanContinue(
 	const SparkModelServingSubmission *submission)
 {
 	uint32_t lane;
+	if ( submission->work_kind == SPARK_MODEL_SERVING_WORK_KIND_CACHE_PUBLISH )
+		return(0u);
 	if ( (pipeline->adapter_descriptor->capability_flags &
 		SPARK_MODEL_SERVING_ADAPTER_CAPABILITY_CONTINUE_LEASE) == 0u )
 		return(0u);
