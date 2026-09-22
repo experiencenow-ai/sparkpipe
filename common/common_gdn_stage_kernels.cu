@@ -65,15 +65,26 @@ static __global__ void LmGdnStageConvUpdateKernel(const void *qkv_bf16, const vo
 	SparkLmFloatToBf16(conv_tail_bf16,tail_base + 2u,window[3]);
 }
 
-static __global__ void LmGdnStageDecayBetaKernel(const void *decay_pre_bf16, const void *beta_pre_bf16, const float *a_log_f32, const float *dt_bias_f32, float *log_decay_f32, float *beta_f32, uint32_t row_count, uint32_t tp_degree)
+static __global__ void LmGdnStageDecayBetaKernel(const void *decay_pre_bf16, const void *beta_pre_bf16, const float *a_log_f32, const float *dt_bias_f32, float *log_decay_f32, float *beta_f32, uint32_t row_count, uint32_t tp_degree, uint32_t tp_rank)
 {
 	uint32_t row = blockIdx.x,head = threadIdx.x;
-	uint64_t index;
+	uint32_t local_heads,full_heads;
+	uint64_t source,sink;
 	if ( row >= row_count || head >= SPARK_LLM_GDN_LOCAL_VALUE_HEAD_COUNT(tp_degree) )
 		return;
-	index = ((uint64_t)row * SPARK_LLM_GDN_LOCAL_VALUE_HEAD_COUNT(tp_degree)) + head;
-	log_decay_f32[index] = -expf(a_log_f32[head]) * SparkLmSoftplus(SparkLmBf16ToFloat(decay_pre_bf16,index) + dt_bias_f32[head]);
-	beta_f32[index] = SparkLmSigmoid(SparkLmBf16ToFloat(beta_pre_bf16,index));
+	/* The decay/beta projections and the a_log/dt_bias tensors are
+	   REPLICATED in the stagepack (full head count on every rank - the
+	   manifest check enforces unsharded rows for these kinds), so the
+	   pre-buffers are row-major FULL-width and the rank reads ITS head
+	   slice: [tp_rank*local, tp_rank*local+local). The linear that fills
+	   them writes the full row; the local-width outputs keep the local
+	   row-major layout every downstream kernel already uses. */
+	local_heads = SPARK_LLM_GDN_LOCAL_VALUE_HEAD_COUNT(tp_degree);
+	full_heads = local_heads * tp_degree;
+	source = ((uint64_t)row * full_heads) + ((uint64_t)tp_rank * local_heads) + head;
+	sink = ((uint64_t)row * local_heads) + head;
+	log_decay_f32[sink] = -expf(a_log_f32[(uint64_t)tp_rank * local_heads + head]) * SparkLmSoftplus(SparkLmBf16ToFloat(decay_pre_bf16,source) + dt_bias_f32[(uint64_t)tp_rank * local_heads + head]);
+	beta_f32[sink] = SparkLmSigmoid(SparkLmBf16ToFloat(beta_pre_bf16,source));
 }
 
 static __global__ void LmGdnStageGdnStepKernel(const void *conv_out_bf16, const float *log_decay_f32, const float *beta_f32, float *state_f32, void *core_out_bf16, const uint32_t *row_lane_indices, const uint32_t *state_cold_by_row, uint32_t row_count, uint32_t gdn_layer_ordinal, uint64_t state_lane_stride, uint64_t state_layer_stride, uint32_t tp_degree)
@@ -1296,9 +1307,9 @@ cudaError_t LmGdnStageLaunchConvUpdate(cudaStream_t stream, const void *qkv_bf16
 	return(cudaGetLastError());
 }
 
-cudaError_t LmGdnStageLaunchDecayBeta(cudaStream_t stream, const void *decay_pre_bf16, const void *beta_pre_bf16, const float *a_log_f32, const float *dt_bias_f32, float *log_decay_f32, float *beta_f32, uint32_t row_count, uint32_t tp_degree)
+cudaError_t LmGdnStageLaunchDecayBeta(cudaStream_t stream, const void *decay_pre_bf16, const void *beta_pre_bf16, const float *a_log_f32, const float *dt_bias_f32, float *log_decay_f32, float *beta_f32, uint32_t row_count, uint32_t tp_degree, uint32_t tp_rank)
 {
-	LmGdnStageDecayBetaKernel<<<row_count,SPARK_LLM_GDN_LOCAL_VALUE_HEAD_COUNT(tp_degree),0,stream>>>(decay_pre_bf16,beta_pre_bf16,a_log_f32,dt_bias_f32,log_decay_f32,beta_f32,row_count,tp_degree);
+	LmGdnStageDecayBetaKernel<<<row_count,SPARK_LLM_GDN_LOCAL_VALUE_HEAD_COUNT(tp_degree),0,stream>>>(decay_pre_bf16,beta_pre_bf16,a_log_f32,dt_bias_f32,log_decay_f32,beta_f32,row_count,tp_degree,tp_rank);
 	return(cudaGetLastError());
 }
 

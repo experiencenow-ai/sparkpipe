@@ -1182,7 +1182,7 @@ extern cudaError_t SparkQwen38MaxLaunchRmsNorm(cudaStream_t stream, const void *
 extern cudaError_t SparkQwen38MaxLaunchFusedResidualRmsNorm(cudaStream_t stream, void *hidden_bf16, const void *delta_bf16, const void *gain_bf16, void *output_bf16, uint32_t row_count, uint32_t dimension, float epsilon);
 extern cudaError_t SparkQwen38MaxLaunchLinear(cudaStream_t stream, const SparkQwen38MaxLinearView *view, const void *input_bf16, void *output_bf16, uint32_t row_count);
 extern cudaError_t SparkQwen38MaxLaunchConvUpdate(cudaStream_t stream, const void *qkv_bf16, const SparkQwen38MaxGdnLayerWeights *weights, void *conv_out_bf16, const SparkQwen38MaxGdnStatePool *pool, const uint32_t *row_lane_indices, uint32_t row_count, uint32_t gdn_layer_ordinal, uint32_t tp_degree);
-extern cudaError_t SparkQwen38MaxLaunchDecayBeta(cudaStream_t stream, const void *decay_pre_bf16, const void *beta_pre_bf16, const SparkQwen38MaxGdnLayerWeights *weights, float *log_decay_f32, float *beta_f32, uint32_t row_count, uint32_t tp_degree);
+extern cudaError_t SparkQwen38MaxLaunchDecayBeta(cudaStream_t stream, const void *decay_pre_bf16, const void *beta_pre_bf16, const SparkQwen38MaxGdnLayerWeights *weights, float *log_decay_f32, float *beta_f32, uint32_t row_count, uint32_t tp_degree, uint32_t tp_rank);
 extern cudaError_t SparkQwen38MaxLaunchGdnStep(cudaStream_t stream, const void *conv_out_bf16, const float *log_decay_f32, const float *beta_f32, const SparkQwen38MaxGdnStatePool *pool, void *core_out_bf16, const uint32_t *row_lane_indices, uint32_t row_count, uint32_t gdn_layer_ordinal, uint32_t tp_degree);
 extern cudaError_t SparkQwen38MaxLaunchGatedNorm(cudaStream_t stream, const void *core_bf16, const void *z_bf16, const SparkQwen38MaxGdnLayerWeights *weights, void *output_bf16, uint32_t row_count, float epsilon, uint32_t tp_degree);
 extern cudaError_t SparkQwen38MaxLaunchAttnPrepare(cudaStream_t stream, void *q_fused_bf16, const void *k_bf16, const void *v_bf16, const SparkQwen38MaxAttnLayerWeights *weights, void *kv_cache_bf16, const uint32_t *slot_mapping, const uint64_t *row_positions, uint32_t row_count, uint32_t attn_layer_ordinal, uint64_t cache_layer_stride, uint64_t cache_block_stride, float epsilon, uint32_t tp_degree, uint32_t tp_rank);
@@ -1212,7 +1212,7 @@ static cudaError_t SparkQwen38MaxModuleRunGdnCoreDecode(SparkQwen38MaxModuleStat
 	if ( error == cudaSuccess )
 	{
 		SparkStageModuleStageTimingBegin(&state->stage_timing,stream,SPARK_QWEN38_MAX_MODULE_STAGE_GDN_DECAY_BETA);
-		error = SparkQwen38MaxLaunchDecayBeta(stream,slot->decay_pre_bf16,slot->beta_pre_bf16,weights,slot->log_decay_f32,slot->beta_f32,rows,state->tp_degree);
+		error = SparkQwen38MaxLaunchDecayBeta(stream,slot->decay_pre_bf16,slot->beta_pre_bf16,weights,slot->log_decay_f32,slot->beta_f32,rows,state->tp_degree,state->tp_rank);
 		SparkStageModuleStageTimingEnd(&state->stage_timing,stream);
 	}
 	if ( error == cudaSuccess )
@@ -1643,9 +1643,11 @@ static SparkStatus SparkQwen38MaxModuleAllocateSlot(SparkQwen38MaxModuleState *s
 	if ( status == SPARK_STATUS_OK )
 		status = SparkStageModuleDeviceAllocate(&state->ledger,rows * local_gdn_value_dimension * SPARK_QWEN38_MAX_MODEL_BF16_ELEMENT_BYTES,&slot->z_bf16);
 	if ( status == SPARK_STATUS_OK )
-		status = SparkStageModuleDeviceAllocate(&state->ledger,rows * local_gdn_value_heads * SPARK_QWEN38_MAX_MODEL_BF16_ELEMENT_BYTES,&slot->beta_pre_bf16);
+		/* decay/beta projections are REPLICATED (full head rows; the linear
+	   fills the full row) - the DecayBeta kernel reads this rank's slice. */
+	status = SparkStageModuleDeviceAllocate(&state->ledger,rows * SPARK_QWEN38_MAX_MODEL_GDN_VALUE_HEAD_COUNT * SPARK_QWEN38_MAX_MODEL_BF16_ELEMENT_BYTES,&slot->beta_pre_bf16);
 	if ( status == SPARK_STATUS_OK )
-		status = SparkStageModuleDeviceAllocate(&state->ledger,rows * local_gdn_value_heads * SPARK_QWEN38_MAX_MODEL_BF16_ELEMENT_BYTES,&slot->decay_pre_bf16);
+		status = SparkStageModuleDeviceAllocate(&state->ledger,rows * SPARK_QWEN38_MAX_MODEL_GDN_VALUE_HEAD_COUNT * SPARK_QWEN38_MAX_MODEL_BF16_ELEMENT_BYTES,&slot->decay_pre_bf16);
 	if ( status == SPARK_STATUS_OK )
 		status = SparkStageModuleDeviceAllocate(&state->ledger,rows * local_gdn_value_heads * sizeof(float),(void **)&slot->log_decay_f32);
 	if ( status == SPARK_STATUS_OK )
