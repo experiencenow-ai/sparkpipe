@@ -1,5 +1,5 @@
 {
-  "file_count": 3276,
+  "file_count": 3278,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -4625,6 +4625,11 @@
       "path": "model-families/qwen38_max/include/sparkpipe/spark_qwen38_max_work_control.h",
       "sha256": "321ea14e9503ae8453ac3b0afe0cdc0b7ef7a3d38dc7516e38a504e2a51e772d",
       "size_bytes": 3431
+    },
+    {
+      "path": "model-families/qwen38_max/smoke_experts.json",
+      "sha256": "35e9cdc9f20f3853eeaf4e84d1214d7dc1597304917be235e1733e7cdfa396ff",
+      "size_bytes": 152628
     },
     {
       "path": "model-families/qwen38_max/src/spark_qwen38_max_work_control.c",
@@ -12532,6 +12537,11 @@
       "size_bytes": 1082
     },
     {
+      "path": "tools/qwen38max_smoke_experts.py",
+      "sha256": "7b24ad1cfbd114aa3ebce2594686bcdc3ef3c80542f9d578b9f3e004e3576c39",
+      "size_bytes": 11744
+    },
+    {
       "path": "tools/qwen38max_swap_rank.sh",
       "sha256": "2c1eae8a37b92b9b87292e79b2308f0c75628cc09291ac4b39e8ec031e9ef00a",
       "size_bytes": 1441
@@ -16385,5 +16395,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78110464
+  "total_bytes": 78274836
 }
