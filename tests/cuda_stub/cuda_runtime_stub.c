@@ -1081,6 +1081,41 @@ CUresult cuMemSetAccess(CUdeviceptr pointer,
     return CUDA_SUCCESS;
 }
 
+CUresult cuMemcpyDtoD(CUdeviceptr destination, CUdeviceptr source,
+    size_t bytes)
+{
+    /* Host-model D2D: VMM reservations and plain allocations are host
+     * memory in this stub; validate VMM bounds/access when resolvable and
+     * copy. Unresolvable (plain cudaMalloc) pointers copy directly, same
+     * as the stub cudaMemcpy device paths. */
+    cuda_stub_vmm_reservation *target =
+        cuda_stub_vmm_reservation_for_va(destination);
+    cuda_stub_vmm_reservation *origin =
+        cuda_stub_vmm_reservation_for_va(source);
+    if ( bytes == 0u )
+        return CUDA_SUCCESS;
+    if ( target != 0 )
+    {
+        CUdeviceptr span_start = (CUdeviceptr)(target + 1);
+        uint64_t offset = destination - span_start;
+        if ( offset > target->bytes ||
+            (uint64_t)bytes > target->bytes - offset ||
+            target->granted_access != CU_MEM_ACCESS_FLAGS_PROT_READWRITE )
+            return CUDA_ERROR_INVALID_VALUE;
+    }
+    if ( origin != 0 )
+    {
+        CUdeviceptr span_start = (CUdeviceptr)(origin + 1);
+        uint64_t offset = source - span_start;
+        if ( offset > origin->bytes ||
+            (uint64_t)bytes > origin->bytes - offset )
+            return CUDA_ERROR_INVALID_VALUE;
+    }
+    memmove((void *)(uintptr_t)destination,
+        (const void *)(uintptr_t)source,bytes);
+    return CUDA_SUCCESS;
+}
+
 CUresult cuda_stub_vmm_probe_write(CUdeviceptr pointer,
     const void *bytes,
     size_t count)
