@@ -22,6 +22,7 @@ MODULE_INCLUDE_FLAGS = \
 	-I"$(REPOSITORY_ROOT)/src" \
 	-I"$(REPOSITORY_ROOT)/model-families/common/include" \
 	-I"$(REPOSITORY_ROOT)/model-families/minimax/include" \
+	-I"$(REPOSITORY_ROOT)/model-families/minimax/include/sparkpipe" \
 	-I"$(REPOSITORY_ROOT)/modules/minimax_resident_decode_stage/include" \
 	-I"$(REPOSITORY_ROOT)/modules/minimax_resident_decode_stage/source" \
 	-I"$(REPOSITORY_ROOT)"
