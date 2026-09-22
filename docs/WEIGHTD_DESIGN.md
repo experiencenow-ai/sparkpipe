@@ -111,6 +111,36 @@ W3 fleet integration: the registrar's GO gains weightd-healthy;
   re-run on attached-arena serving (determinism must be identical).
 W4 multi-family + the multi-topology operational win.
 
+## Shared mesh topology profiles
+
+Weightd IPC ABI 8 carries the logical-to-physical rank map with the existing
+lane reservation. The coordinator assigns one lane in 0–7 and one ordered
+`SPARK_TP_MESH_RANKS` list to every rank of a job before launching it. For
+example, TP4 on physical hosts 4–7 uses `4,5,6,7`; logical rank 2 must run on
+physical host 6. The list must have exactly the collective degree, contain
+unique physical ranks in 0–15, and match the daemon's physical rank and
+configured participant mask. Omitting the list selects explicit identity;
+an invalid explicit list fails. Startup logs the resolved map and physical
+peer mask. TP groups with different mappings require separate lane profiles.
+
+Each daemon fixes a lane's topology on its first configured reservation.
+Changing its root, membership, order or degree returns `UNSUPPORTED`, even
+while idle. Changing profiles requires draining all dependent residents and
+starting a fresh daemon. A healthy same-profile restart preserves source
+tags and request watermarks and must wait for that lane's activity,
+doorbells, hardware gates and transfer completions to drain. Outstanding raw
+mesh RPC writes conservatively block all lane reconfiguration. A null
+reservation topology is allocation-only and cannot begin GPU mesh activity.
+
+GPU slot indices, peer tails and doorbells remain logical. The existing
+transport selects physical QPs from the reserved map, and common host
+control broadcasts use physical masks. Chain publication sends the exact
+packed map and degree in the existing BASE cell before its ordered key;
+peers reject a different topology before adopting that key. Borrowed main
+and HC clients must match their owner's full topology. None of these shared
+host checks qualifies an individual model's math or GPU serving path; those
+still require its numerical and inference gates.
+
 ## The lazy expert arena (2026-09, shipped)
 
 ATTACH CONTRACT (CONFIGURED LAZY ARENA): when SPARK_WEIGHTD_ATTACH_LAZY

@@ -36,7 +36,6 @@ extern uint64_t SparkWeightdMeshBufferAddress(void);
 extern uint32_t SparkWeightdMeshBufferLkey(void);
 extern int SparkWeightdMeshBufferFd(void);
 extern void SparkWeightdMeshPoll(void);
-extern SparkStatus SparkWeightdMeshSetActivity(uint32_t active);
 extern SparkStatus SparkWeightdMeshPostWrite(uint32_t peer,
     uint64_t local_addr, uint32_t lkey, uint32_t length,
     uint64_t remote_offset);
@@ -57,9 +56,15 @@ __attribute__((weak)) void SparkWeightdMeshDeviceProbe(const char *tag,
     (void)tag; (void)device_pointer; (void)bytes;
 }
 __attribute__((weak)) void SparkWeightdMeshPoll(void) { }
-__attribute__((weak)) SparkStatus SparkWeightdMeshSetActivity(uint32_t active)
+__attribute__((weak)) SparkStatus SparkWeightdMeshLaneConfigure(uint32_t lane,
+    const SparkWeightdMeshTopology *topology)
 {
-    (void)active;
+    (void)lane; (void)topology;
+    return SPARK_STATUS_UNSUPPORTED;
+}
+__attribute__((weak)) SparkStatus SparkWeightdMeshSetActivity(uint32_t lane,uint32_t active)
+{
+    (void)lane; (void)active;
     return SPARK_STATUS_UNSUPPORTED;
 }
 __attribute__((weak)) SparkStatus SparkWeightdMeshPostWrite(uint32_t peer,
@@ -160,6 +165,7 @@ typedef struct SparkWeightdConnection
     uint64_t owner;
     uint64_t mesh_generation;
     uint32_t mesh_active;
+    uint32_t mesh_lane;
     uint32_t request_bytes;
     uint32_t request_ready;
     uint32_t attach_count;
@@ -208,6 +214,7 @@ struct SparkWeightdClient
     uint64_t daemon_generation;
     uint32_t lane;
     atomic_uint lane_bands;
+    SparkWeightdMeshTopology topology;
 };
 
 uint32_t SparkWeightdClientAlive(const SparkWeightdClient *client)
@@ -2578,7 +2585,8 @@ static uint32_t SparkWeightdServerDispatch(SparkWeightdServer *server,
         memset(result,0,sizeof(*result));
         SparkWeightdBuildHeader(response,result_kind,request_id);
         if ( activity->generation == 0u || activity->active > 1u ||
-             activity->reserved0 != 0u )
+             activity->lane >= SPARK_WEIGHTD_MESH_MAX_LANES ||
+             server->lane_owner[activity->lane] == 0u )
             status = SPARK_STATUS_INVALID_ARGUMENT;
         else if ( activity->active != 0u && server->orphan_mesh_owners != 0u )
             status = SPARK_STATUS_IO_ERROR;
@@ -2590,15 +2598,17 @@ static uint32_t SparkWeightdServerDispatch(SparkWeightdServer *server,
             status = SPARK_STATUS_INVALID_ARGUMENT;
         else if ( activity->active == 0u &&
                  (connection->mesh_active == 0u ||
-                  activity->generation != connection->mesh_generation) )
+                  activity->generation != connection->mesh_generation ||
+                  activity->lane != connection->mesh_lane) )
             status = SPARK_STATUS_INVALID_ARGUMENT;
         else
         {
-            status = SparkWeightdMeshSetActivity(activity->active);
+            status = SparkWeightdMeshSetActivity(activity->lane,activity->active);
             if ( status == SPARK_STATUS_OK )
             {
                 connection->mesh_generation = activity->generation;
                 connection->mesh_active = activity->active;
+                connection->mesh_lane = activity->lane;
             }
         }
         result->status = (uint32_t)status;
@@ -2688,10 +2698,13 @@ static uint32_t SparkWeightdServerDispatch(SparkWeightdServer *server,
         const SparkWeightdIpcLaneAcquire *acquire =
             (const SparkWeightdIpcLaneAcquire *)request_header;
         uint32_t lane;
+        const SparkWeightdMeshTopology empty_topology = {0};
         memset(result,0,sizeof(*result));
         SparkWeightdBuildHeader(response,result_kind,request_id);
         result->lane = SPARK_WEIGHTD_LANE_NONE;
         if (acquire->reserved != 0u ||
+            (acquire->topology.rank_count == 0u &&
+             memcmp(&acquire->topology,&empty_topology,sizeof(empty_topology)) != 0) ||
             (acquire->requested_lane != SPARK_WEIGHTD_LANE_NONE &&
              acquire->requested_lane >= SPARK_WEIGHTD_MESH_MAX_LANES))
             result->status = (uint32_t)SPARK_STATUS_INVALID_ARGUMENT;
@@ -2708,6 +2721,13 @@ static uint32_t SparkWeightdServerDispatch(SparkWeightdServer *server,
                 (acquire->requested_lane == SPARK_WEIGHTD_LANE_NONE ||
                  acquire->requested_lane == lane))
             {
+                if (acquire->topology.rank_count != 0u)
+                {
+                    result->status = (uint32_t)SparkWeightdMeshLaneConfigure(
+                        lane,&acquire->topology);
+                    if (result->status != (uint32_t)SPARK_STATUS_OK)
+                        break;
+                }
                 server->lane_owner[lane] =
                     (uint16_t)(connection - server->connections) + 1u;
                 connection->lane_mask |= (uint16_t)(1u << lane);
@@ -3860,13 +3880,16 @@ SparkStatus SparkWeightdClientMeshActivity(SparkWeightdClient *client,
     SparkWeightdIpcMeshActivity wire;
     SparkWeightdIpcMeshActivityResult wire_result;
     SparkStatus status;
-    if ( client == 0 || generation == 0u || active > 1u )
+    if ( client == 0 || generation == 0u || active > 1u ||
+         client->lane >= SPARK_WEIGHTD_MESH_MAX_LANES ||
+         client->topology.rank_count == 0u )
         return SPARK_STATUS_INVALID_ARGUMENT;
     memset(&wire,0,sizeof(wire));
     SparkWeightdBuildHeader((uint8_t *)&wire,SPARK_WEIGHTD_IPC_KIND_MESH_ACTIVITY,
         ++client->next_request_id);
     wire.generation = generation;
     wire.active = active;
+    wire.lane = client->lane;
     memset(&wire_result,0,sizeof(wire_result));
     status = SparkWeightdClientExchange(client,&wire,sizeof(wire),&wire_result,
         sizeof(wire_result),timeout_nanoseconds);
@@ -3951,7 +3974,8 @@ SparkStatus SparkWeightdClientMeshBroadcast(
 }
 
 SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
-    uint32_t requested_lane, uint32_t *lane_out, uint64_t timeout_nanoseconds)
+    uint32_t requested_lane,const SparkWeightdMeshTopology *topology,
+    uint32_t *lane_out,uint64_t timeout_nanoseconds)
 {
     SparkWeightdIpcLaneAcquire wire;
     SparkWeightdIpcLaneAcquireResult wire_result;
@@ -3969,6 +3993,7 @@ SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
         sizeof(wire) - SPARK_WEIGHTD_IPC_HEADER_BYTES;
     wire.header.request_id = ++client->next_request_id;
     wire.requested_lane = requested_lane;
+    if (topology != 0) wire.topology = *topology;
     memset(&wire_result, 0, sizeof(wire_result));
     status = SparkWeightdClientExchange(client, &wire,
         (uint32_t)sizeof(wire), &wire_result,
@@ -3982,15 +4007,19 @@ SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
           wire_result.lane != requested_lane) )
         SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
     client->lane = wire_result.lane;
+    client->topology = wire.topology;
     *lane_out = wire_result.lane;
     return SPARK_STATUS_OK;
 }
 
 SparkStatus SparkWeightdClientLaneBind(SparkWeightdClient *owner,
-    const SparkWeightdClient *peer,uint32_t band,uint32_t *lane_out)
+    SparkWeightdClient *peer,uint32_t band,
+    const SparkWeightdMeshTopology *topology,uint32_t *lane_out)
 {
     uint32_t prior;
-    if ( owner == 0 || peer == 0 || lane_out == 0 || band >= 2u ||
+    if ( owner == 0 || peer == 0 || topology == 0 || lane_out == 0 || band >= 2u ||
+         topology->rank_count == 0u ||
+         memcmp(&owner->topology,topology,sizeof(*topology)) != 0 ||
          owner->lane >= SPARK_WEIGHTD_MESH_MAX_LANES ||
          owner->daemon_generation != peer->daemon_generation )
         return SPARK_STATUS_INVALID_ARGUMENT;
@@ -3999,6 +4028,8 @@ SparkStatus SparkWeightdClientLaneBind(SparkWeightdClient *owner,
     prior = atomic_fetch_or_explicit(&owner->lane_bands,1u << band,memory_order_acq_rel);
     if ( (prior & (1u << band)) != 0u )
         return SPARK_STATUS_DUPLICATE;
+    peer->lane = owner->lane;
+    peer->topology = owner->topology;
     *lane_out = owner->lane;
     return SPARK_STATUS_OK;
 }

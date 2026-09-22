@@ -114,10 +114,10 @@ void SparkWeightdClientClose(SparkWeightdClient *client)
 }
 
 SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
-    uint32_t requested,uint32_t *out,uint64_t timeout)
+    uint32_t requested,const SparkWeightdMeshTopology *topology,uint32_t *out,uint64_t timeout)
 {
     FuzzMeshClient *mesh = (FuzzMeshClient *)client;
-    (void)timeout;
+    (void)timeout; (void)topology;
     if (mesh->lane != SPARK_WEIGHTD_LANE_NONE) return SPARK_STATUS_DUPLICATE;
     for (uint32_t lane=0u; lane<SPARK_WEIGHTD_MESH_MAX_LANES; lane++)
         if ((requested == SPARK_WEIGHTD_LANE_NONE || requested == lane) &&
@@ -132,10 +132,10 @@ SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
 }
 
 SparkStatus SparkWeightdClientLaneBind(SparkWeightdClient *owner,
-    const SparkWeightdClient *peer,uint32_t band,uint32_t *out)
+    SparkWeightdClient *peer,uint32_t band,const SparkWeightdMeshTopology *topology,uint32_t *out)
 {
     FuzzMeshClient *mesh = (FuzzMeshClient *)owner;
-    if (mesh->rank != ((const FuzzMeshClient *)peer)->rank ||
+    if (topology == 0 || topology->rank_count == 0u || mesh->rank != ((const FuzzMeshClient *)peer)->rank ||
         mesh->lane >= SPARK_WEIGHTD_MESH_MAX_LANES || band >= 2u)
         return SPARK_STATUS_INVALID_ARGUMENT;
     if ((mesh->bands & (1u << band)) != 0u) return SPARK_STATUS_DUPLICATE;
@@ -187,7 +187,7 @@ SparkStatus SparkWeightdClientMeshBroadcast(SparkWeightdClient *client, uint32_t
 {
 	uint32_t source_rank = *(uint32_t *)client;
 	uint32_t peer;
-	(void)seq_value; (void)seq_remote_offset; (void)timeout_nanoseconds;
+	(void)timeout_nanoseconds;
 	if ( g_broadcast_fail != 0u )
 		return(SPARK_STATUS_IO_ERROR);
 	__sync_add_and_fetch(&g_broadcast_count, 1u);
@@ -200,6 +200,8 @@ SparkStatus SparkWeightdClientMeshBroadcast(SparkWeightdClient *client, uint32_t
 			continue;
 		memcpy(g_regions[peer] + remote_offset,
 		    g_regions[source_rank] + source_offset, length);
+        __sync_synchronize();
+        if (seq_value != 0u) *(volatile uint64_t *)(g_regions[peer]+seq_remote_offset) = seq_value;
 	}
 	__sync_synchronize();
 	return(SPARK_STATUS_OK);
@@ -1207,6 +1209,7 @@ static void FuzzRejections(void)
 static void FuzzSourceLifetime(void);
 static void FuzzCellInitialization(void);
 static void FuzzLaneNamespace(void);
+static void FuzzMeshTopology(void);
 
 static void FuzzCompletionCapacity(void)
 {
@@ -1879,6 +1882,7 @@ int main(int argc, char **argv)
 	}
     FuzzRegistrationOwnership();
     FuzzLaneNamespace();
+    FuzzMeshTopology();
     FuzzCellInitialization();
 	if ( pthread_create(&shipper, 0, FuzzShipperMain, 0) != 0 )
 	{
@@ -2051,6 +2055,65 @@ static void FuzzLaneNamespace(void)
         "actual production pointers use reserved bands instead of identifier low bits");
     SparkTpDeviceCollectiveDestroy(&first);
     SparkTpDeviceCollectiveDestroy(&second);
+}
+
+static void FuzzMeshTopology(void)
+{
+    SparkWeightdMeshTopology topology;
+    SparkTpDeviceCollectiveConfig config = {0};
+    SparkTpDeviceCollective root = {0},peer = {0};
+    SparkTpDeviceCollectiveImplementation *implementation;
+    const char *invalid[] = {"", "4,5,6", "4,5,6,7,8", "4,5,6,6", "4,5,6,16", "4,5,6,-1", "4,5,6, 7", "4,5,6,7x"};
+    FuzzCase("explicit-physical-rank-map-and-ordered-chain-metadata");
+    CHECK(unsetenv("SPARK_TP_MESH_RANKS") == 0 &&
+        SparkTpDeviceCollectiveMeshTopology(3u,4u,&topology) == SPARK_STATUS_OK &&
+        topology.physical_ranks[3] == 3u,"default topology is explicit identity");
+    for (uint32_t i=0u; i<sizeof(invalid)/sizeof(invalid[0]); i++)
+        CHECK(setenv("SPARK_TP_MESH_RANKS",invalid[i],1) == 0 &&
+            SparkTpDeviceCollectiveMeshTopology(0u,4u,&topology) == SPARK_STATUS_INVALID_ARGUMENT,
+            "malformed explicit rank map has no identity fallback");
+    CHECK(setenv("SPARK_TP_MESH_RANKS","4,5,6,7",1) == 0 &&
+        SparkTpDeviceCollectiveMeshTopology(2u,4u,&topology) == SPARK_STATUS_OK &&
+        topology.rank_count == 4u && topology.local_rank == 2u &&
+        topology.physical_ranks[0] == 4u && topology.physical_ranks[2] == 6u,
+        "logical TP4 can explicitly use physical hosts4 through7");
+    CHECK(setenv("SPARK_TP_MESH_RANKS","0,2,3,4,5,6,7,8,9,10,11,12,13,14,15,1",1) == 0 &&
+        SparkTpDeviceCollectiveMeshTopology(15u,16u,&topology) == SPARK_STATUS_OK &&
+        topology.physical_ranks[1] == 2u && topology.physical_ranks[15] == 1u,
+        "full permuted TP16 retains the explicit rank order");
+    CHECK(setenv("SPARK_TP_MESH_RANKS","1,0",1) == 0 &&
+        setenv("SPARK_WEIGHTD_LANE","7",1) == 0,"select private control-test lane");
+    config.abi_version = SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION;
+    config.tp_degree = 2u;
+    config.local_hidden_dimension = FUZZ_HIDDEN;
+    config.max_active_sequence_count = 1u;
+    config.operation_timeout_milli = FUZZ_ROUND_TIMEOUT_MS;
+    g_connect_rank_hint = 1u;
+    CHECK(SparkTpDeviceCollectiveCreate(&config,&root) == SPARK_STATUS_OK &&
+        SparkTpDeviceCollectivePrepareReceiveBf16(&root,g_regions[1],1u,FUZZ_HIDDEN,0u,0) == SPARK_STATUS_OK,
+        "logical root binds physical peer1");
+    implementation = root.implementation;
+    CHECK(implementation != 0 && implementation->physical_peer_mask == 1u &&
+        implementation->packed_rank_map == 1u,"CPU broadcast translates logical peers to physical mask");
+    config.tp_rank = 1u;
+    g_connect_rank_hint = 0u;
+    CHECK(SparkTpDeviceCollectiveCreate(&config,&peer) == SPARK_STATUS_OK &&
+        SparkTpDeviceCollectivePrepareReceiveBf16(&peer,g_regions[0],1u,FUZZ_HIDDEN,0u,0) == SPARK_STATUS_OK,
+        "logical peer binds physical peer0");
+    CHECK(SparkTpDeviceCollectiveChainKey(&root,777u) == SPARK_STATUS_OK &&
+        SparkTpDeviceCollectiveChainKey(&peer,777u) == SPARK_STATUS_OK,
+        "ordered map payload and chain key reach physical peer");
+    SparkTpDeviceCollectiveDestroy(&peer);
+    CHECK(setenv("SPARK_TP_MESH_RANKS","2,0",1) == 0 &&
+        SparkTpDeviceCollectiveCreate(&config,&peer) == SPARK_STATUS_OK &&
+        SparkTpDeviceCollectivePrepareReceiveBf16(&peer,g_regions[0],1u,FUZZ_HIDDEN,0u,0) == SPARK_STATUS_OK,
+        "construct mismatched peer shape for cross-rank gate");
+    CHECK(SparkTpDeviceCollectiveChainKey(&peer,777u) == SPARK_STATUS_INVALID_ARGUMENT,
+        "matching request key cannot admit a different root or membership map");
+    SparkTpDeviceCollectiveDestroy(&peer);
+    SparkTpDeviceCollectiveDestroy(&root);
+    CHECK(unsetenv("SPARK_TP_MESH_RANKS") == 0 && unsetenv("SPARK_WEIGHTD_LANE") == 0,
+        "clear explicit topology fixture");
 }
 
 static void FuzzCellInitialization(void)

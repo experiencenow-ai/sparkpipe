@@ -15,7 +15,7 @@ extern "C" {
 
 #define SPARK_WEIGHTD_CLIENT_TIMEOUT_DEFAULT_NS UINT64_C(10000000000)
 
-#define SPARK_WEIGHTD_IPC_ABI_VERSION 7u
+#define SPARK_WEIGHTD_IPC_ABI_VERSION 8u
 #define SPARK_WEIGHTD_IPC_MAGIC UINT32_C(0x57444953)
 
 #define SPARK_WEIGHTD_ID_BYTES 64u
@@ -340,11 +340,19 @@ typedef struct SparkWeightdIpcEpochExportResult
     uint32_t reserved;
 } SparkWeightdIpcEpochExportResult;
 
+typedef struct SparkWeightdMeshTopology
+{
+    uint32_t rank_count;
+    uint32_t local_rank;
+    uint32_t physical_ranks[16];
+} SparkWeightdMeshTopology;
+
 typedef struct SparkWeightdIpcLaneAcquire
 {
     SparkWeightdIpcHeader header;
     uint32_t requested_lane;
     uint32_t reserved;
+    SparkWeightdMeshTopology topology;
 } SparkWeightdIpcLaneAcquire;
 
 typedef struct SparkWeightdIpcLaneAcquireResult
@@ -380,7 +388,7 @@ typedef struct SparkWeightdIpcMeshActivity
     SparkWeightdIpcHeader header;
     uint64_t generation;
     uint32_t active;
-    uint32_t reserved0;
+    uint32_t lane;
 } SparkWeightdIpcMeshActivity;
 
 typedef struct SparkWeightdIpcMeshActivityResult
@@ -722,13 +730,19 @@ SparkStatus SparkWeightdClientEpochExport(SparkWeightdClient *client,
     int *fd_out,
     uint64_t timeout_nanoseconds);
 
+SparkStatus SparkWeightdMeshLaneConfigure(uint32_t lane,
+    const SparkWeightdMeshTopology *topology);
+SparkStatus SparkWeightdMeshSetActivity(uint32_t lane,uint32_t active);
+
 SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
     uint32_t requested_lane,
+    const SparkWeightdMeshTopology *topology,
     uint32_t *lane_out,
     uint64_t timeout_nanoseconds);
 
 SparkStatus SparkWeightdClientLaneBind(SparkWeightdClient *owner,
-    const SparkWeightdClient *peer,uint32_t band,uint32_t *lane_out);
+    SparkWeightdClient *peer,uint32_t band,
+    const SparkWeightdMeshTopology *topology,uint32_t *lane_out);
 SparkStatus SparkWeightdClientLaneUnbind(SparkWeightdClient *owner,uint32_t band);
 
 SparkStatus SparkWeightdClientEvict(SparkWeightdClient *client,

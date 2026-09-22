@@ -231,6 +231,9 @@ typedef struct SparkTpDeviceCollectiveTopology
     ((uint32_t)sizeof(SparkTpDeviceCollectiveTopology))
 
 struct SparkWeightdClient;
+struct SparkWeightdMeshTopology;
+SparkStatus SparkTpDeviceCollectiveMeshTopology(uint32_t rank,uint32_t degree,
+    struct SparkWeightdMeshTopology *topology);
 
 typedef struct SparkTpDeviceCollectiveConfig
 {

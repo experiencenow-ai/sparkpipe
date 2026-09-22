@@ -2029,6 +2029,9 @@ static SparkStatus SparkGlm5NextModuleInitializeTpCollective(
 	{
 		const char *socket = getenv("SPARK_WEIGHTD_SOCKET");
 		uint32_t requested_lane;
+		SparkWeightdMeshTopology topology;
+		status = SparkTpDeviceCollectiveMeshTopology(state->tp_rank,state->tp_degree,&topology);
+		if (status != SPARK_STATUS_OK) SPARK_RETURN(status);
 		status = SparkGlm5NextRequestedMeshLane(&requested_lane);
 		if ( status != SPARK_STATUS_OK )
 			SPARK_RETURN(status);
@@ -2039,7 +2042,7 @@ static SparkStatus SparkGlm5NextModuleInitializeTpCollective(
 			state->lane_client = 0;
 			SPARK_FAIL(SPARK_STATUS_IO_ERROR);
 		}
-		status = SparkWeightdClientLaneAcquire(state->lane_client,requested_lane,&state->tp_lane,
+		status = SparkWeightdClientLaneAcquire(state->lane_client,requested_lane,&topology,&state->tp_lane,
 			(uint64_t)context->tp_connect_timeout_milli * 1000000ull);
 		if ( status != SPARK_STATUS_OK )
 		{

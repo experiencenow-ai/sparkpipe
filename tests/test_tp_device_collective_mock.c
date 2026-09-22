@@ -52,7 +52,7 @@ static SparkStatus mock_lane_status = SPARK_STATUS_OK;
 SparkStatus SparkWeightdClientConnect(const char *socket_path, SparkWeightdClient **client, SparkWeightdHelloResult *hello_out)
 {
 	(void)socket_path; (void)hello_out;
-	*client = (SparkWeightdClient *)calloc(1u, 64u);
+	*client = (SparkWeightdClient *)calloc(1u, 64u+sizeof(SparkWeightdMeshTopology));
 	((uint64_t *)*client)[2] = SPARK_WEIGHTD_LANE_NONE;
 	((uint64_t *)*client)[4] = mock_server;
 	mock_clients_live++;
@@ -70,7 +70,7 @@ void SparkWeightdClientClose(SparkWeightdClient *client)
 }
 
 SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
-    uint32_t requested,uint32_t *out,uint64_t timeout)
+    uint32_t requested,const SparkWeightdMeshTopology *topology,uint32_t *out,uint64_t timeout)
 {
     uint64_t *state = (uint64_t *)client;
     (void)timeout;
@@ -82,6 +82,7 @@ SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
         {
             mock_lane_mask[state[4]] |= UINT64_C(1) << lane;
             state[2] = lane;
+            if (topology != 0) memcpy(state+8,topology,sizeof(*topology));
             *out = lane;
             return SPARK_STATUS_OK;
         }
@@ -89,10 +90,11 @@ SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
 }
 
 SparkStatus SparkWeightdClientLaneBind(SparkWeightdClient *owner,
-    const SparkWeightdClient *peer,uint32_t band,uint32_t *out)
+    SparkWeightdClient *peer,uint32_t band,const SparkWeightdMeshTopology *topology,uint32_t *out)
 {
     uint64_t *state = (uint64_t *)owner;
-    if (state[4] != ((const uint64_t *)peer)[4] || state[2] >= SPARK_WEIGHTD_MESH_MAX_LANES || band >= 2u)
+    if (topology == 0 || memcmp(state+8,topology,sizeof(*topology)) != 0 ||
+        state[4] != ((const uint64_t *)peer)[4] || state[2] >= SPARK_WEIGHTD_MESH_MAX_LANES || band >= 2u)
         return SPARK_STATUS_INVALID_ARGUMENT;
     if ((state[3] & (1u << band)) != 0u) return SPARK_STATUS_DUPLICATE;
     state[3] |= 1u << band;
@@ -364,6 +366,8 @@ static void TestSharedLanes(SparkTpDeviceCollectiveConfig config,void *mesh)
     SparkTpDeviceCollective first = {0},second = {0},rejected = {0};
     SparkWeightdClient *owner = 0;
     uint32_t lane,live = mock_clients_live;
+    SparkWeightdMeshTopology topology;
+    CHECK(SparkTpDeviceCollectiveMeshTopology(config.tp_rank,config.tp_degree,&topology) == SPARK_STATUS_OK,"paired topology");
     uint64_t bands = mock_lane_mask[0];
     config.collective_identifier = 1u;
     CHECK(SparkTpDeviceCollectiveCreate(&config,&first) == SPARK_STATUS_OK,
@@ -388,7 +392,7 @@ static void TestSharedLanes(SparkTpDeviceCollectiveConfig config,void *mesh)
         "malformed common lane config fails without leaked client");
     CHECK(unsetenv("SPARK_WEIGHTD_LANE") == 0,"clear invalid test lane");
     CHECK(SparkWeightdClientConnect("fixture",&owner,0) == SPARK_STATUS_OK &&
-        SparkWeightdClientLaneAcquire(owner,7u,&lane,1u) == SPARK_STATUS_OK,
+        SparkWeightdClientLaneAcquire(owner,7u,&topology,&lane,1u) == SPARK_STATUS_OK,
         "paired owner reserves explicit lane");
     config.mesh_lane_client = owner;
     config.mesh_band_index = 0u;

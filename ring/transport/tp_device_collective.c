@@ -110,6 +110,9 @@ typedef struct SparkTpDeviceCollectiveImplementation
     SparkWeightdClient *client;
     SparkWeightdClient *lane_client;
     uint32_t mesh_band_index;
+    SparkWeightdMeshTopology mesh_topology;
+    uint32_t physical_peer_mask;
+    uint64_t packed_rank_map;
     uint64_t mesh_activity_generation;
     uint32_t mesh_activity_active;
     uint32_t active_stream_valid;
@@ -398,6 +401,61 @@ static uint64_t SparkTpDeviceCollectiveCancelCellOffset(uint32_t band_index)
         SPARK_WEIGHTD_MESH_DOORBELL_ENTRY_BYTES;
 }
 
+SparkStatus SparkTpDeviceCollectiveMeshTopology(uint32_t rank,uint32_t degree,
+    SparkWeightdMeshTopology *topology)
+{
+    const char *text = getenv("SPARK_TP_MESH_RANKS");
+    uint32_t seen = 0u;
+    if (topology == 0 || degree == 0u || degree > 16u || rank >= degree)
+        return SPARK_STATUS_INVALID_ARGUMENT;
+    memset(topology,0,sizeof(*topology));
+    topology->rank_count = degree;
+    topology->local_rank = rank;
+    for (uint32_t i=0u; i<degree; i++)
+    {
+        unsigned long physical = i;
+        if (text != 0)
+        {
+            char *end;
+            errno = 0;
+            physical = strtoul(text,&end,10);
+            if (text[0] < '0' || text[0] > '9' || errno != 0 ||
+                physical >= 16u || (i+1u == degree ? *end != '\0' : *end != ','))
+                return SPARK_STATUS_INVALID_ARGUMENT;
+            text = end + (i+1u != degree);
+        }
+        if ((seen & (1u << physical)) != 0u) return SPARK_STATUS_INVALID_ARGUMENT;
+        seen |= 1u << physical;
+        topology->physical_ranks[i] = (uint32_t)physical;
+    }
+    return SPARK_STATUS_OK;
+}
+
+static SparkStatus SparkTpDeviceCollectivePublishBase(
+    SparkTpDeviceCollectiveImplementation *implementation,uint64_t offset,uint64_t value)
+{
+    volatile uint64_t *cell = (volatile uint64_t *)(implementation->mesh_buffer+offset);
+    cell[1] = implementation->packed_rank_map;
+    cell[2] = implementation->tp_degree;
+    __sync_synchronize();
+    cell[0] = value;
+    return SparkWeightdClientMeshBroadcast(implementation->client,
+        implementation->physical_peer_mask,offset+8u,offset+8u,16u,value,offset,
+        implementation->round_timeout_ns);
+}
+
+static SparkStatus SparkTpDeviceCollectiveValidateBase(
+    SparkTpDeviceCollectiveImplementation *implementation,volatile uint64_t *cell)
+{
+    __sync_synchronize();
+    if (cell[1] == implementation->packed_rank_map && cell[2] == implementation->tp_degree)
+        return SPARK_STATUS_OK;
+    fprintf(stderr,"MESH-TOPOLOGY-MISMATCH rank=%u local=%016llx/%u peer=%016llx/%llu\n",
+        implementation->tp_rank,(unsigned long long)implementation->packed_rank_map,
+        implementation->tp_degree,(unsigned long long)cell[1],(unsigned long long)cell[2]);
+    return SPARK_STATUS_INVALID_ARGUMENT;
+}
+
 static SparkStatus SparkTpDeviceCollectiveRebase(
     SparkTpDeviceCollectiveImplementation *implementation,
     uint32_t use_broadcast)
@@ -444,16 +502,15 @@ static SparkStatus SparkTpDeviceCollectiveRebase(
             (unsigned long long)base,(unsigned long long)high,
             (unsigned long long)implementation->round_seq,
             (unsigned long long)*base_cell);
+        base_cell[1] = implementation->packed_rank_map;
+        base_cell[2] = implementation->tp_degree;
+        __sync_synchronize();
         *base_cell = base;
         if ( use_broadcast != 0u )
         {
             __sync_synchronize();
-            (void)SparkWeightdClientMeshBroadcast(
-                implementation->client,
-                ((1u << implementation->tp_degree) - 1u) &
-                    ~(1u << implementation->tp_rank),
-                base_offset,base_offset,8u,0ull,0ull,
-                implementation->round_timeout_ns);
+            SparkStatus status = SparkTpDeviceCollectivePublishBase(implementation,base_offset,base);
+            if (status != SPARK_STATUS_OK) return status;
         }
         implementation->base_seen = base;
     }
@@ -481,6 +538,8 @@ static SparkStatus SparkTpDeviceCollectiveRebase(
                 return SPARK_STATUS_BUSY;
             }
         }
+        SparkStatus status = SparkTpDeviceCollectiveValidateBase(implementation,base_cell);
+        if (status != SPARK_STATUS_OK) return status;
         implementation->base_seen = *base_cell;
     }
     implementation->round_seq = implementation->base_seen - 1ull;
@@ -509,14 +568,8 @@ SparkStatus SparkTpDeviceCollectiveChainRetire(
     *base_cell = *base_cell +
         SPARK_TP_DEVICE_COLLECTIVE_WAVE_STRIDE;
     __sync_synchronize();
-    (void)SparkWeightdClientMeshBroadcast(
-        implementation->client,
-        ((1u << implementation->tp_degree) - 1u) &
-            ~(1u << implementation->tp_rank),
-        SparkTpDeviceCollectiveBaseCellOffset(band_index),
-        SparkTpDeviceCollectiveBaseCellOffset(band_index),8u,0ull,0ull,
-        implementation->round_timeout_ns);
-    return(SPARK_STATUS_OK);
+    return SparkTpDeviceCollectivePublishBase(implementation,
+        SparkTpDeviceCollectiveBaseCellOffset(band_index),*base_cell);
 }
 
 static SparkStatus SparkTpDeviceCollectiveEnsureCells(
@@ -662,13 +715,8 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
             (unsigned long long)request_id);
         __sync_synchronize();
         {
-            SparkStatus bcast = SparkWeightdClientMeshBroadcast(
-                implementation->client,
-                ((1u << implementation->tp_degree) - 1u) &
-                    ~(1u << implementation->tp_rank),
-                SparkTpDeviceCollectiveBaseCellOffset(band_index),
-                SparkTpDeviceCollectiveBaseCellOffset(band_index),8u,0ull,0ull,
-                implementation->round_timeout_ns);
+            SparkStatus bcast = SparkTpDeviceCollectivePublishBase(implementation,
+                SparkTpDeviceCollectiveBaseCellOffset(band_index),*base_cell);
             if ( bcast != SPARK_STATUS_OK )
             {
                 fprintf(stderr,"CKEY-BCAST-FAIL rank=0 epoch=%llu status=%d\n",
@@ -718,6 +766,8 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
             cell = *base_cell;
             cell_epoch = cell >> SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_BITS;
         }
+        SparkStatus map_status = SparkTpDeviceCollectiveValidateBase(implementation,base_cell);
+        if (map_status != SPARK_STATUS_OK) return map_status;
         epoch = cell_epoch;
         implementation->consumed_cell = cell;
         if ( epoch != implementation->chain_epoch ||
@@ -1435,6 +1485,15 @@ static SparkStatus SparkTpDeviceCollectiveAcquireLane(
     SparkStatus status;
     uint32_t lane,requested = SPARK_WEIGHTD_LANE_NONE;
     SparkWeightdClient *owner = config->mesh_lane_client;
+    status = SparkTpDeviceCollectiveMeshTopology(config->tp_rank,config->tp_degree,
+        &implementation->mesh_topology);
+    if (status != SPARK_STATUS_OK) return status;
+    for (uint32_t i=0u; i<config->tp_degree; i++)
+    {
+        uint32_t physical = implementation->mesh_topology.physical_ranks[i];
+        implementation->packed_rank_map |= (uint64_t)physical << (4u*i);
+        if (i != config->tp_rank) implementation->physical_peer_mask |= 1u << physical;
+    }
     if ( owner == 0 )
     {
         const char *text = getenv("SPARK_WEIGHTD_LANE");
@@ -1450,12 +1509,12 @@ static SparkStatus SparkTpDeviceCollectiveAcquireLane(
             requested = (uint32_t)value;
         }
         owner = implementation->client;
-        status = SparkWeightdClientLaneAcquire(owner,requested,&lane,
+        status = SparkWeightdClientLaneAcquire(owner,requested,&implementation->mesh_topology,&lane,
             implementation->round_timeout_ns);
         if ( status != SPARK_STATUS_OK ) return status;
     }
     status = SparkWeightdClientLaneBind(owner,implementation->client,
-        config->mesh_band_index,&lane);
+        config->mesh_band_index,&implementation->mesh_topology,&lane);
     if ( status != SPARK_STATUS_OK ) return status;
     implementation->lane_client = owner;
     implementation->mesh_band_index = config->mesh_band_index;
@@ -1464,6 +1523,9 @@ static SparkStatus SparkTpDeviceCollectiveAcquireLane(
     fprintf(stderr,"MESH-LANE rank=%u lane=%u band=%u ownership=%s\n",
         implementation->tp_rank,lane,2u * lane + config->mesh_band_index,
         owner == implementation->client ? "owned" : "borrowed");
+    fprintf(stderr,"MESH-TOPOLOGY rank=%u degree=%u physical=%u map=%016llx peers=%04x\n",
+        config->tp_rank,config->tp_degree,implementation->mesh_topology.physical_ranks[config->tp_rank],
+        (unsigned long long)implementation->packed_rank_map,implementation->physical_peer_mask);
     return SPARK_STATUS_OK;
 }
 
@@ -2292,8 +2354,7 @@ void SparkTpDeviceCollectiveBroadcastCancel(
                 (SPARK_WEIGHTD_MESH_SLOT_BYTES *
                  SPARK_WEIGHTD_MESH_SLOTS_PER_BAND)));
         (void)SparkWeightdClientMeshBroadcast(implementation->client,
-            ((1u << implementation->tp_degree) - 1u) &
-                ~(1u << implementation->tp_rank),
+            implementation->physical_peer_mask,
             cancel_offset,cancel_offset,
             8u,0ull,0ull,implementation->round_timeout_ns);
     }
