@@ -97,7 +97,7 @@ adapter:
 		-DGEMMA4_MODEL_REVISION=\"$(GEMMA4_MODEL_REVISION)\" \
 		-DGEMMA4_CONTRACT_SHA256=\"$(GEMMA4_CONTRACT_SHA256)\" \
 		-I"$(CUDA_HOME)/include" \
-		$(MODULE_INCLUDE_FLAGS) -USPARK_BATCH_BUCKET -DSPARK_BATCH_BUCKET=$(lastword $(MODULE_BATCH_VARIANT_BUCKETS)) \
+		$(MODULE_INCLUDE_FLAGS) -DSPARK_BATCH_BUCKET=1024u \
 		source/spark_gemma4_serving_adapter.c \
 		$(REPOSITORY_ROOT)/build/libsparkpipe_runtime.a \
 		$(REPOSITORY_ROOT)/build/libsparkpipe_model_common.a \
