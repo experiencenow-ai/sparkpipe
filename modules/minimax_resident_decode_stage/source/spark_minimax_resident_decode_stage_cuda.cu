@@ -134,7 +134,6 @@ __global__ void SparkMinimaxHeadNormRopeKernel(__nv_bfloat16 *query_bf16,__nv_bf
 	}
 	value = SparkMinimaxBf16ToFloat(source,((uint64_t)row * (is_query != 0u ? local_query_head_count : local_kv_head_count) + norm_head) * SPARK_MINIMAX_KERNEL_HEAD_DIM + element);
 	squared[element] = value * value;
-	exchange[element] = value;
 	__syncthreads();
 	if ( element == 0u )
 	{
@@ -145,6 +144,11 @@ __global__ void SparkMinimaxHeadNormRopeKernel(__nv_bfloat16 *query_bf16,__nv_bf
 	}
 	__syncthreads();
 	normalized = value * rsqrtf(squared[0] / (float)SPARK_MINIMAX_KERNEL_HEAD_DIM + epsilon) * SparkMinimaxBf16ToFloat(gain,element);
+	/* The rope partner must be the NORMALIZED partner value (per-head norm
+	 * precedes full-dim rope); exchange carries it across the element
+	 * half-swap while the source buffer stays raw until the final write. */
+	exchange[element] = normalized;
+	__syncthreads();
 	{
 		float position = (float)(unsigned long long)row_positions[row];
 		float angle = position * powf(SPARK_MINIMAX_KERNEL_ROPE_THETA,-2.0f * (float)element / (float)SPARK_MINIMAX_KERNEL_HEAD_DIM);
