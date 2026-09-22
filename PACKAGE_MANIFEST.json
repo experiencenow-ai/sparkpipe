@@ -6103,8 +6103,8 @@
     },
     {
       "path": "node/model_residentd.c",
-      "sha256": "568e2bc08cc2077267e5c82a57fda9613ead0da9cce5257d3e1cbfc1e96b8b87",
-      "size_bytes": 124413
+      "sha256": "cd672b5f7aaa2e106831f8a51f3a1669d639dfdc6d97fd316f2033b151cbd2d4",
+      "size_bytes": 124653
     },
     {
       "path": "node/weightd.c",
@@ -7888,8 +7888,8 @@
     },
     {
       "path": "ring/transport/rdma.cu",
-      "sha256": "f8772f45549c81c10cb7d611c353c5d50ef1f8830f83695aa1e07604aa2792bd",
-      "size_bytes": 12163
+      "sha256": "5540ef5af4c210548af131286bb6d7d1ee24ab23f1dbee67e6d0ea77635e17f3",
+      "size_bytes": 12078
     },
     {
       "path": "ring/transport/rdma_control.c",
@@ -16835,5 +16835,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80150801
+  "total_bytes": 80150956
 }
