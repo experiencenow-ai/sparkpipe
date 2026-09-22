@@ -10778,8 +10778,8 @@
     },
     {
       "path": "tools/devcycle/lane_assignments.json",
-      "sha256": "ef22908fe9a98994545af18858c58101c441405f9eb650c1a3846dd27d92cccd",
-      "size_bytes": 8852
+      "sha256": "9d64b54d5dd3ebf4fd220ea60155496f3341c09a019ffb5cf7d5968c20258b02",
+      "size_bytes": 9501
     },
     {
       "path": "tools/devcycle/lane_budget_calc.py",
@@ -16430,5 +16430,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78358703
+  "total_bytes": 78359352
 }
