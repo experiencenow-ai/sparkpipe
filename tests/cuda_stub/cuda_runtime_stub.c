@@ -921,6 +921,13 @@ CUresult cuMemCreate(CUmemGenericAllocationHandle *handle,
     return CUDA_SUCCESS;
 }
 
+CUresult cuMemGetHandleForAddressRange(void *handle, CUdeviceptr pointer,
+    size_t bytes, CUmemRangeHandleType type, unsigned long long flags)
+{
+    (void)handle; (void)pointer; (void)bytes; (void)type; (void)flags;
+    return CUDA_ERROR_INVALID_VALUE;
+}
+
 CUresult cuMemAddressReserve(CUdeviceptr *pointer,
     size_t bytes,
     size_t alignment,
@@ -1121,6 +1128,43 @@ uint32_t cuda_stub_mesh_publish_calls = 0u;
 uint32_t cuda_stub_mesh_publish_null_seq_cell = 0u;
 uint32_t cuda_stub_mesh_publish_null_epoch_cell = 0u;
 
+static uint64_t cuda_stub_roundloop_now_ns(void);
+
+cudaError_t SparkGlm5NextLaunchMeshCopyDown(cudaStream_t stream,
+    volatile void *destination,const void *source,uint64_t bytes,
+    const volatile void *shipped_cell,void *round_control,
+    const volatile void *cancel_cell,uint64_t timeout_ns)
+{
+    SparkTpMeshRoundControl *control = round_control;
+    const volatile uint64_t *shipped = shipped_cell;
+    const volatile uint64_t *cancel = cancel_cell;
+    uint64_t deadline = cuda_stub_roundloop_now_ns() + timeout_ns;
+    uint64_t previous;
+    (void)stream;
+    if ( destination == NULL || source == NULL || bytes == 0u ||
+         shipped == NULL || control == NULL || cancel == NULL || timeout_ns == 0u )
+        return cudaErrorInvalidValue;
+    previous = control->round_seq;
+    while ( previous != 0u && *shipped != previous )
+    {
+        if ( control->error_word != 0u || *cancel != control->cancel_expected ||
+             cuda_stub_roundloop_now_ns() >= deadline )
+        {
+            control->error_word = previous;
+            return cudaSuccess;
+        }
+        sched_yield();
+    }
+    if ( *cancel != control->cancel_expected )
+        control->error_word = UINT64_C(0xFFFFFFFFFE000000) | previous;
+    if ( control->error_word == 0u )
+    {
+        memcpy((void *)destination,source,(size_t)bytes);
+        __sync_synchronize();
+    }
+    return cudaSuccess;
+}
+
 cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
     volatile void *entry,void *seq_cell,const void *epoch_cell,
     void *round_seq,uint64_t bytes,
@@ -1134,6 +1178,8 @@ cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
         cuda_stub_mesh_publish_null_seq_cell++;
     if ( epoch_cell == NULL )
         cuda_stub_mesh_publish_null_epoch_cell++;
+    if ( error_word != NULL && *(uint64_t *)error_word != 0u )
+        return cudaSuccess;
     if ( entry != NULL && seq_cell != NULL && epoch_cell != NULL && slot_tail != NULL )
     {
         uint64_t tag = (*(uint64_t *)epoch_cell << 32) | ((*(uint64_t *)seq_cell + 1u) & 0xffffffffu);
@@ -1166,12 +1212,40 @@ cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
     volatile void *band_base,uint64_t slot_bytes,const void *round_seq,
     uint64_t slots_per_rank,uint32_t rank,uint32_t degree,void *error_word,
     unsigned long long deadline_ns,void *diag_word,volatile void *cancel_cell,
-    const void *cancel_expected)
+    const void *cancel_expected,void *arrival_ring)
 {
-    (void)stream;(void)band_base;
-    (void)slot_bytes;(void)round_seq;(void)slots_per_rank;(void)rank;(void)degree;
-    (void)error_word;(void)deadline_ns;(void)diag_word;
-    (void)cancel_cell;(void)cancel_expected;
+    uint64_t sequence = *(const uint64_t *)round_seq;
+    uint64_t ring = (sequence - 1u) & (slots_per_rank - 1u);
+    uint64_t deadline = cuda_stub_roundloop_now_ns() + deadline_ns;
+    uint32_t peer;
+    (void)stream;
+    for ( peer = 0u; peer < degree; peer++ )
+    {
+        const volatile uint64_t *tail;
+        if ( peer == rank ) continue;
+        tail = (const volatile uint64_t *)((const uint8_t *)band_base +
+            ((uint64_t)peer * slots_per_rank + ring) * slot_bytes + slot_bytes - 8u);
+        while ( (*tail >> 32u) != (sequence >> 32u) || *tail < sequence )
+        {
+            if ( *(volatile uint64_t *)error_word != 0u ) return cudaSuccess;
+            if ( *(volatile uint64_t *)cancel_cell != *(const uint64_t *)cancel_expected )
+            {
+                *(volatile uint64_t *)error_word = UINT64_C(0xFFFFFFFFFE000000) | sequence;
+                return cudaSuccess;
+            }
+            if ( cuda_stub_roundloop_now_ns() >= deadline )
+            {
+                *(volatile uint64_t *)diag_word = ((uint64_t)peer << 56u) |
+                    ((sequence & 0xffffu) << 16u) | (*tail & 0xffffu);
+                *(volatile uint64_t *)error_word = sequence;
+                return cudaSuccess;
+            }
+            sched_yield();
+        }
+    }
+    __sync_synchronize();
+    if ( arrival_ring != NULL )
+        ((uint64_t *)arrival_ring)[sequence & 255u] = cuda_stub_roundloop_now_ns();
     return cudaSuccess;
 }
 
@@ -1216,7 +1290,7 @@ cudaError_t SparkGlm5NextLaunchMeshRoundLoop(cudaStream_t stream,
         (SparkTpMeshRoundControl *)round_control;
     uint8_t *band = (uint8_t *)band_base;
     volatile uint64_t *entry_words = (volatile uint64_t *)entry;
-    volatile uint32_t *shipped = (volatile uint32_t *)shipped_cell;
+    volatile uint64_t *shipped = (volatile uint64_t *)shipped_cell;
     volatile uint64_t *cancel = (volatile uint64_t *)cancel_cell;
     uint64_t cursor, prev_tag, stop_at, parity;
     uint32_t failed = 0u;
@@ -1232,7 +1306,7 @@ cudaError_t SparkGlm5NextLaunchMeshRoundLoop(cudaStream_t stream,
         uint32_t peer;
         if (prev_tag != 0ull)
         {
-            while (*shipped != (uint32_t)prev_tag)
+            while (*shipped != prev_tag)
             {
                 if (*cancel != control->cancel_expected)
                 {
@@ -1246,8 +1320,8 @@ cudaError_t SparkGlm5NextLaunchMeshRoundLoop(cudaStream_t stream,
                         (*shipped & 0xffffull);
                     control->error_word = prev_tag;
                     fprintf(stderr,
-                        "MESH-ROUNDLOOP-TIMEOUT rank=%u phase=ship-ack want=%u got=%u\n",
-                        rank, (uint32_t)prev_tag, *shipped);
+                        "MESH-ROUNDLOOP-TIMEOUT rank=%u phase=ship-ack want=%llu got=%llu\n",
+                        rank, (unsigned long long)prev_tag, (unsigned long long)*shipped);
                     failed = 1u;
                     break;
                 }

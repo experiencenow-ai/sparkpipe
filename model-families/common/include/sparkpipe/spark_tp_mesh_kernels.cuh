@@ -6,7 +6,7 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include "sparkpipe/spark_tp_mesh_round_control.h"
-#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V6-SEQRING-EPOCHMATCH-PREPAD"
+#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V7-FULLTAG-SOURCE-LIFETIME"
 #define SPARK_TP_MESH_ERROR_PARITY_MISMATCH 0xFFFFFFFFFF000000ull
 #define SPARK_TP_MESH_ERROR_CANCELLED 0xFFFFFFFFFE000000ull
 #if defined(__CUDACC__)
@@ -48,6 +48,8 @@ __global__ void SparkGlm5NextMeshPublishKernel(
 	unsigned long long tag;
 	uint64_t ring;
 	if ( threadIdx.x != 0u || blockIdx.x != 0u )
+		return;
+	if ( SparkGlm5NextLdcvU64(error_word) != 0ull )
 		return;
 	sequence = 1ull + atomicAdd((unsigned long long *)seq_cell,1ull);
 	ring = (sequence - 1ull) & (slots_per_rank - 1ull);
@@ -196,7 +198,7 @@ __global__ void SparkGlm5NextMeshRoundLoopKernel(
 	uint64_t slot_bytes,
 	uint64_t slots_per_rank,
 	volatile uint64_t *entry,
-	volatile uint32_t *shipped_cell,
+	volatile uint64_t *shipped_cell,
 	volatile uint64_t *cancel_cell,
 	SparkTpMeshRoundControl *control,
 	uint32_t rank,
@@ -239,7 +241,7 @@ __global__ void SparkGlm5NextMeshRoundLoopKernel(
 		if ( tid == 0u && prev_tag != 0ull )
 		{
 			uint64_t spins = 0ull;
-			while ( *shipped_cell != (uint32_t)prev_tag )
+			while ( *shipped_cell != prev_tag )
 			{
 				if ( *cancel_cell != control->cancel_expected )
 				{
@@ -255,8 +257,8 @@ __global__ void SparkGlm5NextMeshRoundLoopKernel(
 					    ((prev_tag & 0xffffull) << 16ull) |
 					    (*shipped_cell & 0xffffull);
 					control->error_word = prev_tag;
-					printf("MESH-ROUNDLOOP-TIMEOUT rank=%u phase=ship-ack want=%u got=%u\\n",
-						rank,(uint32_t)prev_tag,*shipped_cell);
+					printf("MESH-ROUNDLOOP-TIMEOUT rank=%u phase=ship-ack want=%llu got=%llu\\n",
+						rank,(unsigned long long)prev_tag,(unsigned long long)*shipped_cell);
 					s_decision = SPARK_TP_MESH_ROUND_LOOP_DECISION_TIMEOUT;
 					break;
 				}
@@ -280,10 +282,13 @@ __global__ void SparkGlm5NextMeshRoundLoopKernel(
 			volatile uint64_t *destination = (volatile uint64_t *)
 			    ((uint8_t *)band_base + s_slot);
 			const uint64_t *source = (const uint64_t *)local_device;
-			uint64_t quads = (bytes + 7ull) >> 3ull;
+			uint64_t quads = bytes >> 3ull;
 			uint64_t quad;
 			for ( quad = tid; quad < quads; quad += nthreads )
 				destination[quad] = source[quad];
+            if ( tid == 0u )
+                for ( uint64_t tail = quads * 8u; tail < bytes; tail++ )
+                    ((volatile uint8_t *)destination)[tail] = ((const uint8_t *)source)[tail];
 			__threadfence_system();
 		}
 		__syncthreads();
@@ -392,7 +397,7 @@ extern "C" cudaError_t SparkGlm5NextLaunchMeshRoundLoop(cudaStream_t stream,
 {
 	SparkGlm5NextMeshRoundLoopKernel<<<1,SPARK_TP_MESH_THREADS,0u,stream>>>(
 		(volatile uint64_t *)band_base,slot_bytes,slots_per_rank,
-		(volatile uint64_t *)entry,(volatile uint32_t *)shipped_cell,
+		(volatile uint64_t *)entry,(volatile uint64_t *)shipped_cell,
 		(volatile uint64_t *)cancel_cell,
 		(SparkTpMeshRoundControl *)round_control,rank,degree,
 		local_device,full_device,bytes);
@@ -577,26 +582,70 @@ extern "C" cudaError_t SparkGlm5NextLaunchMeshGuard(cudaStream_t stream,
 }
 
 __global__ void SparkGlm5NextMeshCopyDownKernel(
-    volatile uint64_t *destination,
-    const uint64_t *source,
-    uint32_t quad_count)
+    volatile uint8_t *destination,
+    const uint8_t *source,
+    uint64_t bytes,
+    const volatile uint64_t *shipped,
+    SparkTpMeshRoundControl *control,
+    const volatile uint64_t *cancel,
+    uint64_t timeout_ns)
 {
-	uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
-	if ( i < quad_count )
-		destination[i] = source[i];
+    __shared__ uint32_t ready;
+    if ( threadIdx.x == 0u )
+    {
+        uint64_t previous = control->round_seq;
+        uint64_t deadline = SparkGlm5NextGlobalTimerNs() + timeout_ns;
+        ready = 1u;
+        while ( previous != 0ull && SparkGlm5NextLdcvU64(shipped) != previous )
+        {
+            if ( SparkGlm5NextLdcvU64(&control->error_word) != 0ull ||
+                 SparkGlm5NextLdcvU64(cancel) != control->cancel_expected )
+            {
+                atomicExch((unsigned long long *)&control->error_word,
+                    SPARK_TP_MESH_ERROR_CANCELLED | previous);
+                ready = 0u;
+                break;
+            }
+            if ( SparkGlm5NextGlobalTimerNs() >= deadline )
+            {
+                atomicExch((unsigned long long *)&control->error_word,previous);
+                ready = 0u;
+                break;
+            }
+            __nanosleep(200u);
+        }
+        if ( SparkGlm5NextLdcvU64(cancel) != control->cancel_expected )
+            atomicExch((unsigned long long *)&control->error_word,
+                SPARK_TP_MESH_ERROR_CANCELLED | previous);
+        if ( SparkGlm5NextLdcvU64(&control->error_word) != 0ull )
+            ready = 0u;
+    }
+    __syncthreads();
+    if ( ready == 0u )
+        return;
+    uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    uint64_t quads = bytes / 8u;
+    if ( i < quads )
+        ((volatile uint64_t *)destination)[i] = ((const uint64_t *)source)[i];
+    if ( i == quads )
+        for ( uint64_t tail = quads * 8u; tail < bytes; tail++ )
+            destination[tail] = source[tail];
 }
 
 extern "C" cudaError_t SparkGlm5NextLaunchMeshCopyDown(
-	cudaStream_t stream,void *destination,const void *source,
-	uint64_t bytes)
+    cudaStream_t stream,void *destination,const void *source,
+    uint64_t bytes,const volatile void *shipped,void *round_control,
+    const volatile void *cancel,uint64_t timeout_ns)
 {
-	uint32_t quads = (uint32_t)((bytes + 7u) / 8u);
-	if ( destination == 0 || source == 0 || quads == 0u )
-		return(cudaErrorInvalidValue);
-	SparkGlm5NextMeshCopyDownKernel<<<(quads + 255u) / 256u,256u,0u,stream>>>(
-		(volatile uint64_t *)destination,
-		(const uint64_t *)source,quads);
-	return(cudaPeekAtLastError());
+    uint64_t quads = bytes / 8u + 1u;
+    if ( destination == 0 || source == 0 || bytes == 0u || shipped == 0 ||
+         round_control == 0 || cancel == 0 || timeout_ns == 0u )
+        return(cudaErrorInvalidValue);
+    SparkGlm5NextMeshCopyDownKernel<<<(quads + 255u) / 256u,256u,0u,stream>>>(
+        (volatile uint8_t *)destination,(const uint8_t *)source,bytes,
+        (const volatile uint64_t *)shipped,(SparkTpMeshRoundControl *)round_control,
+        (const volatile uint64_t *)cancel,timeout_ns);
+    return(cudaPeekAtLastError());
 }
 
 extern "C" cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,

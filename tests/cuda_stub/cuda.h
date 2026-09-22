@@ -91,6 +91,12 @@ CUresult cuMemCreate(CUmemGenericAllocationHandle *handle,
     size_t bytes,
     const CUmemAllocationProp *prop,
     unsigned long long flags);
+typedef enum CUmemRangeHandleType_enum
+{
+    CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD = 1
+} CUmemRangeHandleType;
+CUresult cuMemGetHandleForAddressRange(void *handle, CUdeviceptr pointer,
+    size_t bytes, CUmemRangeHandleType type, unsigned long long flags);
 CUresult cuMemAddressReserve(CUdeviceptr *pointer,
     size_t bytes,
     size_t alignment,

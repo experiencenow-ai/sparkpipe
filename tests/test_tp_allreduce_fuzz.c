@@ -108,14 +108,6 @@ SparkStatus SparkWeightdClientMeshBroadcast(SparkWeightdClient *client, uint32_t
 	return(SPARK_STATUS_OK);
 }
 
-int SparkGlm5NextLaunchMeshCopyDown(void *stream, volatile void *destination, const void *source, uint64_t bytes)
-{
-	(void)stream;
-	memcpy((void *)destination, source, (size_t)bytes);
-	__sync_synchronize();
-	return(0);
-}
-
 int SparkGlm5NextLaunchMeshGuard(void *stream, volatile void *error_word, void *output)
 {
 	(void)stream; (void)error_word; (void)output;
@@ -324,9 +316,8 @@ static void *FuzzShipperMain(void *argument)
 				    SPARK_WEIGHTD_MESH_SLOT_BYTES - 8u, 8u);
 			}
 			__sync_synchronize();
-			*(volatile uint32_t *)(g_regions[rank] +
-			    SPARK_WEIGHTD_MESH_SHIPPED_ENTRY(0u, rank)) =
-			    (uint32_t)tag;
+			*(volatile uint64_t *)(g_regions[rank] +
+			    SPARK_WEIGHTD_MESH_SHIPPED_ENTRY(0u, rank)) = tag;
 			__sync_synchronize();
 			seen[rank] = tag;
 		}
@@ -750,6 +741,9 @@ static void FuzzGraphPath(void)
 	uint64_t progress = 0ull;
 	uint32_t i;
 	uint32_t pad_calls = cuda_stub_mesh_seq_pad_calls;
+    static uint64_t request = 2000000u;
+    CHECK(FuzzRunSet(FuzzChainMain,request++,run,run_count,"graph-chain",0u,-1),
+        "graph path starts from a shared request generation");
     g_capture_rank = 0u;
 	CHECK( SparkTpDeviceCollectiveArmCapture(&g_ranks[0].collective) == SPARK_STATUS_OK,
 	    "arm capture on rank 0" );
@@ -760,6 +754,11 @@ static void FuzzGraphPath(void)
 		uint64_t ordinal = 16ull * (uint64_t)i + 1ull;
 		CHECK( FuzzRunSet(FuzzRoundMain, ordinal, run, run_count,
 		    "graph-round", i, -1) != 0u, "graph-path round completes" );
+        for ( uint32_t rank = 0u; rank < run_count; rank++ )
+        {
+            CHECK(g_tasks[rank].status == SPARK_STATUS_OK,"graph-path rank reports success");
+            CHECK(FuzzSumOk(rank,i),"graph-path output includes every current contribution");
+        }
 	}
 	CHECK( cuda_stub_mesh_seq_pad_calls - pad_calls <= 1u,
 	    "pre-launch used at most one pad" );
@@ -868,10 +867,10 @@ static void FuzzBasic(void)
 				volatile uint64_t *entry = (volatile uint64_t *)
 				    (g_regions[rank] +
 				    SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(0u, rank));
-				volatile uint32_t *shipped = (volatile uint32_t *)
+				volatile uint64_t *shipped = (volatile uint64_t *)
 				    (g_regions[rank] +
 				    SPARK_WEIGHTD_MESH_SHIPPED_ENTRY(0u, rank));
-				if ( *shipped != (uint32_t)*entry )
+				if ( *shipped != *entry )
 					acked = 0u;
 			}
 			if ( acked == 0u )
@@ -1131,6 +1130,8 @@ static void FuzzRejections(void)
         SPARK_TP_DEVICE_COLLECTIVE_CHAIN_ID_MASK + 1u) == SPARK_STATUS_INVALID_ARGUMENT,
         "unrepresentable request identity rejects");
 }
+
+static void FuzzSourceLifetime(void);
 
 static void FuzzCompletionCapacity(void)
 {
@@ -1525,7 +1526,9 @@ int main(int argc, char **argv)
     {
         uint32_t schedule;
         FuzzBasic();
+        FuzzGraphPath();
         FuzzS25S3();
+        FuzzSourceLifetime();
         FuzzMandatoryFaults();
         for ( schedule = 0u; schedule < seeds; schedule++ )
             wedge |= FuzzRun(fuzz_rounds,seed + schedule,kill_percent);
@@ -1568,3 +1571,40 @@ static void *FuzzCollectiveCalloc(size_t count, size_t size)
 #define calloc FuzzCollectiveCalloc
 #include "../ring/transport/tp_device_collective.c"
 #undef calloc
+
+static void FuzzSourceLifetime(void)
+{
+    SparkTpMeshRoundControl control;
+    volatile uint64_t shipped = (UINT64_C(7) << 32u) | 1u;
+    volatile uint64_t cancel = 0u;
+    uint8_t source[7] = {1u,2u,3u,4u,5u,6u,7u};
+    uint8_t destination[9];
+    uint64_t entry[3] = {0u,0u,0u}, tail = 0u;
+    FuzzCase("source-copy-full-tag-timeout-cancel-and-byte-bounds");
+    memset(&control,0,sizeof(control));
+    memset(destination,0xa5,sizeof(destination));
+    control.epoch = 8u;
+    control.round_seq = (UINT64_C(8) << 32u) | 1u;
+    CHECK(SparkGlm5NextLaunchMeshCopyDown(0,destination,source,sizeof(source),
+        &shipped,&control,&cancel,1000000u) == 0,
+        "source gate records asynchronous timeout in control");
+    CHECK(control.error_word == control.round_seq && destination[0] == 0xa5u,
+        "same low sequence from stale epoch cannot overwrite a live source");
+    CHECK(SparkGlm5NextLaunchMeshPublish(0,entry,&control.seq,&control.epoch,
+        &control.round_seq,sizeof(source),0u,2u,&tail,&control.error_word) == 0 &&
+        control.seq == 0u && entry[0] == 0u && tail == 0u,
+        "failed source gate cannot publish a payload or advance sequence");
+    control.error_word = 0u;
+    shipped = control.round_seq;
+    CHECK(SparkGlm5NextLaunchMeshCopyDown(0,destination,source,sizeof(source),
+        &shipped,&control,&cancel,1000000u) == 0 &&
+        memcmp(destination,source,sizeof(source)) == 0 &&
+        destination[7] == 0xa5u && destination[8] == 0xa5u,
+        "full tag release copies exact odd byte extent without changing guards");
+    cancel = 1u;
+    memset(destination,0xa5,sizeof(destination));
+    CHECK(SparkGlm5NextLaunchMeshCopyDown(0,destination,source,sizeof(source),
+        &shipped,&control,&cancel,1000000u) == 0 && destination[0] == 0xa5u &&
+        control.error_word != 0u,
+        "cancellation prevents source overwrite and subsequent publication after shipment");
+}

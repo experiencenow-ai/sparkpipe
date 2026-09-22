@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix="weightd-mesh-src-") as build:
         subprocess.run(
             ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
              "-D_GNU_SOURCE", "-pthread", "-c",
-             "-Itests/rdma_syntax_stub", "-Iinclude", source,
+             "-Itests/ibv_stub", "-Itests/cuda_stub", "-Iinclude", source,
              "-o", str(Path(build) / (Path(source).stem + ".o"))],
             cwd=ROOT,
             check=True,

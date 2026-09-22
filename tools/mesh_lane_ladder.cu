@@ -254,13 +254,13 @@ static int ladder_mesh_run(const char *socket_path,uint32_t rank,
                         volatile uint64_t *entry = (volatile uint64_t *)
                             (args->mesh + SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(
                                 args->band,peer));
-                        volatile uint32_t *shipped =
-                            (volatile uint32_t *)
+                        volatile uint64_t *shipped =
+                            (volatile uint64_t *)
                             (args->mesh + SPARK_WEIGHTD_MESH_SHIPPED_ENTRY(
                                 args->band,peer));
                         if ( entry[0] != 0ull &&
-                             *shipped != (uint32_t)entry[0] )
-                            *shipped = (uint32_t)entry[0];
+                             *shipped != entry[0] )
+                            *shipped = entry[0];
                     }
                     usleep(50);
                 }

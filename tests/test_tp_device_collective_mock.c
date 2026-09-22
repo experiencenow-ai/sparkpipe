@@ -25,12 +25,6 @@ static uint32_t test_checks;
 	} while (0)
 
 
-int SparkGlm5NextLaunchMeshCopyDown(void *stream, volatile void *destination, const void *source, uint64_t bytes)
-{
-	(void)stream; (void)destination; (void)source; (void)bytes;
-	return(0);
-}
-
 int SparkGlm5NextLaunchMeshGuard(void *stream, volatile void *error_word, void *output)
 {
 	(void)stream; (void)error_word; (void)output;
@@ -176,6 +170,7 @@ int main(void)
 		submission.descriptor_bytes = sizeof(submission);
 		submission.slot_index = 0u;
 		submission.active_sequence_count = 2u;
+		submission.logical_sequence_count = 2u;
 		submission.ordinal = 1u;
 		submission.local_device = device_scratch;
 		submission.full_device = device_scratch;
