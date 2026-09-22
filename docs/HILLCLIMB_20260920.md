@@ -3,7 +3,7 @@
 ## GOAL (set 09-20, operator)
 **Allreduce ≤ 100µs/round MEASURED on the 16-spark fleet** (91-round chain, status=0, checksums green), starting from 1.79ms/round (the healed fleet's cold-class eager number). Every intermediate number graded MEASURED (wire-math floor check before grading); every step committed + PR'd.
 
-**Ladder:** 1790µs → <1000 → <500 → <200 → ≤100µs. Current: **1334µs/round** (S1, MEASURED: 121.41ms/91r; second chain 153.7ms/91r=1690µs — steady ~1.3-1.7ms). Chain totals now 432-518ms WARM-CLASS (weightd's expert cache survives engine recycles — fresh engines serve warm immediately; the cold cost is once per weightd boot). In-process harness floor: 1530µs.
+**Ladder:** 1790µs → <1000 → <500 → <200 → ≤100µs. Current: **386µs/round CONTENDED-era wall** (09-22: chains RUN 91 rounds under the new epoch stack; host-measured allreduce_ms=0.66 TOTAL for 91 rounds — the round path itself is sub-ms; the wall is the relay-arrival/compute cadence, unmeasured clean since the serving path is mid-repair). Best clean receipt remains 330ms/round (09-22 02:20, status=0, 2/2). Chain totals now 432-518ms WARM-CLASS (weightd's expert cache survives engine recycles — fresh engines serve warm immediately; the cold cost is once per weightd boot). In-process harness floor: 1530µs.
 
 ## Step log (append every step: what / number / verdict)
 
@@ -1922,6 +1922,79 @@ uninstrumented). NEXT: (a) instrument the client Read failure class;
 (b) harden the fingerprint (ignore generation bumps within a live session —
 invalidate only on HELLO-generation changes, not connection recycling);
 (c) then the payoff chain as queued.
+
+## 09-22 17:00 TICK — THE OPERATOR'S CONVERGING DESIGN LANDED + THE API RETURNS TO RTX5090 (with the tokenizer); serving = one blocker left
+
+OPERATOR RULINGS THIS ERA: (1) "only test what is in a PR" — PROTOCOL
+RESTORED (16:00 tick, fleet = PR-exact code by construction); (2) the design
+question answered with the epoch architecture; (3) "the API belongs on the
+rtx5090 — that is where the tokenizer will run; make a non-retarded system";
+(4) "I stopped the other dev — kill any weightsd/residentd that interferes;
+get it stable and ready for parallel dev usage."
+
+THE STORM, FULLY CONVICTED (tcpdump + logs): (a) sparkf's monitor connects
+to every residentd's single client slot — the OLD takeover-at-ACCEPT evicted
+the API per monitor connect (the duel); (b) the API's pipeline Progress
+counted its rank loop DOWN to zero and passed rank==0 to SetFailure — EVERY
+failure killed rank 0's HEALTHY connection ("only rank 0 dropped" was a
+lie); (c) any reconnect bumped client generations → the fingerprint
+invalidated the whole engine session → teardown → more reconnects: self-
+sustaining at ~30 cycles/s, all 16 ranks, zero requests needed.
+
+THE EPOCH DESIGN (deployed 16/16, residentd 720f103a era): HELLO carries
+session_epoch (pipeline-generated, pid+ns-mixed); accept PARKS candidates
+without evicting (a scraper that never says hello can never steal the
+slot); same-epoch hello = REATTACH (fd swap, session state kept: routes,
+queued output, generation — no reset armed); different epoch = the ONE
+legitimate takeover (generation bump, stale-generation cleanup runs); eof =
+detach (session kept, reattach expected); fingerprint = epoch + all-rank
+generations (stable across churn); rank-attribution fixed; the first-hello
+reset arm REMOVED for virgin boots (a fresh residentd has nothing to clean
+— arming deadlocked the quiesce against the API's 10K-retry hammer).
+
+RTX5090 HOMECOMING: the API runs where it always should have — x86 build
+(clean clone ~/g5epoch, -Wno-restrict for gcc-15 + POSIX-guard fixes), the
+runtime root ~/glm53flash.fp8.tp16 (only the adapter .so is x86-executed;
+stage/transport are aarch64 reference copies), single-API script
+/tmp/one_api.sh (the /proc/exe kill — plain pgrep kills your own ssh). THE
+TOKENIZER WIRED (first time ever): repo asset glm-5.3-flash-tokenizer.json,
+vocabulary_size 154856 — REAL BUG FIXED: the sidecar counted only
+model.vocab (154820) but eos ids 154820+ live in added-token space
+(max_token_id+1 floor added); health now reports "tokenizer":true.
+
+KEEPALIVE: the lab router silently reaps idle workstation↔fleet flows and
+RSTs on next traffic (spark6/spark0 cuts convicted; residentds saw NOTHING)
+— client sockets now carry TCP keepalive 10/5/3 (keeps the router's idle
+timer reset; mirrors the residentd's accepted-socket settings).
+
+WEIGHTD-MESH REVIVAL: spark0's MESH-SPIN missing=10 was STALE RECORDS
+(Sep 21 15:06 — its agent had stopped refreshing; peers restarted = dead
+QPNs). The agent (alive) recycled the daemon 09:39 → mesh wired peers=15.
+The residentd's WEIGHTD-DEAD verdict is STICKY across daemon restarts
+(workaround: residentd restart; the agents supervise — kill -9 → restart
+in ~5s). Other 15 nodes' daemons + records were healthy throughout.
+
+MEASURED THIS ERA: chains RUN under the full new stack — 91 rounds,
+allreduce_ms=0.66 TOTAL (host-side; the round path is sub-ms), wall
+35.1s/91r = 386ms/round CONTENDED (cold walks + abort churn around it);
+graph capture works (GRAPH-CAPTURE-OK bound=257); prefetch 42/45 (the
+39-44 tail still fails — the weightsd budget class, next); end-to-end
+HTTP delivery works (JSON error/response reaches the client).
+
+THE ONE REMAINING BLOCKER: the engine ABORTS every submission post-
+restart (residentd sees SUBMIT → decision_required → DECISION decision=2
+ABORT ×1,027,907 submissions). The decision policy aborts whenever the
+transaction's first result failed — SOME RANK still returns BUSY/IO on
+submit (TXN-FAIL-FIRST status=15/4 era). NEXT: name the failing rank
+(SUBMIT-RESULT-TRACE per node), fix its BUSY source, then the cold-walk
+deadline (35s chains > the 30s deadline → status=17 — the deadline must
+read observable state per the minimum-fix ruling). Then: warm canary →
+chain2 GRAPH → ARRIVAL receipt → the clean µs/round number.
+
+HYGIENE LEDGER (pre-existing, verified failing at 781b61d too):
+test_steploop_admission + test_model_pipeline_client (a 100ms weightsd-
+attach race in the fixture); the gemma4 test fixture bitrot
+(SPARK_GEMMA4_MODEL_MODULE_TARGET undefined) blocks full `make test`.
 
 ## 09-22 16:00 TICK — PROTOCOL RESTORED: the fleet runs PR #1077 code, 16/16 PR-exact
 
