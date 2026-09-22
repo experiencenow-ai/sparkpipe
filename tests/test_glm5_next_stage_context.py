@@ -422,6 +422,93 @@ static void check_mtp_callback_handoff(SparkStatus submit_status,uint32_t releas
 	assert(pthread_mutex_destroy(&state.completion_queue_lock) == 0);
 }
 
+static SparkGlm5NextModuleState *DESTROY_STATE;
+static uint32_t DESTROY_FAIL,DESTROY_CALLS[3],DESTROY_LAZY;
+
+void SparkTpDeviceCollectiveDestroy(SparkTpDeviceCollective *collective)
+{
+	uint32_t which = collective == &DESTROY_STATE->tp_device_collective_hc ? 1u : 2u;
+	assert(DESTROY_LAZY == 0u && DESTROY_STATE->lazy_pack != 0);
+	assert(DESTROY_STATE->lazy_pack->attached.mesh_mapping != 0);
+	assert(collective->implementation != 0);
+	DESTROY_CALLS[which]++;
+	if ( DESTROY_FAIL != which ) collective->implementation = 0;
+}
+
+SparkStatus SparkWeightdLazyPackDestroy(SparkWeightdLazyPack *pack)
+{
+	assert(pack == DESTROY_STATE->lazy_pack && DESTROY_LAZY == 0u);
+	assert(DESTROY_STATE->tp_device_collective.implementation == 0);
+	assert(DESTROY_STATE->tp_device_collective_hc.implementation == 0);
+	pack->attached.mesh_mapping = 0;
+	DESTROY_LAZY++;
+	return(SPARK_STATUS_OK);
+}
+
+SparkStatus SparkWeightdWorkerWaitIdle(SparkWeightdWorker *worker,uint64_t timeout)
+{
+	(void)worker;(void)timeout;
+	return(SPARK_STATUS_OK);
+}
+
+SparkStatus SparkWeightdWorkerDestroy(SparkWeightdWorker *worker)
+{
+	(void)worker;
+	return(SPARK_STATUS_OK);
+}
+
+void SparkWeightdClientClose(SparkWeightdClient *client)
+{
+	(void)client;
+}
+
+void SparkWeightdAttachRelease(SparkWeightdAttachOutcome *outcome)
+{
+	(void)outcome;
+}
+
+cudaError_t cudaEventDestroy(cudaEvent_t event)
+{
+	(void)event;
+	return(cudaSuccess);
+}
+
+cudaError_t cudaGraphExecDestroy(cudaGraphExec_t graph)
+{
+	(void)graph;
+	return(cudaSuccess);
+}
+
+static void check_collective_destroy_order(uint32_t failure)
+{
+	SparkWeightdLazyPack pack = {0};
+	SparkGlm5NextModuleState *owner = calloc(1u,sizeof(*owner));
+	assert(owner != 0);
+	owner->pipeline_slot_count = 1u;
+	owner->lazy_pack = &pack;
+	pack.attached.mesh_mapping = (void *)(uintptr_t)1u;
+	owner->tp_device_collective.implementation = (void *)(uintptr_t)1u;
+	owner->tp_device_collective_hc.implementation = (void *)(uintptr_t)2u;
+	owner->tp_device_collective_initialized = owner->tp_device_collective_hc_initialized = 1u;
+	DESTROY_STATE = owner;
+	DESTROY_FAIL = failure;
+	DESTROY_CALLS[1] = DESTROY_CALLS[2] = DESTROY_LAZY = 0u;
+	DRAIN_STATUS = cudaSuccess;
+	SparkGlm5NextResidentDecodeStageDestroy(owner);
+	if ( failure != 0u )
+	{
+		assert(DESTROY_LAZY == 0u && owner->lazy_pack == &pack && pack.attached.mesh_mapping != 0);
+		assert(owner->tp_device_collective.implementation != 0);
+		assert((owner->tp_device_collective_hc.implementation != 0) == (failure == 1u));
+		DESTROY_FAIL = 0u;
+		SparkGlm5NextResidentDecodeStageDestroy(owner);
+	}
+	assert(DESTROY_LAZY == 1u && pack.attached.mesh_mapping == 0);
+	assert(DESTROY_CALLS[1] == 1u + (failure == 1u));
+	assert(DESTROY_CALLS[2] == 1u + (failure == 2u));
+	DESTROY_STATE = 0;
+}
+
 static void check_stream_receipt(void)
 {
 	SparkStageModuleCudaWait first = {0},second = {0};
@@ -1383,6 +1470,9 @@ int32_t main(void)
 	check_graph_expert_ownership(12u,12u,12u,0u,0u);
 	check_graph_expert_ownership(12u,12u,12u,2u,0u);
 	check_graph_expert_ownership(12u,12u,12u,0u,2u);
+	check_collective_destroy_order(0u);
+	check_collective_destroy_order(1u);
+	check_collective_destroy_order(2u);
 	check_weightd_health();
 	check_mtp_callback_handoff(SPARK_STATUS_OK,0u);
 	check_mtp_callback_handoff(SPARK_STATUS_OK,1u);

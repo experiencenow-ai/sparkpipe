@@ -4568,6 +4568,29 @@ static SparkStatus SparkGlm5NextReleaseCaches(SparkGlm5NextModuleState *state)
 	return(SPARK_STATUS_OK);
 }
 
+static SparkStatus SparkGlm5NextReleaseCollectives(SparkGlm5NextModuleState *state)
+{
+	if ( state->tp_device_collective_hc_initialized != 0u )
+	{
+		SparkTpDeviceCollectiveDestroy(&state->tp_device_collective_hc);
+		if ( state->tp_device_collective_hc.implementation != 0 ) return(SPARK_STATUS_IO_ERROR);
+		state->tp_device_collective_hc_initialized = 0u;
+	}
+	if ( state->tp_hc_host_credit_send_bf16 != 0 )
+		(void)cudaFreeHost(state->tp_hc_host_credit_send_bf16);
+	if ( state->tp_hc_host_credit_receive_bf16 != 0 )
+		(void)cudaFreeHost(state->tp_hc_host_credit_receive_bf16);
+	state->tp_hc_host_credit_send_bf16 = 0;
+	state->tp_hc_host_credit_receive_bf16 = 0;
+	if ( state->tp_device_collective_initialized != 0u )
+	{
+		SparkTpDeviceCollectiveDestroy(&state->tp_device_collective);
+		if ( state->tp_device_collective.implementation != 0 ) return(SPARK_STATUS_IO_ERROR);
+		state->tp_device_collective_initialized = 0u;
+	}
+	return(SPARK_STATUS_OK);
+}
+
 void SparkGlm5NextResidentDecodeStageDestroy(void *module_state)
 {
 	SparkGlm5NextModuleState *state;
@@ -4604,27 +4627,13 @@ void SparkGlm5NextResidentDecodeStageDestroy(void *module_state)
 	state->decode_cover_host = 0;
 	state->decode_miss_host = 0;
 	state->decode_cover_device = 0;
+	if ( SparkGlm5NextReleaseCollectives(state) != SPARK_STATUS_OK )
+		return;
 	if ( state->lazy_pack != 0 )
 	{
 		if ( SparkGlm5NextReleasePinnedExperts(state) != SPARK_STATUS_OK || SparkWeightdLazyPackDestroy(state->lazy_pack) != SPARK_STATUS_OK )
 			return;
 		state->lazy_pack = 0;
-	}
-	if ( state->tp_device_collective_hc_initialized != 0u )
-	{
-		SparkTpDeviceCollectiveDestroy(&state->tp_device_collective_hc);
-		if ( state->tp_device_collective_hc.implementation != 0 ) return;
-	}
-	if ( state->tp_hc_host_credit_send_bf16 != 0 )
-		(void)cudaFreeHost(state->tp_hc_host_credit_send_bf16);
-	if ( state->tp_hc_host_credit_receive_bf16 != 0 )
-		(void)cudaFreeHost(state->tp_hc_host_credit_receive_bf16);
-	state->tp_hc_host_credit_send_bf16 = 0;
-	state->tp_hc_host_credit_receive_bf16 = 0;
-	if ( state->tp_device_collective_initialized != 0u )
-	{
-		SparkTpDeviceCollectiveDestroy(&state->tp_device_collective);
-		if ( state->tp_device_collective.implementation != 0 ) return;
 	}
 	if ( state->lane_client != 0 )
 	{
@@ -4741,6 +4750,8 @@ static SparkStatus SparkGlm5NextInitializeState(
 
 	if ( status != SPARK_STATUS_OK )
 	{
+		if ( SparkGlm5NextReleaseCollectives(state) != SPARK_STATUS_OK )
+			SPARK_RETURN(status);
 		if ( state->lazy_pack != 0 && (SparkGlm5NextReleasePinnedExperts(state) != SPARK_STATUS_OK || SparkWeightdLazyPackDestroy(state->lazy_pack) != SPARK_STATUS_OK) )
 		{
 			fprintf(stderr,"GLM lazy initialization cleanup failed; retaining CUDA resources until process exit\n");
