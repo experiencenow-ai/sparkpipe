@@ -116,6 +116,9 @@ fi
 
 # --- private deployment under the runtime root ----------------------------
 mkdir -p "$ROOT"/bin "$ROOT"/lib "$ROOT"/packs "$ROOT"/config "$ROOT"/logs
+# residentd requires the kv backing directory to be a real directory
+# (node/model_residentd.c ValidateDirectories fails io_error otherwise).
+mkdir -p "$ROOT/kv"
 ln -sfn "$CHECKOUT/$RELEASE/bin/sparkpipe_model_residentd" "$ROOT/bin/sparkpipe_model_residentd"
 ln -sfn "$CHECKOUT/$RELEASE/lib/model_serving_adapter.so" "$ROOT/lib/model_serving_adapter.so"
 ln -sfn "$CHECKOUT/$RELEASE/lib/hidden_transport.so" "$ROOT/lib/hidden_transport.so"

@@ -25,7 +25,11 @@
 #   - nonzero scale planes on expert tensors
 # Records carry the GLOBAL layer index (stage packs store global layers:
 # the module resolves wave layers as first_layer_index + local and looks
-# the manifest up by that number).
+# the manifest up by that number) and the LAGUNA range-kind convention
+# kind = tensor_kind * 2 + plane (28 = EXPERT_GATE_UP payload, 30 =
+# EXPERT_DOWN payload; the scale kinds 29/31 belong to quantized arms)
+# - SparkLagunaManifestCheck walks exactly these kinds. The k3 lane's
+# 0/1 kinds are that family's own convention, not a shared one.
 set -euo pipefail
 PACK="${1:?usage: laguna_multidev_experts_manifest.sh PACK_PATH}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -38,14 +42,22 @@ if [ -f "$PACK.experts" ]; then
 import struct, sys
 with open(sys.argv[1], "rb") as handle:
     head = handle.read(16)
+    record = handle.read(48)
 magic, version, count, _ = struct.unpack("<IIII", head)
-raise SystemExit(0 if (magic == 0x58504557 and version == 2 and count > 0) else 1)
+ok = magic == 0x58504557 and version == 2 and count > 0 and len(record) == 48
+if ok:
+    # the laguna range-kind convention (tensor_kind*2 + payload plane);
+    # sidecars carrying foreign kinds (the k3-style 0/1 first attempts)
+    # are stale for this module and regenerate below
+    kind = struct.unpack_from("<4I2Q", record)[2]
+    ok = kind in (28, 30)
+raise SystemExit(0 if ok else 1)
 PYVER
   then
     echo "exists: $PACK.experts"
     exit 0
   fi
-  echo "stale sidecar (not v2/empty): regenerating $PACK.experts" >&2
+  echo "stale sidecar (not v2/empty/wrong kind convention): regenerating $PACK.experts" >&2
   rm -f "$PACK.experts"
 fi
 mkdir -p "$CELL"
@@ -89,7 +101,7 @@ HEADER_BYTES = 264
 ENTRY_BYTES = 64
 K_EXPERT_GATE_UP, K_EXPERT_DOWN = 14, 15
 PAYLOAD_BF16, CODEC_BF16 = 1, 1
-SIDE_KIND = {K_EXPERT_GATE_UP: 0, K_EXPERT_DOWN: 1}
+SIDE_KIND = {K_EXPERT_GATE_UP: 28, K_EXPERT_DOWN: 30}
 
 
 def fail(message):

@@ -315,10 +315,20 @@ static SparkStatus SparkLagunaManifestCheck(const SparkWeightdManifest *manifest
 		entry = &context->entries[index];
 		if ( entry->tensor_kind != SPARK_LAGUNA_STAGEPACK_TENSOR_EXPERT_GATE_UP && entry->tensor_kind != SPARK_LAGUNA_STAGEPACK_TENSOR_EXPERT_DOWN )
 			continue;
-		if ( entry->weight_codec != SPARK_WEIGHT_CODEC_FP8_E4M3 )
+		/* The check validates THIS build's pinned codec (bf16 arm packs
+		 * carry weight_codec 1 = SPARK_WEIGHT_CODEC_BF16; the fp8/nvfp4
+		 * arms carry 5/6). The old form hardcoded FP8_E4M3, so the
+		 * placed bf16 packs failed the lazy attach with UNSUPPORTED
+		 * (lane-8 attach-006 finding). */
+		if ( entry->weight_codec != LAGUNA_EXPERT_WEIGHT_CODEC )
 			SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
 		for (plane=0u; plane<2u; plane++)
 		{
+			/* Plane 1 is the scale plane: quantized arms carry it,
+			 * the bf16 arm carries none (scale_bytes 0) - walking an
+			 * absent plane fails the bytes==0 guard. */
+			if ( plane == 1u && entry->scale_bytes == 0u )
+				continue;
 			status = SparkLagunaManifestPlane(manifest,entry,plane);
 			if ( status != SPARK_STATUS_OK )
 				return(status);
@@ -1467,6 +1477,14 @@ static SparkStatus SparkLagunaModuleInitializeTpCollective(
 	configuration.collective_identifier = context->tp_collective_identifier;
 	configuration.backend_module_path = context->tp_collective_backend_module_path;
 	configuration.registration_cuda_stream = state->execution_stream;
+	/* ApplyTopology copies only the degree; the local host is this
+	 * rank's entry in the topology the serving adapter loaded from the
+	 * tp_collective config (peer_hosts[tp_rank]). The field was left
+	 * zeroed by the memset and the argument gate below rejected every
+	 * launch (lane-8 attach-008: invalid_argument at the collective
+	 * configuration check). */
+	configuration.local_host =
+		context->tp_collective_topology.rank_hosts[state->tp_rank];
 	status = SparkTpDeviceCollectiveApplyTopology(&context->tp_collective_topology,&configuration);
 	if ( status != SPARK_STATUS_OK )
 		return(status);
