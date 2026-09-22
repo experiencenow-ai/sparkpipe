@@ -62,17 +62,18 @@ RUNTIME_CONFIGURATION := \
 
 GPU_VALIDATOR := validation/validate_minimax_resident_decode_stage_cuda.sh
 
-include ../resident_decode_stage_rules.mk
-
 # Dense text tower: bf16 is the only codec this module builds (no routed
 # experts, no quantization arms). EXPERT_CODEC still names the build slot so
 # tools/module_build_release.sh and the shared adapter/library layout stay
-# uniform across families (gemma4 dense precedent).
+# uniform across families (gemma4 dense precedent). These MUST precede the
+# rules include: the rules bind BUILD_DIRECTORY eagerly.
 EXPERT_CODEC ?= bf16
 ifeq ($(filter $(EXPERT_CODEC),bf16),)
 $(error unsupported EXPERT_CODEC '$(EXPERT_CODEC)': the dense minimax text-tower module builds bf16 only)
 endif
 BUILD_DIRECTORY ?= $(REPOSITORY_ROOT)/build/modules/minimax_resident_decode_stage/$(EXPERT_CODEC)
+
+include ../resident_decode_stage_rules.mk
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)

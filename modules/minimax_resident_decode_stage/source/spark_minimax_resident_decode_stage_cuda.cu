@@ -466,10 +466,6 @@ extern "C" cudaError_t SparkMinimaxLaunchHeadNormRope(cudaStream_t stream,void *
 	SparkMinimaxHeadNormRopeKernel<<<grid,SPARK_MINIMAX_KERNEL_HEAD_DIM,0,stream>>>((__nv_bfloat16 *)query_bf16,(__nv_bfloat16 *)key_bf16,
 		(const __nv_bfloat16 *)query_norm_bf16,(const __nv_bfloat16 *)key_norm_bf16,(float *)query_roped_f32,
 		row_positions,row_count,local_query_head_count,local_kv_head_count,epsilon,0u);
-	{
-		uint32_t rank = 0u;
-		(void)rank;
-	}
 	return(cudaGetLastError());
 }
 
@@ -506,7 +502,7 @@ extern "C" cudaError_t SparkMinimaxLaunchAttentionPrefill(cudaStream_t stream,co
 		table->physical_block_indices,table->lane_physical_block_counts,row_lane_indices,row_positions,
 		(const __nv_bfloat16 *)staged_key_bf16,(const __nv_bfloat16 *)staged_value_bf16,attended_bf16,
 		row_count,local_query_head_count,local_kv_head_count,local_kv_head_dimension,
-		table->lane_stride,block_span,layer_block_stride,epsilon,tp_rank,layer_index,base_position);
+		lane_stride,block_span,layer_block_stride,epsilon,tp_rank,layer_index,base_position);
 	return(cudaGetLastError());
 }
 
