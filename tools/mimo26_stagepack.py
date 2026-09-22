@@ -89,11 +89,15 @@ SPAN_RECT = "rect"          # row/col window of a [rows, cols] tensor
 SPAN_SCALE_ROWS = "scale"   # row window (optionally col window) of a grid
 SPAN_MX = "mx"              # one expert's packed payload or its scale plane
 
+# kinds 0..5 mirror the shared SparkStagePackCommonTensorKind; the
+# family-local kinds start at 22 (the qwen4_flash convention) so they never
+# collide with the shared GDN/attention block or another family's extension.
 (KIND_EMBEDDING, KIND_FINAL_NORM, KIND_LM_HEAD, KIND_ATTENTION_NORM,
- KIND_MLP_NORM, KIND_MOE_GATE, KIND_MOE_GATE_BIAS, KIND_SINK_BIAS,
+ KIND_MLP_NORM, KIND_MOE_GATE) = range(6)
+(KIND_SINK_BIAS, KIND_MOE_GATE_BIAS,
  KIND_Q, KIND_K, KIND_V, KIND_O_PROJ,
  KIND_DENSE_MLP_GATE, KIND_DENSE_MLP_UP, KIND_DENSE_MLP_DOWN,
- KIND_EXPERT_GATE, KIND_EXPERT_UP, KIND_EXPERT_DOWN) = range(18)
+ KIND_EXPERT_GATE, KIND_EXPERT_UP, KIND_EXPERT_DOWN) = range(22, 34)
 
 
 @dataclass
@@ -568,16 +572,22 @@ def emit_record(reader: SourceReader, record: Record, stage_dir: Path):
 
 def header_fields(arm: str, records: list, directory_offset: int,
                   file_bytes: int, tp_degree: int, tp_rank: int):
+    """All 26 u32 slots carry SparkStagePackHeaderCommon semantics (the
+    module's layout proof asserts field-for-field offset equality); the mimo
+    hybrid pattern is irregular so attention_period and the gdn block are
+    zero and the layer kinds bind via the family geometry tables. TP identity
+    is environment-driven and receipt-pinned (the qwen4_flash convention),
+    not a pack header field."""
     g = arm_geometry(arm)
     return (
         MAGIC, FORMAT_VERSION, HEADER_BYTES, ENTRY_BYTES, len(records),
         g["hidden"], g["layers"], 0, g["layers"],
-        tp_degree, tp_rank,
-        g["head_dim"], g["v_head_dim"], g["swa_window"], g["heads"],
-        g["kv_full"], g["kv_swa"],
+        0, 0,
+        0, 0, 0, 0, 0, 0,
+        g["heads"], g["kv_full"], g["head_dim"], 64,
         g["experts"], g["experts_per_token"], g["expert_inter"],
         g["vocab"], MXFP4_GROUP,
-        0, 0, 0, 0,
+        0,
         directory_offset, file_bytes,
     )
 
