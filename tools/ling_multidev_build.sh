@@ -6,6 +6,7 @@
 # (the qwen38_27b lane-1 M3 flow, PR #1133):
 #
 #   FIRMWARE/sparkpipe_model_residentd   the common resident launcher
+#   FIRMWARE/sparkpipe_model_api         the lane API (decode receipts)
 #   FIRMWARE/weightd_warm                the shared-socket warmer
 #   FIRMWARE/model_serving_adapter.so    libling_serving_adapter_<codec>.so
 #   FIRMWARE/model_driver.so             the linked ling stage driver
@@ -73,6 +74,7 @@ export PATH
 CONTRACT_SHA256="$(sha256sum "$CHECKOUT/$CONTRACT" | awk '{print $1}')"
 make -C "$CHECKOUT" -j4 \
   build/sparkpipe_model_residentd \
+  build/sparkpipe_model_api \
   build/sparkpipe_model_compile \
   build/sparkpipe_module_publish \
   build/weightd_warm \
@@ -151,6 +153,7 @@ STAGE="$FIRMWARE_ROOT.new.$$"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 install -m 0755 "$CHECKOUT/build/sparkpipe_model_residentd" "$STAGE/"
+install -m 0755 "$CHECKOUT/build/sparkpipe_model_api" "$STAGE/"
 install -m 0755 "$CHECKOUT/build/weightd_warm" "$STAGE/"
 install -m 0644 "$ADAPTER" "$STAGE/model_serving_adapter.so"
 install -m 0644 "$BUILD_DRIVER/stages/stage_000/model_driver.so" "$STAGE/model_driver.so"
@@ -160,7 +163,8 @@ install -m 0644 \
 printf '%s\n' "$COMMIT" > "$STAGE/SOURCE_COMMIT"
 printf 'module=%s\nbucket=%s\n' "$MODULE_ID_BUCKETED" "$BUCKET" \
   > "$STAGE/MODULE_IDENTITY"
-( cd "$STAGE" && sha256sum sparkpipe_model_residentd weightd_warm \
+( cd "$STAGE" && sha256sum sparkpipe_model_residentd \
+    sparkpipe_model_api weightd_warm \
     model_serving_adapter.so model_driver.so hidden_transport.so \
     > SHA256SUMS )
 rm -rf "$BUILD_DRIVER" "$LANE_FIRMWARE"

@@ -289,6 +289,12 @@ if [ -n "${LING_WORKING_SET:-}" ]; then
     fail "working set warm incomplete (see $ROOT/warm.log)"
 fi
 
+# Publish the private runtime root for same-lane follow-on jobs (the
+# decode receipt on the coordinator rank needs deployment.json/config):
+# a per-attempt pointer plus a stable latest symlink, both under /tmp.
+echo "$ROOT" > "/tmp/ling-lane9-root.$ATTEMPT"
+ln -sfn "$ROOT" /tmp/ling-lane9-root-latest
+
 # ----------------------------- RESIDENT LAUNCH -------------------------------
 
 export SPARK_WEIGHTD_ATTACH=1

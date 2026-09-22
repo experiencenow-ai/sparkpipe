@@ -320,7 +320,8 @@ def main() -> int:
     # Wrapper parses (bash -n) and holds the template contract text.
     for script in ("tools/ling_multidev_run_family.sh",
                    "tools/ling_multidev_build.sh",
-                   "tools/devcycle/ling_warm_receipt.sh"):
+                   "tools/devcycle/ling_warm_receipt.sh",
+                   "tools/devcycle/ling_decode_receipt.sh"):
         path = ROOT / script
         proc = subprocess.run(["bash", "-n", str(path)],
                               capture_output=True, text=True)
