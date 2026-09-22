@@ -114,12 +114,22 @@ PYEOF
 
 echo "== timed warm (run 1 = daemon-cold-warm, run 2 = warm-daemon preload"
 echo "   [the < 5 s claim], runs 3+ = steady-state)"
+echo "   Each run prints RUN-WALL (whole invocation: connect + attach/"
+echo "   arena-create + acquire + release + close, shell monotonic) and the"
+echo "   tool's internal WSET-WARM elapsed_ms (acquire+release of the"
+echo "   resident keys). The attach leg = RUN-WALL - WSET-WARM (fleet"
+echo "   convention 2026-09-22: instance time_to_ready splits explicitly"
+echo "   into attach+arena-create vs lease bookkeeping)."
 index=1
 while [ "$index" -le "$RUNS" ]; do
   echo "-- warm run $index/$RUNS"
+  began_ns=$(date +%s%N)
   SPARK_WEIGHTD_EXPERT_POOL_BYTES="$POOL" \
     build/weightd_warm "$SOCKET" "$PACK" "$SHA" x 16 \
     --family dsv4_pro --world-rank "$RANK" --wset "$WSET" 300
+  ended_ns=$(date +%s%N)
+  printf 'RUN-WALL run=%s elapsed_ms=%s\n' "$index" \
+    "$(( (ended_ns - began_ns) / 1000000 ))"
   index=$((index + 1))
 done
 echo "WARM-RECEIPT-DONE rank=$RANK pool=$POOL chunk=$CHUNK runs=$RUNS"
