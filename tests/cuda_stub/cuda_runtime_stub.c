@@ -400,13 +400,71 @@ cudaError_t cudaEventSynchronize(cudaEvent_t event)
     return event != 0 ? cudaSuccess : cudaErrorInvalidValue;
 }
 
-cudaError_t cudaHostRegister(
-    void *address,
-    size_t bytes,
-    unsigned int flags)
+static void *cuda_stub_host_registered[CUDA_STUB_MAX_TRACKED];
+static size_t cuda_stub_host_registered_bytes[CUDA_STUB_MAX_TRACKED];
+static uint32_t cuda_stub_host_registered_count;
+uint32_t cuda_stub_host_register_calls;
+uint32_t cuda_stub_host_unregister_calls;
+int cuda_stub_host_register_result;
+int cuda_stub_host_unregister_result;
+
+uint32_t spark_stub_cuda_host_registered(void *address)
 {
-    (void)address;(void)bytes;(void)flags;
-    return cudaSuccess;
+    uint32_t index,found = 0u;
+    cuda_stub_ledger_lock();
+    for ( index = 0u; index < cuda_stub_host_registered_count; index++ )
+        if ( cuda_stub_host_registered[index] == address )
+            found = 1u;
+    cuda_stub_ledger_unlock();
+    return found;
+}
+
+cudaError_t cudaHostRegister(void *address,size_t bytes,unsigned int flags)
+{
+    uint32_t index;
+    uintptr_t first = (uintptr_t)address;
+    cudaError_t result;
+    (void)flags;
+    cuda_stub_ledger_lock();
+    cuda_stub_host_register_calls++;
+    result = cuda_stub_host_register_result;
+    if ( result == cudaSuccess && (address == 0 || bytes == 0u ||
+            bytes > UINTPTR_MAX - first || cuda_stub_host_registered_count == CUDA_STUB_MAX_TRACKED) )
+        result = cudaErrorInvalidValue;
+    for ( index = 0u; result == cudaSuccess && index < cuda_stub_host_registered_count; index++ )
+    {
+        uintptr_t registered = (uintptr_t)cuda_stub_host_registered[index];
+        if ( first < registered + cuda_stub_host_registered_bytes[index] && registered < first + bytes )
+            result = cudaErrorHostMemoryAlreadyRegistered;
+    }
+    if ( result == cudaSuccess )
+    {
+        cuda_stub_host_registered[cuda_stub_host_registered_count] = address;
+        cuda_stub_host_registered_bytes[cuda_stub_host_registered_count++] = bytes;
+    }
+    cuda_stub_ledger_unlock();
+    return result;
+}
+
+cudaError_t cudaHostUnregister(void *address)
+{
+    uint32_t index;
+    cudaError_t result;
+    cuda_stub_ledger_lock();
+    cuda_stub_host_unregister_calls++;
+    result = cuda_stub_host_unregister_result;
+    for ( index = 0u; index < cuda_stub_host_registered_count; index++ )
+        if ( cuda_stub_host_registered[index] == address )
+            break;
+    if ( result == cudaSuccess && index == cuda_stub_host_registered_count )
+        result = cudaErrorHostMemoryNotRegistered;
+    if ( result == cudaSuccess )
+    {
+        cuda_stub_host_registered[index] = cuda_stub_host_registered[--cuda_stub_host_registered_count];
+        cuda_stub_host_registered_bytes[index] = cuda_stub_host_registered_bytes[cuda_stub_host_registered_count];
+    }
+    cuda_stub_ledger_unlock();
+    return result;
 }
 
 

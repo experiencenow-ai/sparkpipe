@@ -25,6 +25,7 @@ extern int cudaFreeHost(void *pointer);
 extern int cudaMemcpyAsync(void *destination,const void *source,
     size_t bytes,int kind,void *stream);
 extern int cudaHostRegister(void *address,size_t bytes,unsigned int flags);
+extern int cudaHostUnregister(void *address);
 extern int cudaMemcpy(void *destination,const void *source,
     size_t bytes,int kind);
 extern int cudaMalloc(void **address,size_t bytes);
@@ -103,6 +104,7 @@ typedef struct SparkTpDeviceCollectiveImplementation
     uint32_t active_stream_valid;
     void *active_stream;
     uint8_t *mesh_buffer;
+    struct SparkTpDeviceCollectiveImplementation *registration_next;
     uint64_t band_base;
     uint64_t slot_bytes;
     uint64_t round_timeout_ns;
@@ -166,7 +168,46 @@ static uint64_t SparkTpDeviceCollectiveTimeNs(void)
     return((uint64_t)now.tv_sec * 1000000000ull + (uint64_t)now.tv_nsec);
 }
 
-static void *SparkTpDeviceCollectiveRegisteredRegion;
+static pthread_mutex_t SparkTpDeviceCollectiveRegistrationLock = PTHREAD_MUTEX_INITIALIZER;
+static SparkTpDeviceCollectiveImplementation *SparkTpDeviceCollectiveRegisteredOwners;
+
+static SparkStatus SparkTpDeviceCollectiveReleaseRegion(
+    SparkTpDeviceCollectiveImplementation *implementation)
+{
+    SparkTpDeviceCollectiveImplementation *owner,**link;
+    int result = 0;
+    if ( implementation->mesh_buffer == 0 )
+        return SPARK_STATUS_OK;
+    pthread_mutex_lock(&SparkTpDeviceCollectiveRegistrationLock);
+    for ( link = &SparkTpDeviceCollectiveRegisteredOwners; *link != 0 && *link != implementation;
+          link = &(*link)->registration_next )
+        ;
+    if ( *link == 0 )
+    {
+        pthread_mutex_unlock(&SparkTpDeviceCollectiveRegistrationLock);
+        return SPARK_STATUS_INTERNAL_ERROR;
+    }
+    for ( owner = SparkTpDeviceCollectiveRegisteredOwners; owner != 0;
+          owner = owner->registration_next )
+        if ( owner != implementation && owner->mesh_buffer == implementation->mesh_buffer )
+            break;
+    if ( owner == 0 )
+        result = cudaHostUnregister(implementation->mesh_buffer);
+    if ( result == 0 )
+    {
+        *link = implementation->registration_next;
+        implementation->registration_next = 0;
+        implementation->mesh_buffer = 0;
+    }
+    pthread_mutex_unlock(&SparkTpDeviceCollectiveRegistrationLock);
+    if ( result != 0 )
+    {
+        fprintf(stderr,"MESH-UNREGISTER-FAIL ptr=%p cuda=%d (%s); retaining owner\n",
+            implementation->mesh_buffer,result,cudaGetErrorString(result));
+        return SPARK_STATUS_IO_ERROR;
+    }
+    return SPARK_STATUS_OK;
+}
 
 static void SparkTpDeviceCollectiveInvokeCompletion(
     const SparkTpDeviceCollectiveSubmission *submission,
@@ -480,6 +521,8 @@ static SparkStatus SparkTpDeviceCollectiveBeginActivity(
     SparkTpDeviceCollectiveImplementation *implementation)
 {
     SparkStatus status;
+    if ( __atomic_load_n(&implementation->completion_stop,__ATOMIC_ACQUIRE) != 0u )
+        return SPARK_STATUS_BUSY;
     if ( implementation->mesh_activity_active != 0u )
         return SPARK_STATUS_OK;
     if ( implementation->mesh_activity_generation == UINT64_MAX )
@@ -826,7 +869,7 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
     if ( submission->logical_sequence_count == 1u &&
          bytes + 16u > implementation->slot_bytes )
         return SPARK_STATUS_CAPACITY_EXCEEDED;
-    if ( SparkTpDeviceCollectiveRegisteredRegion == 0 ||
+    if ( implementation->mesh_buffer == 0 ||
          (operation_kind ==
                 SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_REDUCE_SUM_BF16 &&
             implementation->combine_bf16 == 0) ||
@@ -1431,6 +1474,9 @@ static SparkStatus SparkTpDeviceCollectiveValidateSubmission(
 {
     if ( collective == 0 || collective->implementation == 0 || submission == 0 )
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+    if ( __atomic_load_n(&((SparkTpDeviceCollectiveImplementation *)collective->implementation)->completion_stop,
+            __ATOMIC_ACQUIRE) != 0u )
+        return SPARK_STATUS_BUSY;
     if ( submission->abi_version != SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION ||
          submission->descriptor_bytes != sizeof(*submission) )
         SPARK_FAIL(SPARK_STATUS_ABI_MISMATCH);
@@ -1580,7 +1626,7 @@ static SparkStatus SparkTpDeviceCollectiveEnqueueRoundsInternal(
         return SPARK_STATUS_CAPACITY_EXCEEDED;
     if ( (bytes & 3ull) != 0ull )
         SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
-    if ( SparkTpDeviceCollectiveRegisteredRegion == 0 )
+    if ( implementation->mesh_buffer == 0 )
         return SPARK_STATUS_UNSUPPORTED;
     {
         SparkStatus ensure = SparkTpDeviceCollectiveEnsureCells(implementation);
@@ -1790,20 +1836,38 @@ SparkStatus SparkTpDeviceCollectivePrepareReceiveBf16(
          receive_device == 0 )
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
     implementation = collective->implementation;
-    if ( SparkTpDeviceCollectiveRegisteredRegion != receive_device )
+    if ( __atomic_load_n(&implementation->completion_stop,__ATOMIC_ACQUIRE) != 0u )
+        return SPARK_STATUS_BUSY;
+    pthread_mutex_lock(&SparkTpDeviceCollectiveRegistrationLock);
+    if ( implementation->mesh_buffer != 0 )
     {
-        if ( SparkTpDeviceCollectiveRegisteredRegion == 0 &&
-             cudaHostRegister(receive_device,
-                (size_t)SPARK_WEIGHTD_MESH_REGION_BYTES,0u) != 0 )
-        {
-            fprintf(stderr,"MESH-REGISTER-FALLBACK ptr=%p region_bytes=%llu (%s); continuing with pageable mesh memory\n",
-                receive_device,
-                (unsigned long long)SPARK_WEIGHTD_MESH_REGION_BYTES,
-                cudaGetErrorString(cudaGetLastError()));
-        }
-        SparkTpDeviceCollectiveRegisteredRegion = receive_device;
+        SparkStatus status = implementation->mesh_buffer == receive_device ?
+            SPARK_STATUS_OK : SPARK_STATUS_UNSUPPORTED;
+        pthread_mutex_unlock(&SparkTpDeviceCollectiveRegistrationLock);
+        return status;
     }
-    implementation->mesh_buffer = receive_device;
+    {
+        SparkTpDeviceCollectiveImplementation *owner;
+        int result = 0;
+        for ( owner = SparkTpDeviceCollectiveRegisteredOwners; owner != 0;
+              owner = owner->registration_next )
+            if ( owner->mesh_buffer == receive_device )
+                break;
+        if ( owner == 0 )
+            result = cudaHostRegister(receive_device,(size_t)SPARK_WEIGHTD_MESH_REGION_BYTES,0u);
+        if ( result != 0 )
+        {
+            pthread_mutex_unlock(&SparkTpDeviceCollectiveRegistrationLock);
+            fprintf(stderr,"MESH-REGISTER-FAIL ptr=%p region_bytes=%llu cuda=%d (%s)\n",
+                receive_device,(unsigned long long)SPARK_WEIGHTD_MESH_REGION_BYTES,
+                result,cudaGetErrorString(result));
+            return SPARK_STATUS_IO_ERROR;
+        }
+        implementation->mesh_buffer = receive_device;
+        implementation->registration_next = SparkTpDeviceCollectiveRegisteredOwners;
+        SparkTpDeviceCollectiveRegisteredOwners = implementation;
+    }
+    pthread_mutex_unlock(&SparkTpDeviceCollectiveRegistrationLock);
     {
         uint32_t band_index = (uint32_t)(implementation->band_base /
             (SPARK_WEIGHTD_MESH_SLOT_BYTES *
@@ -1978,6 +2042,8 @@ SparkStatus SparkTpDeviceCollectiveGraphCancelSeed(
     if ( collective == 0 || collective->implementation == 0 )
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
     implementation = collective->implementation;
+    if ( __atomic_load_n(&implementation->completion_stop,__ATOMIC_ACQUIRE) != 0u )
+        return SPARK_STATUS_BUSY;
     if ( implementation->cancel_expected == 0 )
         SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
     if ( cudaMemcpyAsync(implementation->cancel_expected,
@@ -2240,11 +2306,14 @@ void SparkTpDeviceCollectiveDestroy(SparkTpDeviceCollective *collective)
     if ( implementation->completion_thread_live != 0u )
     {
         pthread_mutex_lock(&implementation->completion_lock);
-        implementation->completion_stop = 1u;
+        __atomic_store_n(&implementation->completion_stop,1u,__ATOMIC_RELEASE);
         pthread_cond_signal(&implementation->completion_wake);
         pthread_mutex_unlock(&implementation->completion_lock);
         pthread_join(implementation->completion_thread,0);
+        implementation->completion_thread_live = 0u;
     }
+    if ( SparkTpDeviceCollectiveReleaseRegion(implementation) != SPARK_STATUS_OK )
+        return;
     if ( implementation->round_control != 0 )
     {
         (void)cudaFree(implementation->round_control);

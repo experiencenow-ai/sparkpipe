@@ -80,6 +80,13 @@ extern uint64_t cuda_stub_roundloop_rounds;
 extern uint32_t cuda_stub_mesh_publish_calls;
 extern uint32_t cuda_stub_mesh_seq_pad_calls;
 extern int cuda_stub_stream_query_result;
+extern uint32_t cuda_stub_host_register_calls;
+extern uint32_t cuda_stub_host_unregister_calls;
+extern int cuda_stub_host_register_result;
+extern int cuda_stub_host_unregister_result;
+extern uint32_t spark_stub_cuda_host_registered(void *address);
+extern int cudaHostRegister(void *address,size_t bytes,unsigned int flags);
+extern int cudaHostUnregister(void *address);
 
 SparkStatus SparkWeightdClientConnect(const char *socket_path, SparkWeightdClient **client, SparkWeightdHelloResult *hello_out)
 {
@@ -1176,6 +1183,99 @@ static void FuzzCompletionCapacity(void)
     }
 }
 
+static void FuzzRegistrationOwnership(void)
+{
+    SparkTpDeviceCollectiveConfig config;
+    SparkTpDeviceCollective owners[4];
+    uint32_t index,calls;
+    FuzzCase("mapped-region-registration-ownership");
+    memset(&config,0,sizeof(config));
+    memset(owners,0,sizeof(owners));
+    config.abi_version = SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION;
+    config.tp_degree = g_rank_count;
+    config.local_hidden_dimension = FUZZ_HIDDEN;
+    config.max_active_sequence_count = 1u;
+    config.operation_timeout_milli = FUZZ_ROUND_TIMEOUT_MS;
+    for ( index = 0u; index < 4u; index++ )
+    {
+        SparkStatus status = SparkTpDeviceCollectiveCreate(&config,&owners[index]);
+        CHECK(status == SPARK_STATUS_OK,"registration owner creates");
+        if ( status != SPARK_STATUS_OK ) _Exit(2);
+    }
+    cuda_stub_host_register_result = 2;
+    CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&owners[0],g_regions[0],1u,
+        FUZZ_HIDDEN,0u,0) == SPARK_STATUS_IO_ERROR &&
+        spark_stub_cuda_host_registered(g_regions[0]) == 0u,
+        "registration failure cannot accept pageable mesh memory");
+    cuda_stub_host_register_result = 0;
+    calls = cuda_stub_host_register_calls;
+    for ( index = 0u; index < 2u; index++ )
+        CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&owners[index],g_regions[0],1u,
+            FUZZ_HIDDEN,0u,0) == SPARK_STATUS_OK,"main and HC share the exact registered mapping");
+    CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&owners[0],g_regions[0],1u,
+        FUZZ_HIDDEN,0u,0) == SPARK_STATUS_OK && cuda_stub_host_register_calls == calls + 1u,
+        "same owner reprepare and shared owner perform one registration");
+    CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&owners[2],g_regions[1],1u,
+        FUZZ_HIDDEN,0u,0) == SPARK_STATUS_OK && cuda_stub_host_register_calls == calls + 2u &&
+        spark_stub_cuda_host_registered(g_regions[0]) != 0u &&
+        spark_stub_cuda_host_registered(g_regions[1]) != 0u,
+        "distinct live mappings each have an independent CUDA registration");
+    CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&owners[3],g_regions[0] + 4096u,1u,
+        FUZZ_HIDDEN,0u,0) == SPARK_STATUS_IO_ERROR,
+        "partially overlapping registration is not borrowed from another owner");
+    CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&owners[0],g_regions[1],1u,
+        FUZZ_HIDDEN,0u,0) == SPARK_STATUS_UNSUPPORTED,
+        "bound collective rejects mapping replacement without changing ownership");
+    calls = cuda_stub_host_unregister_calls;
+    SparkTpDeviceCollectiveDestroy(&owners[0]);
+    CHECK(owners[0].implementation == 0 && cuda_stub_host_unregister_calls == calls &&
+        spark_stub_cuda_host_registered(g_regions[0]) != 0u,
+        "first shared owner cannot unregister the remaining owner's mapping");
+    cuda_stub_host_unregister_result = 2;
+    SparkTpDeviceCollectiveDestroy(&owners[1]);
+    CHECK(owners[1].implementation != 0 && spark_stub_cuda_host_registered(g_regions[0]) != 0u,
+        "failed final unregister retains retryable ownership");
+    {
+        SparkTpDeviceCollectiveSubmission submission;
+        uint32_t activities = g_activity_calls,published = cuda_stub_mesh_publish_calls;
+        memset(&submission,0,sizeof(submission));
+        submission.abi_version = SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION;
+        submission.descriptor_bytes = sizeof(submission);
+        submission.active_sequence_count = 1u;
+        submission.logical_sequence_count = 1u;
+        submission.local_device = g_regions[0];
+        submission.full_device = g_regions[1];
+        submission.cuda_stream = (void *)0x1;
+        CHECK(SparkTpDeviceCollectiveSubmitBf16(&owners[1],&submission) == SPARK_STATUS_BUSY &&
+            SparkTpDeviceCollectiveEnqueueRounds(&owners[1],&submission,1u) == SPARK_STATUS_BUSY &&
+            SparkTpDeviceCollectiveChainKey(&owners[1],1u) == SPARK_STATUS_BUSY &&
+            SparkTpDeviceCollectiveArmCapture(&owners[1]) == SPARK_STATUS_BUSY &&
+            SparkTpDeviceCollectiveGraphCancelSeed(&owners[1],(void *)0x1) == SPARK_STATUS_BUSY &&
+            SparkTpDeviceCollectivePrepareReceiveBf16(&owners[1],g_regions[0],1u,FUZZ_HIDDEN,0u,0) == SPARK_STATUS_BUSY,
+            "retained destruction accepts only cleanup retry after stopping its completion worker");
+        CHECK(g_activity_calls == activities && cuda_stub_mesh_publish_calls == published,
+            "retained destruction cannot acquire a producer or launch unowned work");
+    }
+    cuda_stub_host_unregister_result = 0;
+    SparkTpDeviceCollectiveDestroy(&owners[1]);
+    CHECK(owners[1].implementation == 0 && spark_stub_cuda_host_registered(g_regions[0]) == 0u,
+        "last shared owner unregisters only after successful retry");
+    SparkTpDeviceCollectiveDestroy(&owners[2]);
+    CHECK(owners[2].implementation == 0 && spark_stub_cuda_host_registered(g_regions[1]) == 0u,
+        "distinct mapping unregisters independently");
+    CHECK(cudaHostRegister(g_regions[0],(size_t)SPARK_WEIGHTD_MESH_REGION_BYTES,0u) == 0,
+        "external owner registers its mapping");
+    CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&owners[3],g_regions[0],1u,
+        FUZZ_HIDDEN,0u,0) == SPARK_STATUS_IO_ERROR,
+        "already registered external mapping requires explicit ownership rather than success fallback");
+    calls = cuda_stub_host_unregister_calls;
+    SparkTpDeviceCollectiveDestroy(&owners[3]);
+    CHECK(owners[3].implementation == 0 && cuda_stub_host_unregister_calls == calls &&
+        spark_stub_cuda_host_registered(g_regions[0]) != 0u,
+        "failed prepare never unregisters an external owner's mapping");
+    CHECK(cudaHostUnregister(g_regions[0]) == 0,"external owner can release its own registration");
+}
+
 static void FuzzPayloadCapacity(void)
 {
     SparkTpDeviceCollectiveConfig config;
@@ -1303,6 +1403,8 @@ static void FuzzActivityLifetime(void)
     }
     CHECK(g_activity_calls == calls && g_broadcast_count == broadcasts,
         "rejected rearm and end perform no mesh RPC or broadcast");
+    CHECK(spark_stub_cuda_host_registered(g_regions[0]) != 0u,
+        "pending GPU work retains its CUDA host registration");
     cuda_stub_stream_query_result = 719;
     CHECK(SparkTpDeviceCollectiveEndChain(&g_ranks[0].collective,(void *)0x1) ==
         SPARK_STATUS_IO_ERROR,"failed GPU stream retains mesh activity");
@@ -1722,6 +1824,7 @@ int main(int argc, char **argv)
 			return(1);
 		}
 	}
+    FuzzRegistrationOwnership();
 	if ( pthread_create(&shipper, 0, FuzzShipperMain, 0) != 0 )
 	{
 		fprintf(stderr,"shipper start failed\n");
@@ -1773,6 +1876,8 @@ int main(int argc, char **argv)
                     "destroy drains each owned callback exactly once without delayed duplicates");
             }
         }
+        CHECK(spark_stub_cuda_host_registered(g_regions[rank]) == 0u,
+            "rank teardown leaves no stale CUDA registration before mapping release");
 		free(g_regions[rank]);
 	}
     fprintf(stderr,"COVERAGE mandatory_cases=%u seeds=%u numerical=host-stub tree-policy=host-qualified gpu-lifetime=unqualified\n",g_cases,seeds);
