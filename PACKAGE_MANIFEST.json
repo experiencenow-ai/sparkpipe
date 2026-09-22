@@ -1,5 +1,5 @@
 {
-  "file_count": 3351,
+  "file_count": 3353,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "8662db944e9e7fbfe851f99bddc36d7402d9920b074922d932e0c939fc17f8a6",
-      "size_bytes": 127269
+      "sha256": "02a842c42a2cbdce98b66968da221e78b5f4d454517fa895f3ba4270d87dc3d5",
+      "size_bytes": 127637
     },
     {
       "path": "Makefile.rej",
@@ -12387,6 +12387,11 @@
       "size_bytes": 1638
     },
     {
+      "path": "tools/mesh_attach_repro_run.sh",
+      "sha256": "76f4da8af5bb1986687c3401adefa1ea55f9118e1fbc02d6a075a1eb1d7791c6",
+      "size_bytes": 674
+    },
+    {
       "path": "tools/mesh_lane_ladder.cu",
       "sha256": "1a7863a6d51b9c1ceaec46fa2caf13517ead96d2ae196688b2a2a04f4e397113",
       "size_bytes": 24986
@@ -12395,6 +12400,11 @@
       "path": "tools/mesh_lane_ladder_receipt.py",
       "sha256": "f1353839b2fe06586e017bf952710655f5ec98e9f9f10fba24cf33bbd424b876",
       "size_bytes": 10392
+    },
+    {
+      "path": "tools/mesh_register_attach_repro.c",
+      "sha256": "0d93f77934aea422025d81cffc0e557b3b0f2aea30164532e2aef5ca455a0e1e",
+      "size_bytes": 5273
     },
     {
       "path": "tools/mesh_register_repro.c",
@@ -16760,5 +16770,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79866444
+  "total_bytes": 79872759
 }
