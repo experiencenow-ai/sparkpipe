@@ -120,7 +120,9 @@ def adapter_gates(config, rank, failures, per_host_ports):
     peers = collective["peers"]
     check(len(peers) == 2, failures, f"{host}: expected 2 STEP peers")
     for peer_index, partner in ((0, tp ^ 1), (1, tp ^ 2)):
-        expected = (f"spark{HEX[stage * 4 + partner]}:"
+        # peers are numeric IPv4 literals: SparkTpCollectiveCreate
+        # validates with inet_pton and rejects hostnames outright
+        expected = (f"{lane.HOST_ADDRESSES[f'spark{HEX[stage * 4 + partner]}']}:"
                     f"{lane.TP_COLLECTIVE_PORT + partner}")
         check(peers[peer_index] == expected, failures,
               f"{host}: STEP peer {peer_index} {peers[peer_index]} != {expected}")

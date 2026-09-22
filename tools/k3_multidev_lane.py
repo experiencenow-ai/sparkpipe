@@ -64,6 +64,12 @@ PP = 4
 HEX = "0123456789abcdef"
 HOSTS = [f"spark{HEX[i]}" for i in range(WORLD)]
 
+# Numeric peer addresses for the host TP collective: SparkTpCollectiveCreate
+# validates peers with inet_pton (IPv4 literals only — hostnames are
+# INVALID_ARGUMENT at create). The fleet's sparkN names are static DNS
+# (verified 2026-09-23: spark0=10.10.100.10 .. sparkf=10.10.100.25).
+HOST_ADDRESSES = {f"spark{HEX[i]}": f"10.10.100.{10 + i}" for i in range(WORLD)}
+
 CONTROL_BASE = 23048                            # 23048 .. 23063
 COLLECTIVE_BASE = 53048                         # 53048 .. 53063 (u16-valid, #1094)
 TRANSPORT_BASE = 64048                          # 64048 .. 64063
@@ -154,7 +160,7 @@ def adapter_config(rank: int, kv_pages: int = 64) -> dict:
             "collective_identifier": 1,
             "peers": [
                 "{host}:{port}".format(
-                    host=group_hosts(rank)[partner],
+                    host=HOST_ADDRESSES[group_hosts(rank)[partner]],
                     port=TP_COLLECTIVE_PORT + partner)
                 for partner in (tp ^ 1, tp ^ 2)
             ],
