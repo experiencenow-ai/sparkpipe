@@ -91,3 +91,21 @@ recorded in `model-families/<family>/smoke_experts.json` (lane 0 lands the
 first instance). On a shared socket this materializes pages in the
 operator's daemon: keep the working set inside its declared expert-pool
 budget.
+
+## Local compile-gate fallback (Actions stalls)
+
+When Actions does not queue a run for a pushed head, gate the exact head on
+sparkb through the queue (sync the ref, then a CPU job):
+
+```sh
+export PATH=/usr/local/cuda/bin:$PATH      # cuobjdump is not on sparkb's default PATH
+export NVCC=/usr/local/cuda/bin/nvcc
+export CUDA_ARCH=sm_121a
+export SPARK_CUDA_GATE_SCOPE=complete
+bash tools/cuda13_sm121a_compile_gate.sh
+```
+
+The run must end with `PASS CUDA 13 exact sm_121a compile gate`; retain the
+attempt id and log path in the PR (receipt precedent: PR #1091's
+ebc7cd31 fallback, PR #1085's r5).
+

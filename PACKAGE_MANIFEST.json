@@ -1,5 +1,5 @@
 {
-  "file_count": 3281,
+  "file_count": 3283,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -4415,6 +4415,11 @@
       "path": "model-families/glm5_next/glm53flash.fp8.tp16.smoke.wset",
       "sha256": "fbd8e8a4bff8ec99840b9bd1be5039d7ca73d305bb92ee0bafd5552bbbfcd06b",
       "size_bytes": 2688
+    },
+    {
+      "path": "model-families/glm5_next/glm53flash.smoke.batch.json",
+      "sha256": "f6aa43dfc185367ef54a5158dcfce904793c4c85e29b9a8795e45422ef8e5d9a",
+      "size_bytes": 1349
     },
     {
       "path": "model-families/glm5_next/include/sparkpipe/llm_defines.h",
@@ -10863,8 +10868,8 @@
     },
     {
       "path": "tools/devcycle/templates/README.md",
-      "sha256": "a9a110f8a1224113cc627bccaea039af8dfc30716108018991f13cfda4ba1242",
-      "size_bytes": 5025
+      "sha256": "9e4ed15ee3e56a05d210b2040a85dff1ea0e700c05e2818142a5a36d642cdcc2",
+      "size_bytes": 5625
     },
     {
       "path": "tools/devcycle/templates/dsv4_flash_tp4_stage.template.json",
@@ -11385,6 +11390,11 @@
       "path": "tools/glm5_next_checkpoint_layer_reference.py",
       "sha256": "06c25bc0b735ef449a95d1dda7c8e5f808402e319afef7aff423c2e5eebc77bd",
       "size_bytes": 9290
+    },
+    {
+      "path": "tools/glm5_next_coldlaunch_ab.sh",
+      "sha256": "28fb0bf4fb32bdb4accfc9be247f176960ce9f652e41514ec584c87249ba60ba",
+      "size_bytes": 14217
     },
     {
       "path": "tools/glm5_next_compsec17.py",
@@ -16410,5 +16420,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78320218
+  "total_bytes": 78336384
 }
