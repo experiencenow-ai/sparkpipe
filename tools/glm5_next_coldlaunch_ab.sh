@@ -214,6 +214,7 @@ if [ "$ARM" = "B" ]; then
   grep -q "WSET-WARM keys=" "$ROOT/warm.log" || { echo "wset warm failed"; cat "$ROOT/warm.log" >&2; exit 2; }
   receipt_set warm_seconds "$(elapsed "$t1" "$t0")"
   receipt_set warm_log "$(grep -E 'WSET-WARM|WSET-ONE-SHOT' "$ROOT/warm.log" | tr '\n' ';')"
+  receipt_set daemon_cold_warm_seconds "$(elapsed "$t1" "$t0")"
 fi
 
 # ------------------------------ resident launch -----------------------------
@@ -248,6 +249,7 @@ if [ "$ready" -ne 1 ]; then
   exit 2
 fi
 receipt_set time_to_ready_seconds "$(elapsed "$t1" "$t0")"
+receipt_set instance_ready_seconds "$(elapsed "$t1" "$t0")"
 receipt_set ready_line "$(grep -m1 "model_residentd ready rank=$RANK " "$ROOT/residentd.log")"
 
 # cross-node readiness barrier + coordinator request
@@ -291,6 +293,8 @@ try:
 except (OSError, ValueError):
     bench = {"valid": False, "errors": ["bench output unreadable"]}
 value["bench"] = bench
+value["steady_state_decode_tokens_per_second"] = bench.get("decode_tokens_per_second")
+value["ttft_seconds"] = bench.get("ttft_seconds")
 value["status"] = "PASS" if bench.get("valid") else "FAILED"
 (root / "coldlaunch.json").write_text(json.dumps(value, indent=1, sort_keys=True) + "\n")
 print(json.dumps({"ttft_seconds": bench.get("ttft_seconds"), "tokens": bench.get("token_count"),

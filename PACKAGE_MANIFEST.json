@@ -10868,8 +10868,8 @@
     },
     {
       "path": "tools/devcycle/templates/README.md",
-      "sha256": "9e4ed15ee3e56a05d210b2040a85dff1ea0e700c05e2818142a5a36d642cdcc2",
-      "size_bytes": 5625
+      "sha256": "b04f4d99a0148844680aba9fb219b01eab2a9bb832c5a3005923444d11c556f6",
+      "size_bytes": 7887
     },
     {
       "path": "tools/devcycle/templates/dsv4_flash_tp4_stage.template.json",
@@ -11393,8 +11393,8 @@
     },
     {
       "path": "tools/glm5_next_coldlaunch_ab.sh",
-      "sha256": "9b1012a45f65997e24ed910764dbb331ccaa86a76bc5d92d228fdbed953d7faa",
-      "size_bytes": 14299
+      "sha256": "96e99e046559c0620ed8a8aa1c66832b7b8ab46d6f19e7b4fae4527c6e81512c",
+      "size_bytes": 14560
     },
     {
       "path": "tools/glm5_next_compsec17.py",
@@ -16420,5 +16420,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78336466
+  "total_bytes": 78338989
 }
