@@ -392,13 +392,17 @@ static SparkStatus SparkModelResidentdTransportContract(
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	if ( strcmp(mode,"host-rdma") == 0 )
 	{
-		*capabilities = SPARK_HIDDEN_TRANSPORT_RECOMMENDED_SPARK_HOST_RDMA_CAPS;
+		/* required means REQUIRED (manager ruling, laguna's measured
+		 * diagnosis): the RECOMMENDED superset here demanded doorbells,
+		 * multi-lane and poll descriptors no honest host-rdma backend
+		 * implements, failing every module at load. */
+		*capabilities = SPARK_HIDDEN_TRANSPORT_REQUIRED_SPARK_HOST_RDMA_CAPS;
 		*module_id = SPARK_HIDDEN_TRANSPORT_SPARK_HOST_RDMA_VERBS_MODULE_ID;
 		*memory_mode = SPARK_MODEL_RESIDENTD_MEMORY_MAPPED_HOST;
 	}
 	else if ( strcmp(mode,"gpudirect-rdma") == 0 )
 	{
-		*capabilities = SPARK_HIDDEN_TRANSPORT_RECOMMENDED_SPARK_GPUDIRECT_RDMA_CAPS;
+		*capabilities = SPARK_HIDDEN_TRANSPORT_REQUIRED_SPARK_GPUDIRECT_RDMA_CAPS;
 		*module_id = SPARK_HIDDEN_TRANSPORT_SPARK_GPUDIRECT_RDMA_VERBS_MODULE_ID;
 		*memory_mode = SPARK_MODEL_RESIDENTD_MEMORY_DEVICE;
 	}

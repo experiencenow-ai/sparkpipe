@@ -275,19 +275,17 @@ extern "C" const SparkHiddenTransportInterface *SparkHiddenTransportGetInterface
         sizeof(SparkHiddenTransportInterface);
     spark_hidden_spark_host_rdma_interface.capability_flags =
 #if SPARK_HIDDEN_SPARK_RDMA_DEVICE_DIRECT
-        SPARK_HIDDEN_TRANSPORT_RECOMMENDED_SPARK_GPUDIRECT_RDMA_CAPS |
+        SPARK_HIDDEN_TRANSPORT_REQUIRED_SPARK_GPUDIRECT_RDMA_CAPS |
         SPARK_HIDDEN_TRANSPORT_CAP_PERSISTENT_RECEIVE_CREDITS;
 #else
-        /* residentd's host-rdma contract requires the FULL RECOMMENDED
-         * cap set (it passes RECOMMENDED_* as the required mask): the
-         * weightd-mesh path must claim batched submission (the loop
-         * forms), poll descriptors, multi-lane (the shared daemon's
-         * lane bands) and the remote-completion doorbell (the mesh
-         * doorbell entries) alongside the production/pinned/mapped
-         * basics. Declaring a subset fails the load-time
-         * (declared & required) != required check — twice found the
-         * hard way. */
-        SPARK_HIDDEN_TRANSPORT_RECOMMENDED_SPARK_HOST_RDMA_CAPS |
+        /* The honest contract (manager ruling on laguna's measurement):
+         * REQUIRED_SPARK_HOST_RDMA_CAPS is what this backend implements
+         * — synchronous singles plus batch loops over them. Poll
+         * descriptors, multi-lane and the remote-completion doorbell
+         * are NOT implemented here; declaring them to satisfy a
+         * mis-wired required mask would be a lie. The mask bug is fixed
+         * at the contract site instead (node/model_residentd.c). */
+        SPARK_HIDDEN_TRANSPORT_REQUIRED_SPARK_HOST_RDMA_CAPS |
         SPARK_HIDDEN_TRANSPORT_CAP_PERSISTENT_RECEIVE_CREDITS;
 #endif
     spark_hidden_spark_host_rdma_interface.initialize =
