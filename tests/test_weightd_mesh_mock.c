@@ -20,7 +20,7 @@
 #endif
 
 #define TEST_MESH_PEERS (SPARK_WEIGHTD_MESH_RANKS_PER_BAND - 1u)
-#define TEST_MESH_MAGIC UINT64_C(0x4d45534830303032)
+#define TEST_MESH_MAGIC UINT64_C(0x4d45534830303033)
 #define TEST_MESH_LIVE_DIR "/tmp/weightd-mesh"
 
 typedef struct TestMeshRecord
@@ -322,6 +322,7 @@ static void test_slot_lifetimes(uint32_t local_rank)
     memset(payload,0x5a,64u);
     entry[2] = slot;
     entry[1] = 64u;
+    entry[3] = all_peers;
     __sync_synchronize();
     *(volatile uint64_t *)(payload + SPARK_WEIGHTD_MESH_SLOT_BYTES - 8u) = seq;
     __sync_synchronize();
@@ -339,7 +340,7 @@ static void test_slot_lifetimes(uint32_t local_rank)
             CHECK(spark_stub_ibv_complete(work.wr_id,IBV_WC_SUCCESS) == 0,"tail completion delivered before payload");
         else
         {
-            CHECK(work.source == (uint64_t)(uintptr_t)payload && work.length == 72u,
+            CHECK(work.source == (uint64_t)(uintptr_t)payload && work.length == 64u,
                 "B1 source and payload extent remain unchanged");
             CHECK(*(const uint8_t *)(uintptr_t)work.source == 0x5au,"NIC source retains original contribution until completion");
         }
@@ -418,35 +419,29 @@ static void test_slot_lifetimes(uint32_t local_rank)
 
     first = spark_stub_ibv_posted_count();
     CHECK(test_post_slot(4u,local_rank,seq + 4u,all_peers) == SPARK_STATUS_OK,
-        "sequence gap posts both retained ring slots");
+        "sparse phase sequence publishes current payload");
     last = spark_stub_ibv_posted_count();
-    CHECK(last - first == TEST_MESH_PEERS * 4u,"resync and current data fit the explicit completion bitmap");
-    for ( i = first; i < last; i++ )
-    {
-        SparkStubIbvPostedWork work;
-        CHECK(spark_stub_ibv_posted(i,&work) == 0,"resync WR captured");
-        if ( (work.wr_id & 3u) >= 2u )
-            CHECK(spark_stub_ibv_complete(work.wr_id,IBV_WC_SUCCESS) == 0,"current-generation data completes before resync");
-    }
-    SparkWeightdMeshDrainCq();
-    CHECK(test_shipped(4u,local_rank) == 0u,"resync source reads retain ownership too");
-    test_complete_range(first,last);
-    CHECK(test_shipped(4u,local_rank) == seq + 4u,"resync shipment releases after every associated WR");
+    CHECK(last - first == TEST_MESH_PEERS * 2u,
+        "sparse phases never replay stale source slots");
+    test_complete_range(first,last - 1u);
+    CHECK(test_shipped(4u,local_rank) == 0u,"sparse shipment retains source until final completion");
+    test_complete_range(last - 1u,last);
+    CHECK(test_shipped(4u,local_rank) == seq + 4u,"sparse shipment acknowledges its actual tag");
 
     first = spark_stub_ibv_posted_count();
-    for ( i = 0u; i < 16u; i++ )
-        CHECK(test_post_slot(8u + i / 2u,i % 2u,seq + 4u,all_peers) == SPARK_STATUS_OK,
-            "declared SQ capacity admits four WRs per peer for sixteen independent entries");
+    for ( i = 0u; i < 32u; i++ )
+        CHECK(test_post_slot(8u + i / 4u,i % 4u,seq + 4u,all_peers) == SPARK_STATUS_OK,
+            "declared SQ capacity admits two WRs per peer for thirty-two independent entries");
     last = spark_stub_ibv_posted_count();
     CHECK(last - first == SPARK_WEIGHTD_MESH_PEERS * SPARK_WEIGHTD_MESH_SEND_CAPACITY,
         "maximum pending completions match actual configured SQ capacity");
     CHECK(test_post_slot(7u,0u,seq + 4u,all_peers) == SPARK_STATUS_BUSY,
         "capacity pressure rejects before any partial posting");
     CHECK(spark_stub_ibv_posted_count() == last,"BUSY leaves publication and completion ledgers unchanged");
-    test_complete_range(first,first + TEST_MESH_PEERS * 4u);
+    test_complete_range(first,first + TEST_MESH_PEERS * 2u);
     CHECK(test_post_slot(7u,0u,seq + 4u,all_peers) == SPARK_STATUS_OK,
         "completed work makes capacity retry useful");
-    test_complete_range(first + TEST_MESH_PEERS * 4u,spark_stub_ibv_posted_count());
+    test_complete_range(first + TEST_MESH_PEERS * 2u,spark_stub_ibv_posted_count());
     for ( i = 0u; i < TEST_MESH_PEERS; i++ )
         CHECK(weightd_mesh.send_pending[i] == 0u,"all accepted SQ ownership returns after terminal completions");
 }
@@ -685,6 +680,7 @@ int main(void)
             SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(0u,0u));
         entry[2] = 0u;
         entry[1] = 64u;
+        entry[3] = 0xeu;
         entry[0] = 1u;
         SparkWeightdMeshDoorbellPoll();
     }

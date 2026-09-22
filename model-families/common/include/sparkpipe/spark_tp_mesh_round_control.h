@@ -34,3 +34,31 @@ typedef struct SparkTpMeshRoundControl
 #define SPARK_TP_MESH_ROUND_LOOP_DECISION_GO 0u
 #define SPARK_TP_MESH_ROUND_LOOP_DECISION_CANCEL 1u
 #define SPARK_TP_MESH_ROUND_LOOP_DECISION_TIMEOUT 2u
+
+#if defined(__CUDACC__)
+__host__ __device__
+#endif
+static inline uint32_t SparkTpMeshTreeLevels(uint32_t degree)
+{
+    uint32_t levels = 0u;
+    while ( (1u << levels) < degree ) levels++;
+    return levels;
+}
+
+#if defined(__CUDACC__)
+__host__ __device__
+#endif
+static inline uint32_t SparkTpMeshTreeRoute(uint32_t rank,uint32_t degree,
+    uint32_t phase)
+{
+    uint32_t levels = SparkTpMeshTreeLevels(degree);
+    uint32_t reduce = phase < levels;
+    uint32_t step = 1u << (reduce != 0u ? phase : 2u * levels - phase - 1u);
+    uint32_t residue = rank % (2u * step);
+    uint32_t peer;
+    if ( residue == 0u && rank + step < degree ) peer = rank + step;
+    else if ( residue == step ) peer = rank - step;
+    else return 0u;
+    return (residue == step) == (reduce != 0u) ?
+        (peer + 1u) << 16u : peer + 1u;
+}

@@ -6,7 +6,7 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include "sparkpipe/spark_tp_mesh_round_control.h"
-#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V7-FULLTAG-SOURCE-LIFETIME"
+#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V8-MASKED-FP32-TREE"
 #define SPARK_TP_MESH_ERROR_PARITY_MISMATCH 0xFFFFFFFFFF000000ull
 #define SPARK_TP_MESH_ERROR_CANCELLED 0xFFFFFFFFFE000000ull
 #if defined(__CUDACC__)
@@ -42,7 +42,7 @@ __global__ void SparkGlm5NextMeshPublishKernel(
     uint64_t slot_index,
     uint64_t slots_per_rank,
     volatile uint64_t *slot_tail,
-    unsigned long long *error_word)
+    unsigned long long *error_word,uint32_t peer_mask)
 {
 	unsigned long long sequence;
 	unsigned long long tag;
@@ -63,6 +63,7 @@ __global__ void SparkGlm5NextMeshPublishKernel(
 	round_seq[0] = tag;
 	entry[2] = slot_index;
 	entry[1] = bytes;
+	entry[3] = peer_mask;
 	__threadfence_system();
 	*slot_tail = tag;
 	__threadfence_system();
@@ -298,6 +299,7 @@ __global__ void SparkGlm5NextMeshRoundLoopKernel(
 			    ((uint8_t *)band_base + s_slot + slot_bytes - 8ull);
 			entry[2] = s_slot / slot_bytes;
 			entry[1] = bytes;
+			entry[3] = ((1u << degree) - 1u) & ~(1u << rank);
 			control->seq = control->seq + 1ull;
 			control->round_seq = s_tag;
 			__threadfence_system();
@@ -387,6 +389,158 @@ __global__ void SparkGlm5NextMeshRoundLoopKernel(
 		}
 		__syncthreads();
 	}
+}
+
+static __device__ bool SparkGlm5NextMeshTreeWait(
+    const volatile uint64_t *cell,uint64_t tag,
+    const volatile uint64_t *cancel,SparkTpMeshRoundControl *control,
+    uint64_t deadline)
+{
+    for (;;)
+    {
+        if ( SparkGlm5NextLdcvU64(&control->error_word) != 0u ) return false;
+        if ( SparkGlm5NextLdcvU64(cancel) != control->cancel_expected )
+        {
+            control->error_word = SPARK_TP_MESH_ERROR_CANCELLED | tag;
+            return false;
+        }
+        if ( tag == 0u || SparkGlm5NextLdcvU64(cell) == tag ) return true;
+        if ( SparkGlm5NextGlobalTimerNs() >= deadline )
+        {
+            control->error_word = tag;
+            control->diag_word = SparkGlm5NextLdcvU64(cell);
+            return false;
+        }
+        __nanosleep(200u);
+    }
+}
+
+__global__ void SparkGlm5NextMeshTreeKernel(
+    uint8_t *band,uint64_t slot_bytes,uint64_t slots_per_rank,
+    volatile uint64_t *entry,const volatile uint64_t *shipped,
+    const volatile uint64_t *cancel,SparkTpMeshRoundControl *control,
+    uint32_t rank,uint32_t degree,const void *local,void *output,void *scratch,
+    uint64_t elements,uint32_t operation,uint32_t rounds,
+    uint64_t timeout_ns)
+{
+    __shared__ uint32_t ready;
+    __shared__ uint64_t tag;
+    uint32_t tid = threadIdx.x;
+    uint32_t levels = SparkTpMeshTreeLevels(degree);
+    uint32_t width = operation == 2u ? 8u : operation == 1u ? 4u : 2u;
+    uint64_t capacity = (slot_bytes - 16u) / width;
+    uint64_t deadline = SparkGlm5NextGlobalTimerNs() + timeout_ns;
+    for ( uint32_t round = 0u; round < rounds; round++ )
+    {
+        for ( uint64_t begin = 0u; begin < elements; begin += capacity )
+        {
+            uint64_t count = elements - begin < capacity ? elements - begin : capacity;
+            for ( uint64_t i = tid; i < count; i += blockDim.x )
+            {
+                uint64_t index = begin + i;
+                if ( operation == 1u )
+                    ((float *)scratch)[i] = __uint_as_float((uint32_t)((const uint16_t *)local)[index] << 16u);
+                else if ( operation == 2u )
+                    ((uint64_t *)scratch)[i] = ((const uint64_t *)local)[index];
+                else
+                {
+                    uint32_t owner = (uint32_t)(index / (elements / degree));
+                    uint64_t source = index % (elements / degree);
+                    ((uint16_t *)scratch)[i] = owner == rank ? ((const uint16_t *)local)[source] : 0u;
+                }
+            }
+            __syncthreads();
+            for ( uint32_t phase = 0u; phase < 2u * levels; phase++ )
+            {
+                uint32_t route = SparkTpMeshTreeRoute(rank,degree,phase);
+                uint32_t send = route >> 16u;
+                uint32_t receive = route & 0xffffu;
+                if ( tid == 0u )
+                {
+                    ready = control->seq < UINT32_MAX && control->error_word == 0u;
+                    if ( ready == 0u ) control->error_word = UINT64_MAX;
+                    tag = (control->epoch << 32u) | (control->seq + 1u);
+                    if ( send != 0u && ready != 0u )
+                        ready = SparkGlm5NextMeshTreeWait(shipped,control->round_seq,cancel,control,deadline);
+                }
+                __syncthreads();
+                if ( ready == 0u ) return;
+                uint64_t ring = (tag - 1u) & (slots_per_rank - 1u);
+                uint64_t own_slot = ((uint64_t)rank * slots_per_rank + ring) * slot_bytes;
+                if ( send != 0u )
+                {
+                    for ( uint64_t i = tid; i < count * width; i += blockDim.x )
+                        ((volatile uint8_t *)band)[own_slot + i] = ((const uint8_t *)scratch)[i];
+                    __threadfence_system();
+                    __syncthreads();
+                    if ( tid == 0u )
+                    {
+                        entry[1] = count * width;
+                        entry[2] = own_slot / slot_bytes;
+                        entry[3] = 1u << (send - 1u);
+                        control->round_seq = tag;
+                        __threadfence_system();
+                        *(volatile uint64_t *)(band + own_slot + slot_bytes - 8u) = tag;
+                        __threadfence_system();
+                        entry[0] = tag;
+                    }
+                }
+                if ( receive != 0u )
+                {
+                    uint8_t *source = band + ((uint64_t)(receive - 1u) * slots_per_rank + ring) * slot_bytes;
+                    if ( tid == 0u )
+                        ready = SparkGlm5NextMeshTreeWait((const volatile uint64_t *)(source + slot_bytes - 8u),tag,cancel,control,deadline);
+                    __syncthreads();
+                    if ( ready == 0u ) return;
+                    __threadfence_system();
+                    for ( uint64_t i = tid; i < count; i += blockDim.x )
+                    {
+                        if ( operation == 1u )
+                            ((float *)scratch)[i] = phase < levels ?
+                                ((float *)scratch)[i] + ((const volatile float *)source)[i] : ((const volatile float *)source)[i];
+                        else if ( operation == 2u )
+                        {
+                            uint64_t value = ((const volatile uint64_t *)source)[i];
+                            if ( phase >= levels || value > ((uint64_t *)scratch)[i] ) ((uint64_t *)scratch)[i] = value;
+                        }
+                        else
+                            ((uint16_t *)scratch)[i] = phase < levels ?
+                                ((uint16_t *)scratch)[i] | ((const volatile uint16_t *)source)[i] : ((const volatile uint16_t *)source)[i];
+                    }
+                }
+                __syncthreads();
+                if ( tid == 0u ) control->seq++;
+                __syncthreads();
+            }
+            for ( uint64_t i = tid; i < count; i += blockDim.x )
+            {
+                if ( operation == 1u ) ((uint16_t *)output)[begin + i] = (uint16_t)(__float_as_uint(((float *)scratch)[i]) >> 16u);
+                else if ( operation == 2u ) ((uint64_t *)output)[begin + i] = ((uint64_t *)scratch)[i];
+                else ((uint16_t *)output)[begin + i] = ((uint16_t *)scratch)[i];
+            }
+            __syncthreads();
+        }
+        if ( tid == 0u )
+        {
+            control->slot_cursor = control->seq;
+            control->rounds_done++;
+        }
+        __syncthreads();
+    }
+}
+
+extern "C" cudaError_t SparkGlm5NextLaunchMeshTree(cudaStream_t stream,
+    void *band,uint64_t slot_bytes,uint64_t slots_per_rank,volatile void *entry,
+    const volatile void *shipped,const volatile void *cancel,void *round_control,
+    uint32_t rank,uint32_t degree,const void *local,void *output,void *scratch,
+    uint64_t elements,uint32_t operation,uint32_t rounds,uint64_t timeout_ns)
+{
+    SparkGlm5NextMeshTreeKernel<<<1,SPARK_TP_MESH_THREADS,0u,stream>>>(
+        (uint8_t *)band,slot_bytes,slots_per_rank,(volatile uint64_t *)entry,
+        (const volatile uint64_t *)shipped,(const volatile uint64_t *)cancel,
+        (SparkTpMeshRoundControl *)round_control,rank,degree,local,output,scratch,
+        elements,operation,rounds,timeout_ns);
+    return cudaPeekAtLastError();
 }
 
 extern "C" cudaError_t SparkGlm5NextLaunchMeshRoundLoop(cudaStream_t stream,
@@ -652,14 +806,14 @@ extern "C" cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
     volatile void *entry,void *seq_cell,const void *epoch_cell,
     void *round_seq,uint64_t bytes,
     uint64_t slot_index,uint64_t slots_per_rank,volatile void *slot_tail,
-    void *error_word)
+    void *error_word,uint32_t peer_mask)
 {
 	SparkGlm5NextMeshPublishKernel<<<1,32,0u,stream>>>(
 		(volatile uint64_t *)entry,(unsigned long long *)seq_cell,
 		(const unsigned long long *)epoch_cell,
 		(unsigned long long *)round_seq,bytes,slot_index,slots_per_rank,
 		(volatile uint64_t *)slot_tail,
-		(unsigned long long *)error_word);
+		(unsigned long long *)error_word,peer_mask);
 	return cudaPeekAtLastError();
 }
 

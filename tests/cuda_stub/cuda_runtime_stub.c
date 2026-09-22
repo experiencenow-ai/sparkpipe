@@ -1169,7 +1169,7 @@ cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
     volatile void *entry,void *seq_cell,const void *epoch_cell,
     void *round_seq,uint64_t bytes,
     uint64_t slot_index,uint64_t slots_per_rank,volatile void *slot_tail,
-    void *error_word)
+    void *error_word,uint32_t peer_mask)
 {
     (void)stream;(void)round_seq;(void)bytes;
     (void)slots_per_rank;(void)error_word;
@@ -1186,6 +1186,7 @@ cudaError_t SparkGlm5NextLaunchMeshPublish(cudaStream_t stream,
         volatile uint64_t *ent = (volatile uint64_t *)entry;
         ent[2] = slot_index;
         ent[1] = bytes;
+        ent[3] = peer_mask;
         __sync_synchronize();
         *(volatile uint64_t *)slot_tail = tag;
         *(uint64_t *)round_seq = tag;
@@ -1246,6 +1247,131 @@ cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
     __sync_synchronize();
     if ( arrival_ring != NULL )
         ((uint64_t *)arrival_ring)[sequence & 255u] = cuda_stub_roundloop_now_ns();
+    return cudaSuccess;
+}
+
+static int cuda_stub_tree_wait(const volatile uint64_t *cell,uint64_t tag,
+    const volatile uint64_t *cancel,SparkTpMeshRoundControl *control,uint64_t deadline)
+{
+    for (;;)
+    {
+        if ( control->error_word != 0u ) return 0;
+        if ( *cancel != control->cancel_expected )
+        {
+            control->error_word = UINT64_C(0xFFFFFFFFFE000000) | tag;
+            return 0;
+        }
+        if ( tag == 0u || *cell == tag ) return 1;
+        if ( cuda_stub_roundloop_now_ns() >= deadline )
+        {
+            control->error_word = tag;
+            control->diag_word = *cell;
+            return 0;
+        }
+        sched_yield();
+    }
+}
+
+cudaError_t SparkGlm5NextLaunchMeshTree(cudaStream_t stream,void *band_base,
+    uint64_t slot_bytes,uint64_t slots_per_rank,volatile void *entry_address,
+    const volatile void *shipped_address,const volatile void *cancel_address,
+    void *round_control,uint32_t rank,uint32_t degree,const void *local,
+    void *output,void *scratch,uint64_t elements,
+    uint32_t operation,uint32_t rounds,uint64_t timeout_ns)
+{
+    uint8_t *band = band_base;
+    volatile uint64_t *entry = entry_address;
+    const volatile uint64_t *shipped = shipped_address;
+    const volatile uint64_t *cancel = cancel_address;
+    SparkTpMeshRoundControl *control = round_control;
+    uint32_t levels = SparkTpMeshTreeLevels(degree);
+    uint32_t width = operation == 2u ? 8u : operation == 1u ? 4u : 2u;
+    uint64_t capacity = (slot_bytes - 16u) / width;
+    uint64_t deadline = cuda_stub_roundloop_now_ns() + timeout_ns;
+    uint32_t round;
+    (void)stream;
+    for ( round = 0u; round < rounds; round++ )
+    {
+        uint64_t begin;
+        for ( begin = 0u; begin < elements; begin += capacity )
+        {
+            uint64_t count = elements - begin < capacity ? elements - begin : capacity;
+            uint64_t i;
+            uint32_t phase;
+            for ( i = 0u; i < count; i++ )
+            {
+                uint64_t index = begin + i;
+                if ( operation == 1u )
+                {
+                    uint32_t bits = (uint32_t)((const uint16_t *)local)[index] << 16u;
+                    memcpy((float *)scratch + i,&bits,sizeof(bits));
+                }
+                else if ( operation == 2u ) ((uint64_t *)scratch)[i] = ((const uint64_t *)local)[index];
+                else
+                {
+                    uint32_t owner = (uint32_t)(index / (elements / degree));
+                    uint64_t source = index % (elements / degree);
+                    ((uint16_t *)scratch)[i] = owner == rank ? ((const uint16_t *)local)[source] : 0u;
+                }
+            }
+            for ( phase = 0u; phase < 2u * levels; phase++ )
+            {
+                uint32_t route = SparkTpMeshTreeRoute(rank,degree,phase);
+                uint32_t send = route >> 16u, receive = route & 0xffffu;
+                uint64_t tag,ring;
+                if ( control->seq >= UINT32_MAX || control->error_word != 0u )
+                { control->error_word = UINT64_MAX; return cudaSuccess; }
+                tag = (control->epoch << 32u) | (control->seq + 1u);
+                ring = (tag - 1u) & (slots_per_rank - 1u);
+                if ( send != 0u )
+                {
+                    uint64_t slot = ((uint64_t)rank * slots_per_rank + ring) * slot_bytes;
+                    if ( !cuda_stub_tree_wait(shipped,control->round_seq,cancel,control,deadline) ) return cudaSuccess;
+                    memcpy(band + slot,scratch,(size_t)(count * width));
+                    entry[1] = count * width;
+                    entry[2] = slot / slot_bytes;
+                    entry[3] = 1u << (send - 1u);
+                    control->round_seq = tag;
+                    __sync_synchronize();
+                    *(volatile uint64_t *)(band + slot + slot_bytes - 8u) = tag;
+                    __sync_synchronize();
+                    entry[0] = tag;
+                }
+                if ( receive != 0u )
+                {
+                    uint8_t *source = band + ((uint64_t)(receive - 1u) * slots_per_rank + ring) * slot_bytes;
+                    if ( !cuda_stub_tree_wait((const volatile uint64_t *)(source + slot_bytes - 8u),tag,cancel,control,deadline) ) return cudaSuccess;
+                    __sync_synchronize();
+                    for ( i = 0u; i < count; i++ )
+                    {
+                        if ( operation == 1u ) ((float *)scratch)[i] = phase < levels ?
+                            ((float *)scratch)[i] + ((const float *)source)[i] : ((const float *)source)[i];
+                        else if ( operation == 2u )
+                        {
+                            uint64_t value = ((const uint64_t *)source)[i];
+                            if ( phase >= levels || value > ((uint64_t *)scratch)[i] ) ((uint64_t *)scratch)[i] = value;
+                        }
+                        else ((uint16_t *)scratch)[i] = phase < levels ?
+                            ((uint16_t *)scratch)[i] | ((const uint16_t *)source)[i] : ((const uint16_t *)source)[i];
+                    }
+                }
+                control->seq++;
+            }
+            for ( i = 0u; i < count; i++ )
+            {
+                if ( operation == 1u )
+                {
+                    uint32_t bits;
+                    memcpy(&bits,(const float *)scratch + i,sizeof(bits));
+                    ((uint16_t *)output)[begin + i] = (uint16_t)(bits >> 16u);
+                }
+                else if ( operation == 2u ) ((uint64_t *)output)[begin + i] = ((uint64_t *)scratch)[i];
+                else ((uint16_t *)output)[begin + i] = ((uint16_t *)scratch)[i];
+            }
+        }
+        control->slot_cursor = control->seq;
+        control->rounds_done++;
+    }
     return cudaSuccess;
 }
 
@@ -1338,6 +1464,7 @@ cudaError_t SparkGlm5NextLaunchMeshRoundLoop(cudaStream_t stream,
         memcpy(band + slot * slot_bytes, local_device, (size_t)bytes);
         entry_words[2] = slot;
         entry_words[1] = bytes;
+        entry_words[3] = ((1u << degree) - 1u) & ~(1u << rank);
         control->seq = control->seq + 1ull;
         control->round_seq = tag;
         __sync_synchronize();
