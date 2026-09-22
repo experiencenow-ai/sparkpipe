@@ -58,7 +58,8 @@
     {
       "id": "qwen38_27b_27b_bf16",
       "model_family": "qwen38_27b",
-      "model_id": "Qwen/Qwen3.6-27B",
+      "model_id": "Qwen/Qwen3.8-27B",
+      "model_revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
       "contract": "model-families/qwen38_27b/include/sparkpipe/spark_qwen38_27b_model.h",
       "routed_expert_weight_format": "none",
       "routed_expert_activation_format": "none",
