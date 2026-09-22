@@ -1,5 +1,5 @@
 {
-  "file_count": 3311,
+  "file_count": 3313,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -10747,6 +10747,16 @@
       "size_bytes": 4320
     },
     {
+      "path": "tools/devcycle/dsv4pro_smoke_warm.sh",
+      "sha256": "20155251720094302590528fba0bb2be18138350478fec0c5f33d1964e01d572",
+      "size_bytes": 1797
+    },
+    {
+      "path": "tools/devcycle/dsv4pro_warm_receipt.sh",
+      "sha256": "3622699ce8ed33c8bb656ab47db8d6f0f2802dabf5bade4ccb956fe800db5b2a",
+      "size_bytes": 5555
+    },
+    {
       "path": "tools/devcycle/fabric_probe_pro.sh",
       "sha256": "cc8266ee50b05c622be15ae6cc375dc3e04c01fcc2a488a61af21462ac83f6ac",
       "size_bytes": 874
@@ -10893,8 +10903,8 @@
     },
     {
       "path": "tools/devcycle/run-dsv4-pro-family-job.sh",
-      "sha256": "494d2dd6d27fbaf323882cd4bf7ca79c11370cd6526a140732371be0e7c11416",
-      "size_bytes": 13789
+      "sha256": "c1defbe4e0bc5aed87c98f038e08c9e9e8f82204f0bf722ce1a3b0fd9b9af798",
+      "size_bytes": 14378
     },
     {
       "path": "tools/devcycle/show_node_context.py",
@@ -16560,5 +16570,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78617411
+  "total_bytes": 78625352
 }
