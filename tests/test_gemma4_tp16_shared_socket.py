@@ -2,7 +2,7 @@
 """Lane-6 gemma4-31b TP16 shared-socket deployment contracts.
 
 Validates tools/gemma4_tp16_gen_deployment.py output against the lane 6
-port blocks (control 23096-23111, collective 53096-53111, transport
+port blocks (control 23096-23111, collective 53200-53215, transport
 64096-64111; tools/devcycle/lane_assignments.json) and the adapter's exact
 configuration members, then exercises tools/gemma4_tp16_shared_socket.sh
 end to end in --dry-run against a synthetic checkout: layout, pack sidecar
@@ -29,7 +29,7 @@ WRAPPER = REPOSITORY / "tools/gemma4_tp16_shared_socket.sh"
 
 RANKS = 16
 LANE_CONTROL_BASE, LANE_CONTROL_END = 23096, 23111
-LANE_COLLECTIVE_BASE, LANE_COLLECTIVE_END = 53096, 53111
+LANE_COLLECTIVE_BASE, LANE_COLLECTIVE_END = 53200, 53215
 LANE_TRANSPORT_BASE, LANE_TRANSPORT_END = 64096, 64111
 MODEL_REVISION = "842da3794eaa0b77d5f08bae87a17459d91ff475"
 ADAPTER_MEMBERS = {"schema_version", "model_revision", "stage_pack_path",
