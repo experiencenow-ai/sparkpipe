@@ -96,7 +96,10 @@ def resident_deployment(runtime_root: str, weightd_socket: str) -> dict:
     for rank, host in enumerate(HOSTS):
         nodes.append({
             "rank_index": rank,
-            "stage_index": 0,
+            # The residentd loader rejects duplicate (rank, stage) pairs:
+            # a TP16 identity deployment numbers each rank as its own
+            # transport stage (the GLM TP16 convention) - stage_index = rank.
+            "stage_index": rank,
             "runtime_root": runtime_root,
             "node_target": NODE_TARGET,
             "transport_host": host,

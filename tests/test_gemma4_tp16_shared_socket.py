@@ -73,7 +73,7 @@ def test_generator(output: Path) -> dict:
     check(len(nodes) == RANKS, "node count")
     for node in nodes:
         rank = node["rank_index"]
-        check(node["stage_index"] == 0, f"rank {rank} stage index")
+        check(node["stage_index"] == rank, f"rank {rank} stage index (unique rank/stage pairs)")
         check(node["node_target"] == "cuda.sm121.gemma4.31b.resident_decode_stage.bf16",
               f"rank {rank} node target")
         check(node["runtime_root"] == "${SPARK_QUEUE_RUNTIME_ROOT}",
