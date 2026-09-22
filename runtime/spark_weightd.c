@@ -3817,32 +3817,50 @@ SparkStatus SparkWeightdClientAttachLazy(SparkWeightdClient *client,
                 pool_fd = fds[wire_result.mesh_ready != 0u ? 1u : 0u];
             if ( mesh_fd >= 0 )
             {
-                /* the GPU-side mesh kernels address the region in 64KB host
-                 * pages; mmap only guarantees the system page, so map with
-                 * slack and align up — an unaligned base lands every doorbell
-                 * and tail in the wrong slot */
-                uint64_t slack = wire_result.mesh_send_buffer_bytes +
-                    SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES -
-                    wire_result.mesh_send_buffer_bytes %
-                        SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES -
-                    wire_result.mesh_send_buffer_bytes;
-                uint8_t *raw = mmap(0,
-                    wire_result.mesh_send_buffer_bytes + slack,
-                    PROT_READ | PROT_WRITE, MAP_SHARED, mesh_fd, 0);
-                (void)close(mesh_fd);
-                if (raw == MAP_FAILED)
+                uint64_t bytes = wire_result.mesh_send_buffer_bytes;
+                const size_t alignment = SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES;
+                struct stat mesh_stat;
+                void *mapped = MAP_FAILED;
+                uint8_t *raw;
+                size_t reserved;
+                if ( bytes != SPARK_WEIGHTD_MESH_REGION_BYTES ||
+                     bytes > SIZE_MAX - alignment || fstat(mesh_fd,&mesh_stat) != 0 ||
+                     mesh_stat.st_size < 0 || (uint64_t)mesh_stat.st_size < bytes )
                 {
-                    if ( pool_fd >= 0 )
-                        (void)close(pool_fd);
+                    (void)close(mesh_fd);
+                    if ( pool_fd >= 0 ) (void)close(pool_fd);
+                    SPARK_FAIL(SPARK_STATUS_SCHEMA_ERROR);
+                }
+                reserved = (size_t)bytes + alignment;
+                raw = mmap(0,reserved,PROT_NONE,MAP_PRIVATE | MAP_ANONYMOUS,-1,0);
+                if ( raw != MAP_FAILED )
+                {
+                    uintptr_t aligned = ((uintptr_t)raw + alignment - 1u) &
+                        ~(uintptr_t)(alignment - 1u);
+                    size_t prefix = aligned - (uintptr_t)raw;
+                    size_t suffix = reserved - prefix - (size_t)bytes;
+                    mapped = mmap((void *)aligned,(size_t)bytes,PROT_READ | PROT_WRITE,
+                        MAP_SHARED | MAP_FIXED,mesh_fd,0);
+                    if ( mapped != MAP_FAILED && prefix != 0u )
+                    {
+                        if ( munmap(raw,prefix) != 0 ) mapped = MAP_FAILED;
+                        else { raw += prefix; reserved -= prefix; }
+                    }
+                    if ( mapped != MAP_FAILED && suffix != 0u )
+                    {
+                        if ( munmap((uint8_t *)mapped + bytes,suffix) != 0 ) mapped = MAP_FAILED;
+                        else reserved -= suffix;
+                    }
+                    if ( mapped == MAP_FAILED ) (void)munmap(raw,reserved);
+                }
+                (void)close(mesh_fd);
+                if ( mapped == MAP_FAILED )
+                {
+                    if ( pool_fd >= 0 ) (void)close(pool_fd);
                     SPARK_FAIL(SPARK_STATUS_IO_ERROR);
                 }
-                {
-                    uintptr_t aligned = ((uintptr_t)raw +
-                        SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES - 1u) &
-                        ~(uintptr_t)(SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES - 1u);
-                    wire_result.mesh_send_buffer_addr = (uint64_t)aligned;
-                    result->mesh_mapping = (void *)aligned;
-                }
+                wire_result.mesh_send_buffer_addr = (uint64_t)(uintptr_t)mapped;
+                result->mesh_mapping = mapped;
             }
             wire_result.pool_fd = pool_fd;
         }
