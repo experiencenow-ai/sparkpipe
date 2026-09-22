@@ -22,6 +22,14 @@ What is exact and what is measured later:
   hash layers plus the shared-expert spine. The measured touch-set growth
   curve (route dump from the first shared E2E run) regenerates this
   manifest wholesale; entries are never hand-edited.
+* Route-tape regen (M4 wiring): the shared weightd records every
+  (layer, expert) an arena's leases touch into <PACK>.wset next to the
+  pack (atomic rewrite, deduped; runtime/spark_weightd.c). `manifest
+  --route-tape <PACK>.wset` merges that measured tape with the exact
+  prompt computation: tape keys in hash layers beyond the prompt set are
+  measured decode routing (kept, never invented), tape keys in learned
+  layers are the measured learned-route entries. Tapes and packs are
+  per-rank artifacts: regenerate per node against its own pack.
 * Non-speculative only: the replicated DSpark draft block (mtp.*) is
   excluded from the device working set (charter: non-spec decode first).
 
@@ -31,11 +39,15 @@ Usage:
       --pack /home/sparkN/sparkdata/dsv4_pro.tp4pp4/packs/...spstage \
       --batch tools/devcycle/batches/o24_batch.json --prefix 16 \
       --output model-families/dsv4/smoke_experts.json
+  python3 tools/dsv4_pro_smoke_experts.py manifest ... --route-tape \
+      /home/sparkN/sparkdata/dsv4_pro.tp4pp4/packs/...spstage.wset \
+      --route-tape-sha256 <sha> --route-run "<queue attempt id>"  # M4 regen
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import struct
@@ -227,6 +239,45 @@ def hash_layer_sets(tables: Dict[int, bytes],
     return {layer: sorted(ids) for layer, ids in sets.items()}
 
 
+def load_route_tape(path: Path, expect_sha256: str | None = None) -> List[Tuple[int, int]]:
+    """Daemon-recorded <PACK>.wset route tape: deduplicated, sorted
+    (layer, expert) pairs written by the shared weightd's working-set
+    recorder (atomic mkstemp+rename rewrite; runtime/spark_weightd.c)."""
+    raw = path.read_bytes()
+    if not raw or len(raw) % 8:
+        raise RuntimeError(f"{path}: tape must be nonempty (layer,expert) "
+                           "u32 pairs")
+    digest = hashlib.sha256(raw).hexdigest()
+    if expect_sha256 is not None and digest != expect_sha256:
+        raise RuntimeError(f"{path}: tape sha256 {digest} does not pin the "
+                           f"cited {expect_sha256}")
+    keys = sorted({struct.unpack_from("<II", raw, offset)
+                   for offset in range(0, len(raw), 8)})
+    for layer, expert in keys:
+        if not 0 <= layer < CONTRACT["model"]["layer_count"] or \
+                not 0 <= expert < EXPERTS:
+            raise RuntimeError(f"{path}: tape key {layer}/{expert} outside "
+                               "contract geometry")
+    return keys
+
+
+def load_pack_expert_keys(pack_path: Path) -> set:
+    """The (layer, expert) keys the pack's .experts sidecar carries
+    (16-byte magic/version/count/zero header + 48-byte records, native
+    endianness; mirrored from SparkWeightdManifestLoad)."""
+    path = Path(str(pack_path) + ".experts")
+    data = path.read_bytes()
+    if len(data) < 16:
+        raise RuntimeError(f"{path}: shorter than the manifest header")
+    magic, version, count, zero = struct.unpack_from("=IIII", data, 0)
+    if zero != 0 or count == 0 or len(data) != 16 + 48 * count:
+        raise RuntimeError(f"{path}: malformed expert manifest (magic="
+                           f"0x{magic:08x} version={version} count={count} "
+                           f"size={len(data)})")
+    return {struct.unpack_from("=II", data, 16 + 48 * index)
+            for index in range(count)}
+
+
 def check_pack(plan: dict, pack_path: Path) -> dict:
     """Anchor the byte plan against a deployed rank pack's own header."""
     with pack_path.open("rb") as pack:
@@ -246,12 +297,40 @@ def check_pack(plan: dict, pack_path: Path) -> dict:
 
 def build_manifest(pack_provenance: dict, prompt_provenance: dict,
                    sets: Dict[int, List[int]], per_expert_full: int,
-                   worst_rank: dict, kv_floor: int) -> dict:
+                   worst_rank: dict, kv_floor: int,
+                   learned_sets: Dict[int, List[int]] | None = None,
+                   route: dict | None = None) -> dict:
     experts = []
     for layer in HASH_LAYERS:
         for expert in sets[layer]:
             experts.append({"layer": layer, "expert": expert,
-                            "codec": "mxfp4_e2m1", "bytes": per_expert_full})
+                            "codec": "mxfp4_e2m1", "bytes": per_expert_full,
+                            "source": "route-tape" if route is not None and
+                            (layer, expert) not in route["_computed"]
+                            else "prompt-hash"})
+    for layer in sorted(learned_sets or {}):
+        for expert in learned_sets[layer]:
+            experts.append({"layer": layer, "expert": expert,
+                            "codec": "mxfp4_e2m1", "bytes": per_expert_full,
+                            "source": "route-tape"})
+    if route is not None:
+        route.pop("_computed", None)
+        learned_route: dict | str = {
+            "layers": [LEARNED_LAYERS[0], LEARNED_LAYERS[-1]],
+            "routing": "learned gate (noaux_tc, top-6)",
+            "entries": "measured",
+            "measurement": route,
+            "note": "regenerated wholesale by this tool from the daemon "
+                    "route tape; never hand-edited",
+        }
+    else:
+        learned_route = {
+            "layers": [LEARNED_LAYERS[0], LEARNED_LAYERS[-1]],
+            "routing": "learned gate (noaux_tc, top-6)",
+            "entries": "pending measured route dump from the first shared "
+                       "E2E run; regenerated wholesale by this tool, never "
+                       "hand-edited",
+        }
     manifest = {
         "schema_version": 1,
         "family": "dsv4",
@@ -268,13 +347,7 @@ def build_manifest(pack_provenance: dict, prompt_provenance: dict,
         "kv_floor_bytes": kv_floor,
         "workspace_bytes": WORKSPACE_MIB * MIB,
         "experts": experts,
-        "learned_route_layers": {
-            "layers": [LEARNED_LAYERS[0], LEARNED_LAYERS[-1]],
-            "routing": "learned gate (noaux_tc, top-6)",
-            "entries": "pending measured route dump from the first shared "
-                       "E2E run; regenerated wholesale by this tool, never "
-                       "hand-edited",
-        },
+        "learned_route_layers": learned_route,
         "excluded": {
             "dspark_draft_block": "replicated on every rank pack; excluded "
                                   "from the non-speculative device working set",
@@ -377,6 +450,20 @@ def main(argv=None) -> int:
                                  help="also emit the binary (layer, expert) "
                                       "u32-pair file for "
                                       "tools/weightd_warm.c --wset")
+    manifest_parser.add_argument("--route-tape", type=Path, default=None,
+                                 help="daemon-recorded <PACK>.wset tape from "
+                                      "a shared E2E run (M4 regen: merges "
+                                      "measured decode routing and learned-"
+                                      "layer entries; per-rank artifact - "
+                                      "regenerate against the same node's "
+                                      "pack)")
+    manifest_parser.add_argument("--route-tape-sha256", default=None,
+                                 help="pin the tape's sha256 (receipt-"
+                                      "citable; refuses a drifted tape)")
+    manifest_parser.add_argument("--route-run", default="",
+                                 help="provenance label for the run that "
+                                      "produced the tape (e.g. the queue "
+                                      "attempt id)")
 
     check_parser = sub.add_parser("check-pack", help="anchor plan vs a pack")
     check_parser.add_argument("--rank", type=int, required=True)
@@ -447,6 +534,44 @@ def main(argv=None) -> int:
     sets = hash_layer_sets(tables, tokens)
     per_expert_full = plans[0]["expert_bytes_per_expert"] * TP_DEGREE
     worst = max(plans, key=lambda p: p["spine_bytes"])
+    route = None
+    learned_sets: Dict[int, List[int]] = {}
+    if args.route_tape is not None:
+        pack_keys = load_pack_expert_keys(args.pack)
+        tape = load_route_tape(args.route_tape, args.route_tape_sha256)
+        unknown = [key for key in tape if key not in pack_keys]
+        if unknown:
+            raise RuntimeError(f"{args.route_tape}: keys absent from this "
+                               f"pack's expert manifest: {unknown[:4]} (the "
+                               "tape is a per-rank artifact - regenerate "
+                               "against the same node's pack)")
+        computed = {(layer, expert) for layer in sets
+                    for expert in sets[layer]}
+        measured_hash = {key for key in tape if key[0] in HASH_LAYERS}
+        learned = {key for key in tape if key[0] not in HASH_LAYERS}
+        for layer, expert in measured_hash - computed:
+            sets[layer].append(expert)
+        for layer in sets:
+            sets[layer] = sorted(set(sets[layer]))
+        learned_sets = {}
+        for layer, expert in learned:
+            learned_sets.setdefault(layer, set()).add(expert)
+        learned_sets = {layer: sorted(keys)
+                        for layer, keys in sorted(learned_sets.items())}
+        route = {
+            "source": "weightd working-set recorder (<PACK>.wset)",
+            "tape": str(args.route_tape),
+            "tape_sha256": hashlib.sha256(
+                args.route_tape.read_bytes()).hexdigest(),
+            "run": args.route_run,
+            "hash_layer_keys_measured": len(measured_hash),
+            "hash_layer_keys_beyond_prompt": len(measured_hash - computed),
+            "learned_layer_keys_measured": len(learned),
+            "learned_layers_touched": sorted({key[0] for key in learned}),
+            "learned_per_layer": {str(layer): len(keys)
+                                  for layer, keys in learned_sets.items()},
+            "_computed": computed,
+        }
     scenario_table.hash_coverage = max(len(v) for v in sets.values())
     manifest = build_manifest(
         pack_provenance={
@@ -463,7 +588,8 @@ def main(argv=None) -> int:
             "distinct_token_ids": len(distinct),
         },
         sets=sets, per_expert_full=per_expert_full, worst_rank=worst,
-        kv_floor=kv_floor_bytes(worst))
+        kv_floor=kv_floor_bytes(worst), learned_sets=learned_sets or None,
+        route=route)
     manifest["budget_scenarios_stage0_worst_rank"] = scenario_table(plans)
     text = json.dumps(manifest, indent=1, sort_keys=False) + "\n"
     if args.output:
@@ -475,12 +601,18 @@ def main(argv=None) -> int:
     else:
         print(text)
     if args.wset:
+        pairs = sorted([(layer, expert) for layer in sorted(sets)
+                        for expert in sets[layer]] +
+                       [(layer, expert) for layer in learned_sets
+                        for expert in learned_sets[layer]])
         keys = b"".join(struct.pack("<II", layer, expert)
-                        for layer in sorted(sets) for expert in sets[layer])
+                        for layer, expert in pairs)
         if not keys:
             raise RuntimeError("refusing to write an empty .wset")
         args.wset.write_bytes(keys)
-        print(f"wrote {args.wset} ({len(keys)//8} (layer,expert) pairs)")
+        print(f"wrote {args.wset} ({len(keys)//8} (layer,expert) pairs"
+              + (f", {sum(len(v) for v in learned_sets.values())} "
+                 "route-tape learned" if learned_sets else "") + ")")
     return 0
 
 

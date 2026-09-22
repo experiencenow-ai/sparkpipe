@@ -10798,8 +10798,8 @@
     },
     {
       "path": "tools/devcycle/dsv4pro_warm_receipt.sh",
-      "sha256": "3622699ce8ed33c8bb656ab47db8d6f0f2802dabf5bade4ccb956fe800db5b2a",
-      "size_bytes": 5555
+      "sha256": "576af23e72f3b860ca2ea4be1d751ba3d93b9b1c140dffde519ed1afde31ea13",
+      "size_bytes": 6127
     },
     {
       "path": "tools/devcycle/fabric_probe_pro.sh",
@@ -11128,8 +11128,8 @@
     },
     {
       "path": "tools/dsv4_pro_smoke_experts.py",
-      "sha256": "0b6d61df12d82e7a89d758a90931c8b0bdf96d7b1c8388adc41896ccfc98bcff",
-      "size_bytes": 21802
+      "sha256": "9351db8343863b05e796ebf206772f5fa4823247276515d9d3e7ccd8f4874011",
+      "size_bytes": 28982
     },
     {
       "path": "tools/dsv4_pro_stagepack.py",
@@ -16625,5 +16625,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79515416
+  "total_bytes": 79523168
 }
