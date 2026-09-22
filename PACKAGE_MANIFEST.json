@@ -1,5 +1,5 @@
 {
-  "file_count": 3262,
+  "file_count": 3273,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -4517,6 +4517,36 @@
       "size_bytes": 2534
     },
     {
+      "path": "model-families/mimo26/FACTS.md",
+      "sha256": "0c691cf508723f1a7eaa5f010dbba584a4fed339db3fae1d122e0cb5b25115f6",
+      "size_bytes": 5336
+    },
+    {
+      "path": "model-families/mimo26/census/distill_census.json",
+      "sha256": "28d7bdc37271b59b2ebd1538d88a576e8a4b2476fa3d99552a92e6eff97c77bd",
+      "size_bytes": 472558
+    },
+    {
+      "path": "model-families/mimo26/census/flash_census.json",
+      "sha256": "0be2a21623c31253f772c6c9e1cf9a88a0cd5438fbcfa45552899b99ff05cb1a",
+      "size_bytes": 153382
+    },
+    {
+      "path": "model-families/mimo26/census/pro_census.json",
+      "sha256": "7600a87761b6976518a7c31b85ba62cc419595338a1517d1c867efe2fdd11f24",
+      "size_bytes": 200750
+    },
+    {
+      "path": "model-families/mimo26/include/sparkpipe/spark_mimo26_model.h",
+      "sha256": "70f1a35c5bb8088ff2eb1a291978c2b08e9fef6d4c7b0e375cd37ae0df95cf1e",
+      "size_bytes": 2595
+    },
+    {
+      "path": "model-families/mimo26/include/sparkpipe/spark_mimo26_pro_model.h",
+      "sha256": "352eb11bc3af0f29135a0931b76383c94a40857a76d33de7eacf424a6bde4451",
+      "size_bytes": 2875
+    },
+    {
       "path": "model-families/minimax/include/sparkpipe/llm_defines.h",
       "sha256": "ca6dc2774484ac94fff7d171eee86a220b50dd757a364af4a30c8a3edd758ee9",
       "size_bytes": 1056
@@ -4722,14 +4752,24 @@
       "size_bytes": 2712
     },
     {
+      "path": "model_contracts/mimo26_flash_authoritative.json",
+      "sha256": "f8da09e333ef66b02884d3041a9424f330edcdf896f778e347c84c65ccde4ff2",
+      "size_bytes": 3831
+    },
+    {
+      "path": "model_contracts/mimo26_pro_authoritative.json",
+      "sha256": "1bcbe7691681600f9f80c86111087f353d8e50eb3eb0ffd9eb6cd60104c3af0c",
+      "size_bytes": 3844
+    },
+    {
       "path": "model_contracts/muse_glimmer_authoritative.json",
       "sha256": "c63afb1dd92c4eef8430a6fac206ef5147e297703791bad438662fce526ff37d",
       "size_bytes": 7140
     },
     {
       "path": "model_contracts/must_work_targets.json",
-      "sha256": "c7c673b00f53ec97c437be41c572c9afa3e799b6fdb94b721aa65e151a53444c",
-      "size_bytes": 3871
+      "sha256": "fbb0f9e0a196c4becfcb19d0ed44076e6f6c6cdc03cfff393a883966abaedc70",
+      "size_bytes": 5633
     },
     {
       "path": "model_contracts/qwen36_authoritative.json",
@@ -9622,6 +9662,11 @@
       "size_bytes": 4092
     },
     {
+      "path": "tests/test_mimo26_census.py",
+      "sha256": "9257189aa4ae624f133bb89784dd154e2d9715c5dbcb2ebbd5e379c5f8335bfb",
+      "size_bytes": 7488
+    },
+    {
       "path": "tests/test_mla_absorption.py",
       "sha256": "c8e2abab435c6983a9d2e89439bdf16c54b766ccc697c6958afd211cd3ab7c17",
       "size_bytes": 10079
@@ -9748,8 +9793,8 @@
     },
     {
       "path": "tests/test_must_work_targets.py",
-      "sha256": "19510f7ab95552c6a2c113083546592ae756d7d60b4d0cf720751b1576ca0631",
-      "size_bytes": 2180
+      "sha256": "91438e9f46b2583afe305312c02e40c647e440494438b574db65811d6a884d69",
+      "size_bytes": 2745
     },
     {
       "path": "tests/test_no_python_in_production.py",
@@ -12035,6 +12080,16 @@
       "path": "tools/metric.sh",
       "sha256": "9bd269b586ff3e28c5942c062ad34a15207cb53cdb03616dd4fffd279014e06c",
       "size_bytes": 2842
+    },
+    {
+      "path": "tools/mimo26_census.py",
+      "sha256": "6893d37ab46acb64d4e21429829f290a98d863942604871eed21fa302813eb8b",
+      "size_bytes": 16108
+    },
+    {
+      "path": "tools/mimo26_param_budget.py",
+      "sha256": "296d9458ccadc69e60af0753be7b50f0516dc4ad1cadfe9bc90662c51bae218b",
+      "size_bytes": 6867
     },
     {
       "path": "tools/minimax_stagepack.py",
@@ -16315,5 +16370,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 76687406
+  "total_bytes": 77565367
 }
