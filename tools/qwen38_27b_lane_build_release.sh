@@ -69,6 +69,9 @@ cc --version >> "$receipts/toolchain.txt"
 pack_sha=$(cut -d' ' -f1 "$PACK.sha256")
 weightd_socket="$PWD/build/.qwen38-27b-lane-build-weightd.sock"
 rm -f "$weightd_socket"
+# Private in-job daemon: unique latch port (the 61900 default can collide
+# with another lane's build weightd on the node); build-validation only.
+SPARK_WEIGHTD_LATCH_PORT=31901 \
 build/sparkpipe_weightd --socket "$weightd_socket" \
     --device-bytes-max $((12800 * 1024 * 1024)) \
     >"$receipts/build-weightd.log" 2>&1 &
