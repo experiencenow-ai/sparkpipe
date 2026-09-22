@@ -708,6 +708,30 @@ static void test_mesh_lane_protocol(void)
         assert(SparkWeightdServerCreate(&config,&servers[rank].server) == SPARK_STATUS_OK);
         assert(pthread_create(&threads[rank],0,test_mesh_server_run,&servers[rank]) == 0);
     }
+    {
+        SparkWeightdClient *owner,*peer,*foreign;
+        assert(SparkWeightdClientConnect(paths[0],&owner,0) == SPARK_STATUS_OK);
+        assert(SparkWeightdClientConnect(paths[0],&peer,0) == SPARK_STATUS_OK);
+        assert(SparkWeightdClientConnect(paths[1],&foreign,0) == SPARK_STATUS_OK);
+        CHECK(SparkWeightdClientLaneBind(owner,peer,0u,&out) == SPARK_STATUS_INVALID_ARGUMENT,
+            "unreserved client cannot lend a mesh band");
+        CHECK(SparkWeightdClientLaneAcquire(owner,7u,&out,timeout) == SPARK_STATUS_OK &&
+            SparkWeightdClientLaneBind(owner,peer,0u,&out) == SPARK_STATUS_OK && out == 7u &&
+            SparkWeightdClientLaneBind(owner,peer,1u,&out) == SPARK_STATUS_OK && out == 7u,
+            "same daemon lends two distinct bands of its reserved lane");
+        CHECK(SparkWeightdClientLaneBind(owner,peer,0u,&out) == SPARK_STATUS_DUPLICATE &&
+            SparkWeightdClientLaneBind(owner,foreign,0u,&out) == SPARK_STATUS_INVALID_ARGUMENT &&
+            SparkWeightdClientLaneBind(owner,peer,2u,&out) == SPARK_STATUS_INVALID_ARGUMENT,
+            "duplicate band, foreign daemon and out of range band fail closed");
+        CHECK(SparkWeightdClientLaneUnbind(owner,0u) == SPARK_STATUS_OK &&
+            SparkWeightdClientLaneUnbind(owner,0u) == SPARK_STATUS_INVALID_ARGUMENT &&
+            SparkWeightdClientLaneBind(owner,peer,1u,&out) == SPARK_STATUS_DUPLICATE &&
+            SparkWeightdClientLaneUnbind(owner,1u) == SPARK_STATUS_OK,
+            "unbinding main never releases or duplicates HC ownership");
+        SparkWeightdClientClose(peer);
+        SparkWeightdClientClose(foreign);
+        SparkWeightdClientClose(owner);
+    }
     for (count=2u; count<=4u; count++)
         for (round=0u; round<8u; round++)
         {

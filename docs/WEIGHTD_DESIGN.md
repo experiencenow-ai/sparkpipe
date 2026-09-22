@@ -39,6 +39,14 @@ The multi-job runner checks every rank's log. An absent environment variable
 retains the existing automatic single-job mode and logs it explicitly; an
 empty or malformed value fails initialization.
 
+The shared device collective now acquires its reservation through its existing
+weightd connection. All single-collective model families inherit this behavior;
+logical collective identifiers no longer select mesh bands by their low bits.
+GLM lends its existing reservation to its main and HC collectives, with separate
+band bindings. Binding rejects an unreserved owner, another daemon generation
+or a duplicate band. Common teardown releases bindings only after stream and
+registration cleanup; borrowed reservations remain with their caller.
+
 Normal GLM teardown keeps its reservation until collective drain and cleanup
 succeed. Closing one idle owner releases only its lane. An unexpected active
 producer disconnect retains the existing daemon-wide orphan fence, including

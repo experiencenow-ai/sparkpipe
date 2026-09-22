@@ -44,17 +44,68 @@ extern uint32_t cuda_stub_mesh_hardware_operation;
 extern uint32_t cuda_stub_mesh_hardware_logical_rows;
 
 static uint64_t mock_client_alive = 1u;
+static uint32_t mock_server;
+static uint64_t mock_lane_mask[16];
+static uint32_t mock_clients_live;
+static SparkStatus mock_lane_status = SPARK_STATUS_OK;
 
 SparkStatus SparkWeightdClientConnect(const char *socket_path, SparkWeightdClient **client, SparkWeightdHelloResult *hello_out)
 {
 	(void)socket_path; (void)hello_out;
 	*client = (SparkWeightdClient *)calloc(1u, 64u);
+	((uint64_t *)*client)[2] = SPARK_WEIGHTD_LANE_NONE;
+	((uint64_t *)*client)[4] = mock_server;
+	mock_clients_live++;
 	return(SPARK_STATUS_OK);
 }
 
 void SparkWeightdClientClose(SparkWeightdClient *client)
 {
+    uint64_t *state = (uint64_t *)client;
+    assert(state[3] == 0u);
+    if (state[2] < SPARK_WEIGHTD_MESH_MAX_LANES)
+        mock_lane_mask[state[4]] &= ~(UINT64_C(1) << state[2]);
+    mock_clients_live--;
 	free(client);
+}
+
+SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
+    uint32_t requested,uint32_t *out,uint64_t timeout)
+{
+    uint64_t *state = (uint64_t *)client;
+    (void)timeout;
+    if (mock_lane_status != SPARK_STATUS_OK) return mock_lane_status;
+    if (state[2] != SPARK_WEIGHTD_LANE_NONE) return SPARK_STATUS_DUPLICATE;
+    for (uint32_t lane=0u; lane<SPARK_WEIGHTD_MESH_MAX_LANES; lane++)
+        if ((requested == SPARK_WEIGHTD_LANE_NONE || requested == lane) &&
+            (mock_lane_mask[state[4]] & (UINT64_C(1) << lane)) == 0u)
+        {
+            mock_lane_mask[state[4]] |= UINT64_C(1) << lane;
+            state[2] = lane;
+            *out = lane;
+            return SPARK_STATUS_OK;
+        }
+    return SPARK_STATUS_NO_LANE;
+}
+
+SparkStatus SparkWeightdClientLaneBind(SparkWeightdClient *owner,
+    const SparkWeightdClient *peer,uint32_t band,uint32_t *out)
+{
+    uint64_t *state = (uint64_t *)owner;
+    if (state[4] != ((const uint64_t *)peer)[4] || state[2] >= SPARK_WEIGHTD_MESH_MAX_LANES || band >= 2u)
+        return SPARK_STATUS_INVALID_ARGUMENT;
+    if ((state[3] & (1u << band)) != 0u) return SPARK_STATUS_DUPLICATE;
+    state[3] |= 1u << band;
+    *out = (uint32_t)state[2];
+    return SPARK_STATUS_OK;
+}
+
+SparkStatus SparkWeightdClientLaneUnbind(SparkWeightdClient *owner,uint32_t band)
+{
+    uint64_t *state = (uint64_t *)owner;
+    assert(band < 2u && (state[3] & (1u << band)) != 0u);
+    state[3] &= ~(1u << band);
+    return SPARK_STATUS_OK;
 }
 
 uint32_t SparkWeightdClientAlive(const SparkWeightdClient *client)
@@ -308,6 +359,74 @@ static void TestHardwareDispatch(SparkTpDeviceCollectiveConfig config,void *mesh
     unsetenv("SPARK_TP_WAIT_MODE");
 }
 
+static void TestSharedLanes(SparkTpDeviceCollectiveConfig config,void *mesh)
+{
+    SparkTpDeviceCollective first = {0},second = {0},rejected = {0};
+    SparkWeightdClient *owner = 0;
+    uint32_t lane,live = mock_clients_live;
+    uint64_t bands = mock_lane_mask[0];
+    config.collective_identifier = 1u;
+    CHECK(SparkTpDeviceCollectiveCreate(&config,&first) == SPARK_STATUS_OK,
+        "first model reserves a common lane");
+    config.collective_identifier = 17u;
+    CHECK(SparkTpDeviceCollectiveCreate(&config,&second) == SPARK_STATUS_OK,
+        "second model with modulo-colliding identifier reserves separate lane");
+    CHECK(__builtin_popcountll(mock_lane_mask[0] ^ bands) == 2,
+        "logical identifiers do not choose or alias physical bands");
+    SparkTpDeviceCollectiveDestroy(&first);
+    SparkTpDeviceCollectiveDestroy(&second);
+    CHECK(mock_clients_live == live && mock_lane_mask[0] == bands,
+        "owned collective teardown releases exactly its reservations");
+    mock_lane_status = SPARK_STATUS_NO_LANE;
+    CHECK(SparkTpDeviceCollectiveCreate(&config,&rejected) == SPARK_STATUS_NO_LANE &&
+        rejected.implementation == 0 && mock_clients_live == live,
+        "reservation rejection rolls back common create client");
+    mock_lane_status = SPARK_STATUS_OK;
+    CHECK(setenv("SPARK_WEIGHTD_LANE","8",1) == 0 &&
+        SparkTpDeviceCollectiveCreate(&config,&rejected) == SPARK_STATUS_INVALID_ARGUMENT &&
+        rejected.implementation == 0 && mock_clients_live == live,
+        "malformed common lane config fails without leaked client");
+    CHECK(unsetenv("SPARK_WEIGHTD_LANE") == 0,"clear invalid test lane");
+    CHECK(SparkWeightdClientConnect("fixture",&owner,0) == SPARK_STATUS_OK &&
+        SparkWeightdClientLaneAcquire(owner,7u,&lane,1u) == SPARK_STATUS_OK,
+        "paired owner reserves explicit lane");
+    config.mesh_lane_client = owner;
+    config.mesh_band_index = 0u;
+    CHECK(SparkTpDeviceCollectiveCreate(&config,&first) == SPARK_STATUS_OK,
+        "borrowed main band binds owner reservation");
+    CHECK(SparkTpDeviceCollectiveCreate(&config,&rejected) == SPARK_STATUS_DUPLICATE &&
+        rejected.implementation == 0 && ((uint64_t *)owner)[3] == 1u,
+        "borrowed duplicate band cannot overwrite main ownership");
+    config.mesh_band_index = 1u;
+    CHECK(SparkTpDeviceCollectiveCreate(&config,&second) == SPARK_STATUS_OK &&
+        ((uint64_t *)owner)[3] == 3u,"borrowed HC uses the other band");
+    CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&first,mesh,0u,0u,0u,0) == SPARK_STATUS_OK &&
+        SparkTpDeviceCollectiveChainKey(&first,912u) == SPARK_STATUS_OK,
+        "borrowed owner begins a stream interval");
+    CHECK(SparkTpDeviceCollectiveArmCapture(&first) == SPARK_STATUS_OK &&
+        SparkTpDeviceCollectiveGraphPreLaunch(&first,(void *)1) == SPARK_STATUS_OK,
+        "borrowed stream ownership is recorded");
+    cuda_stub_stream_query_result = cudaErrorNotReady;
+    SparkTpDeviceCollectiveDestroy(&first);
+    CHECK(first.implementation != 0 && ((uint64_t *)owner)[3] == 3u,
+        "busy destroy retains both borrowed band claims");
+    cuda_stub_stream_query_result = cudaSuccess;
+    SparkTpDeviceCollectiveDestroy(&first);
+    CHECK(first.implementation == 0 && ((uint64_t *)owner)[3] == 2u &&
+        (mock_lane_mask[0] & (UINT64_C(1) << 7u)) != 0u,
+        "main destroy leaves HC and parent lane reservation alive");
+    SparkTpDeviceCollectiveDestroy(&second);
+    CHECK(((uint64_t *)owner)[3] == 0u && (mock_lane_mask[0] & (UINT64_C(1) << 7u)) != 0u,
+        "last borrowed destroy leaves reservation with its explicit owner");
+    mock_server = 1u;
+    CHECK(SparkTpDeviceCollectiveCreate(&config,&rejected) == SPARK_STATUS_INVALID_ARGUMENT &&
+        rejected.implementation == 0,"borrowed lane from another daemon is rejected");
+    mock_server = 0u;
+    SparkWeightdClientClose(owner);
+    CHECK(mock_clients_live == live && mock_lane_mask[0] == bands,
+        "paired owner closes after both borrowed collectives release");
+}
+
 int main(void)
 {
 	SparkTpDeviceCollectiveConfig config;
@@ -391,7 +510,9 @@ int main(void)
 		peer_config.tp_rank = 1u;
 		peer_config.operation_timeout_milli = 10000u;
 		memset(&peer,0,sizeof(peer));
+		mock_server = 1u;
 		status = SparkTpDeviceCollectiveCreate(&peer_config, &peer);
+		mock_server = 0u;
 		CHECK(status == SPARK_STATUS_OK, "peer create");
 		if ( status == SPARK_STATUS_OK )
 		{
@@ -426,6 +547,7 @@ int main(void)
 
 	SparkTpDeviceCollectiveDestroy(&collective);
 	TestHardwareDispatch(config,mesh_buffer);
+	TestSharedLanes(config,mesh_buffer);
 	free(mesh_buffer);
 
 	fprintf(stderr,"%s: %u checks, %u failures (publish=%u combine=%u)\n",

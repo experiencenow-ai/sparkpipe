@@ -3,6 +3,7 @@
 #include "sparkpipe/spark_error_site.h"
 #include "sparkpipe/spark_weightd.h"
 #include "sparkpipe/spark_tp_mesh_round_control.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -107,6 +108,8 @@ typedef struct SparkTpDeviceCollectiveCompletionNode
 typedef struct SparkTpDeviceCollectiveImplementation
 {
     SparkWeightdClient *client;
+    SparkWeightdClient *lane_client;
+    uint32_t mesh_band_index;
     uint64_t mesh_activity_generation;
     uint32_t mesh_activity_active;
     uint32_t active_stream_valid;
@@ -1425,11 +1428,51 @@ combine_done:
     return(SPARK_STATUS_OK);
 }
 
+static SparkStatus SparkTpDeviceCollectiveAcquireLane(
+    const SparkTpDeviceCollectiveConfig *config,
+    SparkTpDeviceCollectiveImplementation *implementation)
+{
+    SparkStatus status;
+    uint32_t lane,requested = SPARK_WEIGHTD_LANE_NONE;
+    SparkWeightdClient *owner = config->mesh_lane_client;
+    if ( owner == 0 )
+    {
+        const char *text = getenv("SPARK_WEIGHTD_LANE");
+        if ( text != 0 )
+        {
+            char *end;
+            unsigned long value;
+            errno = 0;
+            value = strtoul(text,&end,10);
+            if ( text[0] < '0' || text[0] > '9' || *end != '\0' ||
+                 errno != 0 || value >= SPARK_WEIGHTD_MESH_MAX_LANES )
+                return SPARK_STATUS_INVALID_ARGUMENT;
+            requested = (uint32_t)value;
+        }
+        owner = implementation->client;
+        status = SparkWeightdClientLaneAcquire(owner,requested,&lane,
+            implementation->round_timeout_ns);
+        if ( status != SPARK_STATUS_OK ) return status;
+    }
+    status = SparkWeightdClientLaneBind(owner,implementation->client,
+        config->mesh_band_index,&lane);
+    if ( status != SPARK_STATUS_OK ) return status;
+    implementation->lane_client = owner;
+    implementation->mesh_band_index = config->mesh_band_index;
+    implementation->band_base = (uint64_t)(2u * lane + config->mesh_band_index) *
+        SPARK_WEIGHTD_MESH_SLOT_BYTES * SPARK_WEIGHTD_MESH_SLOTS_PER_BAND;
+    fprintf(stderr,"MESH-LANE rank=%u lane=%u band=%u ownership=%s\n",
+        implementation->tp_rank,lane,2u * lane + config->mesh_band_index,
+        owner == implementation->client ? "owned" : "borrowed");
+    return SPARK_STATUS_OK;
+}
+
 SparkStatus SparkTpDeviceCollectiveCreate(
     const SparkTpDeviceCollectiveConfig *config,
     SparkTpDeviceCollective *collective_out)
 {
     SparkTpDeviceCollectiveImplementation *implementation;
+    SparkStatus status;
     const char *socket;
     const char *wait_mode = getenv("SPARK_TP_WAIT_MODE");
 
@@ -1443,7 +1486,7 @@ SparkStatus SparkTpDeviceCollectiveCreate(
          config->tp_rank >= config->tp_degree ||
          config->local_hidden_dimension == 0u ||
          config->max_active_sequence_count == 0u ||
-         config->operation_timeout_milli == 0u )
+         config->operation_timeout_milli == 0u || config->mesh_band_index >= 2u )
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
     if ( config->backend_kind !=
             SPARK_TP_DEVICE_COLLECTIVE_BACKEND_HIDDEN_TRANSPORT )
@@ -1474,10 +1517,6 @@ SparkStatus SparkTpDeviceCollectiveCreate(
     implementation->tp_rank = config->tp_rank;
     implementation->tp_degree = config->tp_degree;
     implementation->local_hidden_dimension = config->local_hidden_dimension;
-    implementation->band_base = (uint64_t)(config->collective_identifier &
-        (SPARK_WEIGHTD_MESH_BANDS - 1u)) *
-        SPARK_WEIGHTD_MESH_SLOT_BYTES *
-        SPARK_WEIGHTD_MESH_SLOTS_PER_BAND;
     implementation->slot_bytes = SPARK_WEIGHTD_MESH_SLOT_BYTES;
     implementation->round_timeout_ns =
         (uint64_t)config->operation_timeout_milli * 1000000ull;
@@ -1495,10 +1534,27 @@ SparkStatus SparkTpDeviceCollectiveCreate(
         free(implementation);
         SPARK_FAIL(SPARK_STATUS_IO_ERROR);
     }
-    if ( pthread_mutex_init(&implementation->completion_lock,0) != 0 ||
-         pthread_cond_init(&implementation->completion_wake,0) != 0 )
+    status = SparkTpDeviceCollectiveAcquireLane(config,implementation);
+    if ( status != SPARK_STATUS_OK )
     {
-        (void)SparkWeightdClientClose(implementation->client);
+        fprintf(stderr,"MESH-LANE-FAIL rank=%u band=%u status=%d\n",
+            config->tp_rank,config->mesh_band_index,(int)status);
+        SparkWeightdClientClose(implementation->client);
+        free(implementation);
+        return status;
+    }
+    if ( pthread_mutex_init(&implementation->completion_lock,0) != 0 )
+    {
+        (void)SparkWeightdClientLaneUnbind(implementation->lane_client,implementation->mesh_band_index);
+        SparkWeightdClientClose(implementation->client);
+        free(implementation);
+        SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
+    }
+    if ( pthread_cond_init(&implementation->completion_wake,0) != 0 )
+    {
+        pthread_mutex_destroy(&implementation->completion_lock);
+        (void)SparkWeightdClientLaneUnbind(implementation->lane_client,implementation->mesh_band_index);
+        SparkWeightdClientClose(implementation->client);
         free(implementation);
         SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
     }
@@ -1507,7 +1563,10 @@ SparkStatus SparkTpDeviceCollectiveCreate(
                 SparkTpDeviceCollectiveCompletionThread,
                 implementation) != 0 )
         {
-            (void)SparkWeightdClientClose(implementation->client);
+            pthread_cond_destroy(&implementation->completion_wake);
+            pthread_mutex_destroy(&implementation->completion_lock);
+            (void)SparkWeightdClientLaneUnbind(implementation->lane_client,implementation->mesh_band_index);
+            SparkWeightdClientClose(implementation->client);
             free(implementation);
             SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
         }
@@ -2435,6 +2494,13 @@ void SparkTpDeviceCollectiveDestroy(SparkTpDeviceCollective *collective)
     }
     if ( SparkTpDeviceCollectiveReleaseRegion(implementation) != SPARK_STATUS_OK )
         return;
+    if ( SparkWeightdClientLaneUnbind(implementation->lane_client,
+            implementation->mesh_band_index) != SPARK_STATUS_OK )
+    {
+        fprintf(stderr,"COLLECTIVE-DESTROY-LANE-RETAIN rank=%u band=%u\n",
+            implementation->tp_rank,implementation->mesh_band_index);
+        return;
+    }
     if ( implementation->round_control != 0 )
     {
         (void)cudaFree(implementation->round_control);

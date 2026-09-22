@@ -2083,6 +2083,7 @@ static SparkStatus SparkGlm5NextModuleInitializeTpCollective(
 	configuration.control_port_base = context->tp_collective_control_port_base +
 		2u * state->tp_lane;
 	configuration.collective_identifier = 2u * state->tp_lane;
+	configuration.mesh_lane_client = state->lane_client;
 	configuration.backend_module_path = context->tp_collective_backend_module_path;
 	configuration.registration_cuda_stream = state->execution_stream;
 	status = SparkTpDeviceCollectiveApplyTopology(&context->tp_collective_topology,&configuration);
@@ -2109,6 +2110,8 @@ static SparkStatus SparkGlm5NextModuleInitializeTpCollective(
 	configuration_hc.control_port_base = context->tp_collective_control_port_base +
 		SPARK_GLM5_NEXT_TP_COLLECTIVE_HC_PORT_STRIDE + 2u * state->tp_lane;
 	configuration_hc.collective_identifier = 2u * state->tp_lane + 1u;
+	configuration_hc.mesh_lane_client = state->lane_client;
+	configuration_hc.mesh_band_index = 1u;
 	configuration_hc.backend_module_path = context->tp_collective_backend_module_path;
 	configuration_hc.registration_cuda_stream = state->execution_stream;
 	status = SparkTpDeviceCollectiveApplyTopology(&context->tp_collective_topology,&configuration_hc);

@@ -727,6 +727,10 @@ SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
     uint32_t *lane_out,
     uint64_t timeout_nanoseconds);
 
+SparkStatus SparkWeightdClientLaneBind(SparkWeightdClient *owner,
+    const SparkWeightdClient *peer,uint32_t band,uint32_t *lane_out);
+SparkStatus SparkWeightdClientLaneUnbind(SparkWeightdClient *owner,uint32_t band);
+
 SparkStatus SparkWeightdClientEvict(SparkWeightdClient *client,
     uint32_t target_lane,
     uint32_t *released_leases_out,

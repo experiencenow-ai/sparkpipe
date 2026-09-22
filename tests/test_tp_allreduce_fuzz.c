@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -47,7 +48,10 @@ typedef struct FuzzMeshClient
     uint32_t rank;
     uint32_t active;
     uint64_t generation;
+    uint32_t lane;
+    uint32_t bands;
 } FuzzMeshClient;
+static uint32_t g_lane_masks[FUZZ_MAX_RANKS];
 
 static uint32_t FuzzRandom(void)
 {
@@ -96,12 +100,56 @@ SparkStatus SparkWeightdClientConnect(const char *socket_path, SparkWeightdClien
 	if ( *client == 0 )
 		return(SPARK_STATUS_CAPACITY_EXCEEDED);
 	*(uint32_t *)*client = g_connect_rank_hint;
+    ((FuzzMeshClient *)*client)->lane = SPARK_WEIGHTD_LANE_NONE;
 	return(SPARK_STATUS_OK);
 }
 
 void SparkWeightdClientClose(SparkWeightdClient *client)
 {
+    FuzzMeshClient *mesh = (FuzzMeshClient *)client;
+    assert(mesh->bands == 0u);
+    if (mesh->lane < SPARK_WEIGHTD_MESH_MAX_LANES)
+        g_lane_masks[mesh->rank] &= ~(1u << mesh->lane);
 	free(client);
+}
+
+SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
+    uint32_t requested,uint32_t *out,uint64_t timeout)
+{
+    FuzzMeshClient *mesh = (FuzzMeshClient *)client;
+    (void)timeout;
+    if (mesh->lane != SPARK_WEIGHTD_LANE_NONE) return SPARK_STATUS_DUPLICATE;
+    for (uint32_t lane=0u; lane<SPARK_WEIGHTD_MESH_MAX_LANES; lane++)
+        if ((requested == SPARK_WEIGHTD_LANE_NONE || requested == lane) &&
+            (g_lane_masks[mesh->rank] & (1u << lane)) == 0u)
+        {
+            g_lane_masks[mesh->rank] |= 1u << lane;
+            mesh->lane = lane;
+            *out = lane;
+            return SPARK_STATUS_OK;
+        }
+    return SPARK_STATUS_NO_LANE;
+}
+
+SparkStatus SparkWeightdClientLaneBind(SparkWeightdClient *owner,
+    const SparkWeightdClient *peer,uint32_t band,uint32_t *out)
+{
+    FuzzMeshClient *mesh = (FuzzMeshClient *)owner;
+    if (mesh->rank != ((const FuzzMeshClient *)peer)->rank ||
+        mesh->lane >= SPARK_WEIGHTD_MESH_MAX_LANES || band >= 2u)
+        return SPARK_STATUS_INVALID_ARGUMENT;
+    if ((mesh->bands & (1u << band)) != 0u) return SPARK_STATUS_DUPLICATE;
+    mesh->bands |= 1u << band;
+    *out = mesh->lane;
+    return SPARK_STATUS_OK;
+}
+
+SparkStatus SparkWeightdClientLaneUnbind(SparkWeightdClient *owner,uint32_t band)
+{
+    FuzzMeshClient *mesh = (FuzzMeshClient *)owner;
+    assert(band < 2u && (mesh->bands & (1u << band)) != 0u);
+    mesh->bands &= ~(1u << band);
+    return SPARK_STATUS_OK;
 }
 
 uint32_t SparkWeightdClientAlive(const SparkWeightdClient *client)
@@ -1158,6 +1206,7 @@ static void FuzzRejections(void)
 
 static void FuzzSourceLifetime(void);
 static void FuzzCellInitialization(void);
+static void FuzzLaneNamespace(void);
 
 static void FuzzCompletionCapacity(void)
 {
@@ -1829,6 +1878,7 @@ int main(int argc, char **argv)
 		}
 	}
     FuzzRegistrationOwnership();
+    FuzzLaneNamespace();
     FuzzCellInitialization();
 	if ( pthread_create(&shipper, 0, FuzzShipperMain, 0) != 0 )
 	{
@@ -1972,6 +2022,36 @@ static int FuzzCudaHostAlloc(void **pointer,size_t bytes,unsigned int flags)
 #undef cudaMemsetAsync
 #undef cudaMemcpy
 #undef cudaHostAlloc
+
+static void FuzzLaneNamespace(void)
+{
+    SparkTpDeviceCollectiveConfig config = {0};
+    SparkTpDeviceCollective first = {0},second = {0};
+    SparkTpDeviceCollectiveImplementation *a,*b;
+    uint64_t stride = (uint64_t)SPARK_WEIGHTD_MESH_SLOT_BYTES * SPARK_WEIGHTD_MESH_SLOTS_PER_BAND;
+    FuzzCase("shared-lane-namespace-ignores-colliding-logical-identifiers");
+    config.abi_version = SPARK_TP_DEVICE_COLLECTIVE_ABI_VERSION;
+    config.tp_degree = g_rank_count;
+    config.local_hidden_dimension = FUZZ_HIDDEN;
+    config.max_active_sequence_count = 1u;
+    config.operation_timeout_milli = FUZZ_ROUND_TIMEOUT_MS;
+    config.collective_identifier = 1u;
+    g_connect_rank_hint = 0u;
+    CHECK(SparkTpDeviceCollectiveCreate(&config,&first) == SPARK_STATUS_OK,
+        "first logical model creates common namespace");
+    config.collective_identifier = 17u;
+    CHECK(SparkTpDeviceCollectiveCreate(&config,&second) == SPARK_STATUS_OK,
+        "modulo-colliding second model creates common namespace");
+    if (first.implementation == 0 || second.implementation == 0) _Exit(2);
+    a = first.implementation;
+    b = second.implementation;
+    CHECK(a->band_base != b->band_base &&
+        a->band_base == 2u * ((FuzzMeshClient *)a->lane_client)->lane * stride &&
+        b->band_base == 2u * ((FuzzMeshClient *)b->lane_client)->lane * stride,
+        "actual production pointers use reserved bands instead of identifier low bits");
+    SparkTpDeviceCollectiveDestroy(&first);
+    SparkTpDeviceCollectiveDestroy(&second);
+}
 
 static void FuzzCellInitialization(void)
 {

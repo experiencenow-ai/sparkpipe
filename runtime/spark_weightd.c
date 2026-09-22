@@ -205,6 +205,9 @@ struct SparkWeightdClient
 {
     atomic_int fd;
     uint64_t next_request_id;
+    uint64_t daemon_generation;
+    uint32_t lane;
+    atomic_uint lane_bands;
 };
 
 uint32_t SparkWeightdClientAlive(const SparkWeightdClient *client)
@@ -3559,6 +3562,7 @@ SparkStatus SparkWeightdClientConnect(const char *socket_path,
     {
         SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
     }
+    instance->lane = SPARK_WEIGHTD_LANE_NONE;
     instance->fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (instance->fd < 0)
     {
@@ -3621,6 +3625,7 @@ SparkStatus SparkWeightdClientConnect(const char *socket_path,
         hello_out->device_bytes_max = wire_ack.device_bytes_max;
         hello_out->arena_count = wire_ack.arena_count;
     }
+    instance->daemon_generation = wire_ack.daemon_generation;
     *client = instance;
     return SPARK_STATUS_OK;
 }
@@ -3976,8 +3981,35 @@ SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
          (requested_lane != SPARK_WEIGHTD_LANE_NONE &&
           wire_result.lane != requested_lane) )
         SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
+    client->lane = wire_result.lane;
     *lane_out = wire_result.lane;
     return SPARK_STATUS_OK;
+}
+
+SparkStatus SparkWeightdClientLaneBind(SparkWeightdClient *owner,
+    const SparkWeightdClient *peer,uint32_t band,uint32_t *lane_out)
+{
+    uint32_t prior;
+    if ( owner == 0 || peer == 0 || lane_out == 0 || band >= 2u ||
+         owner->lane >= SPARK_WEIGHTD_MESH_MAX_LANES ||
+         owner->daemon_generation != peer->daemon_generation )
+        return SPARK_STATUS_INVALID_ARGUMENT;
+    if ( SparkWeightdClientAlive(owner) == 0u || SparkWeightdClientAlive(peer) == 0u )
+        return SPARK_STATUS_IO_ERROR;
+    prior = atomic_fetch_or_explicit(&owner->lane_bands,1u << band,memory_order_acq_rel);
+    if ( (prior & (1u << band)) != 0u )
+        return SPARK_STATUS_DUPLICATE;
+    *lane_out = owner->lane;
+    return SPARK_STATUS_OK;
+}
+
+SparkStatus SparkWeightdClientLaneUnbind(SparkWeightdClient *owner,uint32_t band)
+{
+    if ( owner == 0 || band >= 2u )
+        return SPARK_STATUS_INVALID_ARGUMENT;
+    return (atomic_fetch_and_explicit(&owner->lane_bands,~(1u << band),
+        memory_order_acq_rel) & (1u << band)) != 0u ?
+        SPARK_STATUS_OK : SPARK_STATUS_INVALID_ARGUMENT;
 }
 
 SparkStatus SparkWeightdClientEvict(SparkWeightdClient *client,
