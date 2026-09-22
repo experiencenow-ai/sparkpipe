@@ -2198,3 +2198,25 @@ resilience). Then the ladder: warm canary → GRAPH → ARRIVAL → clean
   verdict then names the tail-layer mechanism.
 - Canary16 pending at wrap; submissions flow; admission watermark fix
   and epoch stack holding throughout.
+
+## 09-23 06:00 TICK — THE TAIL-LAYER VERDICT: not a bug — slow cold creation from storage
+
+THE EVIDENCE (fresh engines vs the live instrumented daemon):
+- ACQUIRE-STALL exchange 191396 ms — the first cold acquire REACHES the
+  daemon and hangs server-side in lease/load; the handler never
+  completes (why WD-LEASE-TRACE never printed — it prints on completion);
+  the client's exchange then times out (map.c:514 status=4) and the
+  retry ladder burns its passes against the same slow creation.
+- The 42 "fast" layers were ALREADY RESIDENT in the daemon's memory
+  (instant); the 6 tail layers need chunk creation = reading their expert
+  data from the 21.7GB pack (slow tier) = minutes per layer set.
+- Timeline conviction alongside: the weightd (11:50:57) OUTLIVED the
+  residentds' attach (11:46:57) — every recycle orphans engines (the
+  map-reconnect item; a real revive needs a FULL re-attach, not an fd
+  swap — the arena generation dies with the daemon).
+
+THE DESIGN DIRECTION (next): the creation-class acquire must not ride a
+synchronous client timeout — either the daemon answers PENDING and the
+client polls (the async-creation design), or a standalone deploy-time
+warmer pre-creates the tail ONCE per node (minutes of storage reads at
+deploy, instant serving forever after). Plus the map re-attach revive.
