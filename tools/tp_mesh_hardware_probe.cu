@@ -243,7 +243,7 @@ struct Probe
         }
         return static_cast<double>(Now()-begin)/1e6;
     }
-    void Verify(bool failed=false)
+    void Verify(bool failed=false,bool timed_out=false)
     {
         for (uint32_t rank=0u;rank<degree;rank++)
         {
@@ -270,6 +270,7 @@ struct Probe
             }
             REQUIRE((control.error_word!=0u)==failed);
             REQUIRE(control.rounds_done==(failed ? 0u : rounds));
+            if (timed_out) REQUIRE((control.error_word>>32u)==epoch);
             if (!failed)
             {
                 uint32_t width=operation==2u ? 8u : operation==1u ? 4u : 2u;
@@ -323,6 +324,10 @@ struct Probe
         Wait(begin);Verify(true);EndWorker();
         Setup(4u,1u,2u,513u,2u,true);Data(11u);StartWorker();begin=Now();Launch(true);Wait(begin);Verify();EndWorker();
         completed_cases++;std::puts("PASS cancel all pending graph work, drain, reset chain and replay same executable");
+        Setup(4u,1u,2u,513u,2u,true);Data(12u);hold.store(true);StartWorker();begin=Now();Launch(true);
+        Wait(begin);Verify(true,true);EndWorker();
+        Setup(4u,1u,2u,513u,2u,true);Data(13u);StartWorker();begin=Now();Launch(true);Wait(begin);Verify();EndWorker();
+        completed_cases++;std::puts("PASS missing peer times out with output untouched, drains and recovers same executable");
     }
     void Timings()
     {
