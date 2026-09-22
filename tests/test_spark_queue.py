@@ -32,6 +32,47 @@ class QueueTests(unittest.TestCase):
         self.q.observe = self.observe
         self.census, self.persistent_units = {}, {}
 
+    def test_sync_tests_unmerged_commits_with_exact_detached_source(self):
+        repository = Path(self.tmp.name) / "repository"
+        repository.mkdir()
+        run = self.q.subprocess.run
+        def git(*args):
+            return self.q.subprocess.check_output(["git", "-C", str(repository), *args], text=True).strip()
+        git("init", "-q", "-b", "main")
+        git("config", "user.name", "Fixture")
+        git("config", "user.email", "fixture@example.invalid")
+        marker = repository / "marker"
+        marker.write_text("base")
+        git("add", "marker")
+        git("commit", "-qm", "base")
+        base = git("rev-parse", "HEAD")
+        git("checkout", "-qb", "unmerged-pr")
+        marker.write_text("pr")
+        git("commit", "-qam", "PR")
+        head = git("rev-parse", "HEAD")
+        marker.write_text("uncommitted")
+        for source_ref, expected, contents in (("HEAD", head, "pr"), (base, base, "base")):
+            copied = []
+            def transfer(command, **kwargs):
+                if command[0] != "rsync":
+                    return run(command, **kwargs)
+                checkout = Path(command[-2])
+                self.assertEqual((checkout / "marker").read_text(), contents)
+                self.assertEqual(self.q.subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip(), expected)
+                self.assertEqual(self.q.subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip(), "HEAD")
+                copied.append(str(checkout))
+                return self.q.subprocess.CompletedProcess(command, 0)
+            output = io.StringIO()
+            with patch.object(self.q, "__file__", str(repository / "tools/spark_queue.py")), patch.object(self.q.subprocess, "run", side_effect=transfer), patch.object(self.q, "ssh", return_value=(0, "")) as remote, contextlib.redirect_stdout(output):
+                self.q.cmd_sync(argparse.Namespace(id="pr-test", nodes="spark0", ref=source_ref))
+            receipt = json.loads(output.getvalue())
+            self.assertEqual(receipt["git_commit"], expected)
+            self.assertEqual(receipt["source_ref"], source_ref)
+            self.assertEqual(len(copied), 1)
+            self.assertIn(expected, remote.call_args.args[1])
+            self.assertIn("diff --quiet HEAD", remote.call_args.args[1])
+        self.assertEqual(marker.read_text(), "uncommitted")
+
     def test_rdma_registration_uses_declared_finite_memory_budget(self):
         job = {"id": "rdma", "attempt": "test", "nodes": ["spark0"],
                "deadline": time.time() + 60, "cmd": "true", "memory_mib": 1536}

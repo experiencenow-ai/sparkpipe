@@ -64,17 +64,19 @@ Use disjoint ports/socket paths for independent deployment roots.
 
 ## Commands
 
-Run from a clean checkout of merged main on the controller:
+Test a committed PR branch or main from the controller:
 
 ```sh
 python3 tools/spark_queue.py doctor
 python3 tools/spark_queue.py list
-python3 tools/spark_queue.py sync --id glm-flash-debug --nodes spark0
+python3 tools/spark_queue.py sync --id glm-flash-debug --nodes spark0 --ref HEAD
 ```
 
-sync clones the current clean main into a temporary source checkout, rsyncs it
-into a new node-local directory, verifies its Git identity and tracked content,
-then renames the completed directory. It prints the exact cwd template. Reusing
+sync resolves `--ref` (default committed HEAD) and clones that exact commit into
+an isolated detached checkout, rsyncs it into a new node-local directory, verifies
+its Git identity and tracked content, then renames the completed directory.
+Uncommitted working-tree changes are not included. PR commits can be tested
+before merge; the receipt names the source ref and exact commit. It prints the exact cwd template. Reusing
 an existing destination is an error; select a new lane ID. It copies committed
 source and Git metadata, not local build products or model packs.
 
@@ -143,11 +145,11 @@ contract identities, model/topology/rank, command, shapes, token positions,
 numerical reference and memory measurements. Compile, one-node numerical,
 multi-rank functional and fleet performance receipts are separate evidence.
 
-Deployment qualification follows merge, clean main installation on every
-participant, rebuild, restart, readiness and testing. Never describe dirty or
-unmerged builds as a main deployment receipt. Publish residentd, driver,
-adapter, transport and config coherently; replacing only model_driver.so is
-not a coherent release.
+Hardware testing precedes merge when validating a PR. Install the exact recorded
+commit in a separate test root, rebuild all changed components and validate it.
+A PR receipt identifies that revision; a main rollout receipt identifies its
+merged revision. Publish residentd, driver, adapter, transport and config
+coherently; replacing only model_driver.so is not a coherent release.
 
 The B1 plan uses all-rank fan-out and local reduction. B2+ uses tree reduction
 with compute overlap. Carry the logical batch policy across split chains:

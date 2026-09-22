@@ -595,15 +595,15 @@ def cmd_sync(args):
     root = Path(__file__).resolve().parents[1]
     def git(*argv):
         return subprocess.check_output(["git", "-C", str(root), *argv], text=True).strip()
-    sha = git("rev-parse", "HEAD")
-    if sha != git("rev-parse", "origin/main") or git("status", "--porcelain", "--untracked-files=no"):
-        raise SystemExit("sync requires clean HEAD == origin/main; merge and pull first")
+    sha = git("rev-parse", "--verify", "--end-of-options", args.ref + "^{commit}")
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise SystemExit("sync requires an exact local commit")
     relative = "srcdata/sparkqueue/" + args.id + "/" + sha
     with tempfile.TemporaryDirectory(prefix="sparkqueue-source-") as tmp:
         checkout = Path(tmp) / "source"
         subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", "--no-checkout",
                         str(root), str(checkout)], check=True)
-        subprocess.run(["git", "-C", str(checkout), "checkout", "--quiet", "-B", "main", sha], check=True)
+        subprocess.run(["git", "-C", str(checkout), "checkout", "--quiet", "--detach", sha], check=True)
         subprocess.run(["git", "-C", str(checkout), "remote", "set-url", "origin",
                         "https://github.com/sparkpipe/sparkpipe"], check=True)
         for node in nodes:
@@ -620,7 +620,7 @@ def cmd_sync(args):
             rc, _ = ssh(node, verify)
             if rc != 0:
                 raise SystemExit("source verification failed: " + node + ":" + partial)
-    print(json.dumps({"git_commit": sha, "nodes": nodes, "cwd": "/home/{host}/" + relative}))
+    print(json.dumps({"git_commit": sha, "source_ref": args.ref, "nodes": nodes, "cwd": "/home/{host}/" + relative}))
 
 def cmd_serve(args):
     while True:
@@ -699,6 +699,7 @@ def main():
     a = sub.add_parser("sync")
     a.add_argument("--id", required=True)
     a.add_argument("--nodes", required=True)
+    a.add_argument("--ref", default="HEAD", help="Local commit or branch to test; defaults to committed HEAD")
     a.set_defaults(fn=cmd_sync)
     sub.add_parser("doctor").set_defaults(fn=cmd_doctor)
     args = p.parse_args()
