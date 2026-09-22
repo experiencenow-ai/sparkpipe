@@ -1,5 +1,5 @@
 {
-  "file_count": 3341,
+  "file_count": 3343,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -3258,8 +3258,8 @@
     },
     {
       "path": "examples/model_descriptions/qwen38_max_resident_decode_stage_firmware.json",
-      "sha256": "3829b0050962f68dafca9e979ca1ad92a97ed19055dab02028f0f89a687dbe2c",
-      "size_bytes": 3145
+      "sha256": "4f553ebb67b0cac1054c524ad4b8fb8e8ade6073391712f8a342c56f2a7a6d9d",
+      "size_bytes": 3172
     },
     {
       "path": "examples/model_descriptions/qwen4_flash_resident_decode_stage_firmware.json",
@@ -4712,6 +4712,11 @@
       "size_bytes": 152628
     },
     {
+      "path": "model-families/qwen38_max/smoke_experts_pools.json",
+      "sha256": "df5936a85901011d2d91e73b8091cc99153569246eb3e3c9800bc5b0fa3e1915",
+      "size_bytes": 1607
+    },
+    {
       "path": "model-families/qwen38_max/src/spark_qwen38_max_work_control.c",
       "sha256": "a08e1e937e9322c44a313721f76e27103de5f0865c2bc41afbdca3bb54282184",
       "size_bytes": 318
@@ -5913,8 +5918,8 @@
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/Makefile",
-      "sha256": "dfdabb383a2b5fbf250d966a9221555a93af7ead703d5e50459e539f3a3d573c",
-      "size_bytes": 3464
+      "sha256": "f0fc03108c91ba4c949b85e281362a543526620fd9227e93819d63b5d7176afc",
+      "size_bytes": 5810
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/include/sparkpipe/spark_qwen38_max_resident_decode_stage_firmware.h",
@@ -12797,14 +12802,19 @@
       "size_bytes": 5845
     },
     {
+      "path": "tools/qwen38max_multidev_build_artifacts.sh",
+      "sha256": "b580f32182b20f62a6f99a59fd07a834bac56b31ac84212bc60c94ef785b587c",
+      "size_bytes": 5179
+    },
+    {
       "path": "tools/qwen38max_multidev_experts_manifest.sh",
       "sha256": "783802df7d883e847227ffa46999cbb029255bdb87ad26df054abeb4fdb4eb90",
       "size_bytes": 1170
     },
     {
       "path": "tools/qwen38max_multidev_lane.py",
-      "sha256": "92a1019f3c315047dd31568636e2c62082f82792026e8903e33880fa2abf59b4",
-      "size_bytes": 12253
+      "sha256": "38fc01bac755bf50c990f9d88b97087182fb80ce312561948bcd38c076fcfa41",
+      "size_bytes": 13579
     },
     {
       "path": "tools/qwen38max_multidev_pack_emit.sh",
@@ -12813,8 +12823,8 @@
     },
     {
       "path": "tools/qwen38max_multidev_run_family.sh",
-      "sha256": "fa3f6e5941cbf364ad38187ebbaead4fdcfbb68b74fe260d550446acad8ab1a9",
-      "size_bytes": 13970
+      "sha256": "678df38dacc68e32f611221f5f8a6a2456836a6b5d7002ef1722336c9a632446",
+      "size_bytes": 15144
     },
     {
       "path": "tools/qwen38max_multidev_warm_probe.sh",
@@ -16710,5 +16720,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79668353
+  "total_bytes": 79680012
 }
