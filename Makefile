@@ -363,6 +363,8 @@ PYTHON_TESTS := \
 	tests/test_weightd_supervised.py \
 	tests/test_weightd_supervision.py \
 	tests/test_spark_queue.py \
+	tests/test_multi_dev_orchestrate.py \
+	tests/test_inference_smoke.py \
 	tests/test_hy4_model_header.py \
 	tests/test_qwen4_flash_model_header.py \
 	tests/test_gemma4_model_header.py \
@@ -496,6 +498,7 @@ PYTHON_TESTS := \
 	tests/test_glm5_next_queue_build.py \
 	tests/test_glm5_next_hc_boundary.py \
 	tests/test_glm5_next_embedding_collective.py \
+	tests/test_tp_mesh_cancel_lifetime.py \
 	tests/test_glm5_next_graph_failure.py \
 	tests/test_clamped_up_gate.py \
 	tests/test_glm5_next_stage_context.py
@@ -1161,7 +1164,7 @@ build/test_qwen38_work_control: tests/test_qwen38_work_control.cpp tests/fixture
 build/test_llm_module_contract: tests/test_llm_module_contract.c tests/test_llm_module_contract_negative.c common/common_kv_frame.h model-families/qwen38_max/include/sparkpipe/llm_defines.h | build
 	$(CC) -I model-families/qwen38_max/include $(CPPFLAGS) $(CFLAGS) -D_GNU_SOURCE -I tests/cuda_stub -I include -I src -I model-families/common/include -I . -c tests/test_llm_module_contract.c -o build/test_llm_module_contract_main.o
 	$(CC) -I model-families/qwen38_max/include $(CPPFLAGS) $(CFLAGS) -D_GNU_SOURCE -I tests/cuda_stub -I include -I src -I model-families/common/include -I . -DSPARK_LLM_KV_BLOCK_TOKENS=65u -c tests/test_llm_module_contract_negative.c -o build/test_llm_module_contract_negative.o
-	$(CC) $(CPPFLAGS) $(CUDA_STUB_INCLUDE_FLAGS) $(CFLAGS) build/test_llm_module_contract_main.o build/test_llm_module_contract_negative.o tests/cuda_stub/cuda_runtime_stub.c -o $@
+	$(CC) $(CPPFLAGS) $(CUDA_STUB_INCLUDE_FLAGS) $(CFLAGS) build/test_llm_module_contract_main.o build/test_llm_module_contract_negative.o tests/cuda_stub/cuda_runtime_stub.c $(LDFLAGS) $(LDLIBS) -lm -o $@
 
 build/test_llm_stagepack_format: tests/test_llm_stagepack_format.c tests/test_llm_stagepack_format_negative.c common/common_stagepack_format_ext.h model-families/qwen4_flash/include/sparkpipe/llm_defines.h runtime/stagepack_format.c | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) -D_GNU_SOURCE -I model-families/qwen4_flash/include/sparkpipe -I include -I model-families/qwen4_flash/include -I modules/qwen4_flash_resident_decode_stage/include -I . -c tests/test_llm_stagepack_format.c -o build/test_llm_stagepack_format_main.o
@@ -1352,8 +1355,8 @@ build/test_weightd_map: tests/test_weightd_map.c $(RUNTIME_LIBRARY) $(CORE_LIBRA
 build/test_weightd_mesh_doorbell: tests/test_weightd_mesh_doorbell.c include/sparkpipe/spark_weightd.h | build
 	$(CC) $(CORE_INCLUDE_FLAGS) $(CFLAGS) $< $(LDFLAGS) $(LDLIBS) -o $@
 
-build/test_weightd_mesh_mock: tests/test_weightd_mesh_mock.c node/weightd_mesh.c tests/ibv_stub/verbs.c tests/cuda_stub/cuda_runtime_stub.c tests/ibv_stub/infiniband/verbs.h tests/ibv_stub/sys/mman.h $(CORE_LIBRARY) | build
-	$(CC) $(CORE_INCLUDE_FLAGS) $(CUDA_STUB_INCLUDE_FLAGS) -Itests/ibv_stub -DSPARK_WEIGHTD_MESH_DIR=\"/tmp/spark-weightd-mesh-mock\" $(CFLAGS) tests/test_weightd_mesh_mock.c tests/ibv_stub/verbs.c tests/cuda_stub/cuda_runtime_stub.c $(CORE_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@
+build/test_weightd_mesh_mock: tests/test_weightd_mesh_mock.c node/weightd_mesh.c tests/ibv_stub/verbs.c tests/cuda_stub/cuda_runtime_stub.c tests/ibv_stub/infiniband/verbs.h tests/ibv_stub/sys/mman.h $(RUNTIME_LIBRARY) $(CORE_LIBRARY) | build
+	$(CC) $(CORE_INCLUDE_FLAGS) $(CUDA_STUB_INCLUDE_FLAGS) -Itests/ibv_stub -DSPARK_WEIGHTD_MESH_DIR=\"/tmp/spark-weightd-mesh-mock\" $(CFLAGS) tests/test_weightd_mesh_mock.c tests/ibv_stub/verbs.c tests/cuda_stub/cuda_runtime_stub.c $(RUNTIME_LIBRARY) $(CORE_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@
 
 build/test_module_library: tests/test_module_library.c $(TEST_SUPPORT_OBJECT) $(TEST_MODULE_LINK_UNITS) $(TEST_VALIDATOR) $(TEST_VALIDATOR_CHANGED) $(COMPILER_LIBRARY) $(COMMON_LIBRARY)
 	$(CC) $(CPPFLAGS) -Itests $(CFLAGS) $< $(TEST_SUPPORT_OBJECT) $(COMPILER_LIBRARY) $(COMMON_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@

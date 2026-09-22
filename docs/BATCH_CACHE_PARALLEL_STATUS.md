@@ -1,51 +1,76 @@
 # Batch, cache and parallel inference implementation status
 
-This draft stacks on PR1081 and exposes the implementation while qualification
-continues. It does not claim a reliable GPU server or a throughput recovery.
+PR1082 now targets PR1077's `hillclimb/graph-pacing` branch directly. PR1081 was
+merged into that branch; its stabilization fixes remain ancestors of this work.
+This is an implementation draft. GPU numerical and performance acceptance remain
+open; a host pass or a real CUDA compile does not qualify inference.
 
 Implemented and host-tested:
 
-- GLM honors separate logical/physical cache capacities and attaches the
-  existing dirty-page writeback callback. Bounded diagnostics capture complete
-  KV/index/recurrent/window state, final hidden state and selected head score
-  while execution ownership is held. B1/B3/B5 probes include mixed-position
-  joins, eviction, nonidentity restore, state/token comparison and reset.
-- Common cache copy-on-write preserves immutable partial prefixes across
-  divergent branches, copy failures, eviction pressure, abort and failed Finish.
+- GLM uses configured logical and physical cache capacities, dirty-page writeback,
+  complete KV/index/recurrent/window state capture, and nonidentity restoration.
+  Physical capacity reaches the CUDA view. Common partial-prefix indexing and
+  copy-on-write preserve immutable shared prefixes across divergent branches,
+  failures, eviction and rollback. No alternate per-driver prefix manager.
+- Temporal prefill traverses each layer with the admitted row batch together.
+  Recurrent state follows each sequence's row indices; DSA visibility is causal
+  per row. Tests exercise widths 1 through 101, odd and unequal lengths, final-row
+  capture and synthetic numerical KDA recurrence. This is not real-model parity.
+- Completed multi-token chains publish their actual final processed context with
+  a prepared, zero-row CACHE_PUBLISH operation before release. Publication captures
+  paired GLM recurrent state, retains the binding and invents no intermediate
+  checkpoints. Early EOS releases cleanly when the earlier state was not retained.
+- Logical B1 uses direct contribution broadcast. B2+ uses shared masked binomial
+  tree reduction/broadcast with FP32 SUM partials, U64 MAX and rank-major gather.
+  Host tests cover TP2 through TP16 and the exact 2(N-1) payload bound. Oversized
+  transfers are chunked. Real compute overlap remains unqualified.
 - Mesh source ownership lasts through every posted transfer completion, with
   finite send credits, full epoch/sequence tags, stale completion rejection and
   source-copy gating. Explicit participant masks isolate TP groups; readiness
   requires all configured peers with matching ABI/group identity.
-- The existing queue admits explicitly budgeted shared GPU jobs, accounts for
-  persistent service identity and ports, rejects unknown consumers, and keeps
-  ownership until verified cleanup. Legacy synthetic smoke receipts no longer
-  accept teardown/failure as success.
+- The existing queue accounts for persistent processes, device reservations and
+  ports, and retains ownership through verified cleanup. The real inference
+  smoke runner isolates sockets, listeners, mesh records, cache and logs; pins
+  source, executables, driver/configuration and model inputs; compares exact
+  reference tokens and requires successful owned-process shutdown before PASS.
+- The API and CLI wake on sockets, queued work and explicit retry deadlines.
+  They no longer depend on a fixed 5/10 ms progress cadence. Token events flush
+  before waiting. HTTP cancellation is serialized through the engine worker.
+  See [event-driven progress](EVENT_DRIVEN_PROGRESS.md).
 
-Host evidence from the contributing commits: 46 queue and 3 legacy-receipt tests;
-common cache deterministic tests plus seed73/2000 (647261 checks), sanitized
-seed1337/2000 (649948 checks), and two killed mutations; mesh2889 checks;
-collective TP2/TP3/TP4/TP16 respectively715/985/1392/4495 checks; sanitized mesh
-and TP4; eight failures from restoring premature mesh acknowledgement. GLM
-module/probe host harnesses and sanitizer checks pass. Host probes validate
-control flow and byte ownership, not model numerical correctness.
+Selected evidence:
+
+- Queue: 46 tests; legacy receipt rejection: 3; real smoke runner: 12.
+- Cache fuzz: 13 scenarios, seed73/2000 produced 659645 checks; additional
+  seed1337, sanitizer runs and rollback/copy failure negative controls passed.
+- Collectives: all TP2..TP16 host configurations pass 33 mandatory cases;
+  TP4 sanitizer and mesh sanitizer pass. FP32-rounding and premature source
+  release mutations are rejected. These simulate transport/device behavior.
+- GLM temporal module and CUDA sources compile with real CUDA 13.0.88 for sm121a.
+  K3 and Qwen3.6/3.8 shared-kernel consumers also compile. No GPU launch implied.
+- CACHE_PUBLISH: real TCP/UNIX three-rank fixture passes prepare/commit,
+  publication, retained ownership, decode and release. GLM actual source-body
+  capture/restore tests and sanitizers pass; batch tests cover final-prefix reuse,
+  early EOS and retry deadlines (90 checks after event-driven additions).
+- Real API text/token-ID and system loopback tests pass. An idle API responds
+  correctly to a queue wake; removing that wake fails the regression.
+- Gemma/Ling family-local headers, DSV4 topology slicing/full algorithm parsing,
+  and deployment tokenizer generation now pass their focused host gates.
 
 Still required:
 
-- Propagate physical cache capacity into the CUDA view's bounds.
-- Reach arbitrary partial-prefix reuse through common serving validation and
-  batch publication, not only the driver probe.
-- Execute temporal prefill rows together through each layer with causal
-  recurrent/index attention semantics; current execution repeats token waves.
-- Implement the required B2+ tree policy. Its test currently fails: TP4 sends
-  twelve payloads where a tree permits six.
-- Finish and test the real-inference smoke runner, including every listener,
-  loaded artifact, configuration/environment and shutdown result.
-- Enforce/verify complete device allocation budgets before shared GPU rollout.
-  GB10 MemoryMax does not contain all CUDA allocations; declarations and a
-  process census alone do not establish a hard device memory bound.
+- Finish qualification of GPU cancellation/drain and event-driven mesh activity.
+  GPU wait rearming and normal completion cannot cancel unrelated rank work.
+- Enforce complete device allocation budgets before shared GPU rollout. GB10
+  MemoryMax does not contain all CUDA allocations. The driver ledger omits some
+  direct allocations and CUDA graph/context overhead; declarations alone do not
+  establish a hard device memory bound.
 - Real GPU numerical parity, graph replay/failure, TP4/TP16/TP4xPP4 serving,
-  concurrent different-model inference and sustained performance qualification.
+  simultaneous different-model inference and sustained matched performance.
+- Rerun the complete host campaign on the new source. The historical PR1081 run
+  was 114 PASS, 8 FAIL, 4 SETUP_FAIL; focused repairs do not rewrite that receipt.
+  K3/GLM generated-deployment drift remains visible pending configuration review.
 
-The existing fleet services have not been changed or restarted. The current
-unbounded fleet-agent GPU processes correctly block shared admission. Report
-functional, setup, unrun hardware and performance results separately.
+The current persistent fleet GPU processes have not been restarted by this work.
+Unknown or unbounded consumers block shared admission. Record functional,
+setup, unrun hardware and performance results separately.

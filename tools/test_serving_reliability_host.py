@@ -22,13 +22,13 @@ GROUPS = {
 }
 PYTHON = {
     "weights": "weightd_supervision weightd_supervised weightd_manifest weightd_lazy_pair",
-    "glm": "glm5_next_graph_failure glm5_next_stage_context glm5_next_embedding_collective glm5_next_adapter_config_load glm5_next_expert_shard_math glm5_next_geometry glm5_next_driver_probe",
+    "glm": "tp_mesh_cancel_lifetime glm5_next_graph_failure glm5_next_stage_context glm5_next_embedding_collective glm5_next_adapter_config_load glm5_next_expert_shard_math glm5_next_geometry glm5_next_driver_probe",
     "deployment": "generate_model_resident_deployment deployment_config_drift fleet_registrar spark_queue multi_dev_orchestrate inference_smoke",
     "model_contracts": "model_families model_driver_contracts glm52_module_contract qwen4_flash_model_header laguna_model_header",
 }
 FUZZ = ("tp_allreduce_fuzz", "serving_fault_fuzz", "kv_lane_fuzz", "weightd_working_set", "system_loopback")
 GAPS = [
-    "B2+ tree selection/overlap and large-transfer strategy require implementation and qualification (I36/I50)",
+    "B2+ tree and bounded transfers have host tests; real GPU overlap and topology qualification remain unrun (I36/I50)",
     "GPU graph fault/cancellation, numerical model parity and complete recurrent restore are unqualified",
     "RDMA/device completion and daemon replacement require real hardware tests",
     "TP4, TP16, TP4xPP4 sustained serving, fairness and matched throughput remain unqualified",
