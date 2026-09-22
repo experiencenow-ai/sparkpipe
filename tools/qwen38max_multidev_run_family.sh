@@ -285,8 +285,18 @@ fi
   fail "packs/ must contain exactly one .sha256 sidecar"
 
 # --------------------- COLD-LAUNCH PRELOAD (milestone 3) ---------------------
+# Preload-model directive (2026-09-22): batch-preload the traced set at
+# launch is the DEFAULT posture (the manifest IS the working-set
+# definition); QMAX_WORKING_SET=0 opts out. Default-on also keeps the
+# queue cmd BARE (no env prefix can reach a systemd unit).
 
-if [ -n "${QMAX_WORKING_SET:-}" ]; then
+case "${QMAX_WORKING_SET:-1}" in
+  1|yes|on) WARM_LEG=1 ;;
+  0|no|off) WARM_LEG=0 ;;
+  *) fail "QMAX_WORKING_SET must be a boolean (got '$QMAX_WORKING_SET')" ;;
+esac
+
+if [ "$WARM_LEG" -eq 1 ]; then
   WSET="$ROOT/smoke.wset"
   python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" --emit-wset "$WSET"
   REVISION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["model_revision"])' "$ROOT/config/adapter.json")"
