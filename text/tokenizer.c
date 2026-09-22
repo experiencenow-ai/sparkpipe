@@ -1523,6 +1523,11 @@ SparkStatus SparkTokenizerLoadHuggingFaceJson(
     {
         status = SparkTokenizerParseAddedTokens(tokenizer, &document, added_tokens_token_index);
     }
+    if (status == SPARK_STATUS_OK &&
+        tokenizer->maximum_token_id + 1u > tokenizer->vocabulary_count)
+    {
+        tokenizer->vocabulary_count = tokenizer->maximum_token_id + 1u;
+    }
     if (status == SPARK_STATUS_OK)
     {
         status = SparkTokenizerBuildReverseVocabulary(tokenizer);
