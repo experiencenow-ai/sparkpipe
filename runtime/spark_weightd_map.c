@@ -366,10 +366,7 @@ SparkStatus SparkWeightdMapRelease(SparkWeightdMap *map,uint64_t identifier,uint
 static SparkStatus map_import_chunk(SparkWeightdMap *map,uint32_t slot,uint32_t chunk,int32_t fd)
 {
 	if ( map->mapped[chunk] != 0u )
-	{
-		(void)close(fd);
 		return(SPARK_STATUS_OK);
-	}
 	CUmemAccessDesc access;
 	uint64_t bit = (UINT64_C(1) << slot);
 	if ( map->owners[chunk] != 0u )
