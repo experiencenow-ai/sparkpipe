@@ -325,6 +325,19 @@ static SparkStatus SparkModelResidentClientOpenTcp(
 		if ( setsockopt(client->fd,IPPROTO_TCP,TCP_NODELAY,&enabled,sizeof(enabled)) == 0 )
 			status = SparkModelResidentClientPrepareSocket(client->fd);
 		if ( status == SPARK_STATUS_OK )
+		{
+			enabled = 1;
+			if ( setsockopt(client->fd,SOL_SOCKET,SO_KEEPALIVE,&enabled,sizeof(enabled)) == 0 )
+			{
+				int32_t keepidle = 10;
+				int32_t keepintvl = 5;
+				int32_t keepcnt = 3;
+				(void)setsockopt(client->fd,IPPROTO_TCP,TCP_KEEPIDLE,&keepidle,sizeof(keepidle));
+				(void)setsockopt(client->fd,IPPROTO_TCP,TCP_KEEPINTVL,&keepintvl,sizeof(keepintvl));
+				(void)setsockopt(client->fd,IPPROTO_TCP,TCP_KEEPCNT,&keepcnt,sizeof(keepcnt));
+			}
+		}
+		if ( status == SPARK_STATUS_OK )
 			status = SparkModelResidentClientFinishConnect(client->fd,address->ai_addr,(socklen_t)address->ai_addrlen,timeout_ms);
 		if ( status != SPARK_STATUS_OK )
 		{
