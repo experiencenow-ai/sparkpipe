@@ -1,5 +1,5 @@
 {
-  "file_count": 3275,
+  "file_count": 3276,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -9668,8 +9668,8 @@
     },
     {
       "path": "tests/test_mimo26_stagepack.py",
-      "sha256": "e408d59c4d6da5f2d156c633f161528d3ff4db25939be13ab3fe81315a9b1e77",
-      "size_bytes": 12287
+      "sha256": "82ba4b57021643cc827cc20f4bc3db8e8f48727c80368e7ee80f45f6e8d27350",
+      "size_bytes": 12270
     },
     {
       "path": "tests/test_mla_absorption.py",
@@ -12092,14 +12092,19 @@
       "size_bytes": 16108
     },
     {
+      "path": "tools/mimo26_emit_rank.sh",
+      "sha256": "472b65aacc81c1943820732de4c62a97d6c0247be6d636ab7531802b9f6ba46d",
+      "size_bytes": 3434
+    },
+    {
       "path": "tools/mimo26_param_budget.py",
       "sha256": "296d9458ccadc69e60af0753be7b50f0516dc4ad1cadfe9bc90662c51bae218b",
       "size_bytes": 6867
     },
     {
       "path": "tools/mimo26_stagepack.py",
-      "sha256": "e458accc62cee0663ed99c62bf518163b48cb65d6f8566bf7e68e0efb99067b3",
-      "size_bytes": 36851
+      "sha256": "95bc422a6ea9b8a6bc853242d480e523005a161dc455bda6951f245ddfc2dc87",
+      "size_bytes": 37281
     },
     {
       "path": "tools/minimax_stagepack.py",
@@ -16380,5 +16385,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 77615990
+  "total_bytes": 77619837
 }
