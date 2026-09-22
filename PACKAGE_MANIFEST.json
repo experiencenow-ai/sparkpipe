@@ -12488,8 +12488,8 @@
     },
     {
       "path": "tools/minimax_stagepack.py",
-      "sha256": "b6b08d4045caefa8b121f57eb1270dcc048c13027fc464ba3a48b691506aae85",
-      "size_bytes": 21701
+      "sha256": "fa7241d112cb9667cfbae3fb1555af39e05d4ad21b3224700bd41a4b16ca1485",
+      "size_bytes": 21791
     },
     {
       "path": "tools/model_api_smoke.py",
@@ -16820,5 +16820,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80133794
+  "total_bytes": 80133884
 }
