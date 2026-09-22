@@ -10,6 +10,7 @@
 #include "sparkpipe/spark_driver_loader.h"
 #include "sparkpipe/spark_json.h"
 #include "sparkpipe/spark_model_driver_support.h"
+#include "sparkpipe/spark_serving_cache_admission.h"
 #include "sparkpipe/spark_minimax_model.h"
 #include "sparkpipe/spark_minimax_resident_decode_stage_firmware.h"
 #include "sparkpipe/spark_minimax_serving_adapter.h"

@@ -242,7 +242,13 @@ fi
 export SPARK_WEIGHTD_ATTACH=1
 export SPARK_WEIGHTD_SOCKET="$SOCKET"
 export SPARK_WEIGHTD_LANE="$LANE"
-export SPARK_TP_MESH_RANKS="$MESH_RANKS"
+# SPARK_TP_MESH_RANKS is the TP GROUP's physical ranks (degree entries,
+# parsed by SparkTpDeviceCollectiveMeshTopology): for TP4xPP4 that is
+# this rank's stage slice, NOT the 16-node world identity (the parser
+# rejects trailing entries with INVALID_ARGUMENT at mesh lane acquire —
+# first-launch find #10). The world map stays in $MESH_RANKS for the
+# node-order contract above.
+export SPARK_TP_MESH_RANKS="$((STAGE * 4)),$((STAGE * 4 + 1)),$((STAGE * 4 + 2)),$((STAGE * 4 + 3))"
 export SPARK_WEIGHTD_EXPERT_POOL_BYTES="$K3_EXPERT_POOL_BYTES"
 export SPARK_WEIGHTD_SPINE_BUDGET_BYTES="$K3_SPINE_BUDGET_BYTES"
 # Pinned CUDA environment for shared-lane smoke (template hard rule).

@@ -641,7 +641,7 @@ static SparkStatus SparkK3ManifestCheck(const SparkWeightdManifest *manifest,
 		manifest->range_count < manifest->group_count )
 		SPARK_FAIL(SPARK_STATUS_PARSE_ERROR);
 	for ( layer = pack->config.first_layer;
-		layer < pack->config.first_layer + pack->config.total_layers;
+		layer < pack->config.first_layer + pack->config.layers;
 		++layer )
 	{
 		char name[SPARK_K3_PACK_MAX_NAME_BYTES];
@@ -660,10 +660,15 @@ static SparkStatus SparkK3ManifestCheck(const SparkWeightdManifest *manifest,
 			SPARK_FAIL(SPARK_STATUS_PARSE_ERROR);
 		if ( !have_w1 )
 			continue;
+		/* per-expert divisibility per tensor only: k3's w1/w2 expert
+		 * geometries differ (intermediate 6144 vs 3072 halves the w2
+		 * span), so demanding equal per-expert bytes rejects the real
+		 * deployed manifests — measured: w1 2924544 vs w2 1462272
+		 * bytes/expert on every rank pack (first-launch find #7, the
+		 * lazy-attach manifest check). Each range is still validated
+		 * against ITS tensor's span below. */
 		if ( w1.bytes % pack->config.experts != 0u ||
-			w2.bytes % pack->config.experts != 0u ||
-			w1.bytes / pack->config.experts !=
-				w2.bytes / pack->config.experts )
+			w2.bytes % pack->config.experts != 0u )
 			SPARK_FAIL(SPARK_STATUS_PARSE_ERROR);
 		for ( expert = 0u; expert < pack->config.experts; ++expert )
 		{
@@ -981,36 +986,50 @@ SparkStatus SparkK3StageRunnerInitialize(
 			delete state;
 			SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
 		}
-		for ( routed = state->module.pack.config.first_layer;
-			routed < state->module.pack.config.first_layer +
-				state->module.pack.config.total_layers; ++routed )
+		/* the slice bound is config.layers (this rank pack's stage
+		 * slice), NOT config.total_layers (the whole model): a stage-0
+		 * pack holds layers 0..23 of 93, and layer 0 is dense (no
+		 * expert tensors). Skip dense layers like the manifest check
+		 * does; every layer that HAS experts inside the slice must
+		 * load both spans (first-launch find #8). */
 		{
-			SparkK3PackEntry w1;
-			SparkK3PackEntry w2;
-			char name[SPARK_K3_PACK_MAX_NAME_BYTES];
-			snprintf(name, sizeof(name),
-				"model.layers.%u.expert_w1_weight", routed);
-			if ( SparkK3PackLoadEntry(&state->module.pack, name, &w1) !=
-				SPARK_STATUS_OK )
-				break;
-			snprintf(name, sizeof(name),
-				"model.layers.%u.expert_w2_weight", routed);
-			if ( SparkK3PackLoadEntry(&state->module.pack, name, &w2) !=
-				SPARK_STATUS_OK )
-				break;
-			state->layer_w1_offset[routed] =
-				state->module.pack.payload_base + w1.payload_offset;
-			state->layer_w2_offset[routed] =
-				state->module.pack.payload_base + w2.payload_offset;
-		}
-		if ( routed != state->module.pack.config.first_layer +
-			state->module.pack.config.total_layers )
-		{
-			SparkK3DispatchDestroy(&state->dispatch);
-			SparkK3ModuleDestroy(&state->module);
-			runner->private_state = 0;
-			delete state;
-			SPARK_FAIL(SPARK_STATUS_PARSE_ERROR);
+			uint32_t routed_layers = 0u;
+			for ( routed = state->module.pack.config.first_layer;
+				routed < state->module.pack.config.first_layer +
+					state->module.pack.config.layers; ++routed )
+			{
+				SparkK3PackEntry w1;
+				SparkK3PackEntry w2;
+				int have_w1;
+				int have_w2;
+				char name[SPARK_K3_PACK_MAX_NAME_BYTES];
+				snprintf(name, sizeof(name),
+					"model.layers.%u.expert_w1_weight", routed);
+				have_w1 = SparkK3PackLoadEntry(&state->module.pack,
+					name, &w1) == SPARK_STATUS_OK;
+				snprintf(name, sizeof(name),
+					"model.layers.%u.expert_w2_weight", routed);
+				have_w2 = SparkK3PackLoadEntry(&state->module.pack,
+					name, &w2) == SPARK_STATUS_OK;
+				if ( have_w1 != have_w2 )
+					break;
+				if ( !have_w1 )
+					continue;
+				state->layer_w1_offset[routed] =
+					state->module.pack.payload_base + w1.payload_offset;
+				state->layer_w2_offset[routed] =
+					state->module.pack.payload_base + w2.payload_offset;
+				routed_layers++;
+			}
+			if ( routed != state->module.pack.config.first_layer +
+				state->module.pack.config.layers || routed_layers == 0u )
+			{
+				SparkK3DispatchDestroy(&state->dispatch);
+				SparkK3ModuleDestroy(&state->module);
+				runner->private_state = 0;
+				delete state;
+				SPARK_FAIL(SPARK_STATUS_PARSE_ERROR);
+			}
 		}
 	}
 	if ( SparkK3PackLoadEntry(&state->module.pack,"model.embed_tokens.weight",&entry) == 0 &&

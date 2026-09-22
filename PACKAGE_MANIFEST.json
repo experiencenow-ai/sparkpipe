@@ -5638,8 +5638,8 @@
     },
     {
       "path": "modules/k3_resident_decode_stage/source/spark_k3_resident_decode_stage_runner.cu",
-      "sha256": "72dfec0df055dbde0bec342387dd6b95a41e65ce97722d88b09549f0bdcbee03",
-      "size_bytes": 59121
+      "sha256": "36a1a173a1d55d491553930599760ff2f8b78063ea784bdae8eda3a343764f51",
+      "size_bytes": 60024
     },
     {
       "path": "modules/k3_resident_decode_stage/source/spark_k3_serving_adapter.c",
@@ -5713,8 +5713,8 @@
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_resident_decode_stage_module.c",
-      "sha256": "af42616357c2061044ce78f582681dda26d13cbf297df14771431eef638b7f88",
-      "size_bytes": 114654
+      "sha256": "4a838ce4eb78c747b40cf38980624a1331f31b2717d0643841afbdd5672f40d8",
+      "size_bytes": 115635
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_serving_adapter.c",
@@ -5848,8 +5848,8 @@
     },
     {
       "path": "modules/minimax_resident_decode_stage/Makefile",
-      "sha256": "e365d33ac7cf7de7b9a291a34d87fe76e6f700797032cac4a928b615d62db76c",
-      "size_bytes": 5193
+      "sha256": "dafb4a6cbc130b34630288be4c0a90682d94c699479f1bede30bf54a75868902",
+      "size_bytes": 5443
     },
     {
       "path": "modules/minimax_resident_decode_stage/include/sparkpipe/spark_minimax_model.h",
@@ -5878,8 +5878,8 @@
     },
     {
       "path": "modules/minimax_resident_decode_stage/source/spark_minimax_serving_adapter.c",
-      "sha256": "5ef707b9afb3ec36528d0b33786ff65d9f0b4797eb12e53eb94306ab5c93bc81",
-      "size_bytes": 7801
+      "sha256": "12dc41151ca544446df75d34117ab63fcef689a51f335af42d4031b5eb864af0",
+      "size_bytes": 13244
     },
     {
       "path": "modules/minimax_resident_decode_stage/source/spark_minimax_stagepack_format.h",
@@ -7993,8 +7993,8 @@
     },
     {
       "path": "ring/transport/hidden_transport.c",
-      "sha256": "3c67ef0ac7e99b8f1ebe1799a75a49ab771809714c9a7e0ccee9f953c40a9b25",
-      "size_bytes": 52860
+      "sha256": "560d70e7533c57c0cf30c0f1d723a53525a81b7907c09446b49a3cd2351f3947",
+      "size_bytes": 53298
     },
     {
       "path": "ring/transport/memlink.c",
@@ -8168,8 +8168,8 @@
     },
     {
       "path": "runtime/spark_weightd.c",
-      "sha256": "1a666b4101c50ac11486bbda90f552535ce42fad1ca65cae49529ce4f4b5c7c5",
-      "size_bytes": 177668
+      "sha256": "7cdc719513e7e4358c9a0d76324483d34111c7b53ee827f66cd3eba37ec60c54",
+      "size_bytes": 178729
     },
     {
       "path": "runtime/spark_weightd_attach.c",
@@ -9693,8 +9693,8 @@
     },
     {
       "path": "tests/test_k3_multidev_lane.py",
-      "sha256": "40cfb228fe922865f200ee6b952b304e785d710a34de43b06096faf03cc4cd03",
-      "size_bytes": 13547
+      "sha256": "956ae53fca3abb9cc9eea68c29b7e6099966b8ef4c5b0493c45494f78b1e0e72",
+      "size_bytes": 13706
     },
     {
       "path": "tests/test_k3_pack.py",
@@ -9838,8 +9838,8 @@
     },
     {
       "path": "tests/test_laguna_multidev_lane.py",
-      "sha256": "bd66d0ce84dc2fc7188c08938c52b8e8fab9d7beed6676a82bdb3ce679a07e7e",
-      "size_bytes": 22022
+      "sha256": "4eac72e54626bc136410823a0b9036f48b04a2b5bd11ac39cd18f8e5f8ac41f5",
+      "size_bytes": 22350
     },
     {
       "path": "tests/test_laguna_smoke_experts.py",
@@ -11148,8 +11148,8 @@
     },
     {
       "path": "tools/devcycle/lane_assignments.json",
-      "sha256": "34839a1d0c9aea3ca26c29958cfd202a05e9d96d9a4ecbbbea0ea8e07441e3b1",
-      "size_bytes": 11021
+      "sha256": "d0a66209487ef95d51911a14caffe3ffb66a4b02c78567d8994c713fc2930654",
+      "size_bytes": 12211
     },
     {
       "path": "tools/devcycle/lane_budget_calc.py",
@@ -12383,13 +12383,13 @@
     },
     {
       "path": "tools/k3_multidev_lane.py",
-      "sha256": "91a868c4cf77e93e4c0f86df2354ae7651fee27d5821dc26933dc43dd093a94e",
-      "size_bytes": 11658
+      "sha256": "1b9c7391abdf2be275f14fe819c5fc4693cc24dca5d8c0f3ec7765c8bd20b1eb",
+      "size_bytes": 12044
     },
     {
       "path": "tools/k3_multidev_run_family.sh",
-      "sha256": "009846ad24f23696f2960d630e25728a5b1e72e1cc6f706799ed97979db41ff8",
-      "size_bytes": 12061
+      "sha256": "9dbf5278537b820d87f0e3fcd90fdf49c136dec63dfd530cacee2a9b4f3f0174",
+      "size_bytes": 12505
     },
     {
       "path": "tools/k3_pack.py",
@@ -12533,18 +12533,18 @@
     },
     {
       "path": "tools/laguna_multidev_experts_manifest.sh",
-      "sha256": "dc44c294e07ce14209d9254213749a67ad0013c795964d22e4dd3ba698ff6c60",
-      "size_bytes": 8737
+      "sha256": "a0c04dbb7b7e222c5e763655b386ee5f097473873f825fe6c9efb35c8ee573e9",
+      "size_bytes": 9407
     },
     {
       "path": "tools/laguna_multidev_lane.py",
-      "sha256": "e84b73d18e4fd98c9d84641128b9e27e50615a1781a3580b55ffdfa99164b726",
-      "size_bytes": 21877
+      "sha256": "aec14f2e1ee1d70594d663fbae3cd52ed6979c347da70cc6fc481e537230b2ef",
+      "size_bytes": 22151
     },
     {
       "path": "tools/laguna_multidev_run_family.sh",
-      "sha256": "b0b7f614a35cf2c5fad11965bf38ac136135a3679721ab64fb42f5ce5f420051",
-      "size_bytes": 16065
+      "sha256": "9d5c1c399aab991fc28b590d4c4ae291fbffef295c6bd920e71f4f88e7612e4d",
+      "size_bytes": 17573
     },
     {
       "path": "tools/laguna_smoke_experts.py",
@@ -17020,5 +17020,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80651233
+  "total_bytes": 80665268
 }
