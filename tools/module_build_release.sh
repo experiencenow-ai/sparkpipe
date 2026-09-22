@@ -47,7 +47,13 @@ env_prefix="SPARK_$(printf '%s' "$prefix" | tr '[:lower:]' '[:upper:]')"
 export "${env_prefix}_MODEL_REVISION=$revision" "${env_prefix}_CONTRACT_SHA256=$contract_sha"
 make -j4 -C "modules/$family" CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a EXPERT_CODEC="$codec" MODEL_REVISION="$revision" CONTRACT_SHA256="$contract_sha" publish > "$receipts/publish.log" 2>&1
 firmware="${FIRMWARE_JSON:-examples/model_descriptions/${family}_${codec}_firmware.json}"
-build/sparkpipe_model_compile --model "$firmware" --library build/module_library --output "$output/compiled" --cc /usr/bin/cc --include include --cc-arg -L/usr/local/cuda/targets/sbsa-linux/lib --cc-arg -lcuda --cc-arg -lcudart --cc-arg -lstdc++ --cc-arg -lm --cc-arg -ldl --cc-arg -pthread > "$receipts/driver-link.log" 2>&1
+# Static archives come before the -l libs: module archives reference
+# runtime (stagepack format) and core (sha256/ck128, pulled into every
+# module archive by the spine DAEMON_SHA change) symbols that only
+# libsparkpipe_runtime.a / libsparkpipe_core.a define - without them the
+# driver link fails undefined on every family's release build (evidence:
+# gemma4-fleet-build-3, 16/16 nodes; same cluster as #1127).
+build/sparkpipe_model_compile --model "$firmware" --library build/module_library --output "$output/compiled" --cc /usr/bin/cc --include include --cc-arg build/libsparkpipe_runtime.a --cc-arg build/libsparkpipe_core.a --cc-arg -L/usr/local/cuda/targets/sbsa-linux/lib --cc-arg -lcuda --cc-arg -lcudart --cc-arg -lstdc++ --cc-arg -lm --cc-arg -ldl --cc-arg -pthread > "$receipts/driver-link.log" 2>&1
 target=$(python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert len(v["stages"])==1; print(v["stages"][0]["target"])' "$firmware")
 build/sparkpipe_driver_inspect "$output/compiled/stages/stage_000/model_driver.so" "$target" > "$receipts/driver-inspect.log" 2>&1
 ldd -r "$output/compiled/stages/stage_000/model_driver.so" > "$receipts/driver-dependencies.log" 2>&1
