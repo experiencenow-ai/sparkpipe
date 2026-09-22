@@ -67,6 +67,9 @@ cc --version >> "$receipts/toolchain.txt"
 # PRIVATE weightd inside this job cgroup - the qualified single-node
 # validation shape; it never touches the node's shared daemon.
 pack_sha=$(cut -d' ' -f1 "$PACK.sha256")
+# The validation rank must match the pack's own TP shard (header u32 at
+# offset 100): rank0N packs validate as rank N.
+validate_tp_rank=$(python3 -c 'import struct,sys; print(struct.unpack_from("<I", open(sys.argv[1],"rb").read(120), 100)[0])' "$PACK")
 # sockaddr_un caps the path at 108 bytes and the queue checkout path is
 # long: keep the private validation socket under /tmp instead.
 weightd_socket="/tmp/qwen38-27b-lane-build-weightd-${SPARK_QUEUE_ATTEMPT:-$$}.sock"
@@ -92,7 +95,7 @@ SPARK_WEIGHTD_PACK_SHA256="$pack_sha" \
 make -j4 -C modules/qwen38_27b_resident_decode_stage \
     CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
     STAGE_PACK_PATH="$(cd "$(dirname "$PACK")" && pwd)/$(basename "$PACK")" \
-    ALLOW_UNQUALIFIED_EXECUTION=1 TP_DEGREE=4 TP_RANK=0 TP_STANDALONE=1 \
+    ALLOW_UNQUALIFIED_EXECUTION=1 TP_DEGREE=4 TP_RANK=$validate_tp_rank TP_STANDALONE=1 \
     STAGE_COUNT=1 STAGE_INDEX=0 STAGE_FIRST_LAYER=0 STAGE_LAYER_COUNT=64 \
     MAX_ACTIVE_SEQUENCES=16 KV_BLOCK_COUNT=256 \
     publish > "$receipts/module-publish.log" 2>&1
