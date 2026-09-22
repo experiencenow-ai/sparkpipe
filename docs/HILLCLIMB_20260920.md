@@ -2298,3 +2298,35 @@ bounded dir), (b) reproduce → the core names the faulting frame (the
 12:30-era CUDA-context class is the prime suspect: chunk creation on
 the worker context), (c) fix → the warmer completes → agent-driven
 post-start warming → recycle-proof permanently-warm serving.
+
+## 09-23 14:00 TICK — the crash hunt's elimination ledger; a traceless SIGKILL
+
+INSTRUMENTATION LANDED: bounded cores for the weightd via the agent's
+own launch (hub core script patched: ulimit -c 4000000 + cd ~/wdcore —
+agents pick it up through the core manifest sync; verified live on the
+daemon's /proc limits). THE CORE-ENABLED DAEMON DIED AGAIN MID-CREATION
+WITH NO CORE = SIGKILL-class.
+
+THE ELIMINATION LEDGER (each ruled out by its missing record):
+- earlyoom: no kill lines (thresholds 7%/3.5%; mem never below 63%)
+- kernel OOM: no records
+- the agent's sha-recycle: no announces in the death windows
+- the daemon's self-exit: ZERO exit() paths mid-flight (latch exits at
+  boot only)
+- GPU hardware: healthy, no Xids, no retired pages
+- my supervisor: dead before the last deaths
+
+THE DUEL DOCUMENTED (rotated logs): overlapping restart sources — the
+agent's ~2-min backoff cadence + challengers taking the latch ("held by
+a live weightd; exiting 0 idempotent" ×3) + the core-enabled solo
+daemon (12:59:10) still died at 13:04 with NO challenger kill line in
+its successor's log. THE KILLER REMAINS UNATTRIBUTED — a traceless
+SIGKILL during the creation-class acquire.
+
+NEXT INSTRUMENTS (the killer hunt): (a) a signal-delivery watcher
+(auditd or a privileged eBPF/proc-connector probe naming the kill's
+sender pid), (b) the creation path read for anything the environment
+would punish (huge host staging spikes visible in earlyoom's 5s memory
+reports DURING a warm — watch avail memory live while warming), (c) the
+syslog-per-second capture during one warm run (the record may exist
+outside my greps).
