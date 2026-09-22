@@ -860,6 +860,17 @@ static SparkStatus SparkQwen38MaxModuleInitializeTpCollective(SparkQwen38MaxModu
 	SparkStatus status;
 	if ( state->tp_degree == 1u )
 		return(SPARK_STATUS_OK);
+	/* The unqualified module tier (publish validation, single node) runs
+	   the serving shard geometry WITHOUT the inter-node mesh: the
+	   collective stays closed and the hidden allreduce short-circuits to
+	   the local partial. Values stay finite and deterministic; the
+	   qualified serving path (residentd) always builds the real mesh. */
+	if ( state->allow_unqualified_execution != 0u )
+	{
+		fprintf(stderr,"%s tp_collective_skipped (unqualified module tier) degree=%u rank=%u\n",
+			SPARK_QWEN38_MAX_MODULE_TAG,state->tp_degree,state->tp_rank);
+		return(SPARK_STATUS_OK);
+	}
 	memset(&topology,0,sizeof(topology));
 	topology.abi_version = SPARK_TP_DEVICE_COLLECTIVE_TOPOLOGY_ABI_VERSION;
 	topology.descriptor_bytes = SPARK_TP_DEVICE_COLLECTIVE_TOPOLOGY_BYTES;
@@ -925,6 +936,11 @@ static SparkStatus SparkQwen38MaxModuleTpAllReduceHidden(SparkQwen38MaxModuleSta
 	uint32_t polls,flag;
 	SparkStatus status;
 	if ( state->tp_degree == 1u )
+		return(SPARK_STATUS_OK);
+	/* Unqualified module tier: the collective never opened (see
+	   SparkQwen38MaxModuleInitializeTpCollective) - the local partial IS
+	   the whole for this tier's finite/deterministic checks. */
+	if ( state->allow_unqualified_execution != 0u )
 		return(SPARK_STATUS_OK);
 	if ( state->tp_collective_initialized == 0u )
 		SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
