@@ -15,7 +15,7 @@ extern "C" {
 
 #define SPARK_WEIGHTD_CLIENT_TIMEOUT_DEFAULT_NS UINT64_C(10000000000)
 
-#define SPARK_WEIGHTD_IPC_ABI_VERSION 5u
+#define SPARK_WEIGHTD_IPC_ABI_VERSION 6u
 #define SPARK_WEIGHTD_IPC_MAGIC UINT32_C(0x57444953)
 
 #define SPARK_WEIGHTD_ID_BYTES 64u
@@ -83,7 +83,7 @@ extern "C" {
 #define SPARK_WEIGHTD_MESH_BUFFER_BYTES \
     ((uint64_t)SPARK_WEIGHTD_MESH_SLOT_BYTES * \
      SPARK_WEIGHTD_MESH_SLOTS_PER_BAND * SPARK_WEIGHTD_MESH_BANDS)
-#define SPARK_WEIGHTD_MESH_DOORBELL_BYTES 16384u
+#define SPARK_WEIGHTD_MESH_DOORBELL_BYTES 65536u
 #define SPARK_WEIGHTD_MESH_REGION_BYTES \
     (SPARK_WEIGHTD_MESH_BUFFER_BYTES + (uint64_t)SPARK_WEIGHTD_MESH_DOORBELL_BYTES)
 #define SPARK_WEIGHTD_MESH_DOORBELL_OFFSET SPARK_WEIGHTD_MESH_BUFFER_BYTES
@@ -108,7 +108,43 @@ extern "C" {
     (SPARK_WEIGHTD_MESH_SHIPPED_OFFSET + \
      (((band) * SPARK_WEIGHTD_MESH_RANKS_PER_BAND + (rank)) * \
          SPARK_WEIGHTD_MESH_SHIPPED_CELL_BYTES))
+#define SPARK_WEIGHTD_MESH_WAIT_VERSION 1u
+#define SPARK_WEIGHTD_MESH_WAIT_SHIPPED 1u
+#define SPARK_WEIGHTD_MESH_WAIT_PEERS 2u
+#define SPARK_WEIGHTD_MESH_WAIT_ERROR_CANCELLED UINT64_C(0xFFFFFFFFFE000000)
+#define SPARK_WEIGHTD_MESH_WAIT_ENTRY_BYTES 128u
+#define SPARK_WEIGHTD_MESH_WAIT_OFFSET \
+    (SPARK_WEIGHTD_MESH_SHIPPED_OFFSET + \
+     (uint64_t)SPARK_WEIGHTD_MESH_DOORBELL_RANK_CELLS * \
+        SPARK_WEIGHTD_MESH_SHIPPED_CELL_BYTES)
+#define SPARK_WEIGHTD_MESH_WAIT_ENTRY(band,rank) \
+    (SPARK_WEIGHTD_MESH_WAIT_OFFSET + \
+     ((uint64_t)(band) * SPARK_WEIGHTD_MESH_RANKS_PER_BAND + (rank)) * \
+        SPARK_WEIGHTD_MESH_WAIT_ENTRY_BYTES)
+
+typedef struct SparkWeightdMeshWaitRequest
+{
+    uint64_t request_id;
+    uint64_t kind;
+    uint64_t tag;
+    uint64_t peer_mask;
+    uint64_t cancel_expected;
+    uint64_t timeout_ns;
+    uint64_t version;
+    uint64_t upstream_error;
+    uint64_t ready;
+    uint64_t error;
+    uint64_t diag;
+    uint64_t reserved[5];
+} SparkWeightdMeshWaitRequest;
 #if !defined(__cplusplus)
+_Static_assert(sizeof(SparkWeightdMeshWaitRequest) == SPARK_WEIGHTD_MESH_WAIT_ENTRY_BYTES &&
+    offsetof(SparkWeightdMeshWaitRequest,ready) == 64u,
+    "mesh wait request and ready occupy distinct cache lines");
+_Static_assert(SPARK_WEIGHTD_MESH_WAIT_OFFSET % SPARK_WEIGHTD_MESH_WAIT_ENTRY_BYTES == 0u &&
+    SPARK_WEIGHTD_MESH_WAIT_OFFSET - SPARK_WEIGHTD_MESH_DOORBELL_OFFSET +
+    (uint64_t)SPARK_WEIGHTD_MESH_DOORBELL_RANK_CELLS * SPARK_WEIGHTD_MESH_WAIT_ENTRY_BYTES <=
+    SPARK_WEIGHTD_MESH_DOORBELL_BYTES,"mesh wait requests fit the doorbell page");
 _Static_assert(SPARK_WEIGHTD_MESH_DOORBELL_RANK_CELLS * \
     SPARK_WEIGHTD_MESH_DOORBELL_ENTRY_BYTES <= SPARK_WEIGHTD_MESH_DOORBELL_BYTES,
     "doorbell entries must fit the doorbell page");

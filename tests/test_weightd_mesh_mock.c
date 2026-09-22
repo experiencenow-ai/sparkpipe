@@ -22,7 +22,7 @@
 #endif
 
 #define TEST_MESH_PEERS (SPARK_WEIGHTD_MESH_RANKS_PER_BAND - 1u)
-#define TEST_MESH_MAGIC UINT64_C(0x4d45534830303033)
+#define TEST_MESH_MAGIC UINT64_C(0x4d45534830303034)
 #define TEST_MESH_LIVE_DIR "/tmp/weightd-mesh"
 
 typedef struct TestMeshRecord
@@ -498,6 +498,196 @@ static uint32_t test_mesh_owner_count(void)
     return count;
 }
 
+static SparkWeightdMeshWaitRequest *test_wait_request(uint32_t band,uint32_t rank)
+{
+    return (SparkWeightdMeshWaitRequest *)((uint8_t *)weightd_mesh.recv_buffer +
+        SPARK_WEIGHTD_MESH_WAIT_ENTRY(band,rank));
+}
+
+static uint64_t *test_peer_tail(uint32_t band,uint32_t rank,uint64_t tag)
+{
+    uint64_t slot = (uint64_t)band * SPARK_WEIGHTD_MESH_SLOTS_PER_BAND +
+        rank * SPARK_WEIGHTD_MESH_SLOTS_PER_RANK +
+        ((tag - 1u) & (SPARK_WEIGHTD_MESH_SLOTS_PER_RANK - 1u));
+    return (uint64_t *)((uint8_t *)weightd_mesh.recv_buffer +
+        (slot + 1u) * SPARK_WEIGHTD_MESH_SLOT_BYTES - sizeof(uint64_t));
+}
+
+static uint64_t test_wait_publish(SparkWeightdMeshWaitRequest *request,
+    uint64_t kind,uint64_t tag,uint64_t mask,uint64_t cancel)
+{
+    uint64_t id = request->request_id + 1u;
+    request->ready = 0u;
+    request->error = UINT64_C(0xdeadbeef);
+    request->diag = UINT64_C(0xabcdef);
+    request->kind = kind;
+    request->tag = tag;
+    request->peer_mask = mask;
+    request->cancel_expected = cancel;
+    request->timeout_ns = 1000u;
+    request->version = SPARK_WEIGHTD_MESH_WAIT_VERSION;
+    request->upstream_error = 0u;
+    __atomic_store_n(&request->request_id,id,__ATOMIC_RELEASE);
+    return id;
+}
+
+static void test_mesh_hardware_wait(void)
+{
+    const uint32_t band = 2u,rank = 0u;
+    const uint32_t index = band * SPARK_WEIGHTD_MESH_RANKS_PER_BAND + rank;
+    const uint64_t tag = (UINT64_C(17) << 32u) | 1u;
+    SparkWeightdMeshWaitRequest *request = test_wait_request(band,rank);
+    uint64_t *cancel = (uint64_t *)((uint8_t *)weightd_mesh.recv_buffer +
+        SPARK_WEIGHTD_MESH_DOORBELL_OFFSET +
+        (SPARK_WEIGHTD_MESH_DOORBELL_CELL_CANCEL + 2u * band) *
+            SPARK_WEIGHTD_MESH_DOORBELL_ENTRY_BYTES);
+    uint64_t *peer1 = test_peer_tail(band,1u,tag);
+    uint64_t *peer2 = test_peer_tail(band,2u,tag);
+    uint64_t id,old_error,old_diag;
+    uint32_t first,last,invalid;
+    CHECK(SPARK_WEIGHTD_IPC_ABI_VERSION == 6u &&
+        SPARK_WEIGHTD_MESH_WAIT_OFFSET - SPARK_WEIGHTD_MESH_DOORBELL_OFFSET == 11264u &&
+        (uint8_t *)test_wait_request(15u,15u) + sizeof(*request) <=
+            (uint8_t *)weightd_mesh.recv_buffer + SPARK_WEIGHTD_MESH_REGION_BYTES &&
+        sizeof(*request) == 128u && offsetof(SparkWeightdMeshWaitRequest,ready) == 64u,
+        "ABI6 gate geometry has separate producer and terminal cache lines within registered region");
+    CHECK(SparkWeightdMeshSetActivity(1u) == SPARK_STATUS_OK,
+        "hardware wait producer begins before publishing any GPU request");
+    id = test_wait_publish(request,SPARK_WEIGHTD_MESH_WAIT_SHIPPED,0u,0u,0u);
+    CHECK(SparkWeightdMeshHasWaitWork() != 0u,"unhandled gate prevents idle");
+    SparkWeightdMeshWaitRequestsPoll(100u);
+    CHECK(__atomic_load_n(&request->ready,__ATOMIC_ACQUIRE) == 1u &&
+        request->error == 0u && weightd_mesh.wait_terminal[index] == id &&
+        SparkWeightdMeshHasWaitWork() == 0u,"initial source credit terminates exactly once");
+    first = spark_stub_ibv_posted_count();
+    CHECK(test_post_slot(band,rank,tag,0x6u) == SPARK_STATUS_OK,
+        "source credit test owns actual payload and tail WRs for two peers");
+    last = spark_stub_ibv_posted_count();
+    assert(last - first == 4u);
+    test_wait_publish(request,SPARK_WEIGHTD_MESH_WAIT_SHIPPED,tag,0u,0u);
+    SparkWeightdMeshWaitRequestsPoll(100u);
+    CHECK(request->ready == 0u && test_shipped(band,rank) == 0u,
+        "posting WRs cannot open source reuse gate");
+    test_complete_range(first,last - 1u);
+    SparkWeightdMeshWaitRequestsPoll(101u);
+    CHECK(request->ready == 0u && test_shipped(band,rank) == 0u,
+        "partial NIC completions retain source credit");
+    test_complete_range(last - 1u,last);
+    SparkWeightdMeshWaitRequestsPoll(102u);
+    CHECK(__atomic_load_n(&request->ready,__ATOMIC_ACQUIRE) == 1u &&
+        request->error == 0u && test_shipped(band,rank) == tag,
+        "last terminal WR opens exact source credit gate");
+    test_wait_publish(request,SPARK_WEIGHTD_MESH_WAIT_SHIPPED,tag - 2u,0u,0u);
+    SparkWeightdMeshWaitRequestsPoll(200u);
+    CHECK(request->ready == 0u,"newer shipped tag cannot satisfy older full tag");
+    SparkWeightdMeshWaitRequestsPoll(1200u);
+    CHECK(__atomic_load_n(&request->ready,__ATOMIC_ACQUIRE) == 1u &&
+        request->error == tag - 2u && request->diag == tag &&
+        test_shipped(band,rank) == tag,"timeout reports observed credit without forging shipment");
+    *peer1 = 1u;
+    *peer2 = tag;
+    test_wait_publish(request,SPARK_WEIGHTD_MESH_WAIT_PEERS,tag,0x6u,0u);
+    SparkWeightdMeshWaitRequestsPoll(2000u);
+    CHECK(request->ready == 0u,"stale epoch with matching round cannot release peer wait");
+    *peer1 = tag;
+    *peer2 = tag + 2u;
+    SparkWeightdMeshWaitRequestsPoll(2001u);
+    CHECK(request->ready == 0u,"future peer round cannot satisfy exact tag");
+    *peer2 = tag;
+    SparkWeightdMeshWaitRequestsPoll(2002u);
+    CHECK(__atomic_load_n(&request->ready,__ATOMIC_ACQUIRE) == 1u && request->error == 0u,
+        "all requested peer tails release gate without waiting for unrequested rank");
+    *peer2 = 0u;
+    test_wait_publish(request,SPARK_WEIGHTD_MESH_WAIT_PEERS,tag,0x2u,0u);
+    SparkWeightdMeshWaitRequestsPoll(3000u);
+    CHECK(request->ready == 1u && request->error == 0u,"sparse tree waits only on its declared peer");
+    old_error = request->error;
+    old_diag = request->diag;
+    *cancel = 9u;
+    SparkWeightdMeshWaitRequestsPoll(4000u);
+    CHECK(request->ready == 1u && request->error == old_error && request->diag == old_diag,
+        "late cancellation never rewrites a terminal record");
+    id = test_wait_publish(request,SPARK_WEIGHTD_MESH_WAIT_PEERS,tag,0x4u,0u);
+    SparkWeightdMeshWaitRequestsPoll(4000u);
+    CHECK(__atomic_load_n(&request->ready,__ATOMIC_ACQUIRE) == 1u &&
+        request->error == (SPARK_WEIGHTD_MESH_WAIT_ERROR_CANCELLED | tag) &&
+        request->diag == 9u && weightd_mesh.wait_terminal[index] == id &&
+        *peer2 == 0u && test_shipped(band,rank) == tag,
+        "cancel publishes error and terminal identity before ready without forged peer progress");
+    request->request_id = id - 1u;
+    request->ready = 0u;
+    request->error = 123u;
+    SparkWeightdMeshWaitRequestsPoll(4001u);
+    CHECK(request->ready == 0u && request->error == 123u &&
+        SparkWeightdMeshHasWaitWork() == 0u,"stale handled ID cannot regain terminal-write ownership");
+    request->request_id = id;
+    request->ready = 1u;
+    test_wait_publish(request,SPARK_WEIGHTD_MESH_WAIT_PEERS,tag,0x4u,9u);
+    request->upstream_error = UINT64_C(0x123456789);
+    SparkWeightdMeshWaitRequestsPoll(5000u);
+    CHECK(request->ready == 1u && request->error == UINT64_C(0x123456789) && *peer2 == 0u,
+        "upstream error drains later graph gate without nonexistent peer arrivals");
+    for (invalid=0u; invalid<8u; invalid++)
+    {
+        test_wait_publish(request,SPARK_WEIGHTD_MESH_WAIT_PEERS,tag,0x4u,9u);
+        if ( invalid == 0u ) request->version++;
+        if ( invalid == 1u ) request->kind = 99u;
+        if ( invalid == 2u ) request->peer_mask = 0u;
+        if ( invalid == 3u ) request->peer_mask = 1u;
+        if ( invalid == 4u ) request->peer_mask = 0x10u;
+        if ( invalid == 5u ) request->tag = UINT64_C(17) << 32u;
+        if ( invalid == 6u ) request->kind = SPARK_WEIGHTD_MESH_WAIT_SHIPPED;
+        if ( invalid == 7u ) request->timeout_ns = 0u;
+        SparkWeightdMeshWaitRequestsPoll(6000u);
+        CHECK(__atomic_load_n(&request->ready,__ATOMIC_ACQUIRE) == 1u &&
+            request->error == UINT64_MAX,"invalid gate metadata terminates with explicit failure");
+    }
+    test_wait_publish(request,SPARK_WEIGHTD_MESH_WAIT_PEERS,tag,0x4u,9u);
+    SparkWeightdMeshWaitRequestsPoll(7000u);
+    assert(request->ready == 0u);
+    test_wait_publish(request,SPARK_WEIGHTD_MESH_WAIT_PEERS,tag,0x4u,9u);
+    SparkWeightdMeshWaitRequestsPoll(7001u);
+    CHECK(request->ready == 1u && request->error == UINT64_MAX,
+        "new ID cannot replace an outstanding consumer before terminal release");
+    {
+        SparkWeightdMeshWaitRequest *failed = test_wait_request(3u,rank);
+        first = spark_stub_ibv_posted_count();
+        spark_stub_ibv_fail_post_call(spark_stub_ibv_post_send_calls() + 2u);
+        CHECK(test_post_slot(3u,rank,tag,0x6u) == SPARK_STATUS_IO_ERROR,
+            "hardware gate sees actual partial transport post failure");
+        spark_stub_ibv_fail_post_call(0u);
+        last = spark_stub_ibv_posted_count();
+        test_wait_publish(failed,SPARK_WEIGHTD_MESH_WAIT_SHIPPED,tag,0u,0u);
+        SparkWeightdMeshWaitRequestsPoll(7100u);
+        CHECK(failed->ready == 1u && failed->error == UINT64_MAX &&
+            test_shipped(3u,rank) == 0u && SparkWeightdMeshHasPending() != 0u,
+            "failed source gate drains GPU while accepted NIC reads remain owned");
+        test_complete_range(first,last);
+        CHECK(test_shipped(3u,rank) == 0u && SparkWeightdMeshHasPending() == 0u,
+            "terminal NIC failure never creates successful source credit");
+        failed = test_wait_request(band,4u);
+        test_wait_publish(failed,SPARK_WEIGHTD_MESH_WAIT_SHIPPED,0u,0u,9u);
+        SparkWeightdMeshWaitRequestsPoll(7200u);
+        CHECK(failed->ready == 1u && failed->error == UINT64_MAX,
+            "producer rank outside configured participants cannot claim a gate");
+    }
+    test_wait_publish(request,SPARK_WEIGHTD_MESH_WAIT_SHIPPED,0u,0u,9u);
+    weightd_mesh.mesh_ready = 0u;
+    SparkWeightdMeshWaitForActivity();
+    SparkWeightdMeshWaitRequestsPoll(7300u);
+    CHECK(request->ready == 1u && request->error == UINT64_MAX,
+        "pending gate terminates explicitly if mesh loses readiness");
+    weightd_mesh.mesh_ready = 1u;
+    CHECK(SparkWeightdMeshSetActivity(0u) == SPARK_STATUS_OK,"hardware wait producer ends after gates drain");
+    test_wait_publish(request,SPARK_WEIGHTD_MESH_WAIT_SHIPPED,0u,0u,9u);
+    CHECK(SparkWeightdMeshHasWaitWork() != 0u,"unhandled request remains work after last producer ends");
+    SparkWeightdMeshWaitForActivity();
+    SparkWeightdMeshWaitRequestsPoll(8000u);
+    CHECK(request->ready == 1u && request->error == UINT64_MAX &&
+        SparkWeightdMeshHasWaitWork() == 0u,"request without live producer fails before returning idle");
+    *cancel = 0u;
+}
+
 static void test_mesh_activity_protocol(uint32_t pending_first)
 {
     SparkWeightdServerConfig config;
@@ -848,6 +1038,8 @@ int main(void)
         "broadcast outside configured group rejects before posting");
     CHECK(test_post_slot(0u,0u,1u,1u << 4u) == SPARK_STATUS_INVALID_ARGUMENT,
         "doorbell cannot send to an absent participant");
+    test_mesh_hardware_wait();
+    post_before = spark_stub_ibv_post_send_calls();
     protocol_post_first = spark_stub_ibv_posted_count();
     {
         volatile uint64_t *entry = (volatile uint64_t *)((uint8_t *)weightd_mesh.recv_buffer +

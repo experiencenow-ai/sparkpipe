@@ -21,7 +21,7 @@
     (SPARK_WEIGHTD_MESH_RANKS_PER_BAND - 1u)
 #define SPARK_WEIGHTD_MESH_CQ_ENTRIES 16384u
 #define SPARK_WEIGHTD_MESH_SEND_CAPACITY 64u
-#define SPARK_WEIGHTD_MESH_MAGIC UINT64_C(0x4d45534830303033)
+#define SPARK_WEIGHTD_MESH_MAGIC UINT64_C(0x4d45534830303034)
 #ifndef SPARK_WEIGHTD_MESH_DIR
 #define SPARK_WEIGHTD_MESH_DIR "/tmp/weightd-mesh"
 #endif
@@ -113,6 +113,9 @@ typedef struct SparkWeightdMesh
     uint32_t ship_log_key_budget;
     SparkWeightdMeshTransfer transfers[SPARK_WEIGHTD_MESH_BANDS *
         SPARK_WEIGHTD_MESH_RANKS_PER_BAND];
+    uint64_t wait_seen[SPARK_WEIGHTD_MESH_DOORBELL_RANK_CELLS];
+    uint64_t wait_terminal[SPARK_WEIGHTD_MESH_DOORBELL_RANK_CELLS];
+    uint64_t wait_started[SPARK_WEIGHTD_MESH_DOORBELL_RANK_CELLS];
     uint32_t activity_owners;
     uint32_t mesh_active;
     uint32_t mesh_ready;
@@ -352,13 +355,123 @@ static uint32_t SparkWeightdMeshHasDoorbellWork(void)
     return 0u;
 }
 
+static uint32_t SparkWeightdMeshHasWaitWork(void)
+{
+    uint32_t index;
+    if ( weightd_mesh.recv_buffer == 0 )
+        return 0u;
+    for (index=0u; index<SPARK_WEIGHTD_MESH_DOORBELL_RANK_CELLS; index++)
+    {
+        SparkWeightdMeshWaitRequest *request = (SparkWeightdMeshWaitRequest *)(
+            (uint8_t *)weightd_mesh.recv_buffer + SPARK_WEIGHTD_MESH_WAIT_OFFSET +
+            (uint64_t)index * SPARK_WEIGHTD_MESH_WAIT_ENTRY_BYTES);
+        if ( __atomic_load_n(&request->request_id,__ATOMIC_ACQUIRE) >
+             weightd_mesh.wait_terminal[index] )
+            return 1u;
+    }
+    return 0u;
+}
+
+static void SparkWeightdMeshWaitRequestsPoll(uint64_t now_ns)
+{
+    uint32_t index;
+    if ( weightd_mesh.recv_buffer == 0 )
+        return;
+    for (index=0u; index<SPARK_WEIGHTD_MESH_DOORBELL_RANK_CELLS; index++)
+    {
+        SparkWeightdMeshWaitRequest *request = (SparkWeightdMeshWaitRequest *)(
+            (uint8_t *)weightd_mesh.recv_buffer + SPARK_WEIGHTD_MESH_WAIT_OFFSET +
+            (uint64_t)index * SPARK_WEIGHTD_MESH_WAIT_ENTRY_BYTES);
+        uint64_t id = __atomic_load_n(&request->request_id,__ATOMIC_ACQUIRE);
+        uint64_t error = 0u,diag = 0u;
+        uint32_t complete = 0u;
+        uint32_t band = index / SPARK_WEIGHTD_MESH_RANKS_PER_BAND;
+        uint32_t rank = index % SPARK_WEIGHTD_MESH_RANKS_PER_BAND;
+        uint64_t cancel;
+        if ( id == 0u || id <= weightd_mesh.wait_terminal[index] )
+            continue;
+        if ( weightd_mesh.wait_seen[index] != id )
+        {
+            if ( weightd_mesh.wait_seen[index] > weightd_mesh.wait_terminal[index] )
+                error = UINT64_MAX;
+            weightd_mesh.wait_seen[index] = id;
+            weightd_mesh.wait_started[index] = now_ns;
+        }
+        cancel = __atomic_load_n((uint64_t *)((uint8_t *)weightd_mesh.recv_buffer +
+            SPARK_WEIGHTD_MESH_DOORBELL_OFFSET +
+            (uint64_t)(SPARK_WEIGHTD_MESH_DOORBELL_CELL_CANCEL + 2u * band) *
+                SPARK_WEIGHTD_MESH_DOORBELL_ENTRY_BYTES),__ATOMIC_ACQUIRE);
+        if ( request->upstream_error != 0u )
+            error = request->upstream_error;
+        else if ( request->version != SPARK_WEIGHTD_MESH_WAIT_VERSION ||
+                  (request->kind != SPARK_WEIGHTD_MESH_WAIT_SHIPPED &&
+                   request->kind != SPARK_WEIGHTD_MESH_WAIT_PEERS) ||
+                  request->timeout_ns == 0u || now_ns == 0u ||
+                  (weightd_mesh.rank_mask & (1u << rank)) == 0u ||
+                  (request->tag != 0u && (uint32_t)request->tag == 0u) ||
+                  (request->kind == SPARK_WEIGHTD_MESH_WAIT_SHIPPED && request->peer_mask != 0u) ||
+                  (request->kind == SPARK_WEIGHTD_MESH_WAIT_PEERS &&
+                   (request->tag == 0u || request->peer_mask == 0u ||
+                    (request->peer_mask & ~(uint64_t)weightd_mesh.rank_mask) != 0u ||
+                    (request->peer_mask & (UINT64_C(1) << rank)) != 0u)) ||
+                  weightd_mesh.activity_owners == 0u || weightd_mesh.mesh_ready == 0u )
+            error = UINT64_MAX;
+        else if ( cancel != request->cancel_expected )
+        {
+            error = SPARK_WEIGHTD_MESH_WAIT_ERROR_CANCELLED | request->tag;
+            diag = cancel;
+        }
+        else if ( error == 0u && request->kind == SPARK_WEIGHTD_MESH_WAIT_SHIPPED )
+        {
+            diag = __atomic_load_n((uint64_t *)((uint8_t *)weightd_mesh.recv_buffer +
+                SPARK_WEIGHTD_MESH_SHIPPED_ENTRY(band,rank)),__ATOMIC_ACQUIRE);
+            complete = request->tag == 0u || diag == request->tag;
+            if ( complete == 0u && weightd_mesh.transfers[index].failed != 0u )
+                error = UINT64_MAX;
+        }
+        else if ( error == 0u )
+        {
+            uint32_t peer;
+            uint64_t ring = (request->tag - 1u) & (SPARK_WEIGHTD_MESH_SLOTS_PER_RANK - 1u);
+            complete = 1u;
+            for (peer=0u; peer<SPARK_WEIGHTD_MESH_RANKS_PER_BAND; peer++)
+            {
+                uint64_t slot,tail;
+                if ( (request->peer_mask & (UINT64_C(1) << peer)) == 0u )
+                    continue;
+                slot = (uint64_t)band * SPARK_WEIGHTD_MESH_SLOTS_PER_BAND +
+                    (uint64_t)peer * SPARK_WEIGHTD_MESH_SLOTS_PER_RANK + ring;
+                tail = __atomic_load_n((uint64_t *)((uint8_t *)weightd_mesh.recv_buffer +
+                    (slot + 1u) * SPARK_WEIGHTD_MESH_SLOT_BYTES - 8u),__ATOMIC_ACQUIRE);
+                if ( tail != request->tag )
+                {
+                    complete = 0u;
+                    diag = tail;
+                    break;
+                }
+            }
+        }
+        if ( complete == 0u && error == 0u &&
+             now_ns - weightd_mesh.wait_started[index] >= request->timeout_ns )
+            error = request->tag != 0u ? request->tag : UINT64_MAX;
+        if ( complete != 0u || error != 0u )
+        {
+            weightd_mesh.wait_terminal[index] = id;
+            __atomic_store_n(&request->error,error,__ATOMIC_RELAXED);
+            __atomic_store_n(&request->diag,diag,__ATOMIC_RELAXED);
+            __atomic_store_n(&request->ready,1u,__ATOMIC_RELEASE);
+        }
+    }
+}
+
 static void SparkWeightdMeshWaitForActivity(void)
 {
     pthread_mutex_lock(&SparkWeightdMeshWireLock);
-    while ( weightd_mesh.mesh_ready == 0u ||
+    while ( (weightd_mesh.mesh_ready == 0u && SparkWeightdMeshHasWaitWork() == 0u) ||
             (weightd_mesh.activity_owners == 0u &&
              SparkWeightdMeshHasPending() == 0u &&
-             SparkWeightdMeshHasDoorbellWork() == 0u) )
+             SparkWeightdMeshHasDoorbellWork() == 0u &&
+             SparkWeightdMeshHasWaitWork() == 0u) )
         pthread_cond_wait(&SparkWeightdMeshActivityCondition,
             &SparkWeightdMeshWireLock);
     pthread_mutex_unlock(&SparkWeightdMeshWireLock);
@@ -1048,9 +1161,13 @@ static void SparkWeightdMeshDoorbellPoll(void)
     volatile uint64_t *entries;
     uint32_t band;
     uint32_t rank;
-    if ( weightd_mesh.mesh_ready == 0u ) return;
+    struct timespec now;
+    uint64_t now_ns;
     SparkWeightdMeshDrainCq();
     pthread_mutex_lock(&SparkWeightdMeshWireLock);
+    now_ns = clock_gettime(CLOCK_MONOTONIC,&now) == 0 ?
+        (uint64_t)now.tv_sec * UINT64_C(1000000000) + (uint64_t)now.tv_nsec : 0u;
+    SparkWeightdMeshWaitRequestsPoll(now_ns);
     if ( weightd_mesh.mesh_ready == 0u ||
          SparkWeightdMeshRealtimeNs() < weightd_mesh.quiesce_until_ns )
     {
@@ -1138,6 +1255,7 @@ static void SparkWeightdMeshDoorbellPoll(void)
                     (uint32_t)destinations);
             }
         }
+    SparkWeightdMeshWaitRequestsPoll(now_ns);
     pthread_mutex_unlock(&SparkWeightdMeshWireLock);
 }
 
