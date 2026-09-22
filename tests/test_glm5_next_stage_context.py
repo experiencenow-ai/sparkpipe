@@ -8,8 +8,10 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 HARNESS = r'''
 #include <assert.h>
+#include <errno.h>
 #include "modules/glm5_next_resident_decode_stage/source/spark_glm5_next_resident_decode_stage_module.c"
 #include "cache/kv_page_store.c"
+#include "src/spark_speculation_policy.c"
 #define SparkKvBackendInitialize SparkTestRealKvBackendInitialize
 #include "cache/kv_model_table.c"
 #undef SparkKvBackendInitialize
@@ -19,7 +21,7 @@ HARNESS = r'''
 static SparkGlm5NextModuleState state;
 static uint32_t COPY_COUNT,CANCEL_COUNT,STREAM_QUERY_COUNT,EXPECTED_CANCEL_COUNT,END_COUNT;
 static SparkStatus END_STATUS;
-static uint32_t HOST_MODE,HOST_COUNT;
+static uint32_t HOST_MODE,HOST_COUNT,IN_CUDA_CALLBACK,MTP_COMMITS;
 static cudaHostFn_t HOST_FUNCTIONS[16];
 static void *HOST_CONTEXTS[16];
 static pthread_t HOST_THREAD;
@@ -36,6 +38,7 @@ static void *complete_delayed(void *context)
 cudaError_t cudaLaunchHostFunc(cudaStream_t stream,cudaHostFn_t function,void *context)
 {
 	uint32_t index = HOST_COUNT++;
+	assert(IN_CUDA_CALLBACK == 0u);
 	(void)stream;
 	assert(index < 16u);
 	HOST_FUNCTIONS[index] = function;
@@ -43,7 +46,11 @@ cudaError_t cudaLaunchHostFunc(cudaStream_t stream,cudaHostFn_t function,void *c
 	if ( HOST_MODE == 3u )
 		return(cudaErrorInvalidValue);
 	if ( HOST_MODE == 0u )
+	{
+		IN_CUDA_CALLBACK = 1u;
 		function(context);
+		IN_CUDA_CALLBACK = 0u;
+	}
 	if ( HOST_MODE == 2u )
 		assert(pthread_create(&HOST_THREAD,0,complete_delayed,(void *)(uintptr_t)index) == 0);
 	return(cudaSuccess);
@@ -113,7 +120,7 @@ cudaError_t cudaMemsetAsync(void *pointer,int value,size_t bytes,cudaStream_t st
 
 cudaError_t cudaStreamQuery(cudaStream_t stream)
 {
-	assert(stream != 0 || state.execution_stream == 0);
+	assert(IN_CUDA_CALLBACK == 0u && (stream != 0 || state.execution_stream == 0));
 	STREAM_QUERY_COUNT++;
 	return(DRAIN_STATUS);
 }
@@ -132,6 +139,7 @@ const char *cudaGetErrorString(cudaError_t error)
 
 cudaError_t cudaMemcpy(void *destination,const void *source,size_t bytes,cudaMemcpyKind kind)
 {
+	assert(IN_CUDA_CALLBACK == 0u);
 	(void)kind;
 	memcpy(destination,source,bytes);
 	return(cudaSuccess);
@@ -166,6 +174,7 @@ SparkStatus SparkWeightdWorkerSubmit(SparkWeightdWorker *worker,SparkWeightdWork
 {
 	if ( worker != (SparkWeightdWorker *)(uintptr_t)1u )
 		return(SPARK_STATUS_INVALID_ARGUMENT);
+	assert(pthread_mutex_trylock(&state.completion_queue_lock) == EBUSY);
 	if ( WORK_STATUS == SPARK_STATUS_OK )
 	{
 		COMPLETION_WORK = function;
@@ -292,6 +301,66 @@ static void check_graph_expert_ownership(uint32_t first,uint32_t layers,uint32_t
 	assert(PIN_RECORDS == leases + 1u && PIN_RELEASES == leases + 1u);
 }
 
+int32_t SparkGlm5NextLaunchCudaMtpCommit(const SparkGlm5NextCudaWave *wave,uint32_t committed_steps)
+{
+	assert(IN_CUDA_CALLBACK == 0u && wave != 0 && committed_steps == 1u);
+	MTP_COMMITS++;
+	return(0);
+}
+
+static void check_mtp_callback_handoff(SparkStatus submit_status)
+{
+	uint16_t hidden[SPARK_GLM5_NEXT_MODEL_HIDDEN_DIMENSION],saved[SPARK_GLM5_NEXT_MODEL_HIDDEN_DIMENSION];
+	uint32_t tokens[3] = {11u,12u,13u},errors[6] = {0},host_errors[6] = {0};
+	SparkGlm5NextTpChain *chain = calloc(1u,sizeof(*chain));
+	SparkWeightdWorkFunction resolver;
+	void *resolver_context;
+	memset(&state,0,sizeof(state));
+	memset(hidden,0xa5,sizeof(hidden));
+	memset(saved,0,sizeof(saved));
+	assert(chain != 0 && pthread_mutex_init(&state.completion_queue_lock,0) == 0);
+	state.completion_worker = (SparkWeightdWorker *)(uintptr_t)1u;
+	state.mtp_lane_hidden_bf16 = saved;
+	state.completions[0].state = &state;
+	state.completions[0].mtp_draft_tokens[0] = 10u;
+	state.completions[0].mtp_draft_tokens[1] = 12u;
+	state.slots[0].host_output_token_ids = tokens;
+	state.slots[0].hc_mean_bf16 = hidden;
+	state.slots[0].kv_access_error = errors;
+	state.slots[0].host_kv_access_error = host_errors;
+	chain->state = &state;
+	chain->slot = &state.slots[0];
+	chain->active = 1u;
+	atomic_store(&state.tp_chain_active,1u);
+	atomic_store(&state.slot_states[0],SPARK_STAGE_MODULE_SLOT_CLAIMED);
+	WORK_STATUS = submit_status;
+	COPY_COUNT = MTP_COMMITS = HOST_COUNT = 0u;
+	HOST_MODE = 0u;
+	COMPLETION_WORK = 0;
+	IN_CUDA_CALLBACK = 1u;
+	SparkGlm5NextMtpResolveHost(chain);
+	IN_CUDA_CALLBACK = 0u;
+	assert(COPY_COUNT == 0u && MTP_COMMITS == 0u && chain->active == 1u);
+	if ( submit_status != SPARK_STATUS_OK )
+	{
+		assert(COMPLETION_WORK == 0 && state.overflow_parked_count == 1u);
+		WORK_STATUS = SPARK_STATUS_OK;
+		pthread_mutex_lock(&state.completion_queue_lock);
+		SparkGlm5NextDrainParkedCompletions(&state);
+		pthread_mutex_unlock(&state.completion_queue_lock);
+	}
+	resolver = COMPLETION_WORK;
+	resolver_context = COMPLETION_CONTEXT;
+	assert(resolver == SparkGlm5NextMtpResolveOnWorker && resolver_context == chain && state.overflow_parked_count == 0u);
+	COMPLETION_WORK = 0;
+	resolver(resolver_context);
+	assert(MTP_COMMITS == 1u && memcmp(hidden,saved,sizeof(hidden)) == 0);
+	assert(state.completions[0].completion.accepted_token_count == 1u);
+	assert(COMPLETION_WORK == SparkGlm5NextCompleteOnWorker && COMPLETION_CONTEXT == &state.completions[0]);
+	assert(atomic_load(&state.tp_chain_active) == 1u && atomic_load(&state.slot_states[0]) == SPARK_STAGE_MODULE_SLOT_CLAIMED);
+	assert(pthread_mutex_destroy(&state.completion_queue_lock) == 0);
+}
+
 static void check_stream_receipt(void)
 {
 	SparkStageModuleCudaWait first = {0},second = {0};
@@ -358,7 +427,16 @@ static void check_chain_ownership(void)
 	DRAIN_STATUS = cudaErrorInvalidValue;
 	assert(SparkGlm5NextClaimTpChain(&state) == SPARK_STATUS_IO_ERROR);
 	assert(atomic_load(&state.terminal_status) == SPARK_STATUS_IO_ERROR && atomic_load(&state.tp_chain_active) == 0u);
+	assert(SparkStageModuleCudaWaitInitialize(&state.stream_wait,(cudaStream_t)state.execution_stream) == SPARK_STATUS_OK);
+	DRAIN_STATUS = cudaErrorNotReady;
+	HOST_MODE = 2u;
+	HOST_COUNT = STREAM_QUERY_COUNT = 0u;
+	assert(SparkGlm5NextBoundedStreamSync(&state,(void *)(uintptr_t)8u,UINT64_C(500000000)) == -1);
+	assert(SparkGlm5NextBoundedStreamSync(&state,state.execution_stream,UINT64_C(500000000)) == 0);
+	assert(pthread_join(HOST_THREAD,0) == 0 && STREAM_QUERY_COUNT == 1u && HOST_COUNT == 1u);
+	assert(SparkStageModuleCudaWaitDestroy(&state.stream_wait) == SPARK_STATUS_OK);
 	DRAIN_STATUS = cudaSuccess;
+	HOST_MODE = 0u;
 }
 
 static int32_t check_cache_transactions(SparkStatus completion_status,SparkStatus end_status,cudaError_t drain_status)
@@ -413,6 +491,9 @@ static int32_t check_cache_transactions(SparkStatus completion_status,SparkStatu
 		return(-25);
 	if ( SparkGlm5NextUploadPageTables(&state,&state.completions[0],0) != SPARK_STATUS_OK || COPY_COUNT != 2u )
 		return(-26);
+	state.execution_stream = (void *)(uintptr_t)7u;
+	assert(SparkStageModuleCudaWaitInitialize(&state.stream_wait,(cudaStream_t)state.execution_stream) == SPARK_STATUS_OK);
+	assert(pthread_mutex_init(&state.completion_queue_lock,0) == 0);
 	state.completions[0].completion.status = completion_status;
 	state.completions[0].completion_function = observe_completion;
 	state.slots[0].host_kv_access_error = errors;
@@ -432,7 +513,9 @@ static int32_t check_cache_transactions(SparkStatus completion_status,SparkStatu
 	if ( COMPLETION_WORK != 0 || atomic_load(&state.slot_states[0]) != SPARK_STAGE_MODULE_SLOT_CLAIMED || fixture.owners[0].phase != SPARK_KV_LANE_TRANSACTION_EXECUTING )
 		return(-28);
 	WORK_STATUS = SPARK_STATUS_OK;
-	SparkGlm5NextCompleteAsync(&state.completions[0]);
+	pthread_mutex_lock(&state.completion_queue_lock);
+	SparkGlm5NextDrainParkedCompletions(&state);
+	pthread_mutex_unlock(&state.completion_queue_lock);
 	if ( COMPLETION_WORK == 0 || atomic_load(&state.slot_states[0]) != SPARK_STAGE_MODULE_SLOT_CLAIMED || fixture.owners[0].phase != SPARK_KV_LANE_TRANSACTION_EXECUTING )
 		return(-29);
 	COMPLETION_WORK(COMPLETION_CONTEXT);
@@ -446,6 +529,8 @@ static int32_t check_cache_transactions(SparkStatus completion_status,SparkStatu
 		assert(fixture.owners[0].phase == (drain_status != cudaSuccess ? SPARK_KV_LANE_TRANSACTION_EXECUTING : SPARK_KV_LANE_TRANSACTION_EMPTY));
 		assert(atomic_load(&state.terminal_status) != SPARK_STATUS_OK);
 		DRAIN_STATUS = cudaSuccess;
+		assert(SparkStageModuleCudaWaitDestroy(&state.stream_wait) == SPARK_STATUS_OK);
+		assert(pthread_mutex_destroy(&state.completion_queue_lock) == 0);
 		pthread_mutex_destroy(&state.kv_mutex);
 		memset(&state,0,sizeof(state));
 		return(0);
@@ -455,6 +540,8 @@ static int32_t check_cache_transactions(SparkStatus completion_status,SparkStatu
 		return(-30);
 	if ( COMPLETION_STATUS != completion_status || atomic_load(&state.slot_states[0]) != SPARK_STAGE_MODULE_SLOT_FREE || atomic_load(&state.lane_states[0]) != SPARK_STAGE_MODULE_SLOT_FREE || atomic_load(&state.lane_states[1]) != SPARK_STAGE_MODULE_SLOT_FREE || (completion_status != SPARK_STATUS_OK && (fixture.pages.cache.sequences[0].sequence_id != 0u || fixture.pages.cache.sequences[1].sequence_id != 0u || shadow[0] != UINT32_MAX)) )
 		return(-27);
+	assert(SparkStageModuleCudaWaitDestroy(&state.stream_wait) == SPARK_STATUS_OK);
+	assert(pthread_mutex_destroy(&state.completion_queue_lock) == 0);
 	pthread_mutex_destroy(&state.kv_mutex);
 	memset(&state,0,sizeof(state));
 	return(0);
@@ -1235,6 +1322,8 @@ int32_t main(void)
 	check_graph_expert_ownership(12u,12u,12u,0u,0u);
 	check_graph_expert_ownership(12u,12u,12u,2u,0u);
 	check_graph_expert_ownership(12u,12u,12u,0u,2u);
+	check_mtp_callback_handoff(SPARK_STATUS_OK);
+	check_mtp_callback_handoff(SPARK_STATUS_BUSY);
 	check_stream_receipt();
 	check_chain_ownership();
 	int32_t status = check_cache_transactions(SPARK_STATUS_IO_ERROR,SPARK_STATUS_OK,cudaSuccess);
