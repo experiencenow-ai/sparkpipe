@@ -370,6 +370,8 @@ PYTHON_TESTS := \
 	tests/test_hy4_model_header.py \
 	tests/test_qwen4_flash_model_header.py \
 	tests/test_gemma4_model_header.py \
+	tests/test_gemma4_tp16_shared_socket.py \
+	tests/test_gemma4_smoke_manifest.py \
 	tests/test_ling_model_header.py \
 	tests/test_laguna_model_header.py \
 	tests/test_api_stress.py \
