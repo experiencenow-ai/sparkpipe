@@ -134,7 +134,7 @@ SparkStatus SparkStageModuleLifecycleDestroy(
         return SPARK_STATUS_OK;
     }
     ops->describe(module_state, &lifecycle);
-    status = SparkStageModuleWaitForSlots(
+    status = lifecycle.pipeline_slot_count == 0u ? SPARK_STATUS_OK : SparkStageModuleWaitForSlots(
             lifecycle.module_tag,
             lifecycle.slot_states,
             lifecycle.pipeline_slot_count,
