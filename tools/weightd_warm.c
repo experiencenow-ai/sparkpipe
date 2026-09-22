@@ -46,7 +46,11 @@ int main(int argument_count,char **arguments)
 	request.identity.arena_bytes = (uint64_t)pack_status.st_size;
 	request.identity.topology = (uint32_t)strtoul(topology_text,0,10);
 	memcpy(request.pack_path,pack_path,strlen(pack_path) + 1u);
-	request.expert_pool_bytes = UINT64_MAX;
+	{
+		const char *pool_text = getenv("SPARK_WEIGHTD_EXPERT_POOL_BYTES");
+		request.expert_pool_bytes = pool_text != 0 && pool_text[0] != '\0' ?
+			(uint64_t)strtoull(pool_text,0,10) : UINT64_C(34359738368);
+	}
 	keys = (SparkWeightdExpertKey *)calloc(experts,sizeof(*keys));
 	if ( keys == 0 )
 		return 1;
