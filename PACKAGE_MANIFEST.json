@@ -5963,8 +5963,8 @@
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/validation/spark_qwen38_max_resident_decode_stage_cuda_validation.cu",
-      "sha256": "2e3d82b310c345db664c26e6cbcc52f4bd8836d0d41344eaf96a35a5bb26de4a",
-      "size_bytes": 74360
+      "sha256": "badc12954f80849af824a5b21cddc73c1bd8020fda0585f6692d02a9fa80b9f2",
+      "size_bytes": 76343
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/validation/validate_qwen38_max_resident_decode_stage_cuda.sh",
@@ -16730,5 +16730,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79702726
+  "total_bytes": 79704709
 }
