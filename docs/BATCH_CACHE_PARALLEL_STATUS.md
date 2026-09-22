@@ -33,6 +33,10 @@ Implemented and host-tested:
   smoke runner isolates sockets, listeners, mesh records, cache and logs; pins
   source, executables, driver/configuration and model inputs; compares exact
   reference tokens and requires successful owned-process shutdown before PASS.
+- Common collective activity owns the weightd interval through terminal stream
+  completion. The daemon sleeps only after active owners, queued doorbells and
+  pending NIC writes drain. Lost owners fail explicitly. CUDA graph completion
+  uses bounded callback receipts instead of a host spin loop.
 - The API and CLI wake on sockets, queued work and explicit retry deadlines.
   They no longer depend on a fixed 5/10 ms progress cadence. Token events flush
   before waiting. HTTP cancellation is serialized through the engine worker.
@@ -67,9 +71,13 @@ Still required:
   establish a hard device memory bound.
 - Real GPU numerical parity, graph replay/failure, TP4/TP16/TP4xPP4 serving,
   simultaneous different-model inference and sustained matched performance.
-- Rerun the complete host campaign on the new source. The historical PR1081 run
-  was 114 PASS, 8 FAIL, 4 SETUP_FAIL; focused repairs do not rewrite that receipt.
-  K3/GLM generated-deployment drift remains visible pending configuration review.
+- Rerun the complete host campaign after the latest repairs. PR1081's historical
+  receipt remains 114 PASS, 8 FAIL, 4 SETUP_FAIL. The PR1082 checkpoint 816160d2
+  recorded 120 PASS, 8 FAIL, 1 SETUP_FAIL, 0 TIMEOUT. Its build/fixture failures,
+  API fuzzer wake-pipe setup and generated configuration drift have focused fixes;
+  those fixes do not rewrite either complete-campaign receipt. K3/GLM committed
+  deployments now match the current generators, including mesh session tables,
+  GLM pack names, EOS tokens and configured cache geometry.
 
 The current persistent fleet GPU processes have not been restarted by this work.
 Unknown or unbounded consumers block shared admission. Record functional,
