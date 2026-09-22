@@ -1697,6 +1697,7 @@ __global__ void Glm5NextHcSplitSinkhornKernel(
 }
 
 #define GLM5_NEXT_HC_MIX_TILE 4096u
+#define GLM5_NEXT_HC_MIX_BLOCKS 3u
 __global__ void Glm5NextHcMixKernel(
     const uint16_t *__restrict__ streams_bf16,
     const float *__restrict__ fn_f32,
@@ -1737,6 +1738,8 @@ __global__ void Glm5NextHcMixKernel(
         __syncthreads();
         for (mix = warp; mix < mix_rows; mix += warps)
         {
+            if (mix % GLM5_NEXT_HC_MIX_BLOCKS != blockIdx.y)
+                continue;
             accumulator = 0.0f;
             for (element = lane; element < tile_elements; element += LM_WARP_LANES)
                 accumulator += staged[element] *
@@ -1756,7 +1759,7 @@ __global__ void Glm5NextHcMixKernel(
             rsqrtf(total / (float)flat_dimension + rms_epsilon);
     __syncthreads();
     for (mix = warp; mix < mix_rows; mix += warps)
-        if (lane == 0u)
+        if (lane == 0u && mix % GLM5_NEXT_HC_MIX_BLOCKS == blockIdx.y)
             mixes_f32[((uint64_t)row * mix_rows) + mix] =
                 accum[mix / warps] * inverse_shared[0];
 }
@@ -1835,7 +1838,7 @@ static int32_t Glm5NextHcSite(
         return LM_LAUNCH_ERR_SHAPE;
     LM_LAUNCH(
         (Glm5NextHcMixKernel),
-        rows,
+        dim3(rows,GLM5_NEXT_HC_MIX_BLOCKS),
         GLM5_NEXT_LAYER_THREADS,
         GLM5_NEXT_HC_MIX_TILE * sizeof(float),
         stream,
