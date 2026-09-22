@@ -5138,13 +5138,13 @@
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_resident_decode_stage_cuda.cu",
-      "sha256": "94abc92cecf548aaf5a6cbd2a6860377cd320a6b73c7108e343124d6c9cb81a1",
-      "size_bytes": 23239
+      "sha256": "b7726ec5bd2caab217826cee32df253948f8d590c7eeee97aa5bcb04037bb65a",
+      "size_bytes": 23909
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_resident_decode_stage_module.c",
-      "sha256": "c11ba64706664a49f44a46e840568afd7a66b370a9a79235462ae661b2c0c1dd",
-      "size_bytes": 88733
+      "sha256": "70520e79a45b90dfcb3db38332b6dacc8f4049619bd41609c506b7f4cd1c7f97",
+      "size_bytes": 89342
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_serving_adapter.c",
@@ -16815,5 +16815,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80118299
+  "total_bytes": 80119578
 }
