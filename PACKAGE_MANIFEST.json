@@ -1,5 +1,5 @@
 {
-  "file_count": 3377,
+  "file_count": 3378,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -12977,6 +12977,11 @@
       "size_bytes": 1170
     },
     {
+      "path": "tools/qwen38max_multidev_first_decode.sh",
+      "sha256": "eb4c606d8e0234527ea0cb2974c7a5a3e9b36058b0da83d7fa1fd449a2345086",
+      "size_bytes": 3630
+    },
+    {
       "path": "tools/qwen38max_multidev_lane.py",
       "sha256": "dbec6daf59e17f0c69b9416a13587836f044a23ce72c32fd5cae63cd59838551",
       "size_bytes": 16311
@@ -16890,5 +16895,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80414294
+  "total_bytes": 80417924
 }
