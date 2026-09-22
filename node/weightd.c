@@ -33,15 +33,8 @@ static SparkWeightdMeshLaunch weightd_mesh_launch;
 
 static void *SparkWeightdMeshThread(void *argument)
 {
-    SparkWeightdMeshLaunch *launch = (SparkWeightdMeshLaunch *)argument;
-    SparkStatus status;
-    status = SparkWeightdMeshInit(launch->rank,launch->interface_name,
-        launch->sgid_index,launch->mesh_dir,launch->rank_mask);
-    if (status == SPARK_STATUS_BUSY)
-        SparkWeightdMeshDoorbellLoop();
-    else if (status != SPARK_STATUS_OK)
-        fprintf(stderr, "weightd-mesh init=%s (serving degraded)\n",
-            SparkStatusToString(status));
+    (void)argument;
+    SparkWeightdMeshDoorbellLoop();
     return 0;
 }
 
@@ -359,22 +352,34 @@ int main(int argument_count, char **arguments)
             SparkStatusToString(status), socket_path);
         return 1;
     }
-    printf("spark_weightd ready unix=%s ceiling=%llu\n",
-        socket_path, (unsigned long long)device_bytes_max);
-    fflush(stdout);
-
     if (mesh_fields == 15u)
     {
         static pthread_t mesh_thread;
-        if (pthread_create(&mesh_thread,0,SparkWeightdMeshThread,
-            &weightd_mesh_launch) != 0)
-            fprintf(stderr, "weightd-mesh: thread create failed\n");
+        status = SparkWeightdMeshInit(weightd_mesh_launch.rank,
+            weightd_mesh_launch.interface_name,weightd_mesh_launch.sgid_index,
+            weightd_mesh_launch.mesh_dir,weightd_mesh_launch.rank_mask);
+        if ( status != SPARK_STATUS_BUSY && status != SPARK_STATUS_OK )
+        {
+            fprintf(stderr,"weightd-mesh init=%s; startup failed\n",SparkStatusToString(status));
+            SparkWeightdServerDestroy(server);
+            return 1;
+        }
+        if (pthread_create(&mesh_thread,0,SparkWeightdMeshThread,0) != 0)
+        {
+            fprintf(stderr,"weightd-mesh: thread create failed; startup failed\n");
+            SparkWeightdServerDestroy(server);
+            return 1;
+        }
     }
     else
     {
         fprintf(stderr,
             "weightd-mesh: identity not stated; mesh disabled\n");
     }
+
+    printf("spark_weightd ready unix=%s ceiling=%llu\n",
+        socket_path, (unsigned long long)device_bytes_max);
+    fflush(stdout);
 
     status = SparkWeightdServerRun(server, &SparkWeightdStop);
 
