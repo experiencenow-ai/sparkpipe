@@ -1,4 +1,6 @@
+#ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#endif
 #include "sparkpipe/spark_weightd_lazy_pack.h"
 #include "sparkpipe/spark_error_site.h"
 #include "sparkpipe/spark_weightd_spine.h"
