@@ -51,11 +51,12 @@ REVISION="e0dfe7cd0f6e3b572bbbc0a8a84947469e428cc3"
 
 HOST="$(hostname)"
 case "$HOST" in
-spark*) RANK=$((16#${HOST#spark})) ;;
+spark*) RANK_HEX="${HOST#spark}" ; RANK=$((16#$RANK_HEX)) ;;
 *) echo "unexpected host: $HOST" >&2; exit 2 ;;
 esac
 ROOT="/home/$HOST/sparkdata/ling.bf16.tp16"
-PACK="$ROOT/packs/ling.bf16.tp16.rank$RANK.sp"
+# ling rank packs are HEX-named (rankb, not rank11).
+PACK="$ROOT/packs/ling.bf16.tp16.rank$RANK_HEX.sp"
 SHA="$(cut -d' ' -f1 "$PACK.sha256")"
 MANIFEST="$PACK.experts"
 for required in "$PACK" "$PACK.sha256" "$MANIFEST" "$WSET"; do
