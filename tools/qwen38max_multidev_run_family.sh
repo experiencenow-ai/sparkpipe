@@ -313,6 +313,12 @@ export SPARK_WEIGHTD_ATTACH=1
 export SPARK_WEIGHTD_SOCKET="$SOCKET"
 export SPARK_WEIGHTD_LANE="$LANE"
 export SPARK_TP_MESH_RANKS="$MESH_RANKS"
+# The pack-identity attach path requires the digest env - no fallback,
+# runtime/spark_weightd_attach.c fails "no_identity" without it, and the
+# module's lazy attach reads the same env (#1141 gemma4 digest-export
+# class). The sidecar above is the receipt-reconciled digest; export it
+# so the exec'd residentd inherits the identity it will attach with.
+export SPARK_WEIGHTD_PACK_SHA256="$(cat "$ROOT/packs/pack.sha256")"
 export SPARK_WEIGHTD_EXPERT_POOL_BYTES="$QMAX_EXPERT_POOL_BYTES"
 export SPARK_WEIGHTD_SPINE_BUDGET_BYTES="$QMAX_SPINE_BUDGET_BYTES"
 # Pinned CUDA environment for shared-lane smoke (template hard rule).
