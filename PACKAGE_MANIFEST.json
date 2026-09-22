@@ -1,5 +1,5 @@
 {
-  "file_count": 3276,
+  "file_count": 3279,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "61988992be4f252863b3cdab4303ba148679bd9750d8d8f5e2948cf7bcc36b92",
-      "size_bytes": 126181
+      "sha256": "e4455aef9b1bd7822a4e126380572a909365592e3247776138cbe67f6822c1fc",
+      "size_bytes": 126225
     },
     {
       "path": "Makefile.rej",
@@ -9862,6 +9862,11 @@
       "size_bytes": 4108
     },
     {
+      "path": "tests/test_qwen38_27b_lane_deployment.py",
+      "sha256": "63db205b8efeed33261dfcfef9c1edba8e1efaa3e54421c07d7e4d8238a905db",
+      "size_bytes": 12282
+    },
+    {
       "path": "tests/test_qwen38_27b_layer_host.py",
       "sha256": "6f857624e064a3efeef0202c3b8d9edb8e752c1da6f2c2da3f52307f44eabc8e",
       "size_bytes": 6347
@@ -12405,6 +12410,16 @@
       "path": "tools/qwen38_27b_gen_deployment.py",
       "sha256": "76f477a9e2c31d2ea36fbf8c0d19ca9772a5a672d8b3fd1e5968939fe97e0aa1",
       "size_bytes": 6874
+    },
+    {
+      "path": "tools/qwen38_27b_lane_deployment.py",
+      "sha256": "72c0fb6ac1a21b649aca804ba735d127dbb91d67b83a90657806cd53824db90d",
+      "size_bytes": 20113
+    },
+    {
+      "path": "tools/qwen38_27b_lane_launch.sh",
+      "sha256": "0175fe306c3a0bf9893548e14b82471a6450d7275cce3a8c398556ddc0ddbe9a",
+      "size_bytes": 2649
     },
     {
       "path": "tools/qwen38_27b_nvfp4_smoke.cu",
@@ -16385,5 +16400,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78110043
+  "total_bytes": 78145131
 }
