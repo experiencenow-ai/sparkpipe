@@ -6,7 +6,7 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include "sparkpipe/spark_tp_mesh_round_control.h"
-#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V8-MASKED-FP32-TREE"
+#define SPARK_TP_MESH_KERNELS_MARKER "SPARK-TP-MESH-KERNELS-V9-CANCEL-LATCHED-TREE"
 #define SPARK_TP_MESH_ERROR_PARITY_MISMATCH 0xFFFFFFFFFF000000ull
 #define SPARK_TP_MESH_ERROR_CANCELLED 0xFFFFFFFFFE000000ull
 #if defined(__CUDACC__)
@@ -108,15 +108,17 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 	uint32_t peer;
 	volatile uint64_t *end_word;
 	uint64_t sequence;
+	uint64_t expected_cancel;
 	uint64_t ring;
 	unsigned long long stop_at;
 	if ( threadIdx.x != 0u || blockIdx.x != 0u )
 		return;
+	expected_cancel = cancel_expected != 0 ? SparkGlm5NextLdcvU64(cancel_expected) : 0u;
 	sequence = SparkGlm5NextLdcvU64(round_seq);
 	ring = (sequence - 1ull) & (slots_per_rank - 1ull);
 	stop_at = SparkGlm5NextGlobalTimerNs() + deadline_ns;
 	if ( cancel_cell != 0 && cancel_expected != 0 &&
-	     *cancel_cell != *cancel_expected )
+	     SparkGlm5NextLdcvU64(cancel_cell) != expected_cancel )
 	{
 		atomicExch((unsigned long long *)error_word,
 		    SPARK_TP_MESH_ERROR_CANCELLED | sequence);
@@ -144,7 +146,7 @@ __global__ void SparkGlm5NextMeshWaitKernel(
 					return;
 				if ( cancel_cell != 0 && cancel_expected != 0 &&
 				     SparkGlm5NextLdcvU64(cancel_cell) !=
-				     SparkGlm5NextLdcvU64(cancel_expected) )
+				     expected_cancel )
 				{
 					atomicExch((unsigned long long *)error_word,
 					    SPARK_TP_MESH_ERROR_CANCELLED | sequence);
@@ -219,6 +221,7 @@ __global__ void SparkGlm5NextMeshRoundLoopKernel(
 	uint64_t prev_tag = 0ull;
 	uint64_t stop_at = 0ull;
 	uint64_t spin_cap;
+	uint64_t expected_cancel = control->cancel_expected;
 	if ( tid == 0u )
 	{
 		uint64_t now = SparkGlm5NextGlobalTimerNs();
@@ -244,7 +247,7 @@ __global__ void SparkGlm5NextMeshRoundLoopKernel(
 			uint64_t spins = 0ull;
 			while ( *shipped_cell != prev_tag )
 			{
-				if ( *cancel_cell != control->cancel_expected )
+				if ( *cancel_cell != expected_cancel )
 				{
 					s_decision = SPARK_TP_MESH_ROUND_LOOP_DECISION_CANCEL;
 					break;
@@ -322,7 +325,7 @@ __global__ void SparkGlm5NextMeshRoundLoopKernel(
 				while ( (*end_word >> 32ull) != (s_tag >> 32ull) ||
 				        *end_word < s_tag )
 				{
-					if ( *cancel_cell != control->cancel_expected )
+					if ( *cancel_cell != expected_cancel )
 					{
 						s_decision =
 						    SPARK_TP_MESH_ROUND_LOOP_DECISION_CANCEL;
@@ -394,12 +397,12 @@ __global__ void SparkGlm5NextMeshRoundLoopKernel(
 static __device__ bool SparkGlm5NextMeshTreeWait(
     const volatile uint64_t *cell,uint64_t tag,
     const volatile uint64_t *cancel,SparkTpMeshRoundControl *control,
-    uint64_t deadline)
+    uint64_t deadline,uint64_t expected_cancel)
 {
     for (;;)
     {
         if ( SparkGlm5NextLdcvU64(&control->error_word) != 0u ) return false;
-        if ( SparkGlm5NextLdcvU64(cancel) != control->cancel_expected )
+        if ( SparkGlm5NextLdcvU64(cancel) != expected_cancel )
         {
             control->error_word = SPARK_TP_MESH_ERROR_CANCELLED | tag;
             return false;
@@ -430,6 +433,7 @@ __global__ void SparkGlm5NextMeshTreeKernel(
     uint32_t width = operation == 2u ? 8u : operation == 1u ? 4u : 2u;
     uint64_t capacity = (slot_bytes - 16u) / width;
     uint64_t deadline = SparkGlm5NextGlobalTimerNs() + timeout_ns;
+    uint64_t expected_cancel = control->cancel_expected;
     for ( uint32_t round = 0u; round < rounds; round++ )
     {
         for ( uint64_t begin = 0u; begin < elements; begin += capacity )
@@ -461,7 +465,7 @@ __global__ void SparkGlm5NextMeshTreeKernel(
                     if ( ready == 0u ) control->error_word = UINT64_MAX;
                     tag = (control->epoch << 32u) | (control->seq + 1u);
                     if ( send != 0u && ready != 0u )
-                        ready = SparkGlm5NextMeshTreeWait(shipped,control->round_seq,cancel,control,deadline);
+                        ready = SparkGlm5NextMeshTreeWait(shipped,control->round_seq,cancel,control,deadline,expected_cancel);
                 }
                 __syncthreads();
                 if ( ready == 0u ) return;
@@ -489,7 +493,7 @@ __global__ void SparkGlm5NextMeshTreeKernel(
                 {
                     uint8_t *source = band + ((uint64_t)(receive - 1u) * slots_per_rank + ring) * slot_bytes;
                     if ( tid == 0u )
-                        ready = SparkGlm5NextMeshTreeWait((const volatile uint64_t *)(source + slot_bytes - 8u),tag,cancel,control,deadline);
+                        ready = SparkGlm5NextMeshTreeWait((const volatile uint64_t *)(source + slot_bytes - 8u),tag,cancel,control,deadline,expected_cancel);
                     __syncthreads();
                     if ( ready == 0u ) return;
                     __threadfence_system();
@@ -748,12 +752,13 @@ __global__ void SparkGlm5NextMeshCopyDownKernel(
     if ( threadIdx.x == 0u )
     {
         uint64_t previous = control->round_seq;
+        uint64_t expected_cancel = control->cancel_expected;
         uint64_t deadline = SparkGlm5NextGlobalTimerNs() + timeout_ns;
         ready = 1u;
         while ( previous != 0ull && SparkGlm5NextLdcvU64(shipped) != previous )
         {
             if ( SparkGlm5NextLdcvU64(&control->error_word) != 0ull ||
-                 SparkGlm5NextLdcvU64(cancel) != control->cancel_expected )
+                 SparkGlm5NextLdcvU64(cancel) != expected_cancel )
             {
                 atomicExch((unsigned long long *)&control->error_word,
                     SPARK_TP_MESH_ERROR_CANCELLED | previous);
@@ -768,7 +773,7 @@ __global__ void SparkGlm5NextMeshCopyDownKernel(
             }
             __nanosleep(200u);
         }
-        if ( SparkGlm5NextLdcvU64(cancel) != control->cancel_expected )
+        if ( SparkGlm5NextLdcvU64(cancel) != expected_cancel )
             atomicExch((unsigned long long *)&control->error_word,
                 SPARK_TP_MESH_ERROR_CANCELLED | previous);
         if ( SparkGlm5NextLdcvU64(&control->error_word) != 0ull )

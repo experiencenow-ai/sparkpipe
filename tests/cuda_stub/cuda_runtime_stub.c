@@ -1150,15 +1150,16 @@ cudaError_t SparkGlm5NextLaunchMeshCopyDown(cudaStream_t stream,
     const volatile uint64_t *shipped = shipped_cell;
     const volatile uint64_t *cancel = cancel_cell;
     uint64_t deadline = cuda_stub_roundloop_now_ns() + timeout_ns;
-    uint64_t previous;
+    uint64_t previous,expected_cancel;
     (void)stream;
     if ( destination == NULL || source == NULL || bytes == 0u ||
          shipped == NULL || control == NULL || cancel == NULL || timeout_ns == 0u )
         return cudaErrorInvalidValue;
     previous = control->round_seq;
+    expected_cancel = control->cancel_expected;
     while ( previous != 0u && *shipped != previous )
     {
-        if ( control->error_word != 0u || *cancel != control->cancel_expected ||
+        if ( control->error_word != 0u || *cancel != expected_cancel ||
              cuda_stub_roundloop_now_ns() >= deadline )
         {
             control->error_word = previous;
@@ -1166,7 +1167,7 @@ cudaError_t SparkGlm5NextLaunchMeshCopyDown(cudaStream_t stream,
         }
         sched_yield();
     }
-    if ( *cancel != control->cancel_expected )
+    if ( *cancel != expected_cancel )
         control->error_word = UINT64_C(0xFFFFFFFFFE000000) | previous;
     if ( control->error_word == 0u )
     {
@@ -1227,10 +1228,16 @@ cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
     const void *cancel_expected,void *arrival_ring)
 {
     uint64_t sequence = *(const uint64_t *)round_seq;
+    uint64_t expected_cancel = *(const uint64_t *)cancel_expected;
     uint64_t ring = (sequence - 1u) & (slots_per_rank - 1u);
     uint64_t deadline = cuda_stub_roundloop_now_ns() + deadline_ns;
     uint32_t peer;
     (void)stream;
+    if ( *(volatile uint64_t *)cancel_cell != expected_cancel )
+    {
+        *(volatile uint64_t *)error_word = UINT64_C(0xFFFFFFFFFE000000) | sequence;
+        return cudaSuccess;
+    }
     for ( peer = 0u; peer < degree; peer++ )
     {
         const volatile uint64_t *tail;
@@ -1240,7 +1247,7 @@ cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
         while ( (*tail >> 32u) != (sequence >> 32u) || *tail < sequence )
         {
             if ( *(volatile uint64_t *)error_word != 0u ) return cudaSuccess;
-            if ( *(volatile uint64_t *)cancel_cell != *(const uint64_t *)cancel_expected )
+            if ( *(volatile uint64_t *)cancel_cell != expected_cancel )
             {
                 *(volatile uint64_t *)error_word = UINT64_C(0xFFFFFFFFFE000000) | sequence;
                 return cudaSuccess;
@@ -1262,12 +1269,12 @@ cudaError_t SparkGlm5NextLaunchMeshWait(cudaStream_t stream,
 }
 
 static int cuda_stub_tree_wait(const volatile uint64_t *cell,uint64_t tag,
-    const volatile uint64_t *cancel,SparkTpMeshRoundControl *control,uint64_t deadline)
+    const volatile uint64_t *cancel,SparkTpMeshRoundControl *control,uint64_t deadline,uint64_t expected_cancel)
 {
     for (;;)
     {
         if ( control->error_word != 0u ) return 0;
-        if ( *cancel != control->cancel_expected )
+        if ( *cancel != expected_cancel )
         {
             control->error_word = UINT64_C(0xFFFFFFFFFE000000) | tag;
             return 0;
@@ -1299,6 +1306,7 @@ cudaError_t SparkGlm5NextLaunchMeshTree(cudaStream_t stream,void *band_base,
     uint32_t width = operation == 2u ? 8u : operation == 1u ? 4u : 2u;
     uint64_t capacity = (slot_bytes - 16u) / width;
     uint64_t deadline = cuda_stub_roundloop_now_ns() + timeout_ns;
+    uint64_t expected_cancel = control->cancel_expected;
     uint32_t round;
     (void)stream;
     for ( round = 0u; round < rounds; round++ )
@@ -1337,7 +1345,7 @@ cudaError_t SparkGlm5NextLaunchMeshTree(cudaStream_t stream,void *band_base,
                 if ( send != 0u )
                 {
                     uint64_t slot = ((uint64_t)rank * slots_per_rank + ring) * slot_bytes;
-                    if ( !cuda_stub_tree_wait(shipped,control->round_seq,cancel,control,deadline) ) return cudaSuccess;
+                    if ( !cuda_stub_tree_wait(shipped,control->round_seq,cancel,control,deadline,expected_cancel) ) return cudaSuccess;
                     memcpy(band + slot,scratch,(size_t)(count * width));
                     entry[1] = count * width;
                     entry[2] = slot / slot_bytes;
@@ -1351,7 +1359,7 @@ cudaError_t SparkGlm5NextLaunchMeshTree(cudaStream_t stream,void *band_base,
                 if ( receive != 0u )
                 {
                     uint8_t *source = band + ((uint64_t)(receive - 1u) * slots_per_rank + ring) * slot_bytes;
-                    if ( !cuda_stub_tree_wait((const volatile uint64_t *)(source + slot_bytes - 8u),tag,cancel,control,deadline) ) return cudaSuccess;
+                    if ( !cuda_stub_tree_wait((const volatile uint64_t *)(source + slot_bytes - 8u),tag,cancel,control,deadline,expected_cancel) ) return cudaSuccess;
                     __sync_synchronize();
                     for ( i = 0u; i < count; i++ )
                     {
@@ -1429,6 +1437,7 @@ cudaError_t SparkGlm5NextLaunchMeshRoundLoop(cudaStream_t stream,
     volatile uint64_t *entry_words = (volatile uint64_t *)entry;
     volatile uint64_t *shipped = (volatile uint64_t *)shipped_cell;
     volatile uint64_t *cancel = (volatile uint64_t *)cancel_cell;
+    uint64_t expected_cancel = ((SparkTpMeshRoundControl *)round_control)->cancel_expected;
     uint64_t cursor, prev_tag, stop_at, parity;
     uint32_t failed = 0u;
     (void)stream;
@@ -1445,7 +1454,7 @@ cudaError_t SparkGlm5NextLaunchMeshRoundLoop(cudaStream_t stream,
         {
             while (*shipped != prev_tag)
             {
-                if (*cancel != control->cancel_expected)
+                if (*cancel != expected_cancel)
                 {
                     failed = 1u;
                     break;
@@ -1491,7 +1500,7 @@ cudaError_t SparkGlm5NextLaunchMeshRoundLoop(cudaStream_t stream,
                     slot_bytes + slot_bytes - 8ull);
             while (*end_word < tag)
             {
-                if (*cancel != control->cancel_expected)
+                if (*cancel != expected_cancel)
                 {
                     failed = 1u;
                     break;
