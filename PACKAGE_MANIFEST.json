@@ -1,5 +1,5 @@
 {
-  "file_count": 3344,
+  "file_count": 3345,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -10972,6 +10972,11 @@
       "size_bytes": 2002
     },
     {
+      "path": "tools/devcycle/qwen38max_warm_receipt.sh",
+      "sha256": "e31774a0ca949fa6a7a66fa4593ac24f9032e4aac2c19578a67dbc980ea21e6d",
+      "size_bytes": 4113
+    },
+    {
       "path": "tools/devcycle/r2prefill_exact32k_cell.sh",
       "sha256": "7ef039e35e039da1bc0924724083a0abdecbf21b0b263ffe189ece8a5ddec090",
       "size_bytes": 8341
@@ -16725,5 +16730,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79689959
+  "total_bytes": 79694072
 }
