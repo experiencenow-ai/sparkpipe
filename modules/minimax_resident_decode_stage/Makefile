@@ -5,9 +5,11 @@ MODEL_HEADER := ../../modules/minimax_resident_decode_stage/include/sparkpipe/sp
 MODULE_ENTRY_PREFIX := SparkMinimaxResidentDecodeStage
 MODULE_HOST_SOURCE := $(CURDIR)/source/spark_minimax_resident_decode_stage_module.c
 MODULE_CUDA_SOURCE := $(CURDIR)/source/spark_minimax_resident_decode_stage_cuda.cu
+include ../../runtime/weightd_sources.mk
 MODULE_ADDITIONAL_HOST_SOURCES = \
 	$(REPOSITORY_ROOT)/runtime/stage_module_lifecycle.c \
 	$(REPOSITORY_ROOT)/runtime/stagepack_format.c \
+	$(addprefix $(REPOSITORY_ROOT)/,$(SPARKPIPE_WEIGHTD_SOURCES)) \
 	$(REPOSITORY_ROOT)/ring/transport/hidden_transport.c \
 	$(REPOSITORY_ROOT)/ring/transport/tp_collective.c \
 	$(REPOSITORY_ROOT)/ring/transport/tp_device_collective.c
