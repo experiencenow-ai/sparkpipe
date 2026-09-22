@@ -13,6 +13,7 @@
 #include <endian.h>
 #include <infiniband/verbs.h>
 #include <sys/socket.h>
+#include <sys/mman.h>
 
 #define RT(call) do { cudaError_t rc = (call); if (rc != cudaSuccess) { std::fprintf(stderr,"FAIL line=%d runtime=%s\n",__LINE__,cudaGetErrorString(rc)); return 1; } } while (0)
 #define DR(call) do { CUresult rc = (call); if (rc != CUDA_SUCCESS) { const char *name = nullptr; cuGetErrorName(rc,&name); std::fprintf(stderr,"FAIL line=%d driver=%s\n",__LINE__,name); return 1; } } while (0)
@@ -25,7 +26,15 @@ struct Gate {
     alignas(64) unsigned long long output;
     unsigned long long consumed;
     unsigned long long status;
+    unsigned long long expected_entry;
+    unsigned long long entered;
 };
+
+__global__ void Enter(volatile Gate *gate)
+{
+    gate->entered = gate->expected_entry;
+    __threadfence_system();
+}
 
 __global__ void Consume(volatile Gate *gate)
 {
@@ -38,6 +47,17 @@ __global__ void Consume(volatile Gate *gate)
     }
     gate->status = error;
     __threadfence_system();
+}
+
+static bool WaitHostWord(const unsigned long long *word,unsigned long long expected,bool different)
+{
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    for (;;) {
+        bool equal = __atomic_load_n(word,__ATOMIC_ACQUIRE) == expected;
+        if (different ? !equal : equal) return true;
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
 }
 
 struct RdmaOptions {
@@ -317,15 +337,17 @@ static int RunRdmaSender(const RdmaOptions &options)
 int main(int argc,char **argv)
 {
     if (argc == 1 || (argc == 2 && std::strcmp(argv[1],"--help") == 0)) {
-        std::printf("usage: %s --run [--gpu-waits | --rdma-receive | --rdma-send] [--ib-device NAME --ib-port N --gid-index N --address IPv4 --tcp-port N --iterations 1..128]\nWithout --run no CUDA or RDMA calls are made.\n",argv[0]);
+        std::printf("usage: %s --run [--gpu-waits | --rdma-receive | --rdma-send] [--memfd] [--ib-device NAME --ib-port N --gid-index N --address IPv4 --tcp-port N --iterations 1..128]\nWithout --run no CUDA or RDMA calls are made.\n",argv[0]);
         return 0;
     }
     if (std::strcmp(argv[1],"--run") != 0) return 2;
     bool run = false;
+    bool memfd = false;
     bool rdma_arguments = false;
     RdmaOptions rdma;
     for (int i = 2; i < argc; ++i) {
         const char *name = argv[i];
+        if (std::strcmp(name,"--memfd") == 0) { memfd = true; continue; }
         if (std::strcmp(name,"--gpu-waits") == 0) { run = true; continue; }
         if (std::strcmp(name,"--rdma-receive") == 0) { rdma.receive = true; continue; }
         if (std::strcmp(name,"--rdma-send") == 0) { rdma.send = true; continue; }
@@ -342,7 +364,7 @@ int main(int argc,char **argv)
         else if (std::strcmp(name,"--iterations") == 0) rdma.iterations = value;
         else return 2;
     }
-    if ((rdma.receive && rdma.send) || ((rdma.receive || rdma.send) &&
+    if ((memfd && rdma.send) || (rdma.receive && rdma.send) || ((rdma.receive || rdma.send) &&
         (run || rdma.device == nullptr || rdma.address == nullptr || rdma.port == 0u ||
         rdma.ib_port == 0u || rdma.ib_port > 255u || rdma.gid > 255u ||
         rdma.iterations == 0u || rdma.iterations > 128u))) return 2;
@@ -360,12 +382,30 @@ int main(int argc,char **argv)
     CUcontext context;
     DR(cuCtxGetCurrent(&context));
     Gate *host = nullptr,*mapped = nullptr;
-    RT(cudaHostAlloc(reinterpret_cast<void **>(&host),sizeof(*host),cudaHostAllocMapped));
+    int mapping_fd = -1;
+    size_t mapping_bytes = 0u;
+    if (memfd) {
+        long page = sysconf(_SC_PAGESIZE);
+        REQUIRE(page > 0);
+        mapping_bytes = ((sizeof(*host) + page - 1u) / page) * page;
+        mapping_fd = memfd_create("sparkpipe-memop-probe",MFD_CLOEXEC);
+        REQUIRE(mapping_fd >= 0);
+        REQUIRE(ftruncate(mapping_fd,mapping_bytes) == 0);
+        host = static_cast<Gate *>(mmap(nullptr,mapping_bytes,PROT_READ | PROT_WRITE,MAP_SHARED,mapping_fd,0));
+        REQUIRE(host != MAP_FAILED);
+        RT(cudaHostRegister(host,mapping_bytes,cudaHostRegisterPortable | cudaHostRegisterMapped));
+    } else {
+        RT(cudaHostAlloc(reinterpret_cast<void **>(&host),sizeof(*host),cudaHostAllocMapped));
+    }
+    std::printf("mapping=%s registration_bytes=%zu\n",memfd ? "memfd-shared-portable-mapped" : "cuda-host-mapped",
+        memfd ? mapping_bytes : sizeof(*host));
     RT(cudaHostGetDevicePointer(reinterpret_cast<void **>(&mapped),host,0));
     std::memset(host,0,sizeof(*host));
     cudaStream_t stream;
     RT(cudaStreamCreateWithFlags(&stream,cudaStreamNonBlocking));
     RT(cudaStreamBeginCapture(stream,cudaStreamCaptureModeGlobal));
+    Enter<<<1,1,0,stream>>>(mapped);
+    RT(cudaGetLastError());
     CUstreamCaptureStatus capture_status;
     cuuint64_t capture_id;
     CUgraph graph;
@@ -419,6 +459,8 @@ int main(int argc,char **argv)
                 DR(cuGraphExecBatchMemOpNodeSetParams(reinterpret_cast<CUgraphExec>(executable),nodes[i],&params));
             if (!rdma.receive)
                 for (unsigned int i = 0; i < 512u; ++i) host->payload[i] = PayloadValue(trial,i);
+            host->expected_entry = generation;
+            host->entered = 0u;
             host->output = ~0ull;
             host->consumed = 0u;
             host->status = ~0ull;
@@ -427,6 +469,7 @@ int main(int argc,char **argv)
                 __atomic_store_n(&host->ready,generation - 1u,__ATOMIC_RELEASE);
             }
             RT(cudaGraphLaunch(executable,stream));
+            REQUIRE(WaitHostWord(&host->entered,generation,false));
             if (rdma.receive) {
                 REQUIRE(link.Token(10u + trial * 3u,true));
                 REQUIRE(link.Token(10u + trial * 3u,false));
@@ -442,6 +485,7 @@ int main(int argc,char **argv)
                 __atomic_store_n(&host->error,cancel ? 1u : 0u,__ATOMIC_RELEASE);
                 __atomic_store_n(&host->ready,generation,__ATOMIC_RELEASE);
             }
+            REQUIRE(WaitHostWord(&host->status,~0ull,true));
             RT(cudaStreamSynchronize(stream));
             REQUIRE(host->status == (cancel ? 1u : 0u));
             REQUIRE(host->consumed == (cancel ? 0u : 1u));
@@ -455,6 +499,12 @@ int main(int argc,char **argv)
     RT(cudaGraphExecDestroy(executable));
     RT(cudaGraphDestroy(captured));
     RT(cudaStreamDestroy(stream));
-    RT(cudaFreeHost(host));
+    if (memfd) {
+        RT(cudaHostUnregister(host));
+        REQUIRE(munmap(host,mapping_bytes) == 0);
+        REQUIRE(close(mapping_fd) == 0);
+    } else {
+        RT(cudaFreeHost(host));
+    }
     return 0;
 }

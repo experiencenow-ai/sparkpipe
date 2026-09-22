@@ -13,6 +13,7 @@ def main():
     mode.add_argument("--gpu-waits", action="store_true", help="With --run, launch three local readiness/cancel/recovery checks")
     mode.add_argument("--rdma-receive", action="store_true", help="With --run, receive NIC-written payloads and readiness on a CUDA-mapped host MR")
     mode.add_argument("--rdma-send", action="store_true", help="With --run, send payloads and readiness over an isolated RC QP; no CUDA context")
+    parser.add_argument("--memfd", action="store_true", help="With --run, use explicit MAP_SHARED memfd + portable/mapped CUDA registration; unavailable to sender")
     parser.add_argument("--ib-device", help="Exact RDMA device, required for RDMA modes")
     parser.add_argument("--ib-port", type=int, help="Exact RDMA device port, required for RDMA modes")
     parser.add_argument("--gid-index", type=int, help="Exact GID index, required for RDMA modes")
@@ -24,6 +25,8 @@ def main():
     root = pathlib.Path(__file__).resolve().parents[1]
     parser.add_argument("--output", type=pathlib.Path, default=root / "build/qualification/tp_stream_memop_probe")
     args = parser.parse_args()
+    if args.memfd and (not args.run or args.rdma_send):
+        parser.error("--memfd requires a CUDA --run mode and cannot be used by the RDMA sender")
     rdma = args.rdma_receive or args.rdma_send
     rdma_fields = (args.ib_device, args.ib_port, args.gid_index, args.address, args.tcp_port)
     if (args.gpu_waits or rdma) and not args.run:
@@ -54,6 +57,8 @@ def main():
         if not output.is_file():
             parser.error(f"compile the probe first; missing binary: {output}")
         command = [str(output), "--run"]
+        if args.memfd:
+            command.append("--memfd")
         if args.gpu_waits:
             command.append("--gpu-waits")
         if rdma:

@@ -17,7 +17,10 @@ require new local and remote qualification; the earlier receipt does not
 qualify NIC visibility or the extended probe. The extension compiled for
 `sm_121a` in `spark0:/tmp/sparkpipe-rdma-memop-20260922`; receipts are
 `build/qualification/compile.log`, `help.log` and `SHA256SUMS`. Only compile and
-help were executed for this extension before this checkpoint.
+help were executed for that extension checkpoint. The subsequent explicit
+`--memfd` allocation and entry-marker variant compiled in
+`spark0:/tmp/sparkpipe-rdma-memfd-20260922`, with the same receipt filenames.
+It has not been executed at this checkpoint.
 
 ## Safe invocation
 
@@ -33,7 +36,7 @@ python3 tools/tp_stream_memop_probe.py --run --gpu-waits
 ```
 
 Run only in an assigned isolated GPU window. `--run` creates a context, captures
-91 wait nodes plus a guarded consumer, instantiates the graph, and times 1,000
+91 wait nodes plus an entry marker and guarded consumer, instantiates the graph, and times 1,000
 sets of 91 node-value updates without launching a graph. `--gpu-waits` also
 checks stale/delayed readiness, cancellation before release, and recovery. A
 30-second process alarm bounds the standalone experiment. The guard asserts
@@ -44,19 +47,28 @@ that cancellation never consumes the payload. The local mode involves no network
 Both processes require `--run` and explicit device, port, GID, IPv4 address and
 unique TCP port. The receiver binds that address; the sender connects to it.
 `--iterations` repeats all three cases 1..128 times (default 8), within the same
-30-second process alarm. The sender creates no CUDA context. Each process owns
+30-second process alarm. The sender creates no CUDA context. Optional receiver `--memfd` creates a private
+memfd with `MAP_SHARED`, registers it with CUDA portable/mapped flags, and uses
+the actual alias returned by `cudaHostGetDevicePointer`. There is no allocation
+fallback. Normal cleanup destroys the QP, deregisters the NIC MR, destroys the
+terminal graph/stream, unregisters CUDA, then unmaps and closes the memfd.
+Without `--memfd`, the receiver explicitly uses `cudaHostAllocMapped`. Each process owns
 one RC QP, one 8-entry CQ and one MR; at most three WRs are outstanding. Every
 WR is signaled and checked before source reuse. Normal teardown destroys the
 QP before deregistering its MR; failed/partial posts terminate the isolated
 probe rather than reusing memory. The OS releases only this process's resources
 on the bounded alarm. No daemon, persistent config or existing QP is modified.
 
-For every trial the sender first RDMA-writes a stale generation. The receiver
-requires the launched graph to remain incomplete with untouched output after
+For every trial the receiver first observes a GPU-written entry marker, proving
+the graph has started. The sender then RDMA-writes a stale generation. The receiver
+requires the started graph to remain incomplete with untouched output after
 that write. The sender then posts payload, error and current readiness in that
 order on the same RC QP. The GPU consumes all 512 words and produces a checksum;
 the receiver computes its expectation from the trial number, without reading
-the received payload on CPU before GPU completion. Cancellation must consume
+the received payload on CPU before GPU completion. After the sender releases
+readiness, the receiver observes the GPU-written completion status before making
+any further CUDA call; synchronization only confirms terminal cleanup afterward.
+Cancellation must consume
 nothing, and recovery must observe the subsequent NIC-written error clear.
 The receiver never writes a successful readiness value or transport ACK into
 the MR. TCP messages coordinate phases only; NIC writes release the graph.
@@ -72,8 +84,9 @@ python3 tools/tp_stream_memop_probe.py --run --rdma-receive --ib-device rocep1s0
 python3 tools/tp_stream_memop_probe.py --run --rdma-send --ib-device rocep1s0f0 --ib-port 1 --gid-index 3 --address 10.10.200.0 --tcp-port 49387 --iterations 8
 ```
 
-This tests a CUDA-mapped pinned host MR on one link. A pass does not qualify the
-production memfd/shared registration path, cross-process ownership, allreduce,
+This tests the selected CUDA-mapped host allocation on one link. Add `--memfd`
+to the receiver command to qualify the production allocation/registration shape.
+Even a memfd pass does not qualify cross-process shared ownership, allreduce,
 missing-peer recovery, or model throughput. No unsupported remote FLUSH is
 requested; failure of ordering or visibility is a qualification failure.
 
@@ -133,6 +146,15 @@ for [stream memory operations](https://docs.nvidia.com/cuda/cuda-driver-api/cuda
 affect future launches and require the original node to remain in its graph.
 CUDA 13 [capture inspection and dependency APIs](https://docs.nvidia.com/cuda/archive/13.0.2/cuda-driver-api/group__CUDA__STREAM.html)
 include edge data; the prototype uses those current signatures.
+
+A separate compiled negative control in
+`spark0:/tmp/sparkpipe-rdma-memfd-negative-20260922` changes the wait comparison
+from equality to greater-or-equal and sets every replay wait threshold to zero.
+The original 91-node update loop is unchanged. Run its local `--run --gpu-waits
+--memfd` mode in the assigned window: it must fail the incomplete/untouched
+consumer check after observing GPU entry. It is an isolated source mutation,
+not a runtime fallback or production build mode. Its source/binary hashes are
+in `build/qualification/SHA256SUMS`; it was compiled but not run at this checkpoint.
 
 ## Qualification gates
 
