@@ -55,7 +55,7 @@ checks establish host ownership rules; they do not prove GPU or RDMA ordering.
 
 ## Device and transport boundary
 
-The developer's PR1077 commit 07333264 reports idle engines at 96% SM and 0%
+The developer's PR1077 commit 07333264 reports idle engines at 96% GPU and 0%
 memory utilization. Its success-time cancellation broadcasts are unscoped:
 a faster rank can cancel another rank's valid final round. Cancellation must
 preserve request ownership and drain before rearming shared cells. A same-stream
@@ -90,4 +90,9 @@ forge peer completion. CUDA memory-operation support and a successful compile
 alone do not prove that design works on GB10.
 
 The [hardware wait probe](TP_STREAM_MEMOP_QUALIFICATION.md) is a standalone
-qualification artifact. Compilation creates no CUDA context; execution is explicit.
+qualification artifact. Exact PR source cd344a64 passed 24 NIC-to-GPU trials on
+Spark0/Spark1 with shared memfd registration, stale readiness, cancellation and
+recovery. A wait-bypass mutation failed the intended assertion. GPU completion
+was observed before any post-release CUDA call. Updating 91 wait nodes averaged
+4.25 microseconds per replay. These primitive results support integration testing;
+they do not establish model throughput. See the [receipt](receipts/tp-hardware-wait-cd344a64.json).

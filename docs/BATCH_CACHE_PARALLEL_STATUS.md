@@ -45,10 +45,15 @@ Implemented and host-tested:
 
 Selected evidence:
 
-- Queue: 46 tests; legacy receipt rejection: 3; real smoke runner: 12.
+- The hardware wait prototype passed 24 two-Spark NIC-to-GPU trials using shared
+  memfd registration, plus three local GPU cases. Bypassing the wait fails the
+  assertion. The [receipt](receipts/tp-hardware-wait-cd344a64.json) pins source,
+  binaries, commands and results; it does not qualify model throughput.
+
+- Queue: 47 tests; legacy receipt rejection: 3; real smoke runner: 12.
 - Cache fuzz: 13 scenarios, seed73/2000 produced 659645 checks; additional
   seed1337, sanitizer runs and rollback/copy failure negative controls passed.
-- Collectives: all TP2..TP16 host configurations pass the direct/tree mandatory cases (35 after registration coverage);
+- Collectives: all TP2..TP16 host configurations pass the direct/tree mandatory cases (46 after initialization/registration coverage);
   TP4 sanitizer and mesh sanitizer pass. FP32-rounding and premature source
   release mutations are rejected. These simulate transport/device behavior.
 - GLM temporal module and CUDA sources compile with real CUDA 13.0.88 for sm121a.
