@@ -5878,8 +5878,8 @@
     },
     {
       "path": "modules/minimax_resident_decode_stage/source/spark_minimax_serving_adapter.c",
-      "sha256": "c35f85504a594a88be1d731f2009410109beabaebe82fef5ed730410b4187de8",
-      "size_bytes": 8064
+      "sha256": "5d2ad677e8c5536ab8ce1977b1a0376c59510c615ec49b8e38b7cf5de44449c1",
+      "size_bytes": 13191
     },
     {
       "path": "modules/minimax_resident_decode_stage/source/spark_minimax_stagepack_format.h",
@@ -17020,5 +17020,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80651172
+  "total_bytes": 80656299
 }
