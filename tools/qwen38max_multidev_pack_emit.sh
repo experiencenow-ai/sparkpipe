@@ -47,7 +47,11 @@ case "$ATTEMPT" in
   *[!0-9a-f]*|""|?????????????????????????????????*) fail "bad attempt id" ;;
 esac
 [ "${#ATTEMPT}" -eq 32 ] || fail "bad attempt id length"
-RANK="${SPARK_QUEUE_RANK:?SPARK_QUEUE_RANK is required}"
+# Under --nodes spark0,..,sparkf --per-node the queue rank IS the world
+# rank. QMAX_EMIT_RANK overrides it for targeted single-node emission
+# (smoke runs, re-emitting one rank); the hostname check below still
+# fails closed unless the rank matches the host.
+RANK="${QMAX_EMIT_RANK:-${SPARK_QUEUE_RANK:?SPARK_QUEUE_RANK is required}}"
 [ "${SPARK_QUEUE_SIZE:-}" = "$WORLD" ] ||
   fail "SPARK_QUEUE_SIZE must be $WORLD (got '${SPARK_QUEUE_SIZE:-}')"
 [ "$RANK" -ge 0 ] && [ "$RANK" -lt "$WORLD" ] ||
