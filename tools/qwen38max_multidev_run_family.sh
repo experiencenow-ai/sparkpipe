@@ -123,7 +123,11 @@ the operator must establish the shared daemon (never start one by hand)"
 MANIFEST_JSON="$CHECKOUT/model-families/qwen38_max/smoke_experts.json"
 [ -f "$MANIFEST_JSON" ] ||
   fail "smoke_experts.json missing (the census manifest is the sizing record)"
-BUDGETS="$(python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" --budgets "$MANIFEST_JSON")"
+# --rank: the pool default is THIS rank's chunk-basis size from the pools
+# manifest (per-rank placement is uneven: 3.05-4.44 GiB chunked); budgets
+# fails loud without it by design.
+BUDGETS="$(python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" \
+  --budgets "$MANIFEST_JSON" --rank "$RANK")"
 DEFAULT_POOL="${BUDGETS%% *}"
 DEFAULT_SPINE="${BUDGETS##* }"
 : "${QMAX_EXPERT_POOL_BYTES:=$DEFAULT_POOL}"
