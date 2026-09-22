@@ -3193,8 +3193,8 @@
     },
     {
       "path": "examples/model_descriptions/gemma4_resident_decode_stage_bf16_firmware.json",
-      "sha256": "6d1c0125daff708c52325e9421e1fd4d39fbf9d10d80f4d6487df391ce040830",
-      "size_bytes": 3720
+      "sha256": "1b2ad06d88ec3986c9e46373e66db7d612c6d0658b00fa41fecd84dcffcf74bc",
+      "size_bytes": 3956
     },
     {
       "path": "examples/model_descriptions/glm52_resident_decode_stage_bf16_firmware.json",
@@ -5163,8 +5163,8 @@
     },
     {
       "path": "modules/gemma4_resident_decode_stage/Makefile",
-      "sha256": "9f80917f2d099b1a5c37298178500ccd5c0faaba748893a8831bc4a9549fb943",
-      "size_bytes": 4833
+      "sha256": "c3daa27eb770ab7f59708d410ba155b4a12dea08da1c92ee956caab2d38df508",
+      "size_bytes": 5383
     },
     {
       "path": "modules/gemma4_resident_decode_stage/Makefile.moe",
@@ -5193,8 +5193,8 @@
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_serving_adapter.c",
-      "sha256": "fc57775be72ddc312a5ee5152e1b9cc68a4afa92fafd4bde7fec820f0d5d6c6d",
-      "size_bytes": 13172
+      "sha256": "057815866fceefb57603e961631f52307f1ee08a4ea66c3e547587bcda501771",
+      "size_bytes": 13387
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_stagepack_format.h",
@@ -17020,5 +17020,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80665432
+  "total_bytes": 80666433
 }

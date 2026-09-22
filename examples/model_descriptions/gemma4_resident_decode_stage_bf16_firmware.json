@@ -1,7 +1,7 @@
 {
     "schema_version": 1,
     "model": {
-        "id": "gemma4.31b.resident-decode-stage-firmware",
+        "id": "google/gemma-4-31B-it",
         "revision": "842da3794eaa0b77d5f08bae87a17459d91ff475"
     },
     "metadata": {
@@ -12,7 +12,8 @@
             "disclosed_source": [
                 "google/gemma-4-31b-it warm snapshot, contract source_revision 842da3794eaa0b77d5f08bae87a17459d91ff475"
             ],
-            "revision_note": "model.revision is the contract source_revision (the value the module and adapter embed via GEMMA4_MODEL_REVISION); the serving-adapter template compares it against the driver contract at adapter_initialize - the previous h-string driver revision caused target_mismatch at launch (gemma4-tp16-launch-8). The h-string remains as module geometry documentation in metadata."
+            "revision_note": "model.revision is the contract source_revision (the value the module and adapter embed via GEMMA4_MODEL_REVISION); the serving-adapter template compares it against the driver contract at adapter_initialize - the previous h-string driver revision caused target_mismatch at launch (gemma4-tp16-launch-8). The h-string remains as module geometry documentation in metadata.",
+            "model_id_note": "model.id is the adapter descriptor model_id (SPARK_GEMMA4_SERVING_MODEL_ID); the template compares it against the driver contract at adapter_initialize - the firmware-id string caused target_mismatch (gemma4-tp16-launch-9)."
         },
         "module_geometry": {
             "hidden_dimension": 5376,
