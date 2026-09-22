@@ -43,6 +43,9 @@ TP_DEGREE ?= 4
 TP_RANK ?= 0
 TP_STANDALONE ?= 0
 
+# Digest pin must precede RUNTIME_CONFIGURATION (simple := expansion).
+override MINIMAX_CUDA_VALIDATOR_SHA256 := $(shell sha256sum validation/spark_minimax_resident_decode_stage_cuda_validation.cu 2>/dev/null | awk '{print $$1}')
+
 RUNTIME_CONFIGURATION := \
 	SPARK_MINIMAX_ALLOW_UNQUALIFIED_EXECUTION=$(ALLOW_UNQUALIFIED_EXECUTION) \
 	SPARK_MINIMAX_TP_DEGREE=$(TP_DEGREE) \
@@ -62,7 +65,6 @@ RUNTIME_CONFIGURATION := \
 		SPARK_MINIMAX_CUDA_VALIDATOR_SHA256=$(MINIMAX_CUDA_VALIDATOR_SHA256)
 
 GPU_VALIDATOR := validation/validate_minimax_resident_decode_stage_cuda.sh
-override MINIMAX_CUDA_VALIDATOR_SHA256 := $(shell sha256sum validation/spark_minimax_resident_decode_stage_cuda_validation.cu 2>/dev/null | awk '{print $$1}')
 
 # Dense text tower: bf16 is the only codec this module builds (no routed
 # experts, no quantization arms). EXPERT_CODEC still names the build slot so
