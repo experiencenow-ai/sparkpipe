@@ -29,7 +29,7 @@ log() { echo "mimo26-emit[$ARM r$RANK @$(hostname -s)] $*"; }
 first=0
 while [ "$first" -lt "$LAYER_COUNT" ]; do
   count=$(( WINDOW < LAYER_COUNT - first ? WINDOW : LAYER_COUNT - first ))
-  if python3 tools/mimo26_stagepack.py --arm "$ARM" --checkpoint "$CKPT" \
+  if python3 -u tools/mimo26_stagepack.py --arm "$ARM" --checkpoint "$CKPT" \
       --tp "$TP" --rank "$RANK" --out "$PACK" --stage-dir "$STAGE" \
       --layer-window "$first:$count" --emit >>"$EMIT_ROOT/emit.log" 2>&1; then
     log "window $first:$count staged"
@@ -41,12 +41,12 @@ while [ "$first" -lt "$LAYER_COUNT" ]; do
 done
 
 if [ ! -f "$PACK" ]; then
-  python3 tools/mimo26_stagepack.py --arm "$ARM" --checkpoint "$CKPT" \
+  python3 -u tools/mimo26_stagepack.py --arm "$ARM" --checkpoint "$CKPT" \
     --tp "$TP" --rank "$RANK" --out "$PACK" --stage-dir "$STAGE" --assemble \
     >>"$EMIT_ROOT/emit.log" 2>&1 || { log "assemble FAILED"; exit 1; }
   log "assembled"
 fi
-python3 tools/mimo26_stagepack.py --arm "$ARM" --checkpoint "$CKPT" \
+python3 -u tools/mimo26_stagepack.py --arm "$ARM" --checkpoint "$CKPT" \
   --tp "$TP" --rank "$RANK" --out "$PACK" --verify >>"$EMIT_ROOT/emit.log" 2>&1 \
   || { log "verify FAILED"; exit 1; }
 log "verified byte-exact against $CKPT"
