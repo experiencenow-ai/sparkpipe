@@ -2,9 +2,11 @@
 
 The API and resident daemon provide common serving; weightd owns byte residency,
 leases and mesh transport. Drivers supply layouts, routing and model math.
+Each API process serves one deployment; request `model` does not select another
+model. Apply the model's chat template outside the API; it only joins message content.
 
 Use one controller, `mac@mac-studio`, and ledger `~/.sparkpipe/queue`. Verify the
-merged commit in the planned checkout `/Users/mac/wk-sparkpipe-queue-main-20260922`.
+merged commit in controller checkout `/Users/mac/wk-sparkpipe-queue-main-20260922`.
 The operator runs one `spark_queue.py serve`; do not create another hardware queue
 or set a private `SPARK_QUEUE_STATE`.
 
@@ -31,19 +33,16 @@ python3 tools/spark_queue.py track --node spark0 \
   --device-memory-mib DEVICE_MIB --ports FIRST:LAST
 ```
 
-Repeat per node. `track` checks the live invocation, cgroup and finite host bound;
-it does not start a daemon. Include CUDA context overhead in its device budget.
-Reconcile restarts with `untrack`/`track`; developers do not restart shared services.
+Repeat per node. `track` checks the invocation, cgroup and finite host bound; it does not start a daemon.
+Include CUDA overhead in its device budget; reconcile restarts with `untrack`/`track`.
 
-Coordinate lanes **0 through 7** across the fleet. Each logical-to-physical map
-is immutable for the daemon lifetime; changing it requires draining users and
-operator-coordinated replacement. A crash can fence the shared mesh.
+Coordinate lanes **0 through 7**. Maps are immutable for the daemon lifetime;
+changes require draining users and operator replacement. A crash can fence the mesh.
 
 ## Developer: submit one bounded model job
 
-Choose an assigned lane, model working set and measured allocation budgets.
-Keep ports, runtime/configuration, KV backing and logs private per job. Set both
-`SPARK_WEIGHTD_SOCKET` and deployment `weightd.socket_path` to the shared socket.
+Choose an assigned lane, working set and measured budgets. Keep ports, runtime, KV and logs private.
+Set `SPARK_WEIGHTD_SOCKET` and deployment `weightd.socket_path` to the shared socket.
 
 Commit the family wrapper/configuration, then sync exact source:
 
@@ -55,8 +54,9 @@ python3 tools/spark_queue.py sync --id dev-model-001 \
 Use the printed `CHECKOUT`; build coherent family artifacts through the queue
 (CUDA validation requires GPU admission). Put the remote command in controller
 file `run-family-job.sh`. Its family wrapper prepares a private deployment under
-`$SPARK_QUEUE_RUNTIME_ROOT`, retains pack identities and keeps children in its
-queue cgroup. The resident launch uses the common executable:
+`$SPARK_QUEUE_RUNTIME_ROOT` and keeps children in its queue cgroup. Its runtime
+`packs/` directory must contain exactly one valid `*.sha256` digest for shared
+weightd attachment. The resident launch uses the common executable:
 
 ```sh
 export SPARK_WEIGHTD_SOCKET=/actual/shared/weightd.sock
@@ -90,8 +90,7 @@ Logical rank is the index in `--nodes`; keep this order identical to the map:
 | TP4 subset | `4,5,6,7` | spark4,spark5,spark6,spark7 |
 
 Pin packs, manifests and working sets; cap expert pools, spine, KV and workspace.
-GLM graph mode requires full pinning:
-`SPARK_GLM5_NEXT_GRAPH_PATH=1` and `SPARK_GLM5_NEXT_PIN_EXPERTS=1` with a full pool.
+GLM graphs require `SPARK_GLM5_NEXT_GRAPH_PATH=1`, `SPARK_GLM5_NEXT_PIN_EXPERTS=1` and a full pool.
 Partial-pool eager mode (`0`/`0`) is not GPU-qualified by the parallel GLM receipts.
 
 There is no qualified one-command setup for eight different model families.
