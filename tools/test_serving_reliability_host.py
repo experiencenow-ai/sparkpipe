@@ -24,7 +24,7 @@ GROUPS = {
 PYTHON = {
     "weights": "weightd_supervision weightd_supervised weightd_manifest weightd_lazy_pair weightd_map_fd_ownership",
     "glm": "tp_mesh_cancel_lifetime glm5_next_graph_failure glm5_next_stage_context glm5_next_embedding_collective glm5_next_adapter_config_load glm5_next_expert_shard_math glm5_next_geometry glm5_next_driver_probe",
-    "deployment": "generate_model_resident_deployment deployment_config_drift fleet_registrar spark_queue multi_dev_orchestrate inference_smoke glm5_next_queue_build",
+    "deployment": "generate_model_resident_deployment deployment_config_drift fleet_registrar spark_queue multi_dev_orchestrate inference_smoke glm5_next_queue_build mesh_lane_ladder_receipt",
     "model_contracts": "stage_module_teardown model_families model_driver_contracts glm52_module_contract qwen4_flash_model_header laguna_model_header",
 }
 FUZZ = ("tp_allreduce_fuzz", "serving_fault_fuzz", "kv_lane_fuzz", "weightd_working_set", "system_loopback")
