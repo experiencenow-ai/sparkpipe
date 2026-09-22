@@ -1923,6 +1923,40 @@ uninstrumented). NEXT: (a) instrument the client Read failure class;
 invalidate only on HELLO-generation changes, not connection recycling);
 (c) then the payoff chain as queued.
 
+## 09-22 16:00 TICK — PROTOCOL RESTORED: the fleet runs PR #1077 code, 16/16 PR-exact
+
+OPERATOR CALL-OUT ("only test what is in a PR") — the audit convicted the
+rig: spark3 ~/g5pacing was DIRTY (9 files) on a divergent local HEAD
+(8de7244e), so the deployed artifacts came from unpinned source. FULL
+AUDIT RESULT: all 9 dirty files byte-identical to the PR tip; the rig was
+STALE, never ahead (the PR has strictly more: draft_bridge AF_INET, the
+arrival-dump nonzero line, 467 lines of these tick records); the g5pace*
+strays are crash-era data blobs, not source. NOTHING UN-PUSHED EVER
+SHIPPED — but nothing PROVABLY shipped either; now it does.
+
+THE RECOVERY: Mac tree's 4 uncommitted files (nanosleep removal, ladder
+.cuh dependency, arrival-dump) committed → 781b61d = PR #1077 head.
+spark3 re-clean-cloned at 781b61d (old tree kept as g5pacing_dirty_0922)
+→ full rebuild (module validator PASS) → model_compile → publish_local
+(dies at its own MANIFEST step: find-with-missing-args + pipefail + set
+-e = silent exit 1 — the manual `find lib bin stages` regen stays in the
+recipe) → hub MANIFEST e6e8e1e7.
+
+ARTIFACTS (deterministic, PR-exact): driver a393a959, transport 8178940f,
+residentd af291cf3, adapter 018d5854. The residentd is byte-identical to
+the previously-deployed one (its source was already fully in the PR);
+the driver differs from the stale-rig 97889fed exactly by AF_INET +
+arrival-dump — meaning the fleet NEVER ACTUALLY RAN the draft_bridge
+IPv4-only fix until now (the 07:00 "deployed a76b5cf4" claim shipped a
+stale build — commit-messages-are-not-evidence, artifact edition).
+
+DEPLOYED 16/16 (spark0-9 + sparka-f): engines auto-restarted
+08:46:51-53, ~10s convergence, zero manual kills. EVERY TEST FROM HERE
+= PR CODE. NEXT: the canary on this build is a real discriminator — the
+rank-0 client drops (the invalidation amplifier's trigger) have never
+been observed under true IPv4-only connects.
+
+
 ## 09-22 17:00 TICK — THE OPERATOR'S CONVERGING DESIGN LANDED + THE API RETURNS TO RTX5090 (with the tokenizer); serving = one blocker left
 
 OPERATOR RULINGS THIS ERA: (1) "only test what is in a PR" — PROTOCOL
@@ -1995,36 +2029,3 @@ HYGIENE LEDGER (pre-existing, verified failing at 781b61d too):
 test_steploop_admission + test_model_pipeline_client (a 100ms weightsd-
 attach race in the fixture); the gemma4 test fixture bitrot
 (SPARK_GEMMA4_MODEL_MODULE_TARGET undefined) blocks full `make test`.
-
-## 09-22 16:00 TICK — PROTOCOL RESTORED: the fleet runs PR #1077 code, 16/16 PR-exact
-
-OPERATOR CALL-OUT ("only test what is in a PR") — the audit convicted the
-rig: spark3 ~/g5pacing was DIRTY (9 files) on a divergent local HEAD
-(8de7244e), so the deployed artifacts came from unpinned source. FULL
-AUDIT RESULT: all 9 dirty files byte-identical to the PR tip; the rig was
-STALE, never ahead (the PR has strictly more: draft_bridge AF_INET, the
-arrival-dump nonzero line, 467 lines of these tick records); the g5pace*
-strays are crash-era data blobs, not source. NOTHING UN-PUSHED EVER
-SHIPPED — but nothing PROVABLY shipped either; now it does.
-
-THE RECOVERY: Mac tree's 4 uncommitted files (nanosleep removal, ladder
-.cuh dependency, arrival-dump) committed → 781b61d = PR #1077 head.
-spark3 re-clean-cloned at 781b61d (old tree kept as g5pacing_dirty_0922)
-→ full rebuild (module validator PASS) → model_compile → publish_local
-(dies at its own MANIFEST step: find-with-missing-args + pipefail + set
--e = silent exit 1 — the manual `find lib bin stages` regen stays in the
-recipe) → hub MANIFEST e6e8e1e7.
-
-ARTIFACTS (deterministic, PR-exact): driver a393a959, transport 8178940f,
-residentd af291cf3, adapter 018d5854. The residentd is byte-identical to
-the previously-deployed one (its source was already fully in the PR);
-the driver differs from the stale-rig 97889fed exactly by AF_INET +
-arrival-dump — meaning the fleet NEVER ACTUALLY RAN the draft_bridge
-IPv4-only fix until now (the 07:00 "deployed a76b5cf4" claim shipped a
-stale build — commit-messages-are-not-evidence, artifact edition).
-
-DEPLOYED 16/16 (spark0-9 + sparka-f): engines auto-restarted
-08:46:51-53, ~10s convergence, zero manual kills. EVERY TEST FROM HERE
-= PR CODE. NEXT: the canary on this build is a real discriminator — the
-rank-0 client drops (the invalidation amplifier's trigger) have never
-been observed under true IPv4-only connects.
