@@ -243,8 +243,8 @@ def budgets(source: str) -> int:
     """Emit 'expert_pool_bytes spine_bytes' (per-node, tp-sharded)."""
     document = json.load(open(source, encoding="utf-8"))
     nodes = int(document["nodes"])
-    if nodes < 1:
-        raise SystemExit("budgets need a manifest with nodes >= 1")
+    if document.get("expert_shard") != "tp" or nodes < 1:
+        raise SystemExit("budgets need a tp-sharded manifest with nodes >= 1")
     pool = -(-sum(int(e["bytes"]) for e in document["experts"]) // nodes)
     spine = -(-int(document["spine_bytes"]) // nodes)
     print(f"{pool} {spine}")
