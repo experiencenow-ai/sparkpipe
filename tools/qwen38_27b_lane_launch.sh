@@ -15,7 +15,7 @@
 # weightd mesh lane 1, node-local nvfp4a16 TP4 rank packs).
 #
 # Lane defaults (override through QWEN38_27B_LANE_*):
-#   hosts spark0-spark3, control 23016, collective 67016, transport 64016,
+#   hosts spark0-spark3, control 23016, collective 53016, transport 64016,
 #   weightd mesh lane 1, physical mesh ranks 0,1,2,3,
 #   packs /home/<host>/sparkdata/qwen38-27b.nvfp4a16.tp4/packs.
 #

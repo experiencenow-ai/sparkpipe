@@ -70,7 +70,7 @@ class FakeLane(unittest.TestCase):
             "QWEN38_27B_LANE_SHARED_SOCKET": "/tmp/shared-weightd.sock",
             "QWEN38_27B_LANE_PACK_DIR": str(self.pack_dir),
             "QWEN38_27B_LANE_HOSTS": "spark0,spark1,spark2,spark3",
-            "SPARK_QUEUE_PORTS": "23016:23031,67016:67031,64016:64031",
+            "SPARK_QUEUE_PORTS": "23016:23031,53016:53031,64016:64031",
         }
 
     def tearDown(self):
@@ -135,14 +135,14 @@ class LaneStagingTests(FakeLane):
         self.assertEqual(config["tp_degree"], 4)
         self.assertEqual(config["tp_rank"], 2)
         self.assertEqual(config["stage_pack_path"], "packs/" + self.pack_name)
-        self.assertEqual(config["tp_collective"]["listen_port"], 67018)
+        self.assertEqual(config["tp_collective"]["listen_port"], 53018)
         self.assertEqual(config["tp_collective"]["peer_ports"],
-                         [67016, 67017, 67018, 67019])
+                         [53016, 53017, 53018, 53019])
         sessions = config["tp_collective"]["session_ports"]
         assigned = [port for row in sessions for port in row if port]
         self.assertEqual(len(assigned), 12)
         self.assertEqual(len(set(assigned)), 12)
-        self.assertTrue(all(67020 <= port <= 67031 for port in assigned))
+        self.assertTrue(all(53020 <= port <= 53031 for port in assigned))
         for row in range(4):
             self.assertEqual(sessions[row][row], 0)
         hc = config["tp_collective"]["session_ports_hc"]
@@ -155,12 +155,12 @@ class LaneStagingTests(FakeLane):
     def test_every_listener_inside_reserved_blocks(self):
         ports = lane.listener_ports(
             ["spark0", "spark1", "spark2", "spark3"],
-            {"control": 23016, "collective": 67016, "transport": 64016})
+            {"control": 23016, "collective": 53016, "transport": 64016})
         self.assertEqual(ports[0], 23016)
-        self.assertEqual(ports[-1], 67023)
-        lane.check_reserved(ports, [(23016, 23031), (67016, 67031), (64016, 64031)])
+        self.assertEqual(ports[-1], 64019)
+        lane.check_reserved(ports, [(23016, 23031), (53016, 53031), (64016, 64031)])
         with self.assertRaises(lane.LaneError):
-            lane.check_reserved(ports, [(23016, 23031), (67016, 67031)])
+            lane.check_reserved(ports, [(23016, 23031), (53016, 53031)])
 
     def test_experts_sidecar_staged_when_present(self):
         (self.pack_dir / (self.pack_name + ".experts")).write_bytes(b"\0" * 16)
@@ -267,13 +267,13 @@ class LaneFailClosedTests(FakeLane):
 
 class LaneSessionGridTests(unittest.TestCase):
     def test_grid_is_compact_and_off_diagonal(self):
-        grid = lane.session_grid(67016, 4)
+        grid = lane.session_grid(53016, 4)
         flat = [port for row in grid for port in row]
-        self.assertEqual(flat[0:4], [0, 67020, 67021, 67022])
-        self.assertEqual(flat[4:8], [67023, 0, 67024, 67025])
-        self.assertEqual(flat[8:12], [67026, 67027, 0, 67028])
-        self.assertEqual(flat[12:16], [67029, 67030, 67031, 0])
-        self.assertEqual(sorted(set(flat)), [0] + list(range(67020, 67032)))
+        self.assertEqual(flat[0:4], [0, 53020, 53021, 53022])
+        self.assertEqual(flat[4:8], [53023, 0, 53024, 53025])
+        self.assertEqual(flat[8:12], [53026, 53027, 0, 53028])
+        self.assertEqual(flat[12:16], [53029, 53030, 53031, 0])
+        self.assertEqual(sorted(set(flat)), [0] + list(range(53020, 53032)))
 
 
 if __name__ == "__main__":

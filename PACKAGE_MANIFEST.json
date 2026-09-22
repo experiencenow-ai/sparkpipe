@@ -9863,7 +9863,7 @@
     },
     {
       "path": "tests/test_qwen38_27b_lane_deployment.py",
-      "sha256": "63db205b8efeed33261dfcfef9c1edba8e1efaa3e54421c07d7e4d8238a905db",
+      "sha256": "82373e00d1fd6a4a09ca4646157fb42613d06282a65d2ca50fe737d581b1aaf2",
       "size_bytes": 12282
     },
     {
@@ -12413,12 +12413,12 @@
     },
     {
       "path": "tools/qwen38_27b_lane_deployment.py",
-      "sha256": "72c0fb6ac1a21b649aca804ba735d127dbb91d67b83a90657806cd53824db90d",
+      "sha256": "b3f43a618469d42ed5a0af2f08b2d93ad71b204d24fcd09ab512e91aa9f9c07b",
       "size_bytes": 20113
     },
     {
       "path": "tools/qwen38_27b_lane_launch.sh",
-      "sha256": "0175fe306c3a0bf9893548e14b82471a6450d7275cce3a8c398556ddc0ddbe9a",
+      "sha256": "4b18289c436ecdc8637a7d184fa7a3b92ab594777046c72ad03f5fadf7832706",
       "size_bytes": 2649
     },
     {

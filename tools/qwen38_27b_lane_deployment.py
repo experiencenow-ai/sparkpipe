@@ -15,7 +15,7 @@ set (nvfp4 FFN + bf16 spine, the quality-law serving arm):
   /home/<host>/sparkdata/qwen38-27b.nvfp4a16.tp4/packs/tp4-rankNN.q38sp
 
 Every listener stays inside the lane-1 port blocks (control 23016-23031,
-collective 67016-67031, transport 64016-64031). The collective session grid
+collective 53016-53031, transport 64016-64031). The collective session grid
 uses the twelve ports above the four listen ports because the serving
 adapter loads session_ports as a mandatory non-zero off-diagonal matrix
 while session_ports_hc stays zero (require_session_ports == 0).
@@ -37,7 +37,7 @@ LANE_FAMILY = "qwen38_27b"
 LANE_TOPOLOGY = "TP4"
 LANE_HOSTS_DEFAULT = "spark0,spark1,spark2,spark3"
 LANE_CONTROL_BASE_DEFAULT = 23016
-LANE_COLLECTIVE_BASE_DEFAULT = 67016
+LANE_COLLECTIVE_BASE_DEFAULT = 53016
 LANE_TRANSPORT_BASE_DEFAULT = 64016
 LANE_WEIGHTD_LANE_DEFAULT = 1
 LANE_SHARED_SOCKET_DEFAULT = "/run/sparkpipe-weightd-shared/weightd.sock"
@@ -158,7 +158,7 @@ def session_grid(base: int, size: int) -> list[list[int]]:
     The size*(size-1) ports above the listen ports are assigned in
     row-major order to the off-diagonal cells; the diagonal stays zero
     exactly as the adapter's session-port loader requires. For the lane-1
-    TP4 block (67016-67031) that fills 67020-67031 completely.
+    TP4 block (53016-53031) that fills 53020-53031 completely.
     """
     cursor = base + size
     grid = []
