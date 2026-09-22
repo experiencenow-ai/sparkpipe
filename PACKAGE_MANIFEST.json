@@ -1,5 +1,5 @@
 {
-  "file_count": 3342,
+  "file_count": 3343,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -3392,6 +3392,11 @@
       "size_bytes": 10333
     },
     {
+      "path": "examples/release/dsv41_flash_tp4/m3_preload_receipt.json",
+      "sha256": "778bb59314522ee12601ee0d863384efe1b7edee170c976bfa5a8fa91775b3d0",
+      "size_bytes": 3313
+    },
+    {
       "path": "examples/release/dsv41_flash_tp8/engram_report.json",
       "sha256": "f82fb04f32ce62cee712dfdbca139b9345f79a22e3ad2ddcb44d81ce54fd19a6",
       "size_bytes": 3002
@@ -4908,8 +4913,8 @@
     },
     {
       "path": "modules/dsv41_flash_resident_decode_stage/Makefile",
-      "sha256": "444fe7527745f2a1accb341b6d40e15b2a83bf866142e1388c8da5b6d7c5ac84",
-      "size_bytes": 4867
+      "sha256": "cb2c4f42356424dda6763645d6c4b0ef452d9180ee1564c8a1a7d048c2ce40ca",
+      "size_bytes": 5809
     },
     {
       "path": "modules/dsv41_flash_resident_decode_stage/include/sparkpipe/spark_dsv41_flash_resident_decode_stage_firmware.h",
@@ -4948,8 +4953,8 @@
     },
     {
       "path": "modules/dsv41_flash_resident_decode_stage/tools/dsv41_flash_attach_probe.c",
-      "sha256": "28a195ff71354a3b0d28e112f97139803da6537563f2a2931ab5a0408ee8f4ac",
-      "size_bytes": 13327
+      "sha256": "3c4830833666b0ef4c6b32b232b4f5a4f706923b0209b3e075f7639fcfffe0c2",
+      "size_bytes": 13617
     },
     {
       "path": "modules/dsv41_flash_resident_decode_stage/tools/dsv41_flash_engram_probe.c",
@@ -11123,8 +11128,8 @@
     },
     {
       "path": "tools/dsv41_flash_smoke_experts.py",
-      "sha256": "8aefbde68ac2a6d7d443299759efb01bcf3bcabb8eabeddeb2b94a2a0c56d371",
-      "size_bytes": 10257
+      "sha256": "6080aff250cdc4f47474053ba6ed065b31813e7dd35e0d8babbf68dc308f6d02",
+      "size_bytes": 12053
     },
     {
       "path": "tools/dsv41_flash_stagepack.py",
@@ -16715,5 +16720,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79675142
+  "total_bytes": 79681483
 }
