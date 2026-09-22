@@ -55,3 +55,23 @@ activity. Do not call CUDA/CUPTI from an asynchronous signal handler.
 Tracing perturbs timing. Use the trace to attribute time, then measure throughput
 with the same model/configuration and injection disabled. No serving daemon or
 persistent configuration is changed by the build tool.
+
+## Interpret a completed trace
+
+```sh
+python3 tools/tp_cupti_trace_report.py /absolute/unique/rank0.cupti.log --output /absolute/unique/rank0.cupti.json
+```
+
+The report merges overlapping GPU intervals before calculating covered time
+and gaps. It separates compute kernels, names containing `SparkGlm5NextMesh`,
+memcpy and memset, and lists the largest uncovered intervals and kernel names.
+Category intervals can overlap; their coverage is not additive. An uncovered
+interval is not automatically a network wait: it may also include CPU work,
+launch delay or untraced device operations.
+
+For an exact token/request window recorded on that same host, pass
+`--clock monotonic --start-ns N --end-ns M` (or `--clock realtime`). The parser
+converts the window using `TRACE_ANCHOR` and clips intersecting GPU intervals.
+The nearby clock samples have sampling error and do not synchronize different
+hosts. A trace lacking final flush, buffer-loss accounting or valid completed
+records produces an explicit partial report and exit code 2.
