@@ -184,7 +184,9 @@ struct SparkGlm5NextModuleState
 	float *head_certified_fp8_scale_f32;
 	float *head_certified_fp8_norm_f32;
 	uint64_t expert_pin_leases[32];
+	uint8_t expert_pin_phases[32];
 	uint32_t expert_pin_lease_count;
+	uint32_t expert_pin_key_count;
 	uint8_t *kv_cache;
 	uint64_t kv_layer_stride_bytes;
 	uint8_t *index_cache;
@@ -2562,43 +2564,92 @@ static void SparkGlm5NextTpChainReduceMlp(SparkGlm5NextTpChain *chain)
 		SparkGlm5NextTpChainFail(chain,status);
 }
 
+static uint32_t SparkGlm5NextFirstRoutedLayer(const SparkGlm5NextModuleState *state)
+{
+	return(state->first_layer_index > SPARK_GLM5_NEXT_MODEL_FIRST_ROUTED_LAYER ? state->first_layer_index : SPARK_GLM5_NEXT_MODEL_FIRST_ROUTED_LAYER);
+}
+
 static SparkStatus SparkGlm5NextPinAllExperts(SparkGlm5NextModuleState *state)
 {
 	SparkWeightdExpertKey keys[SPARK_WEIGHTD_LEASE_GROUPS_MAX];
-	uint32_t count = 0u;
-	uint32_t layer,expert;
 	SparkStatus status = SPARK_STATUS_OK;
-	for ( layer = state->first_layer_index + SPARK_GLM5_NEXT_MODEL_FIRST_ROUTED_LAYER;
-	      layer < state->first_layer_index + state->layer_count &&
-	          status == SPARK_STATUS_OK; layer++ )
-		for ( expert = 0u;
-		      expert < SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT &&
-		          status == SPARK_STATUS_OK; expert++ )
+	uint32_t layer,expert,count = 0u;
+	if ( state->expert_pin_lease_count != 0u )
+		return(SPARK_STATUS_BUSY);
+	for (layer=SparkGlm5NextFirstRoutedLayer(state); layer<state->first_layer_index + state->layer_count && status==SPARK_STATUS_OK; layer++)
+		for (expert=0u; expert<SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT && status==SPARK_STATUS_OK; expert++)
 		{
-			keys[count].layer = layer;
-			keys[count].expert = expert;
-			count++;
-			if ( count == SPARK_WEIGHTD_LEASE_GROUPS_MAX ||
-			     ( layer + 1u == state->first_layer_index + state->layer_count &&
-			       expert + 1u == SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT ) )
+			keys[count++] = (SparkWeightdExpertKey){.layer=layer,.expert=expert};
+			if ( count == SPARK_WEIGHTD_LEASE_GROUPS_MAX || (layer + 1u == state->first_layer_index + state->layer_count && expert + 1u == SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT) )
 			{
 				uint64_t lease = 0u;
-				status = SparkWeightdMapAcquire(state->lazy_pack->map,keys,
-				    count,&lease,SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
+				void *base = 0;
+				uint32_t index = state->expert_pin_lease_count;
+				if ( index >= sizeof(state->expert_pin_leases) / sizeof(state->expert_pin_leases[0]) )
+					return(SPARK_STATUS_CAPACITY_EXCEEDED);
+				status = SparkWeightdMapAcquire(state->lazy_pack->map,keys,count,&lease,SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
+				if ( lease != 0u )
+					state->expert_pin_leases[state->expert_pin_lease_count++] = lease;
+				if ( status == SPARK_STATUS_OK )
+					status = lease != 0u ? SparkWeightdMapBeginUse(state->lazy_pack->map,lease,&base) : SPARK_STATUS_VALIDATION_FAILED;
 				if ( status == SPARK_STATUS_OK )
 				{
-					if ( state->expert_pin_lease_count <
-					        (uint32_t)(sizeof(state->expert_pin_leases)/
-					            sizeof(state->expert_pin_leases[0])) )
-						state->expert_pin_leases[state->expert_pin_lease_count++] = lease;
-					fprintf(stderr,"EXPERT-PIN lease=%llu keys=%u total_leases=%u\n",
-						(unsigned long long)lease,(unsigned)count,
-						(unsigned)state->expert_pin_lease_count);
+					state->expert_pin_phases[index] = 1u;
+					if ( base == 0 || (state->decode_lease_base_saved != 0 && state->decode_lease_base_saved != base) )
+						status = SPARK_STATUS_VALIDATION_FAILED;
+					else
+					{
+						state->expert_pin_key_count += count;
+						state->decode_lease_base_saved = base;
+					}
 				}
 				count = 0u;
 			}
 		}
-	SPARK_RETURN(status);
+	return(status);
+}
+
+static SparkStatus SparkGlm5NextReleasePinnedExperts(SparkGlm5NextModuleState *state)
+{
+	while ( state->expert_pin_lease_count != 0u )
+	{
+		uint32_t index = state->expert_pin_lease_count - 1u;
+		SparkStatus status;
+		if ( state->expert_pin_phases[index] == 1u )
+		{
+			status = SparkWeightdMapRecordCompletion(state->lazy_pack->map,state->expert_pin_leases[index],(cudaStream_t)state->execution_stream);
+			if ( status != SPARK_STATUS_OK ) return(status);
+			state->expert_pin_phases[index] = 2u;
+		}
+		status = SparkWeightdMapRelease(state->lazy_pack->map,state->expert_pin_leases[index],SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
+		if ( status != SPARK_STATUS_OK ) return(status);
+		state->expert_pin_phases[index] = 0u;
+		state->expert_pin_leases[index] = 0u;
+		state->expert_pin_lease_count--;
+	}
+	state->expert_pin_key_count = 0u;
+	return(SPARK_STATUS_OK);
+}
+
+static SparkStatus SparkGlm5NextGraphClaimExperts(SparkGlm5NextTpChain *chain)
+{
+	SparkGlm5NextModuleState *state = chain->state;
+	uint32_t index,first = SparkGlm5NextFirstRoutedLayer(state),end = state->first_layer_index + state->layer_count;
+	uint32_t expected = end > first ? (end - first) * SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT : 0u;
+	if ( state->expert_pin_key_count != expected || state->expert_pin_lease_count != SparkCeilDivU32(expected,SPARK_WEIGHTD_LEASE_GROUPS_MAX) )
+	{
+		fprintf(stderr,"GLM whole-chain graph requires %u leased experts; held %u\n",expected,state->expert_pin_key_count);
+		return(SPARK_STATUS_UNSUPPORTED);
+	}
+	for (index=0u; index<state->expert_pin_lease_count; index++)
+		if ( state->expert_pin_leases[index] == 0u || state->expert_pin_phases[index] != 1u )
+			return(SPARK_STATUS_VALIDATION_FAILED);
+	if ( expected != 0u && state->decode_lease_base_saved == 0 )
+		return(SPARK_STATUS_VALIDATION_FAILED);
+	chain->wave.expert_lease_base = state->decode_lease_base_saved;
+	chain->wave.expert_lease_local_layer = 0u;
+	chain->wave.expert_lease_all = 1u;
+	return(SPARK_STATUS_OK);
 }
 
 static SparkStatus SparkGlm5NextLazyExperts(SparkGlm5NextTpChain *chain)
@@ -3124,25 +3175,14 @@ static void SparkGlm5NextGraphEnsure(SparkGlm5NextTpChain *chain,
 		*status_out = SPARK_STATUS_BUSY;
 		return;
 	}
-	status = SparkGlm5NextGraphCoverEnsure(state);
+	status = SparkGlm5NextGraphClaimExperts(chain);
+	if ( status == SPARK_STATUS_OK )
+		status = SparkGlm5NextGraphCoverEnsure(state);
 	if ( status != SPARK_STATUS_OK )
 	{
 		*status_out = status;
 		return;
 	}
-	if ( state->decode_lease_base_saved == 0 &&
-	     state->lazy_pack != 0 &&
-	     state->lazy_pack->map != 0 )
-	{
-		void *lease_base = 0;
-		if ( SparkWeightdMapBase(state->lazy_pack->map,
-		        &lease_base) == SPARK_STATUS_OK && lease_base != 0 )
-			state->decode_lease_base_saved =
-			    (const uint8_t *)lease_base;
-	}
-	chain->wave.expert_lease_base = state->decode_lease_base_saved;
-	chain->wave.expert_lease_local_layer = 0u;
-	chain->wave.expert_lease_all = 1u;
 	bound = chain->wave.maximum_context +
 		SPARK_GLM5_NEXT_GRAPH_CONTEXT_MARGIN;
 	if ( bound > chain->wave.max_sequence_positions )
@@ -4607,12 +4647,15 @@ void SparkGlm5NextResidentDecodeStageDestroy(void *module_state)
 	state->decode_cover_device = 0;
 	if ( state->lazy_pack != 0 )
 	{
-		if ( SparkWeightdLazyPackDestroy(state->lazy_pack) != SPARK_STATUS_OK )
+		if ( SparkGlm5NextReleasePinnedExperts(state) != SPARK_STATUS_OK || SparkWeightdLazyPackDestroy(state->lazy_pack) != SPARK_STATUS_OK )
 			return;
 		state->lazy_pack = 0;
 	}
 	if ( state->tp_device_collective_hc_initialized != 0u )
+	{
 		SparkTpDeviceCollectiveDestroy(&state->tp_device_collective_hc);
+		if ( state->tp_device_collective_hc.implementation != 0 ) return;
+	}
 	if ( state->tp_hc_host_credit_send_bf16 != 0 )
 		(void)cudaFreeHost(state->tp_hc_host_credit_send_bf16);
 	if ( state->tp_hc_host_credit_receive_bf16 != 0 )
@@ -4620,7 +4663,10 @@ void SparkGlm5NextResidentDecodeStageDestroy(void *module_state)
 	state->tp_hc_host_credit_send_bf16 = 0;
 	state->tp_hc_host_credit_receive_bf16 = 0;
 	if ( state->tp_device_collective_initialized != 0u )
+	{
 		SparkTpDeviceCollectiveDestroy(&state->tp_device_collective);
+		if ( state->tp_device_collective.implementation != 0 ) return;
+	}
 	if ( state->lane_client != 0 )
 	{
 		(void)SparkWeightdClientClose(state->lane_client);
@@ -4736,7 +4782,7 @@ static SparkStatus SparkGlm5NextInitializeState(
 
 	if ( status != SPARK_STATUS_OK )
 	{
-		if ( state->lazy_pack != 0 && SparkWeightdLazyPackDestroy(state->lazy_pack) != SPARK_STATUS_OK )
+		if ( state->lazy_pack != 0 && (SparkGlm5NextReleasePinnedExperts(state) != SPARK_STATUS_OK || SparkWeightdLazyPackDestroy(state->lazy_pack) != SPARK_STATUS_OK) )
 		{
 			fprintf(stderr,"GLM lazy initialization cleanup failed; retaining CUDA resources until process exit\n");
 			SPARK_RETURN(status);

@@ -191,6 +191,107 @@ static void observe_completion(void *context,const SparkModelDriverCompletion *c
 	}
 }
 
+static uint32_t PIN_FIRST_EXPECTED,PIN_LAST_EXPECTED;
+static uint32_t PIN_CALLS,PIN_KEYS,PIN_RECORDS,PIN_RELEASES,PIN_FAIL_ACQUIRE,PIN_FAIL_BEGIN,PIN_FAIL_RECORD,PIN_FAIL_RELEASE;
+static uint8_t PIN_PHASES[33],PIN_SEEN[SPARK_GLM5_NEXT_MODEL_LAYER_COUNT][SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT];
+
+SparkStatus SparkWeightdMapAcquire(SparkWeightdMap *map,const SparkWeightdExpertKey *keys,uint32_t count,uint64_t *identifier,uint64_t timeout)
+{
+	(void)timeout;
+	assert(map == (SparkWeightdMap *)(uintptr_t)1u && count > 0u && count <= SPARK_WEIGHTD_LEASE_GROUPS_MAX);
+	*identifier = ++PIN_CALLS;
+	assert(PIN_CALLS < 33u);
+	for (uint32_t i=0u; i<count; i++)
+	{
+		assert(keys[i].layer >= PIN_FIRST_EXPECTED && keys[i].layer < PIN_LAST_EXPECTED);
+		assert(keys[i].expert < SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT && PIN_SEEN[keys[i].layer][keys[i].expert] == 0u);
+		PIN_SEEN[keys[i].layer][keys[i].expert] = 1u;
+		PIN_KEYS++;
+	}
+	return(PIN_CALLS == PIN_FAIL_ACQUIRE ? SPARK_STATUS_IO_ERROR : SPARK_STATUS_OK);
+}
+
+SparkStatus SparkWeightdMapBeginUse(SparkWeightdMap *map,uint64_t identifier,void **base)
+{
+	(void)map;
+	assert(identifier <= PIN_CALLS && PIN_PHASES[identifier] == 0u);
+	if ( identifier == PIN_FAIL_BEGIN ) return(SPARK_STATUS_IO_ERROR);
+	PIN_PHASES[identifier] = 1u;
+	*base = (void *)(uintptr_t)64u;
+	return(SPARK_STATUS_OK);
+}
+
+SparkStatus SparkWeightdMapRecordCompletion(SparkWeightdMap *map,uint64_t identifier,cudaStream_t stream)
+{
+	(void)map;(void)stream;
+	assert(identifier <= PIN_CALLS && PIN_PHASES[identifier] == 1u);
+	PIN_RECORDS++;
+	if ( identifier == PIN_FAIL_RECORD ) return(SPARK_STATUS_IO_ERROR);
+	PIN_PHASES[identifier] = 2u;
+	return(SPARK_STATUS_OK);
+}
+
+SparkStatus SparkWeightdMapRelease(SparkWeightdMap *map,uint64_t identifier,uint64_t timeout)
+{
+	(void)map;(void)timeout;
+	assert(identifier <= PIN_CALLS && (PIN_PHASES[identifier] == 0u || PIN_PHASES[identifier] == 2u));
+	PIN_RELEASES++;
+	if ( identifier == PIN_FAIL_RELEASE ) return(SPARK_STATUS_IO_ERROR);
+	PIN_PHASES[identifier] = 3u;
+	return(SPARK_STATUS_OK);
+}
+
+static void check_graph_expert_ownership(uint32_t first,uint32_t layers,uint32_t expected_first,uint32_t acquire_error,uint32_t begin_error)
+{
+	SparkWeightdLazyPack pack = {0};
+	SparkGlm5NextTpChain chain = {0};
+	uint32_t expected,leases;
+	memset(&state,0,sizeof(state));
+	memset(PIN_PHASES,0,sizeof(PIN_PHASES));
+	memset(PIN_SEEN,0,sizeof(PIN_SEEN));
+	PIN_CALLS = PIN_KEYS = PIN_RECORDS = PIN_RELEASES = PIN_FAIL_RECORD = PIN_FAIL_RELEASE = 0u;
+	PIN_FAIL_ACQUIRE = acquire_error;
+	PIN_FAIL_BEGIN = begin_error;
+	pack.map = (SparkWeightdMap *)(uintptr_t)1u;
+	state.lazy_pack = &pack;
+	state.first_layer_index = first;
+	state.layer_count = layers;
+	PIN_FIRST_EXPECTED = expected_first;
+	PIN_LAST_EXPECTED = first + layers;
+	state.experts_warm = 1u;
+	state.decode_lease_base_saved = (const uint8_t *)(uintptr_t)64u;
+	chain.state = &state;
+	expected = (first + layers - expected_first) * SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT;
+	assert(SparkGlm5NextGraphClaimExperts(&chain) == SPARK_STATUS_UNSUPPORTED && chain.wave.expert_lease_all == 0u);
+	assert(SparkGlm5NextPinAllExperts(&state) == (acquire_error != 0u || begin_error != 0u ? SPARK_STATUS_IO_ERROR : SPARK_STATUS_OK));
+	leases = state.expert_pin_lease_count;
+	if ( acquire_error != 0u || begin_error != 0u )
+	{
+		assert(leases == 2u && state.expert_pin_key_count == SPARK_WEIGHTD_LEASE_GROUPS_MAX);
+		assert(SparkGlm5NextGraphClaimExperts(&chain) == SPARK_STATUS_UNSUPPORTED);
+		assert(SparkGlm5NextReleasePinnedExperts(&state) == SPARK_STATUS_OK);
+		assert(PIN_PHASES[1] == 3u && PIN_PHASES[2] == 3u && PIN_RECORDS == 1u && PIN_RELEASES == 2u);
+		return;
+	}
+	assert(PIN_KEYS == expected && state.expert_pin_key_count == expected);
+	for (uint32_t layer=expected_first; layer<first + layers; layer++)
+		for (uint32_t expert=0u; expert<SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT; expert++) assert(PIN_SEEN[layer][expert] == 1u);
+	assert(SparkGlm5NextPinAllExperts(&state) == SPARK_STATUS_BUSY);
+	assert(SparkGlm5NextGraphClaimExperts(&chain) == SPARK_STATUS_OK && chain.wave.expert_lease_all == 1u);
+	state.expert_pin_phases[0] = 0u;
+	assert(SparkGlm5NextGraphClaimExperts(&chain) == SPARK_STATUS_VALIDATION_FAILED);
+	state.expert_pin_phases[0] = 1u;
+	PIN_FAIL_RECORD = leases;
+	assert(SparkGlm5NextReleasePinnedExperts(&state) == SPARK_STATUS_IO_ERROR && state.expert_pin_lease_count == leases && PIN_RELEASES == 0u);
+	PIN_FAIL_RECORD = 0u;
+	PIN_FAIL_RELEASE = leases;
+	assert(SparkGlm5NextReleasePinnedExperts(&state) == SPARK_STATUS_IO_ERROR && state.expert_pin_lease_count == leases);
+	assert(SparkGlm5NextGraphClaimExperts(&chain) == SPARK_STATUS_VALIDATION_FAILED);
+	PIN_FAIL_RELEASE = 0u;
+	assert(SparkGlm5NextReleasePinnedExperts(&state) == SPARK_STATUS_OK && state.expert_pin_lease_count == 0u && state.expert_pin_key_count == 0u);
+	assert(PIN_RECORDS == leases + 1u && PIN_RELEASES == leases + 1u);
+}
+
 static void check_stream_receipt(void)
 {
 	SparkStageModuleCudaWait first = {0},second = {0};
@@ -1130,6 +1231,10 @@ int32_t main(void)
 	SparkFirmwareModuleHostServices services = {0};
 	const char *path = 0;
 	uint32_t first[4] = {0u,12u,23u,34u},counts[4] = {12u,11u,11u,11u},stage;
+	check_graph_expert_ownership(0u,45u,3u,0u,0u);
+	check_graph_expert_ownership(12u,12u,12u,0u,0u);
+	check_graph_expert_ownership(12u,12u,12u,2u,0u);
+	check_graph_expert_ownership(12u,12u,12u,0u,2u);
 	check_stream_receipt();
 	check_chain_ownership();
 	int32_t status = check_cache_transactions(SPARK_STATUS_IO_ERROR,SPARK_STATUS_OK,cudaSuccess);
