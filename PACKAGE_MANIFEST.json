@@ -5053,8 +5053,8 @@
     },
     {
       "path": "modules/gemma4_resident_decode_stage/validation/spark_gemma4_resident_decode_stage_cuda_validation.cu",
-      "sha256": "4c0bd08b70e08b9dedf5b42e6534d51aae673a684385dc904717d70a7fc92ed3",
-      "size_bytes": 101719
+      "sha256": "bb304e4fde81a0b5754afb240a6229f449023094941d0325369b1c713700faad",
+      "size_bytes": 102477
     },
     {
       "path": "modules/gemma4_resident_decode_stage/validation/validate_gemma4_resident_decode_stage_cuda.sh",
@@ -16430,5 +16430,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78358998
+  "total_bytes": 78359756
 }

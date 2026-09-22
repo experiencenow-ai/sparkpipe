@@ -151,7 +151,14 @@ static int SparkGemma4ValReport(const char *check, const SparkGemma4ValMetrics *
 	return(0);
 }
 
-static int SparkGemma4ValCompareBf16(const char *check, const uint16_t *actual, const uint16_t *expected, uint64_t count)
+/* relative_threshold: single-stage checks carry the 5e-3 single-kernel
+   bound; composed-tier callers pass the ACCUMULATED bound. The chain hidden
+   output spans attention (measured 2.4e-3 at its own boundary) + output
+   projection + residual + fused RMS + gate_up/gelu/down: six bf16-rounding
+   stages against an fp32-internal mirror. 1e-2 keeps composition defects
+   loud (the row-stride bug read ~0.99 relative) without failing on
+   arithmetic accumulation. */
+static int SparkGemma4ValCompareBf16Threshold(const char *check, const uint16_t *actual, const uint16_t *expected, uint64_t count, float relative_threshold)
 {
 	float *actual_f = (float *)malloc(count * sizeof(float));
 	float *expected_f = (float *)malloc(count * sizeof(float));
@@ -166,10 +173,15 @@ static int SparkGemma4ValCompareBf16(const char *check, const uint16_t *actual, 
 		expected_f[index] = SparkGemma4ValFromBf16(expected[index]);
 	}
 	SparkGemma4ValMeasure(&metrics,actual_f,expected_f,count);
-	result = SparkGemma4ValReport(check,&metrics,5e-3,0.999);
+	result = SparkGemma4ValReport(check,&metrics,relative_threshold,0.999f);
 	free(actual_f);
 	free(expected_f);
 	return(result);
+}
+
+static int SparkGemma4ValCompareBf16(const char *check, const uint16_t *actual, const uint16_t *expected, uint64_t count)
+{
+	return(SparkGemma4ValCompareBf16Threshold(check,actual,expected,count,5e-3f));
 }
 
 static int SparkGemma4ValCompareAgainstFloat(const char *check, const uint16_t *actual, const float *expected, uint64_t count)
@@ -1871,9 +1883,9 @@ static int SparkGemma4ValCheckChainSliding(void)
 	free(actual_f);
 	free(expected_f);
 	count = (uint64_t)SPARK_GEMMA4_VAL_CHAIN_ROWS * hidden;
-	if (SparkGemma4ValCompareBf16("chain_sliding_hidden",chain.actual_hidden,chain.expected_hidden,count) != 0)
+	if (SparkGemma4ValCompareBf16Threshold("chain_sliding_hidden",chain.actual_hidden,chain.expected_hidden,count,1e-2f) != 0)
 		return(1);
-	if (SparkGemma4ValCompareBf16("chain_sliding_normed",chain.actual_normed,chain.expected_normed,count) != 0)
+	if (SparkGemma4ValCompareBf16Threshold("chain_sliding_normed",chain.actual_normed,chain.expected_normed,count,1e-2f) != 0)
 		return(1);
 	{
 		uint16_t *rerun_hidden = (uint16_t *)malloc((uint64_t)SPARK_GEMMA4_VAL_CHAIN_ROWS * hidden * 2u);
