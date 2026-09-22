@@ -46,7 +46,7 @@ PACK="/home/$HOST/sparkdata/laguna-s-2.1.bf16.tp8pp2/packs/laguna_stage.tp8.pp2.
 SHA="$(cut -d' ' -f1 "$PACK.sha256")"
 REVISION="$(python3 -c 'import json;print(json.load(open("'"$REPO"'/examples/model_descriptions/laguna_resident_decode_stage_firmware.json"))["model"]["revision"])')"
 WSET="$(mktemp -q /tmp/laguna-wset.XXXXXX)"
-trap 'rm -f "$WSET"' EXIT
+trap 'rm -f "$WSET" "$WSET.chunk."*' EXIT
 
 for required in "$SOCKET" "$PACK" "$PACK.sha256"; do
   [ -e "$required" ] || { echo "missing: $required" >&2; exit 2; }
@@ -58,7 +58,15 @@ cd "$REPO"
 # expert spans (~13.9 GiB NVMe read, one time per node).
 bash tools/laguna_multidev_experts_manifest.sh "$PACK"
 
-python3 tools/laguna_multidev_lane.py --emit-wset "$WSET"
+# Per-rank filtered wset (weightd_warm rejects pairs outside this pack's
+# manifest), split into <=512-pair chunks (SPARK_WEIGHTD_LEASE_GROUPS_MAX;
+# 512 pairs x 8 B = 4096 B exactly) warmed sequentially - the GLM
+# pin-experts chunked-lease precedent. A "run" below = the full chunk
+# sequence, so RUN-WALL stays the honest whole-invocation number.
+python3 tools/laguna_multidev_lane.py --emit-wset "$WSET" --rank "$RANK"
+rm -f "$WSET.chunk."*
+split -b 4096 -d "$WSET" "$WSET.chunk."
+CHUNKS="$(ls "$WSET.chunk."* | sort)"
 if [ "$POOL" = 0 ]; then
   BUDGETS="$(python3 tools/laguna_multidev_lane.py \
     --smoke-budgets model-families/laguna/smoke_experts.json "$RANK")"
@@ -82,9 +90,11 @@ index=1
 while [ "$index" -le "$RUNS" ]; do
   echo "-- warm run $index/$RUNS"
   began_ns=$(date +%s%N)
-  SPARK_WEIGHTD_EXPERT_POOL_BYTES="$POOL" \
-    build/weightd_warm "$SOCKET" "$PACK" "$SHA" "$REVISION" 16 \
-    --wset "$WSET" 300
+  for chunk in $CHUNKS; do
+    SPARK_WEIGHTD_EXPERT_POOL_BYTES="$POOL" \
+      build/weightd_warm "$SOCKET" "$PACK" "$SHA" "$REVISION" 16 \
+      --wset "$chunk" 300
+  done
   ended_ns=$(date +%s%N)
   printf 'RUN-WALL run=%s elapsed_ms=%s\n' "$index" \
     "$(( (ended_ns - began_ns) / 1000000 ))"

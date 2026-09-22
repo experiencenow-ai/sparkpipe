@@ -93,6 +93,12 @@ LANE = 8
 WORLD = 16
 TP = 8
 PP = 2
+# Family geometry (model-families/laguna/include/sparkpipe/llm_defines.h):
+# 48 layers over 2 pipeline stages. A rank's stage owns the contiguous
+# 24-layer span; layer->stage is layer // 24 (NOT the rank->stage rank//8
+# arithmetic - the two only coincide for ranks).
+LAYER_COUNT = 48
+LAYERS_PER_STAGE = LAYER_COUNT // PP
 HEX = "0123456789abcdef"
 HOSTS = [f"spark{HEX[i]}" for i in range(WORLD)]
 
@@ -324,13 +330,12 @@ def smoke_budgets(source: str, rank: int) -> int:
     spans = bases["per_rank_expert_span_bytes"]
     w1, w2 = int(spans["w1"]), int(spans["w2"])
     chunk = 2 * 1024 * 1024
-    layers_per_stage = 48 // PP
     stage = stage_of(rank)
     raw = 0
     chunked = 0
     pairs = 0
     for entry in document["experts"]:
-        if stage_of(int(entry["layer"])) != stage:
+        if int(entry["layer"]) // LAYERS_PER_STAGE != stage:
             continue
         pairs += 1
         raw += w1 + w2
@@ -342,24 +347,40 @@ def smoke_budgets(source: str, rank: int) -> int:
     return 0
 
 
-def emit_wset(source: str, output: str) -> int:
+def emit_wset(source: str, output: str, rank: int | None = None) -> int:
     """Materialize the smoke-expert working set as a .wset binary.
 
     Raw little-endian (layer u32, expert u32) pairs, deduplicated and
     sorted - the format tools/weightd_warm.c --wset validates against the
     pack manifest. Source: model-families/laguna/smoke_experts.json
     (machine-generated; the M2 census receipt).
+
+    With --rank: filtered to that rank's PP-stage layers. weightd_warm
+    (a) rejects any pair absent from the warmed pack's own manifest and
+    (b) caps one --wset file at SPARK_WEIGHTD_LEASE_GROUPS_MAX (512)
+    pairs - the warm side splits the filtered file into <=4096-byte
+    (512-pair) chunks and warms them sequentially (the GLM pin-experts
+    chunked-lease precedent).
     """
     document = json.load(open(source, encoding="utf-8"))
     if document.get("family") != "laguna":
         raise SystemExit("wset source is not the laguna census manifest")
     pairs = sorted({(int(e["layer"]), int(e["expert"]))
                     for e in document["experts"]})
+    filtered = pairs
+    if rank is not None:
+        stage = stage_of(rank)
+        filtered = [pair for pair in pairs
+                    if pair[0] // LAYERS_PER_STAGE == stage]
+        if not filtered:
+            raise SystemExit(f"rank {rank}: the census head has no pairs "
+                             f"for stage {stage}")
     with open(output, "wb") as handle:
-        for layer, expert in pairs:
+        for layer, expert in filtered:
             handle.write(layer.to_bytes(4, "little"))
             handle.write(expert.to_bytes(4, "little"))
-    print(json.dumps({"wset": output, "keys": len(pairs)}))
+    print(json.dumps({"wset": output, "keys": len(filtered),
+                      "rank_filter": rank}))
     return 0
 
 
@@ -403,7 +424,8 @@ def main() -> int:
             raise SystemExit(f"rank must be 0..{WORLD - 1}")
         return smoke_budgets(source, int(rank_text))
     if arguments.emit_wset:
-        return emit_wset(arguments.wset_source, arguments.emit_wset)
+        rank = arguments.rank if arguments.rank is not None else None
+        return emit_wset(arguments.wset_source, arguments.emit_wset, rank)
 
     missing = [name for name, value in (
         ("--runtime-root", arguments.runtime_root),

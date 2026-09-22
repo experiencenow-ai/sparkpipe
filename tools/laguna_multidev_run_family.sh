@@ -288,11 +288,22 @@ DEFAULT_SPINE="${BUDGETS##* }"
 # --------------------- COLD-LAUNCH PRELOAD (milestone 3) ---------------------
 
 if [ -n "${LAGUNA_WORKING_SET:-}" ]; then
+  # Per-rank filtered wset (weightd_warm rejects pairs outside this
+  # pack's manifest), split into <=512-pair chunks
+  # (SPARK_WEIGHTD_LEASE_GROUPS_MAX) warmed sequentially - the GLM
+  # pin-experts chunked-lease precedent.
   WSET="$ROOT/smoke.wset"
-  python3 "$CHECKOUT/tools/laguna_multidev_lane.py" --emit-wset "$WSET"
-  "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
-    "$(cat "$ROOT/packs/pack.sha256")" "$MODEL_REVISION" "$WORLD" \
-    --wset "$WSET" 300 > "$ROOT/warm.log" 2>&1
+  python3 "$CHECKOUT/tools/laguna_multidev_lane.py" \
+    --emit-wset "$WSET" --rank "$RANK"
+  rm -f "$WSET.chunk."*
+  split -b 4096 -d "$WSET" "$WSET.chunk."
+  : > "$ROOT/warm.log"
+  for chunk in $(ls "$WSET.chunk."* | sort); do
+    "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
+      "$(cat "$ROOT/packs/pack.sha256")" "$MODEL_REVISION" "$WORLD" \
+      --wset "$chunk" 300 >> "$ROOT/warm.log" 2>&1 ||
+      fail "working set warm failed (see $ROOT/warm.log, chunk $chunk)"
+  done
   grep -q "WSET-WARM keys=" "$ROOT/warm.log" ||
     fail "working set warm failed (see $ROOT/warm.log)"
 fi
