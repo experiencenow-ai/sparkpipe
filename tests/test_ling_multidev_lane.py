@@ -284,6 +284,39 @@ def main() -> int:
             check(proc.returncode != 0 and not wset.exists(), failures,
                   "wset hook must fail closed without the committed manifest")
 
+        # The warm shard splitter: the committed head exceeds the
+        # client's 512-key lease cap on every rank (chunk-union 16), so
+        # the warm path must split into <=512-key shards whose union is
+        # exactly the manifest list.
+        wset_source = ROOT / "model-families/ling/smoke-ling-v1.wset"
+        if wset_source.is_file():
+            shards = Path(tmp) / "smoke"
+            proc = subprocess.run(
+                [sys.executable,
+                 str(ROOT / "tools/ling_wset_split.py"),
+                 str(wset_source), str(shards)],
+                capture_output=True, text=True, env=env)
+            check(proc.returncode == 0, failures,
+                  f"wset split: {proc.stderr}")
+            listed = [line.split() for line in
+                      proc.stdout.splitlines() if line.strip()]
+            check(len(listed) >= 1, failures, "wset split emitted shards")
+            combined = []
+            for path_text, count_text in listed:
+                shard = Path(path_text)
+                check(int(count_text) <= 512, failures,
+                      f"shard {shard.name} exceeds the 512-key cap")
+                raw = shard.read_bytes()
+                check(len(raw) == int(count_text) * 8, failures,
+                      f"shard {shard.name} size mismatch")
+                combined.extend(struct.iter_unpack("<II", raw))
+            original = list(struct.iter_unpack(
+                "<II", wset_source.read_bytes()))
+            check(sorted(set(combined)) == sorted(original), failures,
+                  "shard union must equal the committed wset exactly")
+            check(len(combined) == len(set(combined)), failures,
+                  "shards must not overlap")
+
     # Wrapper parses (bash -n) and holds the template contract text.
     for script in ("tools/ling_multidev_run_family.sh",
                    "tools/ling_multidev_build.sh",

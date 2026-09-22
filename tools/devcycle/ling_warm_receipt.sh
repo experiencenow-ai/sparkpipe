@@ -124,20 +124,33 @@ PYBASE
 
 echo "== timed warm (run 1 = daemon-cold-warm, run 2 = warm-daemon preload"
 echo "   [the < 5 s claim], runs 3+ = steady-state)"
-echo "   Each run prints RUN-WALL (whole invocation: connect + attach/"
-echo "   arena-create + acquire + release + close, shell monotonic) and the"
-echo "   tool's internal WSET-WARM elapsed_ms (acquire+release of the"
-echo "   resident keys). The attach leg = RUN-WALL - WSET-WARM."
+echo "   ling's full head exceeds the client's 512-key lease-group cap on"
+echo "   every rank (chunk-union 16: all layers per rank pack), so each run"
+echo "   warms the shard sequence through the same socket/arena; RUN-WALL"
+echo "   covers the WHOLE sequence (connect + attach/arena-create +"
+echo "   acquire + release + close per shard, shell monotonic) and"
+echo "   WSET-SUM is the sum of the tool's internal WSET-WARM elapsed_ms."
+SHARD_PREFIX="$(mktemp -u /tmp/ling-warm-rank$$-XXXXXX)"
+python3 "$REPO/tools/ling_wset_split.py" "$WSET" "$SHARD_PREFIX" > "$SHARD_PREFIX.list"
+SHARDS="$(wc -l < "$SHARD_PREFIX.list")"
+echo "WSET-SHARDS count=$SHARDS"
 index=1
 while [ "$index" -le "$RUNS" ]; do
   echo "-- warm run $index/$RUNS"
   began_ns=$(date +%s%N)
-  SPARK_WEIGHTD_EXPERT_POOL_BYTES="$POOL" \
-    build/weightd_warm "$SOCKET" "$PACK" "$SHA" "$REVISION" 16 \
-    --family ling --wset "$WSET" 300
+  wset_sum_ms=0
+  while read -r shard keys; do
+    SPARK_WEIGHTD_EXPERT_POOL_BYTES="$POOL" \
+      build/weightd_warm "$SOCKET" "$PACK" "$SHA" "$REVISION" 16 \
+      --family ling --wset "$shard" 300 2>&1 | tee "$SHARD_PREFIX.warm.$$"
+    shard_ms="$(sed -n 's/.*WSET-WARM keys=[0-9]* elapsed_ms=\([0-9]*\).*/\1/p' "$SHARD_PREFIX.warm.$$")"
+    wset_sum_ms=$(( wset_sum_ms + ${shard_ms:-0} ))
+    rm -f "$SHARD_PREFIX.warm.$$"
+  done < "$SHARD_PREFIX.list"
   ended_ns=$(date +%s%N)
-  printf 'RUN-WALL run=%s elapsed_ms=%s\n' "$index" \
-    "$(( (ended_ns - began_ns) / 1000000 ))"
+  printf 'RUN-WALL run=%s elapsed_ms=%s wset_sum_ms=%s\n' "$index" \
+    "$(( (ended_ns - began_ns) / 1000000 ))" "$wset_sum_ms"
   index=$((index + 1))
 done
-echo "WARM-RECEIPT-DONE rank=$RANK pool=$POOL chunk=$CHUNK runs=$RUNS"
+rm -f "$SHARD_PREFIX".[0-9]* "$SHARD_PREFIX.list"
+echo "WARM-RECEIPT-DONE rank=$RANK pool=$POOL chunk=$CHUNK runs=$RUNS shards=$SHARDS"

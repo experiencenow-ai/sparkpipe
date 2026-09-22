@@ -269,12 +269,21 @@ if [ -n "${LING_WORKING_SET:-}" ]; then
   python3 "$CHECKOUT/tools/ling_multidev_lane.py" --emit-wset "$WSET"
   REVISION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["model_revision"])' "$ROOT/config/adapter.json")"
   # --family ling pins the module tag so the warm keys the SAME arena
-  # the residentd attaches to (identity equality; PR #1146).
-  "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
-    "$(cat "$ROOT/packs/pack.sha256")" "$REVISION" "$WORLD" \
-    --family ling --wset "$WSET" 300 > "$ROOT/warm.log" 2>&1
-  grep -q "WSET-WARM keys=" "$ROOT/warm.log" ||
-    fail "working set warm failed (see $ROOT/warm.log)"
+  # the residentd attaches to (identity equality; PR #1146). The head
+  # exceeds the client's 512-key lease cap on every rank (chunk-union
+  # 16: all layers per rank pack), so warm the shard sequence through
+  # the same socket/arena.
+  python3 "$CHECKOUT/tools/ling_wset_split.py" "$WSET" "$ROOT/smoke" \
+    > "$ROOT/smoke.shards"
+  : > "$ROOT/warm.log"
+  while read -r shard _keys; do
+    "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
+      "$(cat "$ROOT/packs/pack.sha256")" "$REVISION" "$WORLD" \
+      --family ling --wset "$shard" 300 >> "$ROOT/warm.log" 2>&1 ||
+      fail "working set warm failed on $shard (see $ROOT/warm.log)"
+  done < "$ROOT/smoke.shards"
+  [ "$(grep -c "WSET-WARM keys=" "$ROOT/warm.log")" = "$(wc -l < "$ROOT/smoke.shards")" ] ||
+    fail "working set warm incomplete (see $ROOT/warm.log)"
 fi
 
 # ----------------------------- RESIDENT LAUNCH -------------------------------
