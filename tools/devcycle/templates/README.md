@@ -42,9 +42,11 @@ rank map. Nothing here starts a daemon in shared-socket mode.
    closed without them - generic byte segments do not substitute for
    routed-expert IDs.
 4. Reserve every listener with `--ports` at submission: control
-   `23000+16L..+15`, collective `67000+16L..+15`, transport
-   `64000+16L..+15` (from `tools/devcycle/lane_assignments.json`), plus the
-   session block `23168+64L..+63` when the stage config carries session
+   `23000+16L..+15`, collective `53000+16L..+15`, transport
+   `64000+16L..+15` (from `tools/devcycle/lane_assignments.json`,
+   collective block amended by PR #1094 — the original 67000+16L block
+   exceeded the 65535 TCP port bound and was rejected by the queue), plus
+   the session block `23168+64L..+63` when the stage config carries session
    matrices or a draft bridge.
 5. Budget the lane from the measured working set with
    `tools/devcycle/lane_budget_calc.py` against the family

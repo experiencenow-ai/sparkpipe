@@ -42,10 +42,10 @@ MESH_RANKS="@MESH_RANKS@"              # physical rank per logical index (see
                                        # identity TP16 = 0,1,...,15)
 EXEC_PREFIX="@EXEC_PREFIX@"            # verified build prefix of the synced checkout (e.g. build)
 
-# Lane port math (lane_assignments.json): lane L owns
-#   control 23000+16L..+15, collective 67000+16L..+15, transport 64000+16L..+15
+# Lane port math (lane_assignments.json, amended by PR #1094): lane L owns
+#   control 23000+16L..+15, collective 53000+16L..+15, transport 64000+16L..+15
 CONTROL_BASE=$((23000 + 16 * LANE))
-COLLECTIVE_BASE=$((67000 + 16 * LANE))
+COLLECTIVE_BASE=$((53000 + 16 * LANE))
 TRANSPORT_BASE=$((64000 + 16 * LANE))
 # Stage-config session matrices/draft bridge need their own reserved block;
 # default per-lane extra block: 23168+64L..+63 (reserve it with --ports).
