@@ -1,5 +1,5 @@
 {
-  "file_count": 3357,
+  "file_count": 3358,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -7230,6 +7230,11 @@
       "path": "qualification/glm52/performance/tp8_b8_20260816/glm52-toks.txt",
       "sha256": "bc9edad1edcb6fcebf2aadb42c2dd1b85549bfdfc7ee8a0d6d2dca2a1d32b7c8",
       "size_bytes": 559
+    },
+    {
+      "path": "qualification/glm5_next_m3_coldlaunch_20260923.json",
+      "sha256": "39e8f301593856e5012d08f1bde4d24f1d2de96af639f4162220f904e86e2feb",
+      "size_bytes": 4414
     },
     {
       "path": "qualification/hy4/v2_emission/old_rank_00.sha256",
@@ -16790,5 +16795,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79896934
+  "total_bytes": 79901348
 }
