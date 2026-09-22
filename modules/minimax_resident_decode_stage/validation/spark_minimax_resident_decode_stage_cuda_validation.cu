@@ -337,13 +337,14 @@ static int ValidationVocabArgmax(const struct ValidationBuffers *buffers,cudaStr
 		for (column = 0u; column < VALIDATION_HIDDEN; column++)
 			weights[(uint64_t)index * VALIDATION_HIDDEN + column] =
 				ValidationFloatToBf16(ValidationNextRandom() * 0.03f);
-	/* Give the winner a clear additive margin so fp32 accumulation-order
-	 * noise cannot flip the argmax: margin >> possible reassociation error. */
-	for (column = 0u; column < VALIDATION_HIDDEN; column++)
-		weights[(uint64_t)winner * VALIDATION_HIDDEN + column] =
-			ValidationFloatToBf16((float)ValidationBf16ToFloat(weights[(uint64_t)winner * VALIDATION_HIDDEN + column]) + 0.05f);
 	for (column = 0u; column < VALIDATION_HIDDEN; column++)
 		buffers->host_a[column] = ValidationFloatToBf16(ValidationNextRandom());
+	/* Make the winner row a copy of the input: its dot product is the input
+	 * energy (~1.7e3 at this scale) while every random row stays a
+	 * zero-mean random walk (~1e0) - the argmax margin is bulletproof
+	 * against fp32 accumulation-order noise. */
+	for (column = 0u; column < VALIDATION_HIDDEN; column++)
+		weights[(uint64_t)winner * VALIDATION_HIDDEN + column] = buffers->host_a[column];
 	for (index = 0u; index < local_vocab_rows; index++)
 	{
 		double total = 0.0;
