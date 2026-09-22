@@ -137,9 +137,12 @@ ADAPTER="$CHECKOUT/build/modules/qwen38_max_resident_decode_stage/$EXPERT_CODEC/
 # daemon's tracked 29,184 MiB, not this unit's device carve-out).
 WEIGHTD_SOCKET="${QMAX_WEIGHTD_SOCKET:-/run/sparkpipe-weightd-shared/weightd.sock}"
 [ -S "$WEIGHTD_SOCKET" ] || fail "shared weightd socket not live: $WEIGHTD_SOCKET"
-[ -r "$PACK.sha256" ] || fail "pack digest sidecar missing: $PACK.sha256"
-PACK_SHA="$(cut -d' ' -f1 "$PACK.sha256")"
-[ "${#PACK_SHA}" -eq 64 ] || fail "bad pack digest in $PACK.sha256"
+# The placed set carries .experts + .receipt.json sidecars (no .sha256
+# files); the receipt's output_sha256 is the pack digest (the attach
+# identity check on the daemon side fail-closes if it does not match).
+[ -r "$PACK.receipt.json" ] || fail "pack receipt missing: $PACK.receipt.json"
+PACK_SHA="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["output_sha256"])' "$PACK.receipt.json")"
+[ "${#PACK_SHA}" -eq 64 ] || fail "bad output_sha256 in $PACK.receipt.json"
 BUDGET_LINE="$(python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" \
   --budgets "$CHECKOUT/model-families/qwen38_max/smoke_experts.json" \
   --rank "$NODE_RANK")"
