@@ -404,6 +404,7 @@ static void *cuda_stub_host_registered[CUDA_STUB_MAX_TRACKED];
 static size_t cuda_stub_host_registered_bytes[CUDA_STUB_MAX_TRACKED];
 static uint32_t cuda_stub_host_registered_count;
 uint32_t cuda_stub_host_register_calls;
+uint32_t cuda_stub_host_register_flags;
 uint32_t cuda_stub_host_unregister_calls;
 int cuda_stub_host_register_result;
 int cuda_stub_host_unregister_result;
@@ -424,9 +425,9 @@ cudaError_t cudaHostRegister(void *address,size_t bytes,unsigned int flags)
     uint32_t index;
     uintptr_t first = (uintptr_t)address;
     cudaError_t result;
-    (void)flags;
     cuda_stub_ledger_lock();
     cuda_stub_host_register_calls++;
+    cuda_stub_host_register_flags = flags;
     result = cuda_stub_host_register_result;
     if ( result == cudaSuccess && (address == 0 || bytes == 0u ||
             bytes > UINTPTR_MAX - first || cuda_stub_host_registered_count == CUDA_STUB_MAX_TRACKED) )

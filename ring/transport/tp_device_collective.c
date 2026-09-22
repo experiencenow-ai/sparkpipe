@@ -14,6 +14,8 @@
 #define SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE 1
 #define SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST 2
 #define SPARK_TP_CUDA_ERROR_NOT_READY 600
+#define SPARK_TP_CUDA_HOST_REGISTER_PORTABLE 1u
+#define SPARK_TP_CUDA_HOST_REGISTER_MAPPED 2u
 extern int cudaGetLastError(void);
 extern const char *cudaGetErrorString(int error);
 extern int cudaMemsetAsync(void *destination,int value,size_t bytes,
@@ -1854,7 +1856,8 @@ SparkStatus SparkTpDeviceCollectivePrepareReceiveBf16(
             if ( owner->mesh_buffer == receive_device )
                 break;
         if ( owner == 0 )
-            result = cudaHostRegister(receive_device,(size_t)SPARK_WEIGHTD_MESH_REGION_BYTES,0u);
+            result = cudaHostRegister(receive_device,(size_t)SPARK_WEIGHTD_MESH_REGION_BYTES,
+                SPARK_TP_CUDA_HOST_REGISTER_PORTABLE | SPARK_TP_CUDA_HOST_REGISTER_MAPPED);
         if ( result != 0 )
         {
             pthread_mutex_unlock(&SparkTpDeviceCollectiveRegistrationLock);

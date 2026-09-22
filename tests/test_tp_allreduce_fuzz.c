@@ -81,6 +81,7 @@ extern uint32_t cuda_stub_mesh_publish_calls;
 extern uint32_t cuda_stub_mesh_seq_pad_calls;
 extern int cuda_stub_stream_query_result;
 extern uint32_t cuda_stub_host_register_calls;
+extern uint32_t cuda_stub_host_register_flags;
 extern uint32_t cuda_stub_host_unregister_calls;
 extern int cuda_stub_host_register_result;
 extern int cuda_stub_host_unregister_result;
@@ -1215,6 +1216,8 @@ static void FuzzRegistrationOwnership(void)
     CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&owners[0],g_regions[0],1u,
         FUZZ_HIDDEN,0u,0) == SPARK_STATUS_OK && cuda_stub_host_register_calls == calls + 1u,
         "same owner reprepare and shared owner perform one registration");
+    CHECK(cuda_stub_host_register_flags == 3u,
+        "shared mapping explicitly requests portable CUDA context access and device mapping");
     CHECK(SparkTpDeviceCollectivePrepareReceiveBf16(&owners[2],g_regions[1],1u,
         FUZZ_HIDDEN,0u,0) == SPARK_STATUS_OK && cuda_stub_host_register_calls == calls + 2u &&
         spark_stub_cuda_host_registered(g_regions[0]) != 0u &&
