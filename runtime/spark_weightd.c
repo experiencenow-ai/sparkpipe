@@ -148,6 +148,9 @@ typedef struct SparkWeightdArena
     uint64_t epoch;
     void *pool_export_handle;
     uint8_t *staging;
+    uint64_t *recorded_keys;
+    uint32_t recorded_count;
+    uint32_t recorded_capacity;
 } SparkWeightdArena;
 
 #define SPARK_WEIGHTD_ARENA_STAGING_BYTES (4ull * 1024ull * 1024ull)
@@ -615,6 +618,10 @@ static void SparkWeightdVmmRelease(SparkWeightdArena *arena)
     }
     free(arena->chunk_refs);
     free(arena->staging);
+    free(arena->recorded_keys);
+    arena->recorded_keys = 0;
+    arena->recorded_count = 0u;
+    arena->recorded_capacity = 0u;
     arena->staging = 0;
     if (base != 0)
     {
@@ -2088,6 +2095,101 @@ static SparkStatus SparkWeightdAcquireLoad(SparkWeightdServer *server,SparkWeigh
 	SPARK_RETURN(status);
 }
 
+static void SparkWeightdRecordWorkingSet(SparkWeightdArena *arena,
+	const SparkWeightdExpertKey *keys,uint32_t count)
+{
+	char path[SPARK_WEIGHTD_PATH_BYTES + 8u];
+	FILE *out;
+	uint32_t i,index;
+	int changed = 0;
+	for (i=0u; i<count; i++)
+	{
+		uint64_t key = ((uint64_t)keys[i].layer << 32u) | keys[i].expert;
+		for (index=0u; index<arena->recorded_count; index++)
+			if ( arena->recorded_keys[index] == key )
+				break;
+		if ( index < arena->recorded_count )
+			continue;
+		if ( arena->recorded_count == arena->recorded_capacity )
+		{
+			uint32_t capacity = arena->recorded_capacity != 0u ?
+				arena->recorded_capacity * 2u : 1024u;
+			uint64_t *grown = (uint64_t *)realloc(arena->recorded_keys,
+				(size_t)capacity * sizeof(*grown));
+			if ( grown == 0 )
+				return;
+			arena->recorded_keys = grown;
+			arena->recorded_capacity = capacity;
+		}
+		arena->recorded_keys[arena->recorded_count++] = key;
+		changed = 1;
+	}
+	if ( changed == 0 )
+		return;
+	if ( snprintf(path,sizeof(path),"%s.wset",arena->pack_path) >=
+		(int)sizeof(path) )
+		return;
+	out = fopen(path,"wb");
+	if ( out == 0 )
+		return;
+	for (index=0u; index<arena->recorded_count; index++)
+	{
+		uint32_t layer = (uint32_t)(arena->recorded_keys[index] >> 32u);
+		uint32_t expert = (uint32_t)(arena->recorded_keys[index] & 0xffffffffu);
+		if ( fwrite(&layer,sizeof(layer),1u,out) != 1u ||
+			fwrite(&expert,sizeof(expert),1u,out) != 1u )
+		{
+			(void)fclose(out);
+			return;
+		}
+	}
+	(void)fclose(out);
+}
+
+static void SparkWeightdLoadRecordedWorkingSet(SparkWeightdArena *arena)
+{
+	char path[SPARK_WEIGHTD_PATH_BYTES + 8u];
+	FILE *in;
+	uint32_t layer,expert;
+	if ( snprintf(path,sizeof(path),"%s.wset",arena->pack_path) >=
+		(int)sizeof(path) )
+		return;
+	in = fopen(path,"rb");
+	if ( in == 0 )
+		return;
+	while ( fread(&layer,sizeof(layer),1u,in) == 1u &&
+		fread(&expert,sizeof(expert),1u,in) == 1u )
+	{
+		uint64_t key = ((uint64_t)layer << 32u) | expert;
+		uint32_t index;
+		for (index=0u; index<arena->recorded_count; index++)
+			if ( arena->recorded_keys[index] == key )
+				break;
+		if ( index < arena->recorded_count )
+			continue;
+		if ( arena->recorded_count == arena->recorded_capacity )
+		{
+			uint32_t capacity = arena->recorded_capacity != 0u ?
+				arena->recorded_capacity * 2u : 1024u;
+			uint64_t *grown = (uint64_t *)realloc(arena->recorded_keys,
+				(size_t)capacity * sizeof(*grown));
+			if ( grown == 0 )
+			{
+				(void)fclose(in);
+				return;
+			}
+			arena->recorded_keys = grown;
+			arena->recorded_capacity = capacity;
+		}
+		arena->recorded_keys[arena->recorded_count++] = key;
+	}
+	(void)fclose(in);
+	if ( arena->recorded_count != 0u )
+		fprintf(stderr,
+			"WD-WSET recorded working set loaded: %u expert key(s) from %s\n",
+			arena->recorded_count,path);
+}
+
 static SparkStatus SparkWeightdAcquireWorkingSet(SparkWeightdServer *server,SparkWeightdConnection *connection,SparkWeightdArena *arena,const SparkWeightdExpertKey *keys,uint32_t count,uint64_t *identifier)
 {
 	const SparkWeightdLease *lease;
@@ -2414,6 +2516,8 @@ static uint32_t SparkWeightdServerDispatch(SparkWeightdServer *server,
                     if ( arena->leases->leases[occ_i].count != 0u )
                         occ_n++;
                 result->status = SparkWeightdAcquireWorkingSet(server,connection,arena,acquire->keys,acquire->count,&result->lease_identifier);
+                if ( result->status == SPARK_STATUS_OK )
+                    SparkWeightdRecordWorkingSet(arena,acquire->keys,acquire->count);
                 fprintf(stderr,"WD-LEASE-TRACE kind=%s owner=%llu keys=%u status=%d occupied=%u id=%llu\n",
                     request_header->kind == SPARK_WEIGHTD_IPC_KIND_ACQUIRE ? "acquire" : "release",
                     (unsigned long long)connection->owner,
