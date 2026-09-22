@@ -1,5 +1,5 @@
 {
-  "file_count": 3378,
+  "file_count": 3379,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -5683,8 +5683,8 @@
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_serving_adapter.c",
-      "sha256": "2db7f52dec066a8f30b185d6994d6fe03b0f2a5333b03c385affef72d15f519d",
-      "size_bytes": 43577
+      "sha256": "325d70d0fae1ece01432fabcf6207765644f11440dd4344b2a2b3c8994ab5eb4",
+      "size_bytes": 44208
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_stagepack_format.h",
@@ -9738,8 +9738,8 @@
     },
     {
       "path": "tests/test_laguna_multidev_lane.py",
-      "sha256": "1035b8be93f174d997d609e3daec6ffa85e08be4c26fb5327903ff2814b67bdf",
-      "size_bytes": 21852
+      "sha256": "bd66d0ce84dc2fc7188c08938c52b8e8fab9d7beed6676a82bdb3ce679a07e7e",
+      "size_bytes": 22022
     },
     {
       "path": "tests/test_laguna_smoke_experts.py",
@@ -11040,6 +11040,11 @@
       "path": "tools/devcycle/k3_warm_receipt.sh",
       "sha256": "44370b3b175a2027cc44b99025ef0b166e217e47ad3dc9f9d8e01792e11f2eb1",
       "size_bytes": 7077
+    },
+    {
+      "path": "tools/devcycle/laguna_warm_receipt.sh",
+      "sha256": "bc047a2d5e33dbb987af7fe10c4380bc3552b4b033ccfa6d6108369ec3c0894f",
+      "size_bytes": 5322
     },
     {
       "path": "tools/devcycle/lane_assignments.json",
@@ -12423,13 +12428,13 @@
     },
     {
       "path": "tools/laguna_multidev_lane.py",
-      "sha256": "069717c2dd1d6dcde044895cf142043ceb7d86ceee60242242f8d242df99193a",
-      "size_bytes": 17096
+      "sha256": "e84b73d18e4fd98c9d84641128b9e27e50615a1781a3580b55ffdfa99164b726",
+      "size_bytes": 21877
     },
     {
       "path": "tools/laguna_multidev_run_family.sh",
-      "sha256": "b15698636889d80351ed92ed9a8525996567a0e71f2c41ba5ee5e28c210d1c03",
-      "size_bytes": 15735
+      "sha256": "b0b7f614a35cf2c5fad11965bf38ac136135a3679721ab64fb42f5ce5f420051",
+      "size_bytes": 16065
     },
     {
       "path": "tools/laguna_smoke_experts.py",
@@ -16895,5 +16900,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80404894
+  "total_bytes": 80416128
 }
