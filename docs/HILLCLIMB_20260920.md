@@ -2545,3 +2545,9 @@ memory or replacing the spinning kernel with a stream memory wait is a separate
 optimization requiring a publication and visibility contract. This source trace
 does not invalidate the measured idle SM utilization or identify which stream
 owned the reported abandoned kernels.
+
+The direct wait kernel launches one block of 32 threads and only thread zero
+polls. A high sampled GPU utilization percentage can indicate persistent kernel
+activity without establishing execution-resource occupancy. The utilization
+change is evidence of changed activity; attributing the chain wall time to SM
+capacity or context timeslicing still requires a stream/context trace.
