@@ -2611,46 +2611,74 @@ static void *SparkGlm5NextPrefetchMain(void *argument)
 		state->prefetch_live = 0u;
 		return(0);
 	}
-	for ( layer = SPARK_GLM5_NEXT_MODEL_FIRST_ROUTED_LAYER;
-	      layer < SPARK_GLM5_NEXT_MODEL_LAYER_COUNT;
-	      layer++ )
 	{
-		SparkWeightdExpertKey keys[SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT];
-		uint64_t lease = 0u;
-		uint32_t expert;
-		SparkStatus status;
-		void *address = 0;
-		for ( expert = 0u;
-		      expert < SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT;
-		      expert++ )
+		uint8_t layer_done[SPARK_GLM5_NEXT_MODEL_LAYER_COUNT] = {0};
+		uint32_t pass;
+		uint32_t incomplete = 0u;
+		for ( pass = 0u; pass < 5u; pass++ )
 		{
-			keys[expert].layer = layer;
-			keys[expert].expert = expert;
-		}
-		status = SparkWeightdMapAcquire(map,keys,
-		    SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT,&lease,
-		    UINT64_C(240000000000));
-		if ( status == SPARK_STATUS_OK && lease != 0u )
-		{
-			status = SparkWeightdMapBeginUse(map,lease,&address);
-			if ( status == SPARK_STATUS_OK )
-				(void)SparkWeightdMapRelease(map,lease,
+			uint32_t remaining = 0u;
+			for ( layer = SPARK_GLM5_NEXT_MODEL_FIRST_ROUTED_LAYER;
+			      layer < SPARK_GLM5_NEXT_MODEL_LAYER_COUNT;
+			      layer++ )
+			{
+				SparkWeightdExpertKey keys[SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT];
+				uint64_t lease = 0u;
+				uint32_t expert;
+				SparkStatus status;
+				void *address = 0;
+				if ( layer_done[layer] != 0u )
+					continue;
+				for ( expert = 0u;
+				      expert < SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT;
+				      expert++ )
+				{
+					keys[expert].layer = layer;
+					keys[expert].expert = expert;
+				}
+				status = SparkWeightdMapAcquire(map,keys,
+				    SPARK_GLM5_NEXT_MODEL_MOE_EXPERT_COUNT,&lease,
 				    UINT64_C(240000000000));
-			else
-				(void)SparkWeightdMapRelease(map,lease,
-				    UINT64_C(240000000000));
-		}
-		state->prefetch_layers_done++;
-		if ( status != SPARK_STATUS_OK )
+				if ( status == SPARK_STATUS_OK && lease != 0u )
+				{
+					status = SparkWeightdMapBeginUse(map,lease,&address);
+					(void)SparkWeightdMapRelease(map,lease,
+					    UINT64_C(240000000000));
+				}
+				if ( status == SPARK_STATUS_OK )
+				{
+					layer_done[layer] = 1u;
+					state->prefetch_layers_done++;
+					if ( (layer % 8u) == 0u )
+						fprintf(stderr,"PREFETCH-WARM layer=%u pass=%u\n",layer,pass);
+				}
+				else
+				{
+					remaining++;
+					if ( pass == 4u )
+					{
+						incomplete++;
+						fprintf(stderr,
+						    "PREFETCH-LAYER-FAIL layer=%u status=%d pass=%u\n",
+						    layer,(int)status,pass);
+					}
+				}
+			}
+			if ( remaining == 0u )
+				break;
 			fprintf(stderr,
-			    "PREFETCH-LAYER-FAIL layer=%u status=%d\n",
-			    layer,(int)status);
-		else if ( (layer % 8u) == 0u )
-			fprintf(stderr,"PREFETCH-WARM layer=%u\n",layer);
+			    "PREFETCH-PASS %u complete: %u layer(s) still failing — server-side creation may be in flight; retrying\n",
+			    pass,remaining);
+		}
+		fprintf(stderr,"PREFETCH-DONE layers=%llu incomplete=%u\n",
+		    (unsigned long long)state->prefetch_layers_done,incomplete);
+		if ( incomplete == 0u )
+			state->experts_warm = 1u;
+		else
+			fprintf(stderr,
+			    "PREFETCH-INCOMPLETE: experts_warm WITHHELD (%u cold layer(s) — the graph gate stays closed until an eager chain warms them)\n",
+			    incomplete);
 	}
-	fprintf(stderr,"PREFETCH-DONE layers=%llu\n",
-	    (unsigned long long)state->prefetch_layers_done);
-	state->experts_warm = 1u;
 	state->prefetch_live = 0u;
 	return(0);
 }
