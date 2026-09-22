@@ -81,6 +81,10 @@ target.write_bytes(b"".join(struct.pack("<2I", layer, expert)
                             for (layer, expert) in sorted(pairs)))
 print(f"wset {target.name} keys={len(pairs)}")
 PYEOF
+    # Pool budget on the 2 MiB chunk basis (x2.15 rule): the dense expert
+    # tier is 2,406,482,688 B raw per rank -> ~5.0 GiB chunked; 6 GiB covers
+    # it with margin.
+    SPARK_WEIGHTD_EXPERT_POOL_BYTES="${QWEN38_27B_LANE_EXPERT_POOL_BYTES:-6442450944}" \
     "${QWEN38_27B_LANE_FIRMWARE_ROOT}/bin/weightd_warm" \
         "${QWEN38_27B_LANE_SHARED_SOCKET}" \
         "${runtime_root}/packs/${pack_name}" \
