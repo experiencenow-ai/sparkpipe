@@ -69,12 +69,14 @@ OUT="/home/$HOST/$OUT_REL"
 # round died too early to reach). Same filesystem, no traversal.
 PARTIAL="$(dirname "$OUT")/build-partial.$$"
 rm -rf "$PARTIAL"
-mkdir -p "$PARTIAL"
-trap 'rm -rf "$PARTIAL"' EXIT
 # Sweep stale EMPTY partials from the pre-fix runs (their traps no-oped
 # on the unresolvable path); non-empty partials belong to live runs.
+# MUST precede our own mkdir or it deletes our still-empty partial
+# (build-r8c2, all 16 nodes).
 find "$(dirname "$OUT")" -maxdepth 1 -type d -empty \
   -name 'build-partial.*' -exec rm -rf {} + 2>/dev/null || true
+mkdir -p "$PARTIAL"
+trap 'rm -rf "$PARTIAL"' EXIT
 
 [ "$STAGE" = compile ] || \
   [ -r "$PACK" ] || fail "placed pack for this node missing: $PACK (operator-placed NVMe set; no pack, no publish)"
