@@ -46,7 +46,7 @@ static int32_t LmGraphKeyEqual(const LmGraphKey *a, const LmGraphKey *b)
 		&& a->context_bucket == b->context_bucket);
 }
 
-static void LmGraphCacheInitialise(LmGraphCache *cache, LmGraphEntry *storage, uint32_t capacity)
+__attribute__((unused)) static void LmGraphCacheInitialise(LmGraphCache *cache, LmGraphEntry *storage, uint32_t capacity)
 {
 	uint32_t index;
 	cache->entries = storage;

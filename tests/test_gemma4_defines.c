@@ -136,7 +136,7 @@ static void TestGdnFold(void)
 	uint32_t layer;
 	for (layer = 0u; layer < SPARK_GEMMA4_MODEL_LAYER_COUNT; layer++)
 	{
-		TestRequire(SPARK_GEMMA4_MODEL_LAYER_IS_GDN(layer) == (SPARK_GEMMA4_MODEL_LAYER_IS_FULL(layer) == 0u ? 1u : 0u),"gdn_is_sliding");
+		TestRequire((uint32_t)SPARK_GEMMA4_MODEL_LAYER_IS_GDN(layer) == (SPARK_GEMMA4_MODEL_LAYER_IS_FULL(layer) == 0u ? 1u : 0u),"gdn_is_sliding");
 		TestRequire(SPARK_PACK_LOAD_LAYER_IS_GDN(layer) == SPARK_GEMMA4_MODEL_LAYER_IS_GDN(layer),"pack_load_gdn_fold");
 	}
 	TestRequire(SPARK_GEMMA4_MODEL_LAYER_IS_FULL(5u) != 0u && SPARK_GEMMA4_MODEL_LAYER_IS_FULL(4u) == 0u,"full_layer_phase");
