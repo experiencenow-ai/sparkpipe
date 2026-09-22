@@ -42,7 +42,7 @@ The aggregate campaign stays red if any required gate fails.
 | Warm-up and supervision | Required finite configuration; malformed/missing manifests; atomic working-set publication; checked acquire/release; readiness/ownership failures; dependent startup gating | Supervision/supervised/manifest/lazy-pair tests | Fixture syscall/process boundaries; real replacement and resource-ledger reconciliation still required |
 | Memory and core ownership | Embedded descriptor lifetime, matching allocator, transaction/completion/release ordering, arenas and runtime ABI | Memory/arena/work-transaction/completion/release/runtime tests | Host backends and declared fixture boundaries |
 | Module/deployment/serialization | Module ABI/load/compile, deployment metadata, tokenizer/JSON validation, numerical error metrics and codec contracts | Model-description/module-library/compiler/stage-common/LLM/tokenizer/JSON tests; deployment generation/drift/queue tests | Compilation/metadata checks do not qualify inference or fleet behavior |
-| Module teardown ownership | Quiesce/unregister/lazy-release failures retain state and ledger; retry releases mapping and host ownership exactly once; retired-only expert lease remains recoverable | `test_stage_module_teardown.py` executes actual Qwen4 Flash, Qwen38 Max, Gemma4 and Muse callbacks plus common lifecycle and GLM52 lease recovery | External CUDA/weightd boundaries are injected; other driver destruction paths require their own execution fixtures and GPU qualification |
+| Module teardown ownership | Quiesce/unregister/lazy-release failures retain internal state and ledger; zero-slot partial initialization cleans up; retries release ownership once; GLM52 retired leases and K3 acquired/begun/recorded leases remain recoverable | `test_stage_module_teardown.py` executes actual Qwen4 Flash, Qwen38 Max, Gemma4 and Muse callbacks, common lifecycle, GLM52 recovery, and extracted actual K3 acquire/release bodies | CUDA/weightd boundaries are injected; K3 full destructor is not executed here. Public void module/driver teardown still cannot propagate retained cleanup status to its caller |
 | GLM graph and lazy integration | Sticky collective failure, invalid token blocked, daemon loss fencing, stage context, embedding collective, lazy dispatch, explicit geometry/configuration | GLM graph-failure/stage-context/embedding/config/driver-probe/geometry/shard-math/lazy tests | Production bodies with external boundaries mocked; GPU graph replay, cancel, recurrent restore and numerics remain open |
 
 ## Every repository module
@@ -168,3 +168,36 @@ setting an environment variable is not proof that an allocation belongs to
 weightd. This gate makes no pipeline-overlap claim. The unused direct-copy
 worker and loader benchmark remain a concrete removal item for the subsequent
 code review; their public region operation now returns `UNSUPPORTED`.
+
+
+## Current host and GPU checkpoint
+
+The immutable Linux campaign at
+`52d2944262eb643d901df08f7662e5272fa7351b` recorded **163 PASS, 0 FAIL,
+0 SETUP_FAIL and 0 TIMEOUT**, using seeds `1,7,73`, 128 fuzz rounds,
+24 loopback rounds, two build jobs and a 180-second per-test limit. It selected
+114 of the 115 registered C targets; `test_qwen38_math_kernels` retains its
+separate GPU receipt above. The receipt also lists 164 unselected Python files.
+Its non-document source digest is
+`e01d7ad867eb0067415b992148e9d3a564087e9222b00233e77f7c3a0846268d`.
+These are executed host fixtures and fault schedules, not a complete semantic
+review or proof of every model's GPU behavior.
+
+At the same source, the real CUDA `tp_mesh_hardware_probe` passed 70 required
+cases on Spark0 with both CUDA function and data loading explicitly `LAZY`:
+66 numerical schedules over TP2/3/4/8/16, direct/tree and split payloads,
+BF16 sum, unsigned 64-bit maximum and rank-major gather, eager execution and
+graph replay; three stale-readiness/cancellation/timeout schedules; and one
+91-round graph timing schedule. It calls the shared production GPU kernels and
+the daemon's actual readiness processor. One 128 MiB mapped region supplies
+private rank bands, with CPU copies acting as transport. The future-tag
+acceptance mutant failed the no-early-phase assertion. The prior first-round
+failure under lazy loading disappeared after explicit kernel preload during
+hardware preparation; no eager-loading fallback is required. See
+[the hardware receipts and limits](TP_STREAM_MEMOP_QUALIFICATION.md).
+
+This device evidence covers those kernels, mapped-memory gates, guarded errors,
+drain and replay recovery. It does not establish distributed serving throughput,
+model parity, complete GLM cache restoration or the outer driver unload contract.
+The generated public void destructor still discards a module's retained-cleanup
+status; that ownership boundary remains a concrete item for the deeper review.
