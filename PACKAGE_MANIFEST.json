@@ -1,5 +1,5 @@
 {
-  "file_count": 3299,
+  "file_count": 3300,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -10717,6 +10717,11 @@
       "size_bytes": 9264
     },
     {
+      "path": "tools/devcycle/dsv4pro_multidev_fleet_prep.sh",
+      "sha256": "03df7ae9afb82b454f6017ea05575e45d340d5d292cfd7f14cf2aafdcb7f8647",
+      "size_bytes": 3407
+    },
+    {
       "path": "tools/devcycle/fabric_probe_pro.sh",
       "sha256": "cc8266ee50b05c622be15ae6cc375dc3e04c01fcc2a488a61af21462ac83f6ac",
       "size_bytes": 874
@@ -10863,8 +10868,8 @@
     },
     {
       "path": "tools/devcycle/run-dsv4-pro-family-job.sh",
-      "sha256": "4b3dffecfa44f8076da63a80318b6f0f69f1d69bde2714667419bbf76e8ee1a6",
-      "size_bytes": 13369
+      "sha256": "494d2dd6d27fbaf323882cd4bf7ca79c11370cd6526a140732371be0e7c11416",
+      "size_bytes": 13789
     },
     {
       "path": "tools/devcycle/show_node_context.py",
@@ -16500,5 +16505,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78516056
+  "total_bytes": 78519883
 }

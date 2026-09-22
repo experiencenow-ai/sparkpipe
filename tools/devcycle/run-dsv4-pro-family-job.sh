@@ -25,6 +25,14 @@
 #   - No nested SSH GPU launches; every child stays in this queue cgroup.
 #   - Logical rank = index in --nodes = rank_index in the deployment =
 #     mesh rank (identity TP4xPP4 map, order identical to the mesh map).
+#
+# QUEUE INVOCATION (measured, not assumed): submit with
+#   --cmd 'bash tools/devcycle/run-dsv4-pro-family-job.sh'
+# NOT --cmd-file: the dispatcher routes command text through systemd-run,
+# which pre-expands every $VAR/${VAR} pattern before bash executes (probe
+# receipt dsv4pro-dollar-probe, 2026-09-22: [/home/${X}] -> [/home/]).
+# A bare repo-resident invocation keeps this script's variables inside
+# real bash.
 
 set -euo pipefail
 
