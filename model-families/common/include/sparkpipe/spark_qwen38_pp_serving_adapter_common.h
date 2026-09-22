@@ -614,7 +614,11 @@ static SparkStatus SPARK_QWEN38_SERVING_ADAPTER_FN(ServingLoadDriver)(
 	request.contract.driver_model_revision = SPARK_QWEN38_SERVING_ADAPTER_MODEL_REVISION;
 	request.contract.driver_stage_name = SPARK_QWEN38_SERVING_ADAPTER_CONST(SERVING_STAGE_NAME);
 	request.contract.driver_target = SPARK_QWEN38_SERVING_ADAPTER_CONST(SERVING_TARGET);
-	request.contract.model_description_sha256 = SPARK_QWEN38_SERVING_ADAPTER_CONTRACT_SHA256;
+#ifndef SPARK_QWEN38_SERVING_ADAPTER_DRIVER_DESCRIPTION_SHA256
+#define SPARK_QWEN38_SERVING_ADAPTER_DRIVER_DESCRIPTION_SHA256 \
+	SPARK_QWEN38_SERVING_ADAPTER_CONTRACT_SHA256
+#endif
+	request.contract.model_description_sha256 = SPARK_QWEN38_SERVING_ADAPTER_DRIVER_DESCRIPTION_SHA256;
 	request.node_context = 0;
 	request.completion_context = state;
 	request.completion_function = SPARK_QWEN38_SERVING_ADAPTER_FN(ServingOrphanDriverCompletion);

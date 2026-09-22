@@ -3193,8 +3193,8 @@
     },
     {
       "path": "examples/model_descriptions/gemma4_resident_decode_stage_bf16_firmware.json",
-      "sha256": "1b2ad06d88ec3986c9e46373e66db7d612c6d0658b00fa41fecd84dcffcf74bc",
-      "size_bytes": 3956
+      "sha256": "67e813333ae605c2ccd152772416408b77eaba2c24a909fef0f8a0875b13f48e",
+      "size_bytes": 3922
     },
     {
       "path": "examples/model_descriptions/glm52_resident_decode_stage_bf16_firmware.json",
@@ -4308,8 +4308,8 @@
     },
     {
       "path": "model-families/common/include/sparkpipe/spark_qwen38_pp_serving_adapter_common.h",
-      "sha256": "35666a155b9023ec787bf5ec1d8a39e9e51317716ef61c35b9f7500d1d543abf",
-      "size_bytes": 39398
+      "sha256": "ef799c43c72c9d90d7e26af390a284fca357c7bac105c42cdfee220666b73fe5",
+      "size_bytes": 39589
     },
     {
       "path": "model-families/common/include/sparkpipe/spark_qwen38_serving_adapter_common.h",
@@ -5193,8 +5193,8 @@
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_serving_adapter.c",
-      "sha256": "057815866fceefb57603e961631f52307f1ee08a4ea66c3e547587bcda501771",
-      "size_bytes": 13387
+      "sha256": "fb90f5c74faaa585262e654fd0320a8fb348d1151dcd953e66c62fde5e20f403",
+      "size_bytes": 13760
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_stagepack_format.h",
@@ -17020,5 +17020,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80666433
+  "total_bytes": 80666963
 }

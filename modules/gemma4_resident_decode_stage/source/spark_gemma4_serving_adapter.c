@@ -283,7 +283,6 @@ static const SparkModelServingAdapterDescriptor SparkGemma4ServingDescriptor =
 		GEMMA4_MODEL_REVISION,
 		SPARK_GEMMA4_SERVING_PROGRAM_NAME,
 		GEMMA4_CONTRACT_SHA256),
-	.model_description_sha256 = GEMMA4_MODEL_DESCRIPTION_SHA256,
 	.capability_flags = SPARK_SERVING_ADAPTER_CAPABILITY_CHAIN(
 		SPARK_MODEL_SERVING_ADAPTER_CAPABILITY_HIDDEN_TRANSPORT |
 		SPARK_MODEL_SERVING_ADAPTER_CAPABILITY_PARALLEL_FANOUT |
@@ -307,5 +306,12 @@ static const SparkModelServingAdapterDescriptor SparkGemma4ServingDescriptor =
 	.minimum_efficient_submission_row_count = 0u,
 	.cache_block_token_count = SPARK_GEMMA4_RESIDENT_DECODE_STAGE_KV_BLOCK_TOKENS
 };
+
+/* The driver-request contract's model_description_sha256 must equal the
+   FIRMWARE model-description FILE's sha (the driver compile embeds
+   description->source_sha256 = sha of that file) - not the package
+   contract sha the qwen38-common default passes. Families whose firmware
+   file and contract differ override via this macro. */
+#define SPARK_QWEN38_SERVING_ADAPTER_DRIVER_DESCRIPTION_SHA256 GEMMA4_MODEL_DESCRIPTION_SHA256
 
 #include "sparkpipe/spark_qwen38_pp_serving_adapter_common.h"
