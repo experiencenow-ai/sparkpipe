@@ -543,6 +543,8 @@ static int ladder_mesh_run(const char *socket_path,uint32_t rank,
         }
     }
     SparkTpDeviceCollectiveDestroy(&collective);
+    if (collective.implementation != 0)
+        return 1;
     (void)munmap(shm_base,LADDER_SHM_BYTES);
     (void)cudaFree(local_device);
     (void)cudaFree(full_device);

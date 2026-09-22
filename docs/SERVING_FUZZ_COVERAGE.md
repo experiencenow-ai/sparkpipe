@@ -42,6 +42,7 @@ The aggregate campaign stays red if any required gate fails.
 | Warm-up and supervision | Required finite configuration; malformed/missing manifests; atomic working-set publication; checked acquire/release; readiness/ownership failures; dependent startup gating | Supervision/supervised/manifest/lazy-pair tests | Fixture syscall/process boundaries; real replacement and resource-ledger reconciliation still required |
 | Memory and core ownership | Embedded descriptor lifetime, matching allocator, transaction/completion/release ordering, arenas and runtime ABI | Memory/arena/work-transaction/completion/release/runtime tests | Host backends and declared fixture boundaries |
 | Module/deployment/serialization | Module ABI/load/compile, deployment metadata, tokenizer/JSON validation, numerical error metrics and codec contracts | Model-description/module-library/compiler/stage-common/LLM/tokenizer/JSON tests; deployment generation/drift/queue tests | Compilation/metadata checks do not qualify inference or fleet behavior |
+| Module teardown ownership | Quiesce/unregister/lazy-release failures retain state and ledger; retry releases mapping and host ownership exactly once; retired-only expert lease remains recoverable | `test_stage_module_teardown.py` executes actual Qwen4 Flash, Qwen38 Max, Gemma4 and Muse callbacks plus common lifecycle and GLM52 lease recovery | External CUDA/weightd boundaries are injected; other driver destruction paths require their own execution fixtures and GPU qualification |
 | GLM graph and lazy integration | Sticky collective failure, invalid token blocked, daemon loss fencing, stage context, embedding collective, lazy dispatch, explicit geometry/configuration | GLM graph-failure/stage-context/embedding/config/driver-probe/geometry/shard-math/lazy tests | Production bodies with external boundaries mocked; GPU graph replay, cancel, recurrent restore and numerics remain open |
 
 ## Every repository module
@@ -56,17 +57,17 @@ coverage remain explicit gaps for the subsequent review and hardware campaign.
 | `glm5_next_resident_decode_stage` | Common fuzzers plus GLM integration harnesses listed above | OPEN: current GLM5.3 focus; real GPU/fleet gates required |
 | `dsv4_resident_decode_stage` | DSV4, TP16 and TP4xPP4 adapters; cache, lane, pool, shape, stage runner and loader fixtures | OPEN: actual model math/state and each topology |
 | `qwen38_27b_resident_decode_stage` | Serving adapter, host work-control fixture and common contracts | OPEN: actual model math/state |
-| `gemma4_resident_decode_stage` | Serving adapter; dense/MoE geometry and negative controls | OPEN: actual model math/state, dense/MoE variants |
-| `muse_glimmer_resident_decode_stage` | Serving adapter fixture and common contracts | OPEN: actual model math/state |
+| `gemma4_resident_decode_stage` | Serving adapter; dense/MoE geometry and negative controls; actual teardown callback | OPEN: actual model math/state, dense/MoE variants |
+| `muse_glimmer_resident_decode_stage` | Serving adapter fixture, actual teardown callback and common contracts | OPEN: actual model math/state |
 | `ling_resident_decode_stage` | Serving adapter fixture and common contracts | OPEN: actual model math/state |
 | `hy4_resident_decode_stage` | Lifecycle fixture and common contracts | OPEN: actual model math/state |
 | `k3_resident_decode_stage` | Attach/KV/defines contracts and host kernel-run equivalence | OPEN: adapter lifecycle fuzz and real model math/state |
 | `glm52_dspark_draft_backend` | Draft dispatch/MTP policy tests | OPEN: model execution and speculative accept/reject numerical oracle |
-| `glm52_resident_decode_stage` | Common/module contract tests | OPEN: adapter lifecycle fuzz and real model math/state |
+| `glm52_resident_decode_stage` | Common/module contract tests; retired/current expert-lease recovery | OPEN: adapter lifecycle fuzz and real model math/state |
 | `kv_mooncake` | Host client fixture | OPEN: external service failure/recovery and actual payload residency |
 | `laguna_resident_decode_stage` | Model-header contract test | OPEN: executable adapter fuzz and real model math/state |
-| `qwen4_flash_resident_decode_stage` | Model-header contract test | OPEN: executable adapter fuzz and real model math/state |
-| `qwen38_max_resident_decode_stage` | Host work-control fixture and common contracts | OPEN: executable adapter fuzz and real model math/state |
+| `qwen4_flash_resident_decode_stage` | Model-header contract test and actual teardown callback | OPEN: executable adapter fuzz and real model math/state |
+| `qwen38_max_resident_decode_stage` | Host work-control fixture, actual teardown callback and common contracts | OPEN: executable adapter fuzz and real model math/state |
 | `dsv41_flash_resident_decode_stage` | Common contract discovery only | OPEN: executable adapter fuzz and real model math/state |
 
 ## Reproducing and extending failures

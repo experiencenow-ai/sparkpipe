@@ -785,12 +785,17 @@ static void SparkGemma4ModuleSnapshotExtend(
 	snapshot->kv_token_capacity = (uint64_t)state->kv_block_count * SPARK_GEMMA4_RESIDENT_DECODE_STAGE_KV_BLOCK_TOKENS;
 }
 
-static void SparkGemma4ModuleStateTeardown(void *module_state)
+static SparkStatus SparkGemma4ModuleStateTeardown(void *module_state)
 {
 	SparkGemma4ModuleState *state = (SparkGemma4ModuleState *)module_state;
-	uint32_t slot_index;
 	if ( state->tp_collective_initialized != 0u )
+	{
 		SparkTpDeviceCollectiveDestroy(&state->tp_device_collective);
+		if ( state->tp_device_collective.implementation != 0 )
+			return(SPARK_STATUS_BUSY);
+		state->tp_collective_initialized = 0u;
+	}
+	uint32_t slot_index;
 	for (slot_index = 0u; slot_index < SPARK_GEMMA4_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT; slot_index++)
 	{
 		free(state->slots[slot_index].host_row_lane_indices);
@@ -801,6 +806,7 @@ static void SparkGemma4ModuleStateTeardown(void *module_state)
 		free(state->slots[slot_index].host_context_lengths);
 		free(state->slots[slot_index].host_frame_error);
 	}
+	return(SPARK_STATUS_OK);
 }
 
 static const SparkStageModuleLifecycleOps SparkGemma4ModuleLifecycle =
@@ -1008,6 +1014,7 @@ static void SparkGemma4T1Streams(SparkGemma4ModuleState *state, SparkGemma4Modul
 	}
 }
 
+#if SPARK_GEMMA4_MODEL_MOE_BLOCK
 static void SparkGemma4T1Route(SparkGemma4ModuleState *state, SparkGemma4ModuleSlot *slot, uint32_t layer, uint32_t rows)
 {
 	static uint32_t *ids_host = 0;
@@ -1042,6 +1049,7 @@ static void SparkGemma4T1Route(SparkGemma4ModuleState *state, SparkGemma4ModuleS
 		fputc('\n',stderr);
 	}
 }
+#endif
 
 static void SparkGemma4T1Head(SparkGemma4ModuleState *state, SparkGemma4ModuleSlot *slot, uint32_t first_row, uint32_t copy_rows)
 {

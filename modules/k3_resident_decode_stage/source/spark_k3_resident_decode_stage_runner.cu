@@ -924,7 +924,7 @@ SparkStatus SparkK3StageRunnerInitialize(
 		status = SparkTpDeviceCollectiveCreate(&device_config,
 			&state->device_collective);
 		if ( status != SPARK_STATUS_OK )
-			{ SparkK3DispatchDestroy(&state->dispatch); SparkK3ModuleDestroy(&state->module); runner->private_state = 0; delete state; return status; }
+			{ SparkK3StageRunnerDestroy(runner); return status; }
 		state->device_collective_created = 1;
 		if ( state->lazy_pack != 0 &&
 			state->lazy_pack->attached.mesh_send_buffer_addr != 0 )
@@ -933,18 +933,18 @@ SparkStatus SparkK3StageRunnerInitialize(
 				(void *)(uintptr_t)state->lazy_pack->attached.mesh_send_buffer_addr,
 				0u,0u,0u,0u);
 		if ( status != SPARK_STATUS_OK )
-			{ SparkK3DispatchDestroy(&state->dispatch); SparkK3ModuleDestroy(&state->module); runner->private_state = 0; delete state; return status; }
+			{ SparkK3StageRunnerDestroy(runner); return status; }
 	}
 	if ( runner->owns_embedding != 0u )
 	{
 		const void *embed_slice = 0;
 		if ( SparkK3PackLoadEntry(&state->module.pack,
 			"model.embed_tokens.weight",&entry) != SPARK_STATUS_OK )
-			{ SparkK3DispatchDestroy(&state->dispatch); SparkK3ModuleDestroy(&state->module); runner->private_state = 0; delete state; SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
+			{ SparkK3StageRunnerDestroy(runner); SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
 		if ( SparkWeightdLazyPackSlice(state->lazy_pack,
 			state->module.pack.payload_base + entry.payload_offset,
 			entry.bytes, &embed_slice) != SPARK_STATUS_OK )
-			{ SparkK3DispatchDestroy(&state->dispatch); SparkK3ModuleDestroy(&state->module); runner->private_state = 0; delete state; SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
+			{ SparkK3StageRunnerDestroy(runner); SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
 		state->embed_weight = (const uint16_t *)embed_slice;
 	}
 	if ( runner->owns_final_head != 0u )
@@ -955,13 +955,13 @@ SparkStatus SparkK3StageRunnerInitialize(
 			SparkWeightdLazyPackSlice(state->lazy_pack,
 			state->module.pack.payload_base + entry.payload_offset,
 			entry.bytes, &norm_slice) != SPARK_STATUS_OK )
-			{ SparkK3DispatchDestroy(&state->dispatch); SparkK3ModuleDestroy(&state->module); runner->private_state = 0; delete state; SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
+			{ SparkK3StageRunnerDestroy(runner); SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
 		state->head_norm_weight = (const uint16_t *)norm_slice;
 		if ( SparkK3PackLoadEntry(&state->module.pack,"lm_head.weight",&entry) != SPARK_STATUS_OK ||
 			SparkWeightdLazyPackSlice(state->lazy_pack,
 			state->module.pack.payload_base + entry.payload_offset,
 			entry.bytes, &head_slice) != SPARK_STATUS_OK )
-			{ SparkK3DispatchDestroy(&state->dispatch); SparkK3ModuleDestroy(&state->module); runner->private_state = 0; delete state; SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
+			{ SparkK3StageRunnerDestroy(runner); SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
 		state->head_weight = (const uint16_t *)head_slice;
 	{
 		uint64_t shard_rows = (uint64_t)state->vocab_slice_rows;
@@ -1261,26 +1261,33 @@ void SparkK3StageRunnerDestroy(SparkK3StageRunner *runner)
 	if ( runner == 0 || runner->private_state == 0 )
 		return;
 	state = (SparkK3RunnerState *)runner->private_state;
-	if ( state->collective_created != 0 )
-		SparkTpCollectiveDestroy(&state->collective);
 	if ( state->device_collective_created != 0 )
+	{
 		SparkTpDeviceCollectiveDestroy(&state->device_collective);
-	cudaFree(state->fused_device);
-	SparkK3DispatchDestroy(&state->dispatch);
+		if ( state->device_collective.implementation != 0 )
+			return;
+		state->device_collective_created = 0;
+	}
 	if ( state->lease_inflight != 0u && state->lazy_pack != 0 &&
 		state->lazy_pack->map != 0 )
 	{
-		(void)SparkWeightdMapRelease(state->lazy_pack->map,
+		if ( SparkWeightdMapRelease(state->lazy_pack->map,
 			state->lease_identifier,
-			SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
+			SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS) != SPARK_STATUS_OK )
+			return;
 		state->lease_inflight = 0u;
 	}
-	SparkK3ModuleDestroy(&state->module);
 	if ( state->lazy_pack != 0 )
 	{
-		(void)SparkWeightdLazyPackDestroy(state->lazy_pack);
+		if ( SparkWeightdLazyPackDestroy(state->lazy_pack) != SPARK_STATUS_OK )
+			return;
 		state->lazy_pack = 0;
 	}
+	if ( state->collective_created != 0 )
+		SparkTpCollectiveDestroy(&state->collective);
+	cudaFree(state->fused_device);
+	SparkK3DispatchDestroy(&state->dispatch);
+	SparkK3ModuleDestroy(&state->module);
 	delete[] state->staging_values;
 	free(state->group_offset_host);
 	delete[] state->staging_scratch;

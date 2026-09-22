@@ -501,7 +501,8 @@ PYTHON_TESTS := \
 	tests/test_tp_mesh_cancel_lifetime.py \
 	tests/test_glm5_next_graph_failure.py \
 	tests/test_clamped_up_gate.py \
-	tests/test_glm5_next_stage_context.py
+	tests/test_glm5_next_stage_context.py \
+	tests/test_stage_module_teardown.py
 TEST_SUPPORT_OBJECT := build/test_support.o
 TEST_MODULE_OBJECTS := \
     build/test_modules/module_add_one.o \
@@ -1284,8 +1285,7 @@ HY4_SMOKE_SOURCES := tests/test_hy4_lifecycle_smoke.c \
 build/test_hy4_lifecycle_smoke: $(HY4_SMOKE_SOURCES) | build
 	$(CC) $(HY4_SMOKE_INCLUDE_FLAGS) $(CFLAGS) $(HY4_SMOKE_SOURCES) $(LDFLAGS) $(LDLIBS) -o $@
 
-build/test_dsv4_w1_loader: tests/test_dsv4_w1_loader.c src/spark_sha256.c src/spark_status.c runtime/stage_module_common.c $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY) tests/cuda_stub/cuda_runtime_stub.c | build
-	$(CC) $(CORE_INCLUDE_FLAGS) $(CUDA_STUB_INCLUDE_FLAGS) $(CFLAGS) $^ $(LDFLAGS) -o $@
+build/test_dsv4_w1_loader: tests/test_dsv4_w1_loader.c src/spark_sha256.c src/spark_status.c runtime/stage_module_common.c $(MODEL_COMMON_LIBRARY) $(CORE_LIBRARY) | build
 	$(CC) $(MODEL_COMMON_INCLUDE_FLAGS) $(CUDA_STUB_INCLUDE_FLAGS) -Itests $(CFLAGS) $^ $(LDFLAGS) -o $@
 
 # W2 weightd (docs/WEIGHTD_DESIGN.md): the residency daemon and its
@@ -1329,8 +1329,8 @@ build/test_weightd_churn: tests/test_weightd_churn.c $(RUNTIME_LIBRARY) $(CORE_L
 build/test_weightd_expert_stress: tests/test_weightd_expert_stress.c $(RUNTIME_LIBRARY) $(CORE_LIBRARY) tests/cuda_stub/cuda_runtime_stub.c | build
 	$(CC) $(CORE_INCLUDE_FLAGS) $(CUDA_STUB_INCLUDE_FLAGS) $(CFLAGS) $^ $(LDFLAGS) -o $@
 
-build/test_glm5_next_lazy_dispatch: tests/test_glm5_next_lazy_dispatch.c runtime/spark_weightd_lease.c tests/cuda_stub/cuda_runtime_stub.c runtime/spark_weightd_manifest.c modules/glm5_next_resident_decode_stage/source/spark_glm5_next_resident_decode_stage_module.c modules/glm5_next_resident_decode_stage/source/spark_glm5_next_resident_decode_stage_internal.h | build
-	$(CC) $(CORE_INCLUDE_FLAGS) $(CUDA_STUB_INCLUDE_FLAGS) -Imodel-families/common/include -Imodel-families/glm5_next/include -Imodules/glm5_next_resident_decode_stage/include $(CFLAGS) -ffunction-sections -fdata-sections $(wordlist 1,4,$^) $(LDFLAGS) -Xlinker $(if $(filter Darwin,$(UNAME_S)),-dead_strip,--gc-sections) -o $@
+build/test_glm5_next_lazy_dispatch: tests/test_glm5_next_lazy_dispatch.c runtime/spark_weightd_lease.c tests/cuda_stub/cuda_runtime_stub.c runtime/spark_weightd_manifest.c runtime/stage_module_common.c modules/glm5_next_resident_decode_stage/source/spark_glm5_next_resident_decode_stage_module.c modules/glm5_next_resident_decode_stage/source/spark_glm5_next_resident_decode_stage_internal.h | build
+	$(CC) $(CORE_INCLUDE_FLAGS) $(CUDA_STUB_INCLUDE_FLAGS) -Imodel-families/common/include -Imodel-families/glm5_next/include -Imodules/glm5_next_resident_decode_stage/include $(CFLAGS) -ffunction-sections -fdata-sections $(wordlist 1,5,$^) $(LDFLAGS) -Xlinker $(if $(filter Darwin,$(UNAME_S)),-dead_strip,--gc-sections) -o $@
 
 build/test_weightd_fd_frames: tests/test_weightd_fd_frames.c runtime/spark_weightd.c runtime/spark_weightd_worker.c runtime/spark_weightd_manifest.c runtime/spark_weightd_lease.c include/sparkpipe/spark_weightd.h include/sparkpipe/spark_weightd_manifest.h include/sparkpipe/spark_weightd_lease.h $(CORE_LIBRARY) tests/cuda_stub/cuda_runtime_stub.c | build
 	$(CC) $(CORE_INCLUDE_FLAGS) $(CUDA_STUB_INCLUDE_FLAGS) $(CFLAGS) $(filter %.c %.a,$(filter-out runtime/spark_weightd.c,$^)) $(LDFLAGS) -o $@
