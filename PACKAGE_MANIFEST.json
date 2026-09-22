@@ -1,5 +1,5 @@
 {
-  "file_count": 3264,
+  "file_count": 3272,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -255,6 +255,31 @@
       "path": "config/litellm-config.yaml",
       "sha256": "940e0c27323308cd733011ca76e9c7116a9ecfadee1112b8a7452aa0e8fae375",
       "size_bytes": 3110
+    },
+    {
+      "path": "deployment/dsv41_flash_tp4/config/stage_00.json",
+      "sha256": "1b2038069772b8532cb82f038c43703d9af09e0f1f93b0a69b3df54f0a07e2be",
+      "size_bytes": 1202
+    },
+    {
+      "path": "deployment/dsv41_flash_tp4/config/stage_01.json",
+      "sha256": "3ee607fa5525f095473341c080f9f1c31e92c51e4ae5b734fdf27f44bf75f59f",
+      "size_bytes": 1202
+    },
+    {
+      "path": "deployment/dsv41_flash_tp4/config/stage_02.json",
+      "sha256": "3207d4a8e9c52d397a3a73107395d8f5dad40895191a203cbbcc4e1f85e6b09f",
+      "size_bytes": 1202
+    },
+    {
+      "path": "deployment/dsv41_flash_tp4/config/stage_03.json",
+      "sha256": "4745205d738c4bfa21abc42ee9d6fb471ffde83b99d21ee92132c739352c03fb",
+      "size_bytes": 1202
+    },
+    {
+      "path": "deployment/dsv41_flash_tp4/model_resident.json",
+      "sha256": "61d18d02d2814e1be2e2f100cbd8b09647e304218417ff88e60f67dd40d10848",
+      "size_bytes": 2667
     },
     {
       "path": "deployment/glm5_next_tp16/LAUNCH-STATE.md",
@@ -8777,6 +8802,11 @@
       "size_bytes": 7196
     },
     {
+      "path": "tests/test_dsv41_flash_shared_lane.py",
+      "sha256": "5c62f74572ae99d18d5f09b8e3ec031be34934dfaf10f565d90613344244f643",
+      "size_bytes": 9625
+    },
+    {
       "path": "tests/test_dsv41_flash_stagepack.py",
       "sha256": "cf40f3f3bf5930a57fb64f7b3f691462f2a7259b975b819aa9abd30140d997f7",
       "size_bytes": 6913
@@ -10847,6 +10877,11 @@
       "size_bytes": 32801
     },
     {
+      "path": "tools/dsv41_flash_gen_deployment.py",
+      "sha256": "e730fbc8827dfb23462ad7c81005c2dd8d584221cad3a31c60c839da1d910f7a",
+      "size_bytes": 8595
+    },
+    {
       "path": "tools/dsv41_flash_index_census.py",
       "sha256": "02fd90fe63322ca0830ca52d284770c4c2a159c0aa2dcf5bdf438ddaeee49b53",
       "size_bytes": 4549
@@ -10860,6 +10895,11 @@
       "path": "tools/dsv41_flash_pack_verify.py",
       "sha256": "c48a843166450a1c9f20f381988f9a0625cd2a944502eae28b764c7f8cd0a21a",
       "size_bytes": 19145
+    },
+    {
+      "path": "tools/dsv41_flash_shared_lane.sh",
+      "sha256": "54d0295edaf62cf68c41b6cf1a07a2473a6272eb02995facbb784b9e1bb2fdbd",
+      "size_bytes": 4430
     },
     {
       "path": "tools/dsv41_flash_stagepack.py",
@@ -16325,5 +16365,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 76697839
+  "total_bytes": 76727964
 }
