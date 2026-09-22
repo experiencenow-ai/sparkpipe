@@ -51,6 +51,14 @@ python3 tools/mimo26_stagepack.py --arm "$ARM" --checkpoint "$CKPT" \
   || { log "verify FAILED"; exit 1; }
 log "verified byte-exact against $CKPT"
 
+# Shipping runs OUTSIDE the queue job (driver-side): queue participants must
+# belong to the job, and the multi-source rsync to a fresh remote needs the
+# trailing-slash dir form. MIMO26_NO_SHIP=1 keeps the job to emit/verify.
+if [ "${MIMO26_NO_SHIP:-0}" = 1 ]; then
+  log "verified; shipping deferred to the driver (MIMO26_NO_SHIP)"
+  exit 0
+fi
+
 place() {
   local node="$1" dest_base="$2"
   if [ "$(hostname -s)" = "$node" ]; then
@@ -61,12 +69,9 @@ place() {
   else
     ssh -o BatchMode=yes -o ConnectTimeout=10 "$node" "mkdir -p '$dest_base/packs'"
     rsync -a "$PACK" "$PACK.sha256" "$PACK.receipt.json" \
-      "$node:$dest_base/packs/rank$RANK.sp.moving" 2>>"$EMIT_ROOT/ship.log" \
+      "$node:$dest_base/packs/" 2>>"$EMIT_ROOT/ship.log" \
       || { log "ship to $node FAILED"; exit 1; }
-    ssh -o BatchMode=yes "$node" "cd '$dest_base/packs' && \
-      mv rank$RANK.sp.moving/rank$RANK.sp . && mv rank$RANK.sp.moving/rank$RANK.sp.sha256 . && \
-      mv rank$RANK.sp.moving/rank$RANK.sp.receipt.json . && rmdir rank$RANK.sp.moving" \
-      >>"$EMIT_ROOT/ship.log" 2>&1 || { log "ship rename FAILED"; exit 1; }
+
   fi
   ssh -o BatchMode=yes -o ConnectTimeout=10 "$node" \
     "cd '$dest_base/packs' && sha256sum -c rank$RANK.sp.sha256" \
