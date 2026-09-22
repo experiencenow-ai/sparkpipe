@@ -11393,8 +11393,8 @@
     },
     {
       "path": "tools/glm5_next_ck128_stamp.sh",
-      "sha256": "c1d5d1502b2ef091656359647a560748e1f687b86080529677b6df77afd637d3",
-      "size_bytes": 1317
+      "sha256": "4303e5b9a332fef33d85c34822533d23bfbcf04e37cc155955aae74a0bee69e6",
+      "size_bytes": 1347
     },
     {
       "path": "tools/glm5_next_coldlaunch_ab.sh",
@@ -16425,5 +16425,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78341936
+  "total_bytes": 78341966
 }

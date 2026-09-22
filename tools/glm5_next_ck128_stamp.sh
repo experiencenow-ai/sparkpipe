@@ -25,7 +25,7 @@ if [ -f "$PACK.ck128" ]; then
   echo "already stamped rank=$suffix ck128=$(cat "$PACK.ck128")"
   exit 0
 fi
-cc -O2 -I "$CHECKOUT/include" "$CHECKOUT/tools/ck128_stamp.c" -o /tmp/ck128_stamp.$$
+cc -O2 -I "$CHECKOUT/include" "$CHECKOUT/tools/ck128_stamp.c" "$CHECKOUT/src/spark_ck128.c" -o /tmp/ck128_stamp.$$
 trap 'rm -f /tmp/ck128_stamp.$$' EXIT
 /tmp/ck128_stamp.$$ "$PACK"
 echo "stamped rank=$suffix bytes=$(stat -c %s "$PACK") ck128=$(cat "$PACK.ck128")"
