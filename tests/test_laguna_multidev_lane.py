@@ -378,8 +378,9 @@ def manifest_gates(failures):
             check(int(pool_text) == pack_chunk_basis, failures,
                   f"pool {pool_text} != whole-pack chunk basis "
                   f"{pack_chunk_basis} (the daemon's acquire budget law)")
-            check(int(spine_text) == spine, failures,
-                  f"spine {spine_text} != complement {spine}")
+            check(int(spine_text) == spine + 256, failures,
+                  f"spine budget {spine_text} != complement {spine} + 256 "
+                  "(the aligned spine allocation)")
         # idempotence: a valid sidecar is left untouched
         before = sidecar.read_bytes()
         again = subprocess.run(
