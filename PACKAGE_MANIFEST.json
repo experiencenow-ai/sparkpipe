@@ -10733,8 +10733,8 @@
     },
     {
       "path": "tools/devcycle/fleet_registry.json",
-      "sha256": "467b5aa162b1b0291490f6d180a5a33f4b2d530ace5c071ded40af7e85044bc1",
-      "size_bytes": 5111
+      "sha256": "cf3e8ebae48e15aa3eb86d13d183e3f3c469bf6020c59bb7155f60e8bb5fb915",
+      "size_bytes": 5518
     },
     {
       "path": "tools/devcycle/fleet_status.sh",
@@ -16385,5 +16385,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78110043
+  "total_bytes": 78110450
 }
