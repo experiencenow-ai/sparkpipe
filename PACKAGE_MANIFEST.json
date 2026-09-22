@@ -5918,8 +5918,8 @@
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/Makefile",
-      "sha256": "f0fc03108c91ba4c949b85e281362a543526620fd9227e93819d63b5d7176afc",
-      "size_bytes": 5810
+      "sha256": "a366149992e4fba0eaea8fffc0b814c3e5dd936230b3c6d1a57cc07c81d65c14",
+      "size_bytes": 6152
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/include/sparkpipe/spark_qwen38_max_resident_decode_stage_firmware.h",
@@ -16725,5 +16725,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79686936
+  "total_bytes": 79687278
 }
