@@ -59,10 +59,16 @@ cc --version >> "$receipts/toolchain.txt"
 
 # Module archive + device validation + library publication against the real
 # rank pack (whole-stack 64-layer TP slice, TP4 lane shape).
+# Whole-stack TP tier per the validator contract: rank 0 in STANDALONE
+# collective mode (consistency + determinism gate here; cross-rank
+# numerics gate at the lane E2E run), unqualified execution admitted by
+# the retained-receipt validator itself.
 make -j4 -C modules/qwen38_27b_resident_decode_stage \
     CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
     STAGE_PACK_PATH="$(cd "$(dirname "$PACK")" && pwd)/$(basename "$PACK")" \
-    TP_DEGREE=4 TP_RANK=0 MAX_ACTIVE_SEQUENCES=16 KV_BLOCK_COUNT=256 \
+    ALLOW_UNQUALIFIED_EXECUTION=1 TP_DEGREE=4 TP_RANK=0 TP_STANDALONE=1 \
+    STAGE_COUNT=1 STAGE_INDEX=0 STAGE_FIRST_LAYER=0 STAGE_LAYER_COUNT=64 \
+    MAX_ACTIVE_SEQUENCES=16 KV_BLOCK_COUNT=256 \
     publish > "$receipts/module-publish.log" 2>&1
 
 # Driver link against the published module library.
