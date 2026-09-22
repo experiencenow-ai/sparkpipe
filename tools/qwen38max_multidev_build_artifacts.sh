@@ -2,11 +2,19 @@
 # qwen38max_multidev_build_artifacts.sh — build the lane-2 wrapper's
 # PREBUILT artifact set on THIS node (multidev M3 build arm).
 #
-# A GPU-owned queue job (glm5_next build precedent): nvcc compiles CUDA
-# and the module publish step executes retained-receipt GPU validation,
-# so a CPU-only reservation is insufficient. Produces the coherent
-# artifact set the wrapper's QMAX_PREBUILT_DIR consumes, in a persistent
-# node-local directory:
+# Stages (single literal argument; queue cmd stays BARE):
+#   compile  root targets + module archive/adapter, install the four
+#            static artifacts. CPU resources suffice (nvcc needs no GPU
+#            device) — budget host memory generously.
+#   publish  module publish (whole-stack smoke GPU validation on this
+#            node's placed pack) + driver compile, then add the driver
+#            artifact to the existing set. GPU-owned; needs the compile
+#            stage's build tree in the SAME checkout directory.
+#   all      both, one unit (fits only with host memory >= ~24 GiB after
+#            the device carve-out — build-r6 OOM-killed at 7 GiB host).
+#
+# Produces the coherent artifact set the wrapper's QMAX_PREBUILT_DIR
+# consumes, in a persistent node-local directory:
 #
 #   /home/<host>/sparkdata/qwen38max.tp16/build-latest/
 #     sparkpipe_model_residentd  model_serving_adapter.so
@@ -15,11 +23,10 @@
 # Same build chain as the wrapper's inline path (the family's proven
 # qwen38_tp4_build.sh flow): root targets, module archive+adapter with
 # the pinned serving revision, module publish (whole-stack smoke tier on
-# the rank-0 placed pack, the only pack a single-node TP1 validation may
-# touch), then sparkpipe_model_compile for the driver — the driver
-# compile resolves the module from build/module_library, so the publish
-# MUST precede it. Atomic: builds into build-partial.$$ and renames on
-# success. Queue cmd stays BARE.
+# this node's OWN placed pack), then sparkpipe_model_compile for the
+# driver — the driver compile resolves the module from
+# build/module_library, so the publish MUST precede it. Atomic: builds
+# into build-partial.$$ and renames on success.
 set -euo pipefail
 
 WORLD=16
@@ -29,6 +36,9 @@ CONTRACT="model_contracts/qwen38_authoritative.json"
 OUT_REL="sparkdata/qwen38max.tp16/build-latest"
 
 fail() { echo "qwen38max-build-artifacts: $*" >&2; exit 1; }
+
+STAGE="${1:-all}"
+case "$STAGE" in compile|publish|all) ;; *) fail "usage: $0 [compile|publish|all]" ;; esac
 
 ATTEMPT="${SPARK_QUEUE_ATTEMPT:?run through the authoritative spark queue}"
 case "$ATTEMPT" in
@@ -57,29 +67,52 @@ rm -rf "$PARTIAL"
 mkdir -p "$PARTIAL"
 trap 'rm -rf "$PARTIAL"' EXIT
 
-[ -r "$PACK" ] || fail "placed pack for this node missing: $PACK (operator-placed NVMe set; no pack, no publish)"
+[ "$STAGE" = compile ] || \
+  [ -r "$PACK" ] || fail "placed pack for this node missing: $PACK (operator-placed NVMe set; no pack, no publish)"
 
 PATH="/usr/local/cuda/bin:$PATH"
 export PATH
 CONTRACT_SHA256="$(sha256sum "$CHECKOUT/$CONTRACT" | awk '{print $1}')"
 START="$(date +%s)"
 
-make -C "$CHECKOUT" -j4 \
-  build/sparkpipe_model_residentd \
-  build/sparkpipe_model_compile \
-  build/weightd_warm \
-  hidden_transport_spark_host_rdma_verbs
-make -C "$CHECKOUT/modules/qwen38_max_resident_decode_stage" -j4 \
-  CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
-  EXPERT_CODEC="$EXPERT_CODEC" \
-  MODEL_REVISION="$MODEL_REVISION" \
-  CONTRACT_SHA256="$CONTRACT_SHA256" \
-  archive adapter
+if [ "$STAGE" != publish ]; then
+  # ---- compile stage (CPU-sufficient; the fat nvcc TUs need host RAM) ----
+  make -C "$CHECKOUT" -j4 \
+    build/sparkpipe_model_residentd \
+    build/sparkpipe_model_compile \
+    build/weightd_warm \
+    hidden_transport_spark_host_rdma_verbs
+  make -C "$CHECKOUT/modules/qwen38_max_resident_decode_stage" -j4 \
+    CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
+    EXPERT_CODEC="$EXPERT_CODEC" \
+    MODEL_REVISION="$MODEL_REVISION" \
+    CONTRACT_SHA256="$CONTRACT_SHA256" \
+    archive adapter
+  ADAPTER="$CHECKOUT/build/modules/qwen38_max_resident_decode_stage/$EXPERT_CODEC/libqwen38_max_serving_adapter_$EXPERT_CODEC.so"
+  [ -f "$ADAPTER" ] || fail "adapter not built: $ADAPTER"
+  install -m 0755 "$CHECKOUT/build/sparkpipe_model_residentd" "$PARTIAL/"
+  install -m 0755 "$CHECKOUT/build/weightd_warm" "$PARTIAL/"
+  install -m 0644 "$ADAPTER" "$PARTIAL/model_serving_adapter.so"
+  install -m 0644 \
+    "$CHECKOUT/build/libhidden_transport_spark_host_rdma_verbs.so" \
+    "$PARTIAL/hidden_transport.so"
+  rm -rf "$OUT" && mv "$PARTIAL" "$OUT"
+  END="$(date +%s)"
+  for artifact in sparkpipe_model_residentd model_serving_adapter.so \
+      hidden_transport.so weightd_warm; do
+    [ -f "$OUT/$artifact" ] || fail "missing artifact: $OUT/$artifact"
+  done
+  echo "COMPILE-DONE host=$HOST seconds=$((END - START))"
+  [ "$STAGE" = compile ] && exit 0
+fi
+
+# ---- publish stage (GPU-owned: retained-receipt whole-stack validation) ----
 ADAPTER="$CHECKOUT/build/modules/qwen38_max_resident_decode_stage/$EXPERT_CODEC/libqwen38_max_serving_adapter_$EXPERT_CODEC.so"
-[ -f "$ADAPTER" ] || fail "adapter not built: $ADAPTER"
+[ -f "$ADAPTER" ] || fail "compile stage artifacts missing in this checkout: $ADAPTER (run the compile stage in the SAME cwd first)"
+[ -x "$CHECKOUT/build/sparkpipe_model_compile" ] || fail "sparkpipe_model_compile missing: run the compile stage first"
 # Publish the validated module into build/module_library: the driver
 # compile below resolves the module by exact identity from the library
-# and fails with MODULE_NOT_VALIDIFIED without this. Whole-stack smoke
+# and fails with MODULE_NOT_VALIDATED without this. Whole-stack smoke
 # tier (STAGE_COUNT=1, all 92 layers, TP1, MAS=8) on this node's own
 # placed pack — the validator's admitted single-node tier (qwen38_27b
 # publish precedent: tp4-rank0 pack + standalone whole-stack).
@@ -107,15 +140,11 @@ make -C "$CHECKOUT/modules/qwen38_max_resident_decode_stage" -j2 \
   --cc-arg -lm \
   --cc-arg -ldl \
   --cc-arg -pthread
-install -m 0755 "$CHECKOUT/build/sparkpipe_model_residentd" "$PARTIAL/"
-install -m 0755 "$CHECKOUT/build/weightd_warm" "$PARTIAL/"
-install -m 0644 "$ADAPTER" "$PARTIAL/model_serving_adapter.so"
-install -m 0644 "$PARTIAL/driver/model_driver.so" "$PARTIAL/"
-install -m 0644 \
-  "$CHECKOUT/build/libhidden_transport_spark_host_rdma_verbs.so" \
-  "$PARTIAL/hidden_transport.so"
-rm -rf "$PARTIAL/driver"
-rm -rf "$OUT" && mv "$PARTIAL" "$OUT"
+# The compile stage owns the directory atomically; add the driver with a
+# same-filesystem atomic rename so a torn install can never be observed.
+install -m 0644 "$PARTIAL/driver/model_driver.so" "$OUT/model_driver.so.$$"
+mv "$OUT/model_driver.so.$$" "$OUT/model_driver.so"
+[ -f "$OUT/sparkpipe_model_residentd" ] || fail "compile-stage set missing at $OUT (run compile first)"
 END="$(date +%s)"
 echo "qwen38max-build-artifacts: $HOST -> $OUT in $((END - START))s"
 for artifact in sparkpipe_model_residentd model_serving_adapter.so \
