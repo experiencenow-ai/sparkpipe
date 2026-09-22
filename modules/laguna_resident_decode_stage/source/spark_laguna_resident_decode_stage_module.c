@@ -1477,6 +1477,14 @@ static SparkStatus SparkLagunaModuleInitializeTpCollective(
 	configuration.collective_identifier = context->tp_collective_identifier;
 	configuration.backend_module_path = context->tp_collective_backend_module_path;
 	configuration.registration_cuda_stream = state->execution_stream;
+	/* ApplyTopology copies only the degree; the local host is this
+	 * rank's entry in the topology the serving adapter loaded from the
+	 * tp_collective config (peer_hosts[tp_rank]). The field was left
+	 * zeroed by the memset and the argument gate below rejected every
+	 * launch (lane-8 attach-008: invalid_argument at the collective
+	 * configuration check). */
+	configuration.local_host =
+		context->tp_collective_topology.rank_hosts[state->tp_rank];
 	status = SparkTpDeviceCollectiveApplyTopology(&context->tp_collective_topology,&configuration);
 	if ( status != SPARK_STATUS_OK )
 		return(status);
