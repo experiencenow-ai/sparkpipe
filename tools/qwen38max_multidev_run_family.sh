@@ -117,6 +117,17 @@ SOCKET="${QMAX_WEIGHTD_SOCKET:-${SPARK_WEIGHTD_SOCKET:-/run/sparkpipe-weightd-sh
 [ -S "$SOCKET" ] || fail "shared weightd socket $SOCKET is not a live socket; \
 the operator must establish the shared daemon (never start one by hand)"
 
+# Arena-side budget defaults derive from the committed census manifest
+# (PR #1085) - per-node tp-sharded bytes; the QMAX_* envs only override.
+# This keeps the queue cmd BARE (no env prefixes: systemd pre-expansion).
+MANIFEST_JSON="$CHECKOUT/model-families/qwen38_max/smoke_experts.json"
+[ -f "$MANIFEST_JSON" ] ||
+  fail "smoke_experts.json missing (the census manifest is the sizing record)"
+BUDGETS="$(python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" --budgets "$MANIFEST_JSON")"
+DEFAULT_POOL="${BUDGETS%% *}"
+DEFAULT_SPINE="${BUDGETS##* }"
+: "${QMAX_EXPERT_POOL_BYTES:=$DEFAULT_POOL}"
+: "${QMAX_SPINE_BUDGET_BYTES:=$DEFAULT_SPINE}"
 for value in QMAX_EXPERT_POOL_BYTES QMAX_SPINE_BUDGET_BYTES QMAX_KV_BACKING_BYTES; do
   eval "text=\${$value:-}"
   # shellcheck disable=SC2154  # assigned by the eval above
