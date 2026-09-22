@@ -11,8 +11,8 @@ MODULE_ADDITIONAL_HOST_SOURCES = \
 	$(REPOSITORY_ROOT)/ring/transport/hidden_transport.c \
 	$(REPOSITORY_ROOT)/ring/transport/tp_collective.c \
 	$(REPOSITORY_ROOT)/ring/transport/tp_device_collective.c
-MINIMAX_MODEL_REVISION := $(shell git -C $(REPOSITORY_ROOT) rev-parse HEAD 2>/dev/null || echo unknown)
-MINIMAX_CONTRACT_SHA256 := $(shell sha256sum $(CURDIR)/../../model-families/minimax/include/sparkpipe/llm_defines.h 2>/dev/null | awk '{print $$1}')
+MINIMAX_MODEL_REVISION ?= minimax-h3-text-bf16-h5120-l64-mrope24-20-20-tp4-v1
+MINIMAX_CONTRACT_SHA256 ?= $(shell sha256sum $(CURDIR)/../../model-families/minimax/include/sparkpipe/llm_defines.h 2>/dev/null | awk '{print $$1}')
 MODULE_COMPILE_FLAGS := \
 	-DSPARK_MINIMAX_MODULE_BUILD=1 \
 	-DMINIMAX_MODEL_REVISION=\"$(MINIMAX_MODEL_REVISION)\" \
@@ -62,3 +62,42 @@ RUNTIME_CONFIGURATION := \
 GPU_VALIDATOR := validation/validate_minimax_resident_decode_stage_cuda.sh
 
 include ../resident_decode_stage_rules.mk
+
+# Dense text tower: bf16 is the only codec this module builds (no routed
+# experts, no quantization arms). EXPERT_CODEC still names the build slot so
+# tools/module_build_release.sh and the shared adapter/library layout stay
+# uniform across families (gemma4 dense precedent).
+EXPERT_CODEC ?= bf16
+ifeq ($(filter $(EXPERT_CODEC),bf16),)
+$(error unsupported EXPERT_CODEC '$(EXPERT_CODEC)': the dense minimax text-tower module builds bf16 only)
+endif
+BUILD_DIRECTORY ?= $(REPOSITORY_ROOT)/build/modules/minimax_resident_decode_stage/$(EXPERT_CODEC)
+
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+ADAPTER_SHARED_FLAGS := -dynamiclib
+ADAPTER_LIBRARY_EXT := dylib
+else
+ADAPTER_SHARED_FLAGS := -shared
+ADAPTER_LIBRARY_EXT := so
+endif
+ADAPTER_LIBRARY := $(BUILD_DIRECTORY)/libminimax_serving_adapter_$(EXPERT_CODEC).$(ADAPTER_LIBRARY_EXT)
+
+.PHONY: adapter
+
+# TP4 text-tower serving adapter in the codec-scoped module build slot
+# tools/module_build_release.sh expects (gemma4 dense precedent).
+adapter:
+	$(MAKE) -C $(REPOSITORY_ROOT) core model_common
+	@mkdir -p "$(BUILD_DIRECTORY)"
+	$(CC) $(CFLAGS) $(MODULE_POSIX_FLAGS) -fPIC $(ADAPTER_SHARED_FLAGS) \
+		-D_POSIX_C_SOURCE=200809L \
+		-DMINIMAX_MODEL_REVISION=\"$(MINIMAX_MODEL_REVISION)\" \
+		-DMINIMAX_CONTRACT_SHA256=\"$(MINIMAX_CONTRACT_SHA256)\" \
+		-I"$(CUDA_HOME)/include" \
+		$(MODULE_INCLUDE_FLAGS) -DSPARK_BATCH_BUCKET=1024u \
+		source/spark_minimax_serving_adapter.c \
+		$(REPOSITORY_ROOT)/build/libsparkpipe_runtime.a \
+		$(REPOSITORY_ROOT)/build/libsparkpipe_model_common.a \
+		$(REPOSITORY_ROOT)/build/libsparkpipe_core.a -ldl -pthread \
+		-o "$(ADAPTER_LIBRARY)"
