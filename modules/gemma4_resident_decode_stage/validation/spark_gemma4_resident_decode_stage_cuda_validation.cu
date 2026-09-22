@@ -1006,8 +1006,6 @@ static void SparkGemma4ValMirrorDecode(const SparkGemma4ValKv *kv, const uint16_
 	   (2048 bytes of host heap), corrupting the heap under libcuda: the next
 	   CUDA call segfaulted layout-dependently (-O3 publish builds died at the
 	   window copy; -lineinfo builds leaked the garbage into the compare). */
-
-{
 	uint32_t row,head,step,element;
 	uint32_t group = query_heads / kv->kv_heads;
 	for (row = 0u; row < rows; row++)
