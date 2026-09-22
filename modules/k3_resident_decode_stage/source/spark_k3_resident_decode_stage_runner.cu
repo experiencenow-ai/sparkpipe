@@ -176,6 +176,13 @@ static SparkStatus K3RunnerCombineTp4Bf16(void *combine_context,
 	return cudaGetLastError() == cudaSuccess ? SPARK_STATUS_OK : SPARK_STATUS_INTERNAL_ERROR;
 }
 
+enum
+{
+	SPARK_K3_LEASE_ACQUIRED = 1u,
+	SPARK_K3_LEASE_BEGUN = 2u,
+	SPARK_K3_LEASE_RECORDED = 3u
+};
+
 typedef struct SparkK3RunnerState
 {
 	SparkK3ModuleState module;
@@ -186,7 +193,7 @@ typedef struct SparkK3RunnerState
 	int device_collective_created;
 	SparkWeightdLazyPack *lazy_pack;
 	uint64_t lease_identifier;
-	uint32_t lease_inflight;
+	uint32_t lease_phase;
 	void *lease_address;
 	uint32_t *group_offset_host;
 	uint64_t layer_w1_offset[K3_LAYERS];
@@ -578,6 +585,31 @@ static SparkStatus SparkK3ManifestCheck(const SparkWeightdManifest *manifest,
 	return SPARK_STATUS_OK;
 }
 
+static SparkStatus SparkK3RunnerReleaseLease(SparkK3RunnerState *state)
+{
+	SparkStatus status;
+	if ( state->lease_identifier == 0u )
+		return(state->lease_phase == 0u ? SPARK_STATUS_OK : SPARK_STATUS_VALIDATION_FAILED);
+	if ( state->lazy_pack == 0 || state->lazy_pack->map == 0 ||
+		state->lease_phase < SPARK_K3_LEASE_ACQUIRED || state->lease_phase > SPARK_K3_LEASE_RECORDED )
+		return(SPARK_STATUS_VALIDATION_FAILED);
+	if ( state->lease_phase == SPARK_K3_LEASE_BEGUN )
+	{
+		status = SparkWeightdMapRecordCompletion(state->lazy_pack->map,state->lease_identifier,state->stream);
+		if ( status != SPARK_STATUS_OK )
+			return(status);
+		state->lease_phase = SPARK_K3_LEASE_RECORDED;
+	}
+	status = SparkWeightdMapRelease(state->lazy_pack->map,state->lease_identifier,SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
+	if ( status == SPARK_STATUS_OK )
+	{
+		state->lease_identifier = 0u;
+		state->lease_phase = 0u;
+		state->lease_address = 0;
+	}
+	return(status);
+}
+
 static int32_t SparkK3RunnerLazyAcquire(void *context, uint32_t layer,
 	void *buffers_void)
 {
@@ -597,6 +629,9 @@ static int32_t SparkK3RunnerLazyAcquire(void *context, uint32_t layer,
 	error = cudaStreamSynchronize(state->stream);
 	if ( error != cudaSuccess )
 		SPARK_FAIL(SPARK_STATUS_IO_ERROR);
+	status = SparkK3RunnerReleaseLease(state);
+	if ( status != SPARK_STATUS_OK )
+		return status;
 	error = cudaMemcpy(state->group_offset_host, buffers->group_row_offset,
 		(K3_EXPERTS + 1u) * 4u, cudaMemcpyDeviceToHost);
 	if ( error != cudaSuccess )
@@ -608,18 +643,20 @@ static int32_t SparkK3RunnerLazyAcquire(void *context, uint32_t layer,
 		return status;
 	status = SparkWeightdMapAcquire(map, keys, count,
 		&state->lease_identifier, SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
+	if ( state->lease_identifier != 0u )
+		state->lease_phase = SPARK_K3_LEASE_ACQUIRED;
 	if ( status != SPARK_STATUS_OK )
 	{
-		if ( state->lease_identifier != 0u )
-			(void)SparkWeightdMapRelease(map, state->lease_identifier,
-				SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
+		(void)SparkK3RunnerReleaseLease(state);
 		SPARK_FAIL(status);
 	}
-	state->lease_inflight = 1u;
+	if ( state->lease_identifier == 0u )
+		return SPARK_STATUS_VALIDATION_FAILED;
 	status = SparkWeightdMapBeginUse(map,
 		state->lease_identifier, &state->lease_address);
 	if ( status != SPARK_STATUS_OK )
 		return status;
+	state->lease_phase = SPARK_K3_LEASE_BEGUN;
 	buffers->expert_w1_weight = (const uint8_t *)state->lease_address +
 		state->layer_w1_offset[layer];
 	buffers->expert_w2_weight = (const uint8_t *)state->lease_address +
@@ -630,25 +667,13 @@ static int32_t SparkK3RunnerLazyAcquire(void *context, uint32_t layer,
 static void SparkK3RunnerLazyRelease(void *context, uint32_t layer)
 {
 	SparkK3RunnerState *state = (SparkK3RunnerState *)context;
-	SparkWeightdMap *map;
 	SparkStatus status;
 	(void)layer;
-	if ( state == 0 || state->lazy_pack == 0 ||
-		state->lease_inflight == 0u )
+	if ( state == 0 )
 		return;
-	map = state->lazy_pack->map;
-	if ( map == 0 )
-		return;
-	status = SparkWeightdMapRecordCompletion(map,
-		state->lease_identifier, state->stream);
-	if ( status == SPARK_STATUS_OK )
-		status = SparkWeightdMapRelease(map,
-			state->lease_identifier,
-			SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
+	status = SparkK3RunnerReleaseLease(state);
 	if ( status != SPARK_STATUS_OK )
-		fprintf(stderr, "sparkpipe_k3: lease release failed status=%d "
-			"(retained for recovery)\n", (int)status);
-	state->lease_inflight = 0u;
+		fprintf(stderr,"sparkpipe_k3: lease release failed status=%d (retained for recovery)\n",(int)status);
 }
 
 static SparkStatus K3RunnerEnvUnsigned64(const char *name, uint64_t minimum,
@@ -924,7 +949,7 @@ SparkStatus SparkK3StageRunnerInitialize(
 		status = SparkTpDeviceCollectiveCreate(&device_config,
 			&state->device_collective);
 		if ( status != SPARK_STATUS_OK )
-			{ SparkK3DispatchDestroy(&state->dispatch); SparkK3ModuleDestroy(&state->module); runner->private_state = 0; delete state; return status; }
+			{ SparkK3StageRunnerDestroy(runner); return status; }
 		state->device_collective_created = 1;
 		if ( state->lazy_pack != 0 &&
 			state->lazy_pack->attached.mesh_send_buffer_addr != 0 )
@@ -933,18 +958,18 @@ SparkStatus SparkK3StageRunnerInitialize(
 				(void *)(uintptr_t)state->lazy_pack->attached.mesh_send_buffer_addr,
 				0u,0u,0u,0u);
 		if ( status != SPARK_STATUS_OK )
-			{ SparkK3DispatchDestroy(&state->dispatch); SparkK3ModuleDestroy(&state->module); runner->private_state = 0; delete state; return status; }
+			{ SparkK3StageRunnerDestroy(runner); return status; }
 	}
 	if ( runner->owns_embedding != 0u )
 	{
 		const void *embed_slice = 0;
 		if ( SparkK3PackLoadEntry(&state->module.pack,
 			"model.embed_tokens.weight",&entry) != SPARK_STATUS_OK )
-			{ SparkK3DispatchDestroy(&state->dispatch); SparkK3ModuleDestroy(&state->module); runner->private_state = 0; delete state; SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
+			{ SparkK3StageRunnerDestroy(runner); SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
 		if ( SparkWeightdLazyPackSlice(state->lazy_pack,
 			state->module.pack.payload_base + entry.payload_offset,
 			entry.bytes, &embed_slice) != SPARK_STATUS_OK )
-			{ SparkK3DispatchDestroy(&state->dispatch); SparkK3ModuleDestroy(&state->module); runner->private_state = 0; delete state; SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
+			{ SparkK3StageRunnerDestroy(runner); SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
 		state->embed_weight = (const uint16_t *)embed_slice;
 	}
 	if ( runner->owns_final_head != 0u )
@@ -955,13 +980,13 @@ SparkStatus SparkK3StageRunnerInitialize(
 			SparkWeightdLazyPackSlice(state->lazy_pack,
 			state->module.pack.payload_base + entry.payload_offset,
 			entry.bytes, &norm_slice) != SPARK_STATUS_OK )
-			{ SparkK3DispatchDestroy(&state->dispatch); SparkK3ModuleDestroy(&state->module); runner->private_state = 0; delete state; SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
+			{ SparkK3StageRunnerDestroy(runner); SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
 		state->head_norm_weight = (const uint16_t *)norm_slice;
 		if ( SparkK3PackLoadEntry(&state->module.pack,"lm_head.weight",&entry) != SPARK_STATUS_OK ||
 			SparkWeightdLazyPackSlice(state->lazy_pack,
 			state->module.pack.payload_base + entry.payload_offset,
 			entry.bytes, &head_slice) != SPARK_STATUS_OK )
-			{ SparkK3DispatchDestroy(&state->dispatch); SparkK3ModuleDestroy(&state->module); runner->private_state = 0; delete state; SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
+			{ SparkK3StageRunnerDestroy(runner); SPARK_FAIL(SPARK_STATUS_PARSE_ERROR); }
 		state->head_weight = (const uint16_t *)head_slice;
 	{
 		uint64_t shard_rows = (uint64_t)state->vocab_slice_rows;
@@ -1261,26 +1286,26 @@ void SparkK3StageRunnerDestroy(SparkK3StageRunner *runner)
 	if ( runner == 0 || runner->private_state == 0 )
 		return;
 	state = (SparkK3RunnerState *)runner->private_state;
-	if ( state->collective_created != 0 )
-		SparkTpCollectiveDestroy(&state->collective);
 	if ( state->device_collective_created != 0 )
-		SparkTpDeviceCollectiveDestroy(&state->device_collective);
-	cudaFree(state->fused_device);
-	SparkK3DispatchDestroy(&state->dispatch);
-	if ( state->lease_inflight != 0u && state->lazy_pack != 0 &&
-		state->lazy_pack->map != 0 )
 	{
-		(void)SparkWeightdMapRelease(state->lazy_pack->map,
-			state->lease_identifier,
-			SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
-		state->lease_inflight = 0u;
+		SparkTpDeviceCollectiveDestroy(&state->device_collective);
+		if ( state->device_collective.implementation != 0 )
+			return;
+		state->device_collective_created = 0;
 	}
-	SparkK3ModuleDestroy(&state->module);
+	if ( SparkK3RunnerReleaseLease(state) != SPARK_STATUS_OK )
+		return;
 	if ( state->lazy_pack != 0 )
 	{
-		(void)SparkWeightdLazyPackDestroy(state->lazy_pack);
+		if ( SparkWeightdLazyPackDestroy(state->lazy_pack) != SPARK_STATUS_OK )
+			return;
 		state->lazy_pack = 0;
 	}
+	if ( state->collective_created != 0 )
+		SparkTpCollectiveDestroy(&state->collective);
+	cudaFree(state->fused_device);
+	SparkK3DispatchDestroy(&state->dispatch);
+	SparkK3ModuleDestroy(&state->module);
 	delete[] state->staging_values;
 	free(state->group_offset_host);
 	delete[] state->staging_scratch;

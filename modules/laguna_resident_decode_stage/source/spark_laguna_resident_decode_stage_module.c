@@ -2372,14 +2372,19 @@ void SparkLagunaResidentDecodeStageDestroy(void *module_state)
 	}
 	if ( SparkStageModuleCudaStatus(SPARK_LAGUNA_MODULE_TAG,cudaStreamSynchronize((cudaStream_t)state->execution_stream),"destroy_stream_drain") != SPARK_STATUS_OK )
 		return;
+	if ( state->tp_device_collective_initialized != 0u )
+	{
+		SparkTpDeviceCollectiveDestroy(&state->tp_device_collective);
+		if ( state->tp_device_collective.implementation != 0 )
+			return;
+		state->tp_device_collective_initialized = 0u;
+	}
 	if ( state->lazy_pack != 0 )
 	{
 		if ( SparkWeightdLazyPackDestroy(state->lazy_pack) != SPARK_STATUS_OK )
 			return;
 		state->lazy_pack = 0;
 	}
-	if ( state->tp_device_collective_initialized != 0u )
-		SparkTpDeviceCollectiveDestroy(&state->tp_device_collective);
 	SparkLagunaReleaseCaches(state);
 	SparkLagunaReleaseSlotHost(state);
 	SparkStageModuleLedgerRelease(&state->ledger);
@@ -2421,6 +2426,12 @@ static SparkStatus SparkLagunaInitializeState(
 		status = SparkWeightdWorkerCreate(&state->completion_worker);
 	if ( status != SPARK_STATUS_OK )
 	{
+		if ( state->tp_device_collective_initialized != 0u )
+		{
+			SparkTpDeviceCollectiveDestroy(&state->tp_device_collective);
+			if ( state->tp_device_collective.implementation != 0 )
+				return(status);
+		}
 		if ( state->lazy_pack != 0 && SparkWeightdLazyPackDestroy(state->lazy_pack) != SPARK_STATUS_OK )
 		{
 			fprintf(stderr,"GLM lazy initialization cleanup failed; retaining CUDA resources until process exit\n");

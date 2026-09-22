@@ -447,8 +447,6 @@ static void check_map_lifetime(SparkWeightdClient *client,uint64_t generation,ui
 	assert(SparkWeightdMapAcquire(map,&key,1u,&first,TIMEOUT) == SPARK_STATUS_IO_ERROR);
 	assert(first == 0u);
 	assert(SparkWeightdMapAcquire(map,&key,1u,&first,TIMEOUT) == SPARK_STATUS_OK);
-	/* The persistent-mapping design keeps chunks mapped across release; the
-	 * old unmap-on-release fault case tested a path that no longer exists. */
 	assert(SparkWeightdMapRelease(map,first,TIMEOUT) == SPARK_STATUS_OK);
 	assert(SparkWeightdMapDestroy(map) == SPARK_STATUS_OK);
 	assert(SparkWeightdMapCreate(client,&attached,-1,-1,&map) == SPARK_STATUS_OK);
@@ -463,6 +461,140 @@ static void check_map_lifetime(SparkWeightdClient *client,uint64_t generation,ui
 	assert(SparkWeightdMapAcquire(map,&key,1u,&first,TIMEOUT) == SPARK_STATUS_IO_ERROR);
 	assert(first == 0u);
 	assert(SparkWeightdMapDestroy(map) == SPARK_STATUS_OK);
+}
+
+static void write_full_chunk_fixture(const char *path,const char *manifest_path)
+{
+    FILE *pack = fopen(path,"wb"),*manifest = fopen(manifest_path,"wb");
+    uint32_t header[4] = {SPARK_WEIGHTD_EXPERT_MANIFEST_MAGIC,2u,3u,0u},i;
+    uint8_t *data = malloc(CHUNK);
+    assert(pack != 0 && manifest != 0 && data != 0);
+    assert(fwrite(header,1u,sizeof(header),manifest) == sizeof(header));
+    for (i=0u; i<3u; i++)
+    {
+        uint8_t record[48] = {0},digest[16];
+        uint64_t offset = (uint64_t)i * CHUNK,bytes = CHUNK;
+        SparkCk128Context ck;
+        memset(data,(int)i + 1,CHUNK);
+        SparkCk128Initialize(&ck);
+        SparkCk128Update(&ck,data,CHUNK);
+        SparkCk128Finalize(&ck,digest);
+        memcpy(record + 4u,&i,4u);
+        memcpy(record + 16u,&offset,8u);
+        memcpy(record + 24u,&bytes,8u);
+        memcpy(record + 32u,digest,16u);
+        assert(fwrite(record,1u,sizeof(record),manifest) == sizeof(record));
+        assert(fwrite(data,1u,CHUNK,pack) == CHUNK);
+    }
+    free(data);
+    assert(fclose(pack) == 0 && fclose(manifest) == 0);
+}
+
+static void check_full_chunk(const void *address,uint32_t expert)
+{
+    const uint8_t *data = (const uint8_t *)address + (uint64_t)expert * CHUNK;
+    uint32_t i;
+    for (i=0u; i<CHUNK; i++)
+        assert(data[i] == (uint8_t)(expert + 1u));
+}
+
+static void check_map_eviction(void)
+{
+    char root[] = "/tmp/weightd-evict-XXXXXX",path[256],manifest[272],socket_path[256],wset[272];
+    TestServer state = {0};
+    SparkWeightdServerConfig config = {0};
+    SparkWeightdLazyAttachResult attached = {0};
+    SparkWeightdWorkingSetResult result;
+    SparkWeightdClient *a,*b;
+    SparkWeightdMap *map;
+    SparkWeightdExpertKey key = {0u,0u},pair[2] = {{0u,1u},{0u,2u}};
+    pthread_t thread;
+    uint64_t generation,base,other,first,second,leases[64],epoch;
+    uint32_t i,allocations;
+    int epoch_fd = -1;
+    void *address,*second_address;
+    assert(mkdtemp(root) != 0);
+    snprintf(path,sizeof(path),"%s/pack",root);
+    snprintf(manifest,sizeof(manifest),"%s.experts",path);
+    snprintf(wset,sizeof(wset),"%s.wset",path);
+    snprintf(socket_path,sizeof(socket_path),"%s/socket",root);
+    write_full_chunk_fixture(path,manifest);
+    config.socket_path = socket_path;
+    config.device_bytes_max = 3u * CHUNK;
+    assert(SparkWeightdServerCreate(&config,&state.server) == SPARK_STATUS_OK);
+    assert(pthread_create(&thread,0,run_server,&state) == 0);
+    assert(SparkWeightdClientConnect(socket_path,&a,0) == SPARK_STATUS_OK);
+    assert(SparkWeightdClientConnect(socket_path,&b,0) == SPARK_STATUS_OK);
+    generation = attach_config(a,path,3u * CHUNK,2u,3u,&base);
+    assert(attach_config(b,path,3u * CHUNK,2u,3u,&other) == generation);
+    for (i=0u; i<3u; i++)
+    {
+        result = acquire(b,generation,i,SPARK_STATUS_OK);
+        release(b,generation,result.lease_identifier);
+    }
+    assert(SparkWeightdClientEpochExport(a,generation,&epoch_fd,TIMEOUT) == SPARK_STATUS_OK);
+    attached.status = SPARK_STATUS_OK;
+    attached.arena_generation = generation;
+    attached.arena_bytes = 3u * CHUNK;
+    attached.chunk_bytes = CHUNK;
+    attached.chunk_count = 3u;
+    assert(SparkWeightdMapCreate(a,&attached,epoch_fd,-1,&map) == SPARK_STATUS_OK);
+    assert(cudaMemcpy(&epoch,SparkWeightdMapEpochDevice(map),sizeof(epoch),cudaMemcpyDeviceToHost) == cudaSuccess && epoch > 0u);
+    assert(SparkWeightdMapAcquire(map,&key,1u,&first,TIMEOUT) == SPARK_STATUS_OK);
+    assert(SparkWeightdMapBeginUse(map,first,&address) == SPARK_STATUS_OK);
+    check_full_chunk(address,0u);
+    assert(SparkWeightdMapAcquire(map,&key,1u,&second,TIMEOUT) == SPARK_STATUS_OK);
+    for (i=1u; i<3u; i++)
+    {
+        result = acquire(b,generation,i,SPARK_STATUS_OK);
+        release(b,generation,result.lease_identifier);
+    }
+    assert(SparkWeightdMapBeginUse(map,second,&second_address) == SPARK_STATUS_OK && second_address == address);
+    assert(SparkWeightdMapRecordCompletion(map,first,0) == SPARK_STATUS_OK);
+    allocations = spark_stub_cuda_outstanding_allocs();
+    assert(SparkWeightdMapRelease(map,first,TIMEOUT) == SPARK_STATUS_OK);
+    assert(spark_stub_cuda_outstanding_allocs() == allocations);
+    check_full_chunk(second_address,0u);
+    assert(SparkWeightdMapRecordCompletion(map,second,0) == SPARK_STATUS_OK);
+    spark_stub_cuda_fail_next_unmap();
+    assert(SparkWeightdMapRelease(map,second,TIMEOUT) == SPARK_STATUS_IO_ERROR);
+    assert(SparkWeightdClientAcquire(b,generation,pair,2u,&result,TIMEOUT) == SPARK_STATUS_CAPACITY_EXCEEDED);
+    assert(SparkWeightdMapAcquire(map,&key,1u,&first,TIMEOUT) == SPARK_STATUS_BUSY && first == 0u);
+    assert(SparkWeightdMapRelease(map,second,TIMEOUT) == SPARK_STATUS_OK);
+    assert(SparkWeightdClientAcquire(b,generation,pair,2u,&result,TIMEOUT) == SPARK_STATUS_OK);
+    release(b,generation,result.lease_identifier);
+    allocations = spark_stub_cuda_outstanding_allocs();
+    for (i=0u; i<24u; i++)
+    {
+        key.expert = i % 3u;
+        assert(SparkWeightdMapAcquire(map,&key,1u,&first,TIMEOUT) == SPARK_STATUS_OK);
+        assert(SparkWeightdMapBeginUse(map,first,&address) == SPARK_STATUS_OK);
+        check_full_chunk(address,key.expert);
+        assert(SparkWeightdMapRecordCompletion(map,first,0) == SPARK_STATUS_OK);
+        assert(SparkWeightdMapRelease(map,first,TIMEOUT) == SPARK_STATUS_OK);
+        assert(spark_stub_cuda_outstanding_allocs() == allocations);
+    }
+    key.expert = 0u;
+    for (i=0u; i<64u; i++)
+        assert(SparkWeightdMapAcquire(map,&key,1u,&leases[i],TIMEOUT) == SPARK_STATUS_OK);
+    assert(SparkWeightdMapAcquire(map,&key,1u,&first,TIMEOUT) == SPARK_STATUS_BUSY && first == 0u);
+    assert(SparkWeightdMapBeginUse(map,leases[63],&address) == SPARK_STATUS_OK);
+    allocations = spark_stub_cuda_outstanding_allocs();
+    for (i=0u; i<63u; i++)
+        assert(SparkWeightdMapRelease(map,leases[i],TIMEOUT) == SPARK_STATUS_OK);
+    assert(spark_stub_cuda_outstanding_allocs() == allocations);
+    check_full_chunk(address,0u);
+    assert(SparkWeightdMapRecordCompletion(map,leases[63],0) == SPARK_STATUS_OK);
+    assert(SparkWeightdMapRelease(map,leases[63],TIMEOUT) == SPARK_STATUS_OK);
+    assert(SparkWeightdMapDestroy(map) == SPARK_STATUS_OK);
+    SparkWeightdClientClose(a);
+    SparkWeightdClientClose(b);
+    __atomic_store_n(&state.stop,1,__ATOMIC_SEQ_CST);
+    assert(pthread_join(thread,0) == 0);
+    SparkWeightdServerDestroy(state.server);
+    assert(spark_stub_cuda_outstanding_allocs() == 0u);
+    assert(unlink(manifest) == 0 && unlink(path) == 0 && unlink(wset) == 0 && rmdir(root) == 0);
+    puts("PASS partial map: actual eviction epoch, overlapping leases, failed unmap pin retention, 24 bounded reloads, 64-owner limit");
 }
 
 static void check_orphan(SparkWeightdClient *a,uint64_t generation,uint64_t base,const char *socket_path,const char *path)
@@ -735,6 +867,7 @@ int main(int argc,char **argv)
 	SparkWeightdServerDestroy(state.server);
 	assert(spark_stub_cuda_outstanding_allocs() == 0u);
 	assert(unlink(manifest) == 0 && unlink(path) == 0 && unlink(wset) == 0 && rmdir(root) == 0);
+	check_map_eviction();
 	check_many_exports();
 	check_pooled_attach();
 	puts("PASS working-set IPC: all ranges, leases, rollback, scoped imports, 65-chunk exports and pooled single-alloc attach");
