@@ -63,7 +63,11 @@ set -euo pipefail
 FAMILY="laguna"
 LANE=8
 WORLD=16
-MESH_RANKS="0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15"
+# The TP8 collective's mesh map is GROUP-SCOPED (the quickstart topology
+# table's TP-subset convention): SparkTpDeviceCollectiveMeshTopology
+# parses exactly tp_degree entries, so a stage's ranks export their own
+# eight physical ranks (attach-010: the 16-entry identity map failed the
+# parser's terminator check after the 8th entry). Set after STAGE below."
 EXPERT_CODEC="bf16"
 # The placed packs' identity (every .receipt.json beside them pins this
 # revision); the module build and the adapter serving pin must agree.
@@ -140,6 +144,7 @@ the operator must establish the shared daemon (never start one by hand)"
 
 STAGE=$((RANK / 8))
 TP_RANK=$((RANK % 8))
+MESH_RANKS="$(seq -s, $((STAGE * 8)) $((STAGE * 8 + 7)))"
 HOST="spark$(printf '%x' "$RANK")"
 [ "$(hostname)" = "$HOST" ] ||
   fail "node order mismatch: rank $RANK expects $HOST but this job runs on \
@@ -239,12 +244,19 @@ if [ -f "$DEPLOYED_PACK.experts" ] && python3 - "$DEPLOYED_PACK.experts" <<'PYVE
 import struct, sys
 with open(sys.argv[1], "rb") as handle:
     head = handle.read(16)
+    record = handle.read(48)
 magic, version, count, _ = struct.unpack("<IIII", head)
-raise SystemExit(0 if (magic == 0x58504557 and version == 2 and count > 0) else 1)
+ok = magic == 0x58504557 and version == 2 and count > 0 and len(record) == 48
+if ok:
+    kind = struct.unpack_from("<4I2Q", record)[2]
+    ok = kind in (28, 30)   # laguna range-kind convention (tensor_kind*2)
+raise SystemExit(0 if ok else 1)
 PYVER
 then
-  # only a v2 routed-expert manifest with records is usable by the lazy
-  # attach; stale sidecars regenerate below like missing ones
+  # only a v2 routed-expert manifest with records in the laguna kind
+  # convention is usable by the lazy attach; stale sidecars (including
+  # the k3-style 0/1 kinds of the first attempts) regenerate like
+  # missing ones
   ln -sfn "$DEPLOYED_PACK.experts" "$PRIVATE_PACK.experts"
 else
   bash "$CHECKOUT/tools/laguna_multidev_experts_manifest.sh" "$PRIVATE_PACK"
@@ -318,6 +330,14 @@ fi
 
 export SPARK_WEIGHTD_ATTACH=1
 export SPARK_WEIGHTD_SOCKET="$SOCKET"
+# Deterministic mesh lane: the collective's sixteen ranks must sit in
+# ONE lane's band pair and the fleet daemon is PER-NODE, so a
+# daemon-assigned lane cannot be uniform across the job's nodes - the
+# lane is pinned, never assigned. attach-009's assignment stopgap died
+# with the 8-entry table (MESH-LANE-FAIL); the lane-9 constant bump
+# (SPARK_WEIGHTD_MESH_MAX_LANES=16) + the manager's fleet restart wave
+# make pin 8 acquirable - pinning before that wave fails MESH-LANE-FAIL
+# by design, so this launch waits for the wave.
 export SPARK_WEIGHTD_LANE="$LANE"
 export SPARK_TP_MESH_RANKS="$MESH_RANKS"
 # Budget envs were exported at derivation time (the warm leg needs them).
@@ -328,6 +348,14 @@ export CUDA_DEVICE_MAX_CONNECTIONS=32
 echo "laguna-$FAMILY-lane$LANE: rank=$RANK host=$HOST stage=$STAGE tp=$TP_RANK \
 pack=$PRIVATE_PACK pool=${LAGUNA_EXPERT_POOL_BYTES}B spine=${LAGUNA_SPINE_BUDGET_BYTES}B \
 socket=$SOCKET collective_id=$COLLECTIVE_ID"
+if [ -n "${LAGUNA_GDB:-}" ]; then
+  # Debug hook (crash triage): run the resident under batch gdb and
+  # print the backtrace on fault before the queue reaps the job.
+  exec gdb --batch -ex run -ex "bt 25" \
+    --args "$ROOT/bin/sparkpipe_model_residentd" \
+    --deployment "$ROOT/deployment.json" \
+    --rank-index "$RANK"
+fi
 exec "$ROOT/bin/sparkpipe_model_residentd" \
   --deployment "$ROOT/deployment.json" \
   --rank-index "$RANK"
