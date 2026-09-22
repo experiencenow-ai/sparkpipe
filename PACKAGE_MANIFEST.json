@@ -8998,8 +8998,8 @@
     },
     {
       "path": "tests/test_dsv4_pro_weightd_warm_identity.py",
-      "sha256": "d07699471d54bcbe07fd24789373b7261ada41a557333368bda865b9247bca2d",
-      "size_bytes": 6826
+      "sha256": "c080e374a935c140039192a0289f3496c9be5e93ddc27e02479ac701c098b1d0",
+      "size_bytes": 6998
     },
     {
       "path": "tests/test_dsv4_serving_adapter.c",
@@ -10473,8 +10473,8 @@
     },
     {
       "path": "tests/test_weightd_supervision.py",
-      "sha256": "ad1a413a1ff3b6200e50b6ec8160002513f90918d1d8d3ce7af7421f40e2ee9c",
-      "size_bytes": 13968
+      "sha256": "a08373eea1890ace227f3915ed8fa5b10937112d0ef71f74a6dad14416e1da01",
+      "size_bytes": 15846
     },
     {
       "path": "tests/test_weightd_worker.c",
@@ -13373,8 +13373,8 @@
     },
     {
       "path": "tools/weightd_warm.c",
-      "sha256": "9db8b8e00816a7d378760a4c1285170ab3c5563be1b1206aff7360dbe61efcb9",
-      "size_bytes": 14358
+      "sha256": "d01cc171eb3cc5b87ac2e88302f7911d953129245c68811faf57156eb6741550",
+      "size_bytes": 15779
     },
     {
       "path": "tools/weightdctl.c",
@@ -16625,5 +16625,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79503313
+  "total_bytes": 79506784
 }
