@@ -1450,6 +1450,7 @@ typedef struct SparkGemma4ValChain
 	void *normed_device;
 	void *query_device;
 	void *kv_device;
+	void *value_device;
 	void *att_device;
 	void *gu_device;
 	void *mlp_device;
@@ -1528,7 +1529,8 @@ static cudaError_t SparkGemma4ValChainAlloc(SparkGemma4ValChain *chain)
 	error = cudaMalloc(&chain->h_device,hidden_bytes);
 	if (error == cudaSuccess) error = cudaMalloc(&chain->normed_device,hidden_bytes);
 	if (error == cudaSuccess) error = cudaMalloc(&chain->query_device,(uint64_t)SPARK_GEMMA4_VAL_CHAIN_ROWS * chain->query_out * 2u);
-	if (error == cudaSuccess) error = cudaMalloc(&chain->kv_device,(uint64_t)SPARK_GEMMA4_VAL_CHAIN_ROWS * chain->kv_out * 2u);
+	if (error == cudaSuccess) error = cudaMalloc(&chain->kv_device,(uint64_t)SPARK_GEMMA4_VAL_CHAIN_ROWS * chain->kv_half * 2u);
+	if (error == cudaSuccess) error = cudaMalloc(&chain->value_device,(uint64_t)SPARK_GEMMA4_VAL_CHAIN_ROWS * chain->kv_half * 2u);
 	if (error == cudaSuccess) error = cudaMalloc(&chain->att_device,hidden_bytes);
 	if (error == cudaSuccess) error = cudaMalloc(&chain->gu_device,(uint64_t)SPARK_GEMMA4_VAL_CHAIN_ROWS * chain->intermediate * 2u * 2u);
 	if (error == cudaSuccess) error = cudaMalloc(&chain->mlp_device,hidden_bytes);
@@ -1574,14 +1576,23 @@ static cudaError_t SparkGemma4ValChainDeviceStages(SparkGemma4ValChain *chain)
 		SparkRopeDomainInitTheta(&rope_domain,chain->head_dimension,chain->head_dimension,SPARK_GEMMA4_MODEL_SLIDING_ROPE_THETA,SPARK_GEMMA4_MODEL_QK_SCALE);
 		error = SparkGemma4LaunchRope(cudaStreamPerThread,chain->query_device,(const uint32_t *)chain->positions_device,SPARK_GEMMA4_VAL_CHAIN_ROWS,chain->query_out / chain->head_dimension,&rope_domain);
 	}
+	/* the fused kv projection splits at launch into K/V views over the fused
+	   weight, feeding SEPARATE rows x kv_half buffers - the head-strided
+	   norm/rope/store kernels cannot address a per-row [K|V] packed buffer
+	   (row stride heads*head_dimension addressed row r's V as row r+1's K).
+	   Same composition as the fixed module sliding path. */
 	if (error == cudaSuccess)
-		error = SparkGemma4ValChainView(&view,chain->kv_weight_device,chain->hidden,chain->kv_out);
+		error = SparkGemma4ValChainView(&view,chain->kv_weight_device,chain->hidden,chain->kv_half);
 	if (error == cudaSuccess)
 		error = SparkGemma4LaunchLinear(cudaStreamPerThread,&view,chain->normed_device,chain->kv_device,SPARK_GEMMA4_VAL_CHAIN_ROWS);
 	if (error == cudaSuccess)
 		error = SparkGemma4LaunchHeadRmsNorm(cudaStreamPerThread,chain->kv_device,chain->key_norm_device,chain->kv_device,SPARK_GEMMA4_VAL_CHAIN_ROWS,chain->kv_heads,chain->head_dimension,SPARK_GEMMA4_MODEL_RMS_NORM_EPSILON);
 	if (error == cudaSuccess)
-		error = SparkGemma4LaunchHeadRmsNorm(cudaStreamPerThread,((uint16_t *)chain->kv_device) + chain->kv_half,0,((uint16_t *)chain->kv_device) + chain->kv_half,SPARK_GEMMA4_VAL_CHAIN_ROWS,chain->kv_heads,chain->head_dimension,SPARK_GEMMA4_MODEL_RMS_NORM_EPSILON);
+		error = SparkGemma4ValChainView(&view,((const uint8_t *)chain->kv_weight_device) + ((uint64_t)chain->kv_half * chain->hidden * 2u),chain->hidden,chain->kv_half);
+	if (error == cudaSuccess)
+		error = SparkGemma4LaunchLinear(cudaStreamPerThread,&view,chain->normed_device,chain->value_device,SPARK_GEMMA4_VAL_CHAIN_ROWS);
+	if (error == cudaSuccess)
+		error = SparkGemma4LaunchHeadRmsNorm(cudaStreamPerThread,chain->value_device,0,chain->value_device,SPARK_GEMMA4_VAL_CHAIN_ROWS,chain->kv_heads,chain->head_dimension,SPARK_GEMMA4_MODEL_RMS_NORM_EPSILON);
 	if (error == cudaSuccess)
 	{
 		SparkRopeDomain rope_domain;
@@ -1594,9 +1605,8 @@ static cudaError_t SparkGemma4ValChainDeviceStages(SparkGemma4ValChain *chain)
 static cudaError_t SparkGemma4ValChainDeviceTail(SparkGemma4ValChain *chain)
 {
 	SparkGemma4LinearView view;
-	void *value_half = ((uint16_t *)chain->kv_device) + chain->kv_half;
 	cudaError_t error;
-	error = SparkGemma4LaunchKvStoreSliding(cudaStreamPerThread,chain->kv_pool,chain->kv_page_table,chain->kv_page_count,1u,chain->kv_page_count,chain->kv_access_error,chain->kv_device,value_half,(const uint32_t *)chain->kv_sequence_device,(const uint32_t *)chain->positions_device,SPARK_GEMMA4_VAL_CHAIN_ROWS,chain->kv_heads);
+	error = SparkGemma4LaunchKvStoreSliding(cudaStreamPerThread,chain->kv_pool,chain->kv_page_table,chain->kv_page_count,1u,chain->kv_page_count,chain->kv_access_error,chain->kv_device,chain->value_device,(const uint32_t *)chain->kv_sequence_device,(const uint32_t *)chain->positions_device,SPARK_GEMMA4_VAL_CHAIN_ROWS,chain->kv_heads);
 	if (error == cudaSuccess)
 		error = SparkGemma4LaunchAttentionDecodeSliding(cudaStreamPerThread,chain->kv_pool,chain->kv_page_table,chain->kv_page_count,1u,chain->kv_page_count,chain->kv_access_error,chain->query_device,(const uint32_t *)chain->kv_sequence_device,(const uint32_t *)chain->kv_context_device,(const uint32_t *)chain->window_device,chain->query_out / chain->head_dimension,chain->query_device,SPARK_GEMMA4_VAL_CHAIN_ROWS,chain->kv_heads);
 	if (error == cudaSuccess)
@@ -1891,6 +1901,7 @@ static int SparkGemma4ValCheckChainSliding(void)
 	cudaFree(chain.normed_device);
 	cudaFree(chain.query_device);
 	cudaFree(chain.kv_device);
+	cudaFree(chain.value_device);
 	cudaFree(chain.att_device);
 	cudaFree(chain.gu_device);
 	cudaFree(chain.mlp_device);
