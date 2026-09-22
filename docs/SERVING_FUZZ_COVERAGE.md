@@ -99,3 +99,32 @@ force-cleanup path are examples of reducing states instead of stacking repairs.
 The review must separately account for unrun driver paths, source-only tests,
 legacy tests for removed implementations, eager-map fixture geometry and real
 hardware gates. Do not replace those gaps with a blanket “all modules covered.”
+
+## Linux campaign receipt, 2026-09-22
+
+A fresh exported checkout of `6a4e905d60b4a228ca25f948bac23d2f9245c59c`
+ran on Spark0/Linux aarch64 with explicit host CUDA stubs, seeds 1,7,73,
+128 random rounds and 24 loopback rounds per seed. Result: 114 PASS, 8 FAIL,
+4 SETUP_FAIL, 0 TIMEOUT. These are execution counts; the matrix above defines
+the narrower semantic and hardware boundaries. No GPU inference or service
+restart was performed.
+
+All four seeded lifecycle fuzzers, the API queue fuzzer, real-socket loopback,
+tokenizer/text API tests, and continuous-batch tests passed. The collective
+fuzzer exercised ranks 2,4,8,16 for every seed. The expanded pipeline oracle
+also rejects final callbacks while any matching rank still owns work.
+
+Remaining FAIL: aggregate build; RDMA hello-control fixture; weightd subprocess
+startup; eager-map chunk geometry; DSV4 TP4xPP4 adapter ABI loading; deployment
+generator and checked-in deployment schema drift; required B2+ tree selection.
+Remaining SETUP_FAIL: mesh mock CUDA/verbs declarations, LLM contract math
+linkage, Gemma4 model defines, Ling attention-period define. These failures
+remain acceptance gates, not exclusions or passing tests.
+
+The campaign found a tokenizer regression inherited from PR1077: replacing
+the allocated vocabulary-entry count with maximum token ID plus one caused
+a heap overrun in reverse-table construction and destruction. Keep entry
+count unchanged; validate deployment vocabulary span using maximum token ID.
+Existing JSON/compiled roundtrip fixtures cover sparse IDs and added tokens.
+The original Linux ASan trace identifies `SparkTokenizerBuildReverseVocabulary`;
+the repaired tokenizer, sidecar ground truth and actual text API tests pass.

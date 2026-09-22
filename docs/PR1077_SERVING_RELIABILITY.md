@@ -142,3 +142,17 @@ requests. Run a sustained serving soak checking lost/duplicate completions,
 lease counts and memory growth. Only then compare unprofiled NCCL/mesh cold
 load, prefill, TTFT and warm decode. Host mocks and CUDA compilation do not
 qualify these hardware behaviors.
+
+## Latest parent integration
+
+PR1081 includes PR1077 head `1a62b723a12701b2ac092f77cf66cea6ad0a0b60`
+without conflicts. The broader campaign and its remaining gates are recorded
+in `SERVING_FUZZ_COVERAGE.md`. In addition to the earlier teardown repairs,
+the change removes deadline-based theft of executing cache lanes, reserves
+collective completion capacity before accepting work, preserves prepare/abort
+ordering after partial admission, and waits for every rank before final callbacks.
+
+Malformed or nonregular pack digest sidecars fail at their actual read error;
+they are not skipped in favor of another identity. Explicit incompatible
+`SPARK_WEIGHTD_ATTACH` values fail deployment startup. A runtime bundle must
+contain one valid intended pack digest, without unrelated sidecar debris.

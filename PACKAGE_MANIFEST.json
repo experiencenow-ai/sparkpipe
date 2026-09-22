@@ -1468,8 +1468,8 @@
     },
     {
       "path": "docs/PR1077_SERVING_RELIABILITY.md",
-      "sha256": "ce6a2ad4df802760ad598613b022d0ceb0a19185286322e0c5fb523d8c6beeda",
-      "size_bytes": 9377
+      "sha256": "b3b2d43d2e1c9262e626cb20d501472fe0ec6ee7e8627119cc52e2ac2e2e9c7c",
+      "size_bytes": 10171
     },
     {
       "path": "docs/QWEN38_DFLASH2_RUNBOOK.md",
@@ -1498,8 +1498,8 @@
     },
     {
       "path": "docs/SERVING_FUZZ_COVERAGE.md",
-      "sha256": "82465e883dd65ad6a2701d0c28fec0ca5fd7f35f6757dd6d02adc044efc24cbd",
-      "size_bytes": 10925
+      "sha256": "192d3ec98289a861af5f4f816b84aa734ca8d5f313acc47b271c29431614cf2d",
+      "size_bytes": 12651
     },
     {
       "path": "docs/SPARKDEV_HANDOFF_GLM53FLASH.md",
@@ -16145,5 +16145,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 75893982
+  "total_bytes": 75896502
 }
