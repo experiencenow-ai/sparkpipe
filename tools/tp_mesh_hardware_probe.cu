@@ -332,24 +332,26 @@ struct Probe
     void Timings()
     {
         Setup(16u,1u,1u,257u,91u);Data(20u);double construction=Capture();StartWorker();
-        std::vector<double> samples,waits,copies,math;
+        std::vector<double> samples,waits,sources,peers,copies,math;
         SparkTpMeshRoundControl previous[16]={};
         for (uint32_t i=0u;i<8u;i++)
         {
             Data(i+20u);uint64_t begin=Now();Launch(true);double elapsed=Wait(begin);Verify();
-            uint64_t maximum_wait=0u,maximum_copy=0u,maximum_math=0u;
+            uint64_t maximum_wait=0u,maximum_source=0u,maximum_peer=0u,maximum_copy=0u,maximum_math=0u;
             for (uint32_t rank=0u;rank<degree;rank++)
             {
                 SparkTpMeshRoundControl control={};CUDA(cudaMemcpy(&control,ranks[rank].control,sizeof(control),cudaMemcpyDeviceToHost));
                 maximum_wait=std::max(maximum_wait,control.source_wait_ns+control.peer_wait_ns-previous[rank].source_wait_ns-previous[rank].peer_wait_ns);
+                maximum_source=std::max(maximum_source,control.source_wait_ns-previous[rank].source_wait_ns);
+                maximum_peer=std::max(maximum_peer,control.peer_wait_ns-previous[rank].peer_wait_ns);
                 maximum_copy=std::max(maximum_copy,control.copy_ns-previous[rank].copy_ns);
                 maximum_math=std::max(maximum_math,control.combine_ns-previous[rank].combine_ns);previous[rank]=control;
             }
-            if (i>=2u) { samples.push_back(elapsed);waits.push_back(maximum_wait/1e6);copies.push_back(maximum_copy/1e6);math.push_back(maximum_math/1e6); }
+            if (i>=2u) { samples.push_back(elapsed);waits.push_back(maximum_wait/1e6);sources.push_back(maximum_source/1e6);peers.push_back(maximum_peer/1e6);copies.push_back(maximum_copy/1e6);math.push_back(maximum_math/1e6); }
         }
-        EndWorker();std::sort(samples.begin(),samples.end());std::sort(waits.begin(),waits.end());std::sort(copies.begin(),copies.end());std::sort(math.begin(),math.end());
+        EndWorker();std::sort(samples.begin(),samples.end());std::sort(waits.begin(),waits.end());std::sort(sources.begin(),sources.end());std::sort(peers.begin(),peers.end());std::sort(copies.begin(),copies.end());std::sort(math.begin(),math.end());
         std::printf("TIMING tp=16 rows=1 rounds=91 graph_construct_ms=%.3f warmups=2 samples=%zu min_ms=%.3f median_ms=%.3f max_ms=%.3f transport=cpu-copy actual_daemon_gate=1\n",construction,samples.size(),samples.front(),samples[samples.size()/2u],samples.back());
-        std::printf("PHASE_TIMING median_max_rank_wait_ms=%.3f copy_ms=%.3f combine_ms=%.3f samples=%zu\n",waits[waits.size()/2u],copies[copies.size()/2u],math[math.size()/2u],samples.size());
+        std::printf("PHASE_TIMING median_max_rank_wait_ms=%.3f source_wait_ms=%.3f peer_wait_ms=%.3f copy_ms=%.3f combine_ms=%.3f samples=%zu\n",waits[waits.size()/2u],sources[sources.size()/2u],peers[peers.size()/2u],copies[copies.size()/2u],math[math.size()/2u],samples.size());
         completed_cases++;
     }
 };
