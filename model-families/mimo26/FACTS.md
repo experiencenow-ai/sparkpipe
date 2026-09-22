@@ -89,6 +89,23 @@ Per-node budgets TOTAL 9792 MiB / DEVICE 6400 MiB; lane envelope 8 Sparks
   GiB/token -> ~5.3 tok/s; flash 13.0 GiB/token -> ~15.7 tok/s. Batch
   amortises the expert read; the spine read is the fixed cost.
 
+## Stagepack wire (M2, tools/mimo26_stagepack.py)
+
+Arms: `mimo26pro.mxfp4.tp8` and `mimo26flash.mxfp4.tp4` under
+`~/sparkdata/<arm>/packs/`. Wire: 120-byte 26I2Q header + 56-byte 6I4Q
+entries (kind, layer, format, rows, cols, reserved, payload_offset,
+payload_bytes, scale_offset, scale_bytes) + 256-aligned payload/scale planes,
+magic 'M26P'. Weight codes: BF16/F32 shared codes, fp8 e4m3 block-128 = 4,
+**mxfp4 e2m1+e8m0 g32 = 9** (added to include/sparkpipe/spark_stagepack_format.h).
+Slicing: q row-sliced by head groups, k/v sections replicated whole (kv-head
+granules cannot cut the fp8 grid; ~16 MB/layer cost), o_proj col-sliced,
+embed/lm_head vocab-row-sliced, router/norms replicated, sink head-sliced,
+experts per-rank disjoint slabs expert-major. The fused scale grids' padding
+rows are measured (216/216, 108/116), sliced on block boundaries and dropped
+where they are not data. Emission is staged/resumable (`--emit`/`--assemble`
+/`--verify`, `--layer-window FIRST:COUNT` for TTL-bounded fanout); verify
+byte-compares every plane against the checkpoint.
+
 ## Registration
 
 - Geometry headers: `include/sparkpipe/spark_mimo26_pro_model.h`,

@@ -1,5 +1,5 @@
 {
-  "file_count": 3273,
+  "file_count": 3275,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -3788,8 +3788,8 @@
     },
     {
       "path": "include/sparkpipe/spark_stagepack_format.h",
-      "sha256": "0f48957e86144678310341b711ae97078e5ef9d212d314f5ce7d8d657925d628",
-      "size_bytes": 6067
+      "sha256": "2d6d5aebd1bd55f7dc1cbdb4bf322885230f2b9d023adb53fb68dae16182fcdd",
+      "size_bytes": 6351
     },
     {
       "path": "include/sparkpipe/spark_state_pool.h",
@@ -4518,8 +4518,8 @@
     },
     {
       "path": "model-families/mimo26/FACTS.md",
-      "sha256": "0c691cf508723f1a7eaa5f010dbba584a4fed339db3fae1d122e0cb5b25115f6",
-      "size_bytes": 5336
+      "sha256": "f106ca7687c5456a09c934401c93b30686de11a32b6e4e88bd54d3d0d9ef4691",
+      "size_bytes": 6405
     },
     {
       "path": "model-families/mimo26/census/distill_census.json",
@@ -9667,6 +9667,11 @@
       "size_bytes": 7488
     },
     {
+      "path": "tests/test_mimo26_stagepack.py",
+      "sha256": "e408d59c4d6da5f2d156c633f161528d3ff4db25939be13ab3fe81315a9b1e77",
+      "size_bytes": 12287
+    },
+    {
       "path": "tests/test_mla_absorption.py",
       "sha256": "c8e2abab435c6983a9d2e89439bdf16c54b766ccc697c6958afd211cd3ab7c17",
       "size_bytes": 10079
@@ -12092,6 +12097,11 @@
       "size_bytes": 6867
     },
     {
+      "path": "tools/mimo26_stagepack.py",
+      "sha256": "e458accc62cee0663ed99c62bf518163b48cb65d6f8566bf7e68e0efb99067b3",
+      "size_bytes": 36851
+    },
+    {
       "path": "tools/minimax_stagepack.py",
       "sha256": "b6b08d4045caefa8b121f57eb1270dcc048c13027fc464ba3a48b691506aae85",
       "size_bytes": 21701
@@ -12773,8 +12783,8 @@
     },
     {
       "path": "tools/stagepack_naming.json",
-      "sha256": "ab8619b157c827e179b78a61fac79acda4ef4a67cbda7d99381c40fd8ed0c443",
-      "size_bytes": 2041
+      "sha256": "411b32067126bf44de6348742b09900090d758e59a21a7466ac7f0e466b668ca",
+      "size_bytes": 2173
     },
     {
       "path": "tools/staging_manifest.py",
@@ -16370,5 +16380,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 77565367
+  "total_bytes": 77615990
 }
