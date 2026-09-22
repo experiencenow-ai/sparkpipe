@@ -1567,7 +1567,7 @@ cudaError_t LmGdnStageLaunchGroupedExpertLinear(cudaStream_t stream, const LmGdn
 		group_row_offset == 0 || group_tile_prefix == 0 || output_bf16 == 0 ||
 		(view->weight_format != SPARK_LLM_WEIGHT_FORMAT_FP8_E4M3_F32B128 &&
 		 view->weight_format != SPARK_LLM_WEIGHT_FORMAT_NVFP4_PACKED) ||
-		view->output_dimension % SPARK_LLM_ROUTED_EXPERT_COUNT != 0u ||
+		view->output_dimension % experts_per_rank != 0u ||
 		view->weight_payload == 0 || view->weight_scale_e8m0 == 0 ||
 		(source_row_map == 0 && source_row_count == 0u) ||
 		tp_degree == 0u || tp_rank >= tp_degree ||
@@ -1577,7 +1577,15 @@ cudaError_t LmGdnStageLaunchGroupedExpertLinear(cudaStream_t stream, const LmGdn
 		lm_format = SPARK_LM_WEIGHT_FORMAT_NVFP4_E2M1;
 	else
 		lm_format = SPARK_LM_WEIGHT_FORMAT_FP8_E4M3_F32B128;
-	rows_per_expert = (uint64_t)view->output_dimension / SPARK_LLM_ROUTED_EXPERT_COUNT;
+	/* The stagepack view is the RANK-LOCAL stacked shard: the manifest
+	   tier already divided the entry rows by the degree (a 32-expert
+	   rank shard of a 512-expert router carries output_dimension =
+	   32*rows_per_expert, which the old /ROUTED_EXPERT_COUNT division
+	   silently mis-derived whenever the local stack stayed divisible -
+	   the r15p3 illegal-access at site=moe). Only the ROUTE table is
+	   global: the offsets/prefix windows shift to this rank's expert
+	   base; the payload/scale bases do not. */
+	rows_per_expert = (uint64_t)view->output_dimension / experts_per_rank;
 	if ( lm_format == SPARK_LM_WEIGHT_FORMAT_NVFP4_E2M1 )
 	{
 		if ( (view->input_dimension % 16u) != 0u )
@@ -1590,8 +1598,8 @@ cudaError_t LmGdnStageLaunchGroupedExpertLinear(cudaStream_t stream, const LmGdn
 		payload_stride = rows_per_expert * view->input_dimension;
 		scale_stride = (rows_per_expert / 128u) * ((uint64_t)view->input_dimension / 128u) * 4u;
 	}
-	payload = (const uint8_t *)view->weight_payload + ((uint64_t)tp_rank * experts_per_rank * payload_stride);
-	scale = (const uint8_t *)view->weight_scale_e8m0 + ((uint64_t)tp_rank * experts_per_rank * scale_stride);
+	payload = (const uint8_t *)view->weight_payload;
+	scale = (const uint8_t *)view->weight_scale_e8m0;
 	offsets = group_row_offset + ((uint64_t)tp_rank * experts_per_rank);
 	prefix = group_tile_prefix + ((uint64_t)tp_rank * experts_per_rank);
 	return(SparkLmHostLaunchGroupedScalarLinear<32u>(stream,
@@ -1613,14 +1621,18 @@ cudaError_t LmGdnStageLaunchGroupedExpertTileLinear(cudaStream_t stream, const L
 	const uint32_t *offsets;
 	if ( view == 0 || input_bf16 == 0 || group_row_offset == 0 || output_bf16 == 0 ||
 		view->weight_format != SPARK_LLM_WEIGHT_FORMAT_FP8_E4M3_F32B128 ||
-		view->output_dimension % SPARK_LLM_ROUTED_EXPERT_COUNT != 0u ||
 		view->input_dimension % 64u != 0u ||
 		view->weight_payload == 0 || view->weight_scale_e8m0 == 0 ||
 		source_row_count == 0u ||
 		tp_degree == 0u || tp_rank >= tp_degree ||
 		(SPARK_LLM_ROUTED_EXPERT_COUNT % tp_degree) != 0u )
 		return(cudaErrorInvalidValue);
-	rows_per_expert = (uint64_t)view->output_dimension / SPARK_LLM_ROUTED_EXPERT_COUNT;
+	experts_per_rank = SPARK_LLM_ROUTED_EXPERT_COUNT / tp_degree;
+	/* Rank-local stacked shard view (see LmGdnStageLaunchGroupedExpertLinear):
+	   only the route-offset window is global; payload/scale bases are local. */
+	if ( view->output_dimension % experts_per_rank != 0u )
+		return(cudaErrorInvalidValue);
+	rows_per_expert = (uint64_t)view->output_dimension / experts_per_rank;
 	if ( rows_per_expert % SPARK_LM_TILE_N != 0u )
 		return(cudaErrorInvalidValue);
 	payload_stride = rows_per_expert * view->input_dimension;
@@ -1629,9 +1641,8 @@ cudaError_t LmGdnStageLaunchGroupedExpertTileLinear(cudaStream_t stream, const L
 	n_tiles = (uint32_t)(rows_per_expert / SPARK_LM_TILE_N);
 	(void)m_blocks;
 	(void)n_tiles;
-	experts_per_rank = SPARK_LLM_ROUTED_EXPERT_COUNT / tp_degree;
-	payload = (const uint8_t *)view->weight_payload + ((uint64_t)tp_rank * experts_per_rank * payload_stride);
-	scale = (const uint8_t *)view->weight_scale_e8m0 + ((uint64_t)tp_rank * experts_per_rank * scale_stride);
+	payload = (const uint8_t *)view->weight_payload;
+	scale = (const uint8_t *)view->weight_scale_e8m0;
 	offsets = group_row_offset + ((uint64_t)tp_rank * experts_per_rank);
 	return(SparkLmHostLaunchGroupedExpertTileMloop(
 		stream,
