@@ -1,5 +1,5 @@
 {
-  "file_count": 3276,
+  "file_count": 3279,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -4360,6 +4360,11 @@
       "path": "model-families/dsv41_flash/include/sparkpipe/spark_dsv41_flash_model.h",
       "sha256": "ad3916cde8d579df0859a0a7963a46df4e462f6f446f3c93693a3c967fec2d88",
       "size_bytes": 5656
+    },
+    {
+      "path": "model-families/dsv41_flash/smoke_experts.json",
+      "sha256": "10ccaaaf2278bfd9a958017d26324592b29ad677195310434367267c3c249345",
+      "size_bytes": 42414
     },
     {
       "path": "model-families/gemma4/include/sparkpipe/llm_defines.h",
@@ -8812,6 +8817,11 @@
       "size_bytes": 9625
     },
     {
+      "path": "tests/test_dsv41_flash_smoke_experts.py",
+      "sha256": "f1dcc763c8453ef63993d5691a1153508f8aa39d3274a325f2d77a6b754565cf",
+      "size_bytes": 4977
+    },
+    {
       "path": "tests/test_dsv41_flash_stagepack.py",
       "sha256": "cf40f3f3bf5930a57fb64f7b3f691462f2a7259b975b819aa9abd30140d997f7",
       "size_bytes": 6913
@@ -10920,6 +10930,11 @@
       "path": "tools/dsv41_flash_shared_lane.sh",
       "sha256": "54d0295edaf62cf68c41b6cf1a07a2473a6272eb02995facbb784b9e1bb2fdbd",
       "size_bytes": 4430
+    },
+    {
+      "path": "tools/dsv41_flash_smoke_experts.py",
+      "sha256": "a9f4f70dc766118d759692a8fc65c9b53eb39cfcdcf251696cab507b880eeb1b",
+      "size_bytes": 9570
     },
     {
       "path": "tools/dsv41_flash_stagepack.py",
@@ -16385,5 +16400,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78109125
+  "total_bytes": 78166086
 }
