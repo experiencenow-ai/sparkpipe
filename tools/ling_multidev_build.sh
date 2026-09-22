@@ -53,11 +53,19 @@ make -C "$CHECKOUT" -j4 \
   build/sparkpipe_model_compile \
   build/weightd_warm \
   hidden_transport_spark_host_rdma_verbs
+# Bucket ladder trimmed to the stage config's execution_row_capacity
+# (128, the LING-T1 serving shape): the queue's 15-minute task window
+# cannot hold the full 1..1024 ladder's single CUDA TU (measured: two
+# full windows terminated mid-TU, and nvcc checkpoints nothing), while
+# buckets <= 128 cover every batch the lane's configs can execute. The
+# module rule allows trimming the ladder explicitly (never edit a
+# variant); re-extend before any capacity bump above 128 rows.
 make -C "$CHECKOUT/$MODULE" -j4 \
   CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
   EXPERT_CODEC="$EXPERT_CODEC" \
   MODEL_REVISION="$MODEL_REVISION" \
   CONTRACT_SHA256="$CONTRACT_SHA256" \
+  MODULE_BATCH_VARIANT_BUCKETS="1 2 4 8 16 32 64 128" \
   archive adapter
 ADAPTER="$CHECKOUT/build/modules/ling_resident_decode_stage/$EXPERT_CODEC/libling_serving_adapter_$EXPERT_CODEC.so"
 [ -f "$ADAPTER" ] || { echo "adapter not built: $ADAPTER" >&2; exit 1; }
