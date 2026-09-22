@@ -69,4 +69,4 @@ RUNTIME_CONFIGURATION := \
 	SPARK_QWEN38_MAX_STAGE_MTP=$(MTP_LAYER_COUNT) \
 	SPARK_QWEN38_MAX_STAGE_GDN_SNAPSHOT_SLOTS=$(GDN_SNAPSHOT_SLOT_COUNT)
 
-include $(REPOSITORY_ROOT)/modules/resident_decode_stage_rules.mk
+include ../resident_decode_stage_rules.mk
