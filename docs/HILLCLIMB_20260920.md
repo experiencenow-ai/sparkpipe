@@ -2517,3 +2517,16 @@ idle SM 96%→0% on every sampled node (spark1/3/5/7/9/c/f all 0).
 
 ALSO NOTED: the fresh boot shows "GLM execution mode=graph" — the merged
 PR's explicit-graph-mode default is live.
+
+## 09-24 05:30 — TEST RESULTS (graph-mode boot + one-shot preload)
+
+- Spinner fix VERIFIED in the field: idle SM 0% fleet-wide (was 96%).
+- ONE-SHOT PRELOAD RECEIPT: --wset 336 keys → WSET-WARM elapsed_ms=0
+  (instant — the experts were already resident from the walk; the number
+  proves the one-shot path; a TRUE cold preload still needs measuring on
+  a fresh daemon).
+- THE BLOCKER NOW: in the fresh GRAPH-MODE boot, NO chain completes at
+  all (zero CHAIN-TIME lines; requests die status=4). The graph default
+  + this state stalls before first completion — the request-level gap
+  moved earlier. Next: trace the graph-mode chain start (gate armed?
+  experts_warm under graph default? the demand walk inside graph mode).
