@@ -239,3 +239,10 @@ Git repository and proves sync preserves the requested source.
 See [parallel resident qualification](PARALLEL_RESIDENT_QUALIFICATION.md) for
 actual four/eight-instance GLM fleet results and the separate mixed-topology
 initialization failure. These host and device receipts retain different scopes.
+
+The final runtime candidate `852e01a2c9ee8b7b273370a793761dc70db5b005` repeated
+the same fresh Linux campaign: **166 PASS, 0 FAIL, 0 SETUP_FAIL, 0 TIMEOUT**.
+It includes the forced-alignment shared-file mapping regression. Non-documentation
+source digest: `c20ff6ac61fd91170fddb4c41854fc3b47a5cb8980449cefce9cc0862b770b94`.
+The complete inventory, unrun list and logs are retained in the release qualification
+archive; local copy: `/private/tmp/sparkpipe-pr1082-receipts/host-852e01a2/reliability/`.

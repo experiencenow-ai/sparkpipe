@@ -112,6 +112,22 @@ All sixteen queue control groups stopped. The failed attempt is
 `76dbd15ed4154c38a49cef183513a116`; its [failure receipt](receipts/mixed-mesh-44fe4af7-failure.json)
 retains the exact initialization error and qualification boundary.
 
+## Aligned-mapping repeat
+
+Source `852e01a2c9ee8b7b273370a793761dc70db5b005` passed the complete eight-resident
+campaign again after the shared-memory mapping repair. All sixteen queue groups
+exited zero; 256 output tokens matched and all 144 owned processes were absent.
+Aggregate decode was **13.010 tok/s**, per resident **1.623–1.669 tok/s**, with
+**48,346 MiB** device memory on every Spark. The common window contained 236 tokens
+over 18.140 seconds. Budgets and model geometry were unchanged.
+The [repeat receipt](receipts/parallel-residents-852e01a2.json) pins every rank.
+
+The separate mixed-layout probe registered all 55 children and performed numerical
+work, then failed at an eager gather capability check before full qualification.
+The legacy callback check prevented reaching the existing hardware gather path.
+This failure does not invalidate the complete GLM inference receipt and does not
+establish a mixed-topology pass.
+
 ## Evidence
 
 The compact [fleet receipt](receipts/parallel-residents-2b24873d.json) pins source,
