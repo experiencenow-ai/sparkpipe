@@ -11,16 +11,32 @@ The two existing weightd/resident processes and their measured GPU allocations
 were unchanged after the run. This was a shared host timing sample, not an
 isolated performance benchmark or GLM inference result.
 
-The current extension adds RDMA modes and expands the scalar payload to 4 KiB
-on cache lines separate from readiness, error and GPU output. Those changes
-require new local and remote qualification; the earlier receipt does not
-qualify NIC visibility or the extended probe. The extension compiled for
-`sm_121a` in `spark0:/tmp/sparkpipe-rdma-memop-20260922`; receipts are
-`build/qualification/compile.log`, `help.log` and `SHA256SUMS`. Only compile and
-help were executed for that extension checkpoint. The subsequent explicit
-`--memfd` allocation and entry-marker variant compiled in
-`spark0:/tmp/sparkpipe-rdma-memfd-20260922`, with the same receipt filenames.
-It has not been executed at this checkpoint.
+The memfd/RDMA extension was executed at source commit
+`cd344a64440d075552a7f4eb3e3e01c830ef4b7d`, using
+`/tmp/sparkpipe-hw-rdma-cd344a64` on Spark0 and Spark1. The source SHA256 was
+`e044fd958a4187a8b63284571ce48c1ed38e51d33c06322fefa10e0d88d5f25c` and wrapper
+SHA256 was `1316b5443f05e61f1588b5d0b5bd7410113a41c3338c1c4cf948f8a346cfcb14`.
+Receiver binary SHA256 was
+`3064edc6f2e8759df9d88b896e8afee13bdc05a15ad7c8c9f65bb283b68b5cc5`;
+sender binary SHA256 was
+`a6048bc899ae09637c959aa60bf376faea2d4408ab26a220362f706e5a219776`.
+
+Spark0 received into an 8,192-byte shared memfd mapping, with portable/mapped
+CUDA registration and the actual device alias. Spark1 sent over the explicitly
+selected RoCE v2 link. Eight repetitions of all three cases passed: 24 GPU
+launches with 4,096-byte NIC-written payloads, stale/delayed readiness,
+error-before-release cancellation, and recovery. Both processes exited 0;
+combined elapsed time was 2.077 seconds. The receiver observed GPU entry before
+its stale check and GPU completion before any CUDA call following NIC release.
+The sender checked every signaled work completion before reusing source memory.
+
+The 1,000 repetitions of 91 node-value updates averaged 4,249.49 ns per replay
+(46.70 ns/node). The separate local memfd run passed all three GPU cases and
+reported 4,078.29 ns per replay (44.82 ns/node). These are host update timings
+on shared machines, not collective latency or serving throughput. Local receipt
+bundle `/private/tmp/sparkpipe-pr1082-receipts/cd344a64-rdma` contains
+`result.json`, `receiver.log` and `sender.log`; the local GPU receipt is
+`spark0:/tmp/sparkpipe-hw-rdma-cd344a64/local-memfd.log`.
 
 ## Safe invocation
 
@@ -80,13 +96,13 @@ active MTU below 4096 is rejected. An assigned run can use these commands after
 checking that the chosen TCP port is unused:
 
 ```sh
-python3 tools/tp_stream_memop_probe.py --run --rdma-receive --ib-device rocep1s0f0 --ib-port 1 --gid-index 3 --address 10.10.200.0 --tcp-port 49387 --iterations 8
+python3 tools/tp_stream_memop_probe.py --run --rdma-receive --memfd --ib-device rocep1s0f0 --ib-port 1 --gid-index 3 --address 10.10.200.0 --tcp-port 49387 --iterations 8
 python3 tools/tp_stream_memop_probe.py --run --rdma-send --ib-device rocep1s0f0 --ib-port 1 --gid-index 3 --address 10.10.200.0 --tcp-port 49387 --iterations 8
 ```
 
-This tests the selected CUDA-mapped host allocation on one link. Add `--memfd`
-to the receiver command to qualify the production allocation/registration shape.
-Even a memfd pass does not qualify cross-process shared ownership, allreduce,
+This tests the selected CUDA-mapped host allocation on one link. The executed
+`--memfd` mode matches the production allocation/registration shape. The pass
+does not qualify cross-process shared ownership, allreduce,
 missing-peer recovery, or model throughput. No unsupported remote FLUSH is
 requested; failure of ordering or visibility is a qualification failure.
 
@@ -147,22 +163,24 @@ affect future launches and require the original node to remain in its graph.
 CUDA 13 [capture inspection and dependency APIs](https://docs.nvidia.com/cuda/archive/13.0.2/cuda-driver-api/group__CUDA__STREAM.html)
 include edge data; the prototype uses those current signatures.
 
-A separate compiled negative control in
+The separately compiled negative control in
 `spark0:/tmp/sparkpipe-rdma-memfd-negative-20260922` changes the wait comparison
 from equality to greater-or-equal and sets every replay wait threshold to zero.
-The original 91-node update loop is unchanged. Run its local `--run --gpu-waits
---memfd` mode in the assigned window: it must fail the incomplete/untouched
-consumer check after observing GPU entry. It is an isolated source mutation,
-not a runtime fallback or production build mode. Its source/binary hashes are
-in `build/qualification/SHA256SUMS`; it was compiled but not run at this checkpoint.
+The original 91-node update loop is unchanged. Its local
+`--run --gpu-waits --memfd` run exited 1 at the expected line 478 assertion that
+`cudaStreamQuery` must report not-ready after GPU entry. It failed by assertion,
+not by timeout, demonstrating that the scheduled-stale oracle detects a bypassed
+wait. Receipt: `negative-run.log`; source and binary hashes are recorded in
+`build/qualification/SHA256SUMS` in that directory. This is an isolated source
+mutation, not a runtime fallback or production build mode.
 
 ## Qualification gates
 
-The original local mode passed; rerun it for the extended payload layout. Before
-serving integration, qualify actual RDMA-to-GPU visibility on two assigned hosts
-and exercise stale CQEs/requests, skew, missing peers, timeout, cancellation,
+The extended local memfd checks, two-host NIC visibility checks and bypass
+negative control passed their expected outcomes. Before serving integration,
+exercise the production path with stale CQEs/requests, skew, missing peers, timeout, cancellation,
 failed Begin/End and source-slot reuse. Require rounding-sensitive BF16 SUM,
 U64 MAX and rank-major gather at TP2/3/4/8/16 for B1 and logical B2+ split across
 execution rows and payload chunks. Compare numerical output and whole-chain
-latency with identical model/configuration inputs. Local gate success is not
-allreduce qualification; no throughput benefit is claimed by this prototype.
+latency with identical model/configuration inputs. Passing the local and NIC
+gates is not allreduce qualification; no throughput benefit is claimed by this prototype.
