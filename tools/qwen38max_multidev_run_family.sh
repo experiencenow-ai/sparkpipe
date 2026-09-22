@@ -308,6 +308,11 @@ if [ "$WARM_LEG" -eq 1 ]; then
   WSET="$ROOT/smoke.wset"
   python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" --emit-wset "$WSET"
   REVISION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["model_revision"])' "$ROOT/config/adapter.json")"
+  # weightd_warm fail-closes without finite pool/spine envs (it attaches
+  # through the same identity path); the resident-launch exports below
+  # come too late for the warm leg - carry them on the invocation.
+  SPARK_WEIGHTD_EXPERT_POOL_BYTES="$QMAX_EXPERT_POOL_BYTES" \
+  SPARK_WEIGHTD_SPINE_BUDGET_BYTES="$QMAX_SPINE_BUDGET_BYTES" \
   "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
     "$(cat "$ROOT/packs/pack.sha256")" "$REVISION" "$WORLD" \
     --wset "$WSET" 300 > "$ROOT/warm.log" 2>&1
