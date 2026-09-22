@@ -1,0 +1,117 @@
+{
+ "schema_version": 1,
+ "comment": "Eight shared developer lanes on the 16-Spark fleet (PR #1082 baseline). One driver family per lane. Budgets are per node per lane; the eight lanes together must stay inside the verified envelope: 78336 MiB total reservation + 8192 MiB queue headroom per Spark. Ports: lane L owns control 23000+16L .. +15, collective 67000+16L .. +15, transport 64000+16L .. +15 (above every fleet_registry block). Exclusive reservations are MANAGER-AUTHORIZED ONLY (phase 2, critical benchmarks); routine work is smoke tests + small B* under shared lanes with same-conditions A/B discipline.",
+ "defaults": {
+  "total_mib_per_node": 9792,
+  "device_mib_per_node": 6400,
+  "queue_headroom_mib_per_node": 8192,
+  "branch_prefix": "lane/",
+  "worktree_root": "/Users/cem/sparkpipe-worktrees/"
+ },
+ "lanes": [
+  {
+   "lane": 0,
+   "driver": "glm5_next",
+   "families": ["glm53flash", "glm53full"],
+   "owner": "dev-lane0",
+   "branch": "lane/glm5-next-multidev",
+   "topology": "TP16",
+   "default_nodes": "spark0-sparkf",
+   "ports": {"control": 23000, "collective": 67000, "transport": 64000},
+   "status": "pattern-owner",
+   "charter": "The validated pattern (PR #1082 receipts). Extract the shared-socket family wrapper into a reusable template for the other 7 lanes; land the smoke-expert manifest convention + calculator review; drive cold-launch batch preload < 5 s TTFR."
+  },
+  {
+   "lane": 1,
+   "driver": "qwen38_27b",
+   "families": ["qwen38_27b"],
+   "owner": "dev-lane1",
+   "branch": "lane/qwen38-27b-multidev",
+   "topology": "TP4",
+   "default_nodes": "spark0-spark3",
+   "ports": {"control": 23016, "collective": 67016, "transport": 64016},
+   "status": "cpu-validated",
+   "charter": "Both arms CPU-validated. Port the shared-socket wrapper, smoke-expert manifest, batch preload, then the smoke/small-B* hill-climb. nvfp4 smoke precedent: tools/qwen38_27b_nvfp4_smoke.cu."
+  },
+  {
+   "lane": 2,
+   "driver": "qwen38_max",
+   "families": ["qwen38_max"],
+   "owner": "dev-lane2",
+   "branch": "lane/qwen38-max-multidev",
+   "topology": "TP16",
+   "default_nodes": "spark0-sparkf",
+   "ports": {"control": 23032, "collective": 67032, "transport": 64032},
+   "status": "cpu-validated",
+   "charter": "Blocked on #1072 merge (manager runs the merge gate). Experts manifest precedent: tools/qwen38max_experts_manifest.c. Then wrapper + manifest + preload + hill-climb."
+  },
+  {
+   "lane": 3,
+   "driver": "k3",
+   "families": ["k3"],
+   "owner": "dev-lane3",
+   "branch": "lane/k3-multidev",
+   "topology": "TP4xPP4",
+   "default_nodes": "spark0-sparkf",
+   "ports": {"control": 23048, "collective": 67048, "transport": 64048},
+   "status": "packs-deployed",
+   "charter": "mxfp4 packs deployed on all 16 ranks. Wrapper + manifest + preload + first shared-lane decode (the old exclusive-ring prerequisite is obsolete under multidev). Budget math: tools/k3_param_budget.py."
+  },
+  {
+   "lane": 4,
+   "driver": "dsv41_flash",
+   "families": ["dsv41_flash"],
+   "owner": "dev-lane4",
+   "branch": "lane/dsv41-flash-multidev",
+   "topology": "TP4",
+   "default_nodes": "spark4-spark7",
+   "ports": {"control": 23064, "collective": 67064, "transport": 64064},
+   "status": "cpu-validated",
+   "charter": "Validated references on main. Wrapper + manifest + preload + hill-climb. The nvfp4 convention lands via #1076 (manager review) - do not block on it."
+  },
+  {
+   "lane": 5,
+   "driver": "dsv4_pro",
+   "families": ["dsv4"],
+   "owner": "dev-lane5",
+   "branch": "lane/dsv4-pro-multidev",
+   "topology": "TP4xPP4",
+   "default_nodes": "spark0-sparkf",
+   "ports": {"control": 23080, "collective": 67080, "transport": 64080},
+   "status": "packs-verified",
+   "charter": "16 rank packs verified, single-spark val4 PASS. First TP4xPP4 end-to-end at small B* under shared lanes (no exclusive reservation), then the numerical gate, then hill-climb."
+  },
+  {
+   "lane": 6,
+   "driver": "gemma4",
+   "families": ["gemma4-31b", "gemma4-26b"],
+   "owner": "dev-lane6",
+   "branch": "lane/gemma4-multidev",
+   "topology": "TP16",
+   "default_nodes": "spark0-sparkf",
+   "ports": {"control": 23096, "collective": 67096, "transport": 64096},
+   "status": "cpu-validated",
+   "charter": "Both sizes CPU-validated. Wrapper + manifest + preload + hill-climb. 26b tp16 topology emission is #1078 (manager review; currently red) - proceed with landed packs."
+  },
+  {
+   "lane": 7,
+   "driver": "mimo26",
+   "families": ["mimo26-pro", "mimo26-flash"],
+   "owner": "dev-lane7",
+   "branch": "lane/mimo26-multidev",
+   "topology": "TBD-by-census",
+   "default_nodes": "TBD-by-census",
+   "ports": {"control": 23112, "collective": 67112, "transport": 64112},
+   "status": "weights-arrived",
+   "charter": "Weights visible on /mnt/model-warm: mimo-v2.6-pro-rl, mimo-v2.6-flash-rl, mimo-v2.6-distill-qwen-9b (+ docs). Census -> family facts -> driver module -> stagepack -> CPU reference -> wrapper. Pattern precedent: model-families/mimo25 + the minimax packer (wave 2). Quality law applies: quantized experts + full-resolution spine, no requantization."
+  }
+ ],
+ "rotation_queue": [
+  {"driver": "laguna", "reason": "mixed-codec per-layer lands via #1076; lane opens on next free slot"},
+  {"driver": "ling", "reason": "validated references; lane opens on next free slot"},
+  {"driver": "muse_glimmer", "reason": "validated references; lane opens on next free slot"},
+  {"driver": "hy4", "reason": "chat-template A/B verdict pending (sinkprobe/fixtree loops)"},
+  {"driver": "minimax", "reason": "text-tower driver under review in #1080; diffusion stage design shared with qwen-image"},
+  {"driver": "qwen-image-2.1", "reason": "diffusion resident stage design doc precedes the module (serves minimax-h3 video too)"}
+ ]
+}
