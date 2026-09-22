@@ -46,6 +46,7 @@ SESSION_BASE=$((23168 + 64 * LANE))
 
 ATTEMPT="${SPARK_QUEUE_ATTEMPT:?run through the authoritative spark queue}"
 ROOT="${SPARK_QUEUE_RUNTIME_ROOT:?}"
+mkdir -p "$ROOT"                 # the queue hands us the path, not the directory
 RANK="${SPARK_QUEUE_RANK:?}"; SIZE="${SPARK_QUEUE_SIZE:?}"
 [ "$SIZE" -eq 16 ] || { echo "job expects the full TP16 fleet (got SIZE=$SIZE)" >&2; exit 2; }
 [ -S "$SHARED_SOCKET" ] || { echo "shared weightd socket missing: $SHARED_SOCKET" >&2; exit 2; }
