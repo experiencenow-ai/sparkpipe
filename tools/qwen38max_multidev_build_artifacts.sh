@@ -26,7 +26,6 @@ WORLD=16
 EXPERT_CODEC="fp8"
 MODEL_REVISION="d2dc35658bcf77e66643428cb52e774cc3b5bd29"
 CONTRACT="model_contracts/qwen38_authoritative.json"
-PACK="/home/$(hostname)/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank0.sp"
 OUT_REL="sparkdata/qwen38max.tp16/build-latest"
 
 fail() { echo "qwen38max-build-artifacts: $*" >&2; exit 1; }
@@ -42,6 +41,12 @@ case "${SPARK_QUEUE_SIZE:-1}" in 1|16) ;; *) fail "size must be 1 or 16" ;; esac
 
 HOST="$(hostname)"
 case "$HOST" in spark[0-9a-f]) ;; *) fail "unexpected hostname '$HOST'" ;; esac
+# This node's OWN placed pack (one pack per node: rank i lives on
+# spark{hex(i)} — tools/qwen38max_multidev_pack_emit.sh placement). The
+# publish validates the module against the same pack this node's driver
+# will attach; a rank0 hardcode would fail the pack check on 15/16 nodes.
+NODE_RANK="$((16#${HOST#spark}))"
+PACK="/home/$HOST/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank$NODE_RANK.sp"
 
 CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="/home/$HOST/$OUT_REL"
@@ -50,7 +55,7 @@ rm -rf "$PARTIAL"
 mkdir -p "$PARTIAL"
 trap 'rm -rf "$PARTIAL"' EXIT
 
-[ -r "$PACK" ] || fail "rank-0 placed pack missing: $PACK (operator-placed NVMe set; no pack, no publish)"
+[ -r "$PACK" ] || fail "placed pack for this node missing: $PACK (operator-placed NVMe set; no pack, no publish)"
 
 PATH="/usr/local/cuda/bin:$PATH"
 export PATH
@@ -72,10 +77,10 @@ ADAPTER="$CHECKOUT/build/modules/qwen38_max_resident_decode_stage/$EXPERT_CODEC/
 [ -f "$ADAPTER" ] || fail "adapter not built: $ADAPTER"
 # Publish the validated module into build/module_library: the driver
 # compile below resolves the module by exact identity from the library
-# and fails with MODULE_NOT_VALIDATED without this. Whole-stack smoke
-# tier (STAGE_COUNT=1, all 92 layers, TP1, MAS=8) on the rank-0 placed
-# pack — the validator's admitted single-node tier (qwen38_27b publish
-# precedent: tp4-rank0 pack + standalone whole-stack).
+# and fails with MODULE_NOT_VALIDIFIED without this. Whole-stack smoke
+# tier (STAGE_COUNT=1, all 92 layers, TP1, MAS=8) on this node's own
+# placed pack — the validator's admitted single-node tier (qwen38_27b
+# publish precedent: tp4-rank0 pack + standalone whole-stack).
 make -C "$CHECKOUT/modules/qwen38_max_resident_decode_stage" -j2 \
   CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
   EXPERT_CODEC="$EXPERT_CODEC" \

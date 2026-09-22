@@ -168,20 +168,43 @@ def render(rank: int, runtime_root: str, weightd_socket: str,
     }
 
 
-def budgets(source: str) -> int:
-    """Emit 'expert_pool_bytes spine_bytes' (per-node, tp-sharded).
+POOLS_MANIFEST_NAME = "smoke_experts_pools.json"
 
-    The arena-side sizing record from the census manifest: the wrapper
-    consumes this to default QMAX_EXPERT_POOL_BYTES/QMAX_SPINE_BUDGET_BYTES
-    without any queue-cmd env syntax.
+
+def budgets(source: str, rank: int) -> int:
+    """Emit 'expert_pool_bytes raw_bytes spine_bytes' for ONE rank.
+
+    The pool default is the CHUNK-BASIS working-set size for this exact
+    rank from the pools manifest (model-families/qwen38_max/
+    smoke_experts_pools.json): the 2 MiB chunk-union over every sidecar
+    span of every smoke expert placed on the rank's pack - the same
+    arithmetic the weightd lazy tier materializes at (VmmReserve:
+    GRANULARITY_MINIMUM with a 2 MiB floor, runtime/spark_weightd.c).
+    Raw division of the census bytes (sum/16) under-declares every rank
+    (this family measures 1.40x-1.44x; lane 5's 2.15x and lane 0's 5.17x
+    are their families' factors, not ours). The raw per-rank number is
+    emitted second so receipts can carry BOTH bases; spine stays raw
+    (the pin-all whole-arena tier does not pay chunking).
     """
     document = json.load(open(source, encoding="utf-8"))
     nodes = int(document["nodes"])
     if document.get("expert_shard") != "tp" or nodes < 1:
         raise SystemExit("budgets need a tp-sharded manifest with nodes >= 1")
-    pool = -(-sum(int(e["bytes"]) for e in document["experts"]) // nodes)
+    if rank is None or not 0 <= rank < nodes:
+        raise SystemExit("budgets need --rank in 0..%d" % (nodes - 1,))
+    pools_path = os.path.join(os.path.dirname(os.path.abspath(source)),
+                              POOLS_MANIFEST_NAME)
+    try:
+        pools = json.load(open(pools_path, encoding="utf-8"))
+        chunked = int(pools["per_rank"][str(rank)])
+        raw = int(pools["per_rank_raw"][str(rank)])
+    except (OSError, ValueError, KeyError) as error:
+        raise SystemExit(
+            "budgets need %s with per_rank/per_rank_raw for rank %d "
+            "(chunk-basis sizing record; missing key: %s)"
+            % (pools_path, rank, error))
     spine = -(-int(document["spine_bytes"]) // nodes)
-    print(f"{pool} {spine}")
+    print(f"{chunked} {raw} {spine}")
     return 0
 
 
@@ -218,8 +241,9 @@ def main() -> int:
     parser.add_argument("--emit-wset", metavar="OUTPUT",
                         help="write the smoke-expert .wset and exit")
     parser.add_argument("--budgets", metavar="MANIFEST",
-                        help="print 'expert_pool_bytes spine_bytes' "
-                             "(per-node, tp-sharded) and exit")
+                        help="print 'expert_pool_bytes raw_bytes spine_bytes' "
+                             "for --rank (chunk-basis pool from the sibling "
+                             "pools manifest) and exit")
     parser.add_argument("--wset-source", default=os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "model-families", "qwen38_max", "smoke_experts.json"))
@@ -229,7 +253,7 @@ def main() -> int:
     arguments = parser.parse_args()
 
     if arguments.budgets:
-        return budgets(arguments.budgets)
+        return budgets(arguments.budgets, arguments.rank)
     if arguments.emit_wset:
         return emit_wset(arguments.wset_source, arguments.emit_wset)
 
