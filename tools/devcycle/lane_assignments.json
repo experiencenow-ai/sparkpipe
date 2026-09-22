@@ -170,24 +170,36 @@
    },
    "status": "weights-arrived",
    "charter": "Weights visible on /mnt/model-warm: mimo-v2.6-pro-rl, mimo-v2.6-flash-rl, mimo-v2.6-distill-qwen-9b (+ docs). Census -> family facts -> driver module -> stagepack -> CPU reference -> wrapper. Pattern precedent: model-families/mimo25 + the minimax packer (wave 2). Quality law applies: quantized experts + full-resolution spine, no requantization."
+  },
+  {
+   "lane": 9,
+   "driver": "ling",
+   "families": [
+    "ling",
+    "muse_glimmer",
+    "hy4"
+   ],
+   "owner": "dev-lane9",
+   "branch": "lane/ling-multidev",
+   "topology": "TP16",
+   "default_nodes": "spark0-sparkf",
+   "ports": {
+    "control": 23144,
+    "collective": 53144,
+    "transport": 64144,
+    "session": 23744
+   },
+   "status": "packs-verified",
+   "charter": "Three-family ROTATION on one lane (manager allocation 2026-09-22): ling first, then muse_glimmer, then hy4. ling census 2026-09-22: ling.bf16.tp16 + ling.fp8.tp16 placed 16/16 with valid v2 .experts + .sha256 sidecars (zero ceph, wrapper only symlinks); lingfin.bf16.tp16 placed 15/16 - spark7 lacks it, restorable from /mnt/model-warm/ling-3.0-flash-fin via one-time read (config-only delta from ling-3.0-flash per the rank0 emission receipt); muse.tp16.bf16 + hy4.fp8.tp16 + hy4.ud-iq1m.tp16 dirs present fleet-wide under legacy file naming (inventory at family rotation time). Sequence per family: wrapper from template -> smoke_experts.json (both bases, own chunk-union factor) -> attach + three-number receipt -> small-B* decode. The parked hy4 chat-template A/B (sinkprobe/fixtree) predates multidev - re-evaluate only if it blocks the M-numbers.",
+   "measured_device_mib": 6400,
+   "measured_total_mib": 9792,
+   "source": "manager allocation (session 2026-09-22) + lane-9 fleet census"
   }
  ],
  "rotation_queue": [
   {
    "driver": "laguna",
    "reason": "mixed-codec per-layer lands via #1076; lane opens on next free slot"
-  },
-  {
-   "driver": "ling",
-   "reason": "validated references; lane opens on next free slot"
-  },
-  {
-   "driver": "muse_glimmer",
-   "reason": "validated references; lane opens on next free slot"
-  },
-  {
-   "driver": "hy4",
-   "reason": "chat-template A/B verdict pending (sinkprobe/fixtree loops)"
   },
   {
    "driver": "minimax",
