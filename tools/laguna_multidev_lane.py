@@ -311,7 +311,11 @@ def budgets(pack_path: str) -> int:
     spine_bytes += pack_bytes - cursor
     chunk = 2 * 1024 * 1024
     pool_bytes = -(-pack_bytes // chunk) * chunk
-    print(f"{pool_bytes} {spine_bytes}")
+    # The spine budget must cover the loader's ALIGNED allocation:
+    # lazy_spine_load cudaMallocs bytes + 255 and refuses a budget under
+    # it (attach-007: spine 546,565,120 + 255 > budget 546,565,120 ->
+    # CAPACITY_EXCEEDED at spark_weightd_lazy_pack.c:62).
+    print(f"{pool_bytes} {spine_bytes + 256}")
     return 0
 
 

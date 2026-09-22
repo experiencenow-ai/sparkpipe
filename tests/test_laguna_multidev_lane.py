@@ -349,7 +349,11 @@ def manifest_gates(failures):
             check(pad == 0, failures, "record pad must be 0")
             check(layer == 5, failures,
                   "records must carry the GLOBAL layer index")
-            entry = entries[1 + kind]
+            check(kind in (28, 30), failures,
+                  f"record kind {kind} outside the laguna convention "
+                  "(tensor_kind*2 + payload plane; SparkLagunaManifestCheck "
+                  "walks exactly 28/30)")
+            entry = entries[1 + (0 if kind == 28 else 1)]
             expected_offset = entry[8] + expert * (entry[9] // group_count)
             check(offset == expected_offset, failures,
                   f"expert {expert} kind {kind}: offset {offset} != "
@@ -374,8 +378,9 @@ def manifest_gates(failures):
             check(int(pool_text) == pack_chunk_basis, failures,
                   f"pool {pool_text} != whole-pack chunk basis "
                   f"{pack_chunk_basis} (the daemon's acquire budget law)")
-            check(int(spine_text) == spine, failures,
-                  f"spine {spine_text} != complement {spine}")
+            check(int(spine_text) == spine + 256, failures,
+                  f"spine budget {spine_text} != complement {spine} + 256 "
+                  "(the aligned spine allocation)")
         # idempotence: a valid sidecar is left untouched
         before = sidecar.read_bytes()
         again = subprocess.run(
