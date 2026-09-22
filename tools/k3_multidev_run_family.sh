@@ -173,7 +173,15 @@ rm -rf "$GENERATED"
 #    expert manifest the lazy attach fails closed without.
 PRIVATE_PACK="$ROOT/packs/$(basename "$DEPLOYED_PACK")"
 ln -sfn "$DEPLOYED_PACK" "$PRIVATE_PACK"
-if [ -f "$DEPLOYED_PACK.experts" ]; then
+if [ -f "$DEPLOYED_PACK.experts" ] && python3 - "$DEPLOYED_PACK.experts" <<'PYVER'
+import struct, sys
+with open(sys.argv[1], "rb") as handle:
+    magic, version, count, _ = struct.unpack("<IIII", handle.read(16))
+raise SystemExit(0 if (magic == 0x58504557 and version == 2 and count > 0) else 1)
+PYVER
+then
+  # only a v2 routed-expert manifest with records is usable by the lazy
+  # attach; stale v1 sidecars regenerate below like missing ones
   ln -sfn "$DEPLOYED_PACK.experts" "$PRIVATE_PACK.experts"
 else
   bash "$CHECKOUT/tools/k3_multidev_experts_manifest.sh" "$PRIVATE_PACK"
