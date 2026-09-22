@@ -67,8 +67,12 @@ the notification/retirement gap instead of relying on this rare schedule.
 Commit `3f888927` retains the completion receipt until the stream is terminal,
 within the original deadline. It waits on the condition during GPU work and
 uses bounded retirement checks after notification. Timeout preserves ownership
-and reuses the pending receipt rather than appending callbacks. A new fleet run
-is required before counting four or eight residents as passed.
+and reuses the pending receipt rather than appending callbacks. The retained real-CUDA regression then passed 200,000 waits across four
+concurrent processes: zero false successes, all four exited zero and all PIDs
+were absent. Its binary SHA256 is
+`2139eff5fc2458dae58b6bd698c8ef7f7c3e70b60cc0e283ccea163941bd8076`,
+built from `bd25d2c7`. This is a common completion-helper gate; a new fleet run
+is still required before counting four or eight residents as passed.
 
 ## Evidence
 

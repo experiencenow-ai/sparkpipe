@@ -22,8 +22,9 @@ def main():
         (root / "model_contracts").mkdir()
         fixture_script = root / "tools/glm5_next_build_release.sh"
         fixture_script.write_bytes(SCRIPT.read_bytes())
+        (root / "tools/module_build_release.sh").write_bytes((ROOT / "tools/module_build_release.sh").read_bytes())
         (root / "model_contracts/glm53_flash_authoritative.json").write_text("{}")
-        for name, body in (("git", "exit 0"), ("make", "exit 23")):
+        for name, body in (("git", 'if [ "$1" = rev-parse ]; then printf "%040d\\n" 1; fi'), ("make", "exit 23"), ("flock", "exit 0")):
             path = root / name
             path.write_text("#!/bin/sh\n" + body + "\n")
             path.chmod(0o755)

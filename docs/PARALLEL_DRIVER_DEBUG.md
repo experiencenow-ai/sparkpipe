@@ -188,9 +188,9 @@ validation, so a CPU-only queue reservation is insufficient.
 
 The script builds the host services, native transport, serving adapter and
 validated module, then compiles the model driver. Its local output is
-`build/glm53_release`, with `SOURCE_COMMIT` and relative
-`ARTIFACT_SHA256SUMS` for provenance. A failed build does not leave a current
-checksum receipt. Use `sha256sum -c ARTIFACT_SHA256SUMS` inside that directory
+`build/glm53_release` and `build/glm53_release.tar.gz`, with `SOURCE_COMMIT`
+and relative `SHA256SUMS` for provenance. A failed build does not leave a current
+checksum receipt. Use `sha256sum -c SHA256SUMS` inside that directory
 before assembling a deployment with its verified packs and topology config.
 
 The script no longer accepts a branch argument, resets a shared tree, stops
