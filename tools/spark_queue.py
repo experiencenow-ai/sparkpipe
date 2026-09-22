@@ -603,6 +603,8 @@ def cmd_sync(args):
         checkout = Path(tmp) / "source"
         subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", "--no-checkout",
                         str(root), str(checkout)], check=True)
+        subprocess.run(["git", "-C", str(checkout), "fetch", "--quiet", "--no-tags",
+                        "--update-shallow", str(root), sha], check=True)
         subprocess.run(["git", "-C", str(checkout), "checkout", "--quiet", "--detach", sha], check=True)
         subprocess.run(["git", "-C", str(checkout), "remote", "set-url", "origin",
                         "https://github.com/sparkpipe/sparkpipe"], check=True)

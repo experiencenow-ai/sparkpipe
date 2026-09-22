@@ -32,10 +32,31 @@ class QueueTests(unittest.TestCase):
         self.q.observe = self.observe
         self.census, self.persistent_units = {}, {}
 
+    def assert_synced_source(self, repository, source_ref, expected, contents):
+        run = self.q.subprocess.run
+        copied = []
+        def transfer(command, **kwargs):
+            if command[0] != "rsync":
+                return run(command, **kwargs)
+            checkout = Path(command[-2])
+            self.assertEqual((checkout / "marker").read_text(), contents)
+            self.assertEqual(self.q.subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip(), expected)
+            self.assertEqual(self.q.subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip(), "HEAD")
+            copied.append(str(checkout))
+            return self.q.subprocess.CompletedProcess(command, 0)
+        output = io.StringIO()
+        with patch.object(self.q, "__file__", str(repository / "tools/spark_queue.py")), patch.object(self.q.subprocess, "run", side_effect=transfer), patch.object(self.q, "ssh", return_value=(0, "")) as remote, contextlib.redirect_stdout(output):
+            self.q.cmd_sync(argparse.Namespace(id="pr-test", nodes="spark0", ref=source_ref))
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(receipt["git_commit"], expected)
+        self.assertEqual(receipt["source_ref"], source_ref)
+        self.assertEqual(len(copied), 1)
+        self.assertIn(expected, remote.call_args.args[1])
+        self.assertIn("diff --quiet HEAD", remote.call_args.args[1])
+
     def test_sync_tests_unmerged_commits_with_exact_detached_source(self):
         repository = Path(self.tmp.name) / "repository"
         repository.mkdir()
-        run = self.q.subprocess.run
         def git(*args):
             return self.q.subprocess.check_output(["git", "-C", str(repository), *args], text=True).strip()
         git("init", "-q", "-b", "main")
@@ -52,26 +73,41 @@ class QueueTests(unittest.TestCase):
         head = git("rev-parse", "HEAD")
         marker.write_text("uncommitted")
         for source_ref, expected, contents in (("HEAD", head, "pr"), (base, base, "base")):
-            copied = []
-            def transfer(command, **kwargs):
-                if command[0] != "rsync":
-                    return run(command, **kwargs)
-                checkout = Path(command[-2])
-                self.assertEqual((checkout / "marker").read_text(), contents)
-                self.assertEqual(self.q.subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip(), expected)
-                self.assertEqual(self.q.subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip(), "HEAD")
-                copied.append(str(checkout))
-                return self.q.subprocess.CompletedProcess(command, 0)
-            output = io.StringIO()
-            with patch.object(self.q, "__file__", str(repository / "tools/spark_queue.py")), patch.object(self.q.subprocess, "run", side_effect=transfer), patch.object(self.q, "ssh", return_value=(0, "")) as remote, contextlib.redirect_stdout(output):
-                self.q.cmd_sync(argparse.Namespace(id="pr-test", nodes="spark0", ref=source_ref))
-            receipt = json.loads(output.getvalue())
-            self.assertEqual(receipt["git_commit"], expected)
-            self.assertEqual(receipt["source_ref"], source_ref)
-            self.assertEqual(len(copied), 1)
-            self.assertIn(expected, remote.call_args.args[1])
-            self.assertIn("diff --quiet HEAD", remote.call_args.args[1])
+            self.assert_synced_source(repository, source_ref, expected, contents)
         self.assertEqual(marker.read_text(), "uncommitted")
+
+    def test_sync_preserves_remote_only_commit_from_shallow_local_source(self):
+        upstream = Path(self.tmp.name) / "upstream"
+        repository = Path(self.tmp.name) / "shallow-controller"
+        upstream.mkdir()
+        def git(path, *args):
+            return self.q.subprocess.check_output(["git", "-C", str(path), *args], text=True).strip()
+        git(upstream, "init", "-q", "-b", "main")
+        git(upstream, "config", "user.name", "Fixture")
+        git(upstream, "config", "user.email", "fixture@example.invalid")
+        marker = upstream / "marker"
+        marker.write_text("base")
+        git(upstream, "add", "marker")
+        git(upstream, "commit", "-qm", "base")
+        base = git(upstream, "rev-parse", "HEAD")
+        self.q.subprocess.run(["git", "clone", "--quiet", "--depth=1", "--single-branch",
+                               upstream.as_uri(), str(repository)], check=True)
+        git(upstream, "checkout", "-qb", "unmerged-pr")
+        marker.write_text("fetched-pr")
+        git(upstream, "commit", "-qam", "PR")
+        head = git(upstream, "rev-parse", "HEAD")
+        git(repository, "fetch", "--quiet", "--depth=1", "origin", "unmerged-pr")
+        self.assertEqual(git(repository, "rev-parse", "--is-shallow-repository"), "true")
+        self.assertEqual(git(repository, "rev-parse", "HEAD"), base)
+        self.assertEqual(git(repository, "for-each-ref", "--format=%(objectname)", "refs/heads"), base)
+        self.assertEqual(git(repository, "rev-parse", "FETCH_HEAD"), head)
+        (repository / "marker").write_text("controller-dirty")
+        self.assert_synced_source(repository, "FETCH_HEAD", head, "fetched-pr")
+        git(repository, "update-ref", "refs/remotes/origin/unmerged-pr", head)
+        self.assert_synced_source(repository, "refs/remotes/origin/unmerged-pr", head, "fetched-pr")
+        self.assert_synced_source(repository, head, head, "fetched-pr")
+        self.assertEqual(git(repository, "rev-parse", "HEAD"), base)
+        self.assertEqual((repository / "marker").read_text(), "controller-dirty")
 
     def test_rdma_registration_uses_declared_finite_memory_budget(self):
         job = {"id": "rdma", "attempt": "test", "nodes": ["spark0"],
