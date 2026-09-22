@@ -25,6 +25,7 @@ MODULE_ADDITIONAL_HOST_SOURCES = \
 	$(REPOSITORY_ROOT)/runtime/stage_module_lifecycle.c \
 	$(REPOSITORY_ROOT)/runtime/stagepack_format.c \
 	$(addprefix $(REPOSITORY_ROOT)/,$(SPARKPIPE_WEIGHTD_SOURCES)) \
+	$(REPOSITORY_ROOT)/src/spark_status.c \
 	$(REPOSITORY_ROOT)/src/spark_sha256.c \
 	$(REPOSITORY_ROOT)/src/spark_ck128.c \
 	$(REPOSITORY_ROOT)/cache/store/stage_kv_client.c \
