@@ -5733,8 +5733,8 @@
     },
     {
       "path": "modules/qwen38_27b_resident_decode_stage/Makefile",
-      "sha256": "7b846b85e344d19a35f69b4eb0da9d4127d1ca3abef3b9653e337009c8c927d1",
-      "size_bytes": 3874
+      "sha256": "41ea7458ee47584652f53929cde3193508e3c144773d6ada82834bccb6af38ad",
+      "size_bytes": 4332
     },
     {
       "path": "modules/qwen38_27b_resident_decode_stage/README.md",
@@ -16430,5 +16430,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78201363
+  "total_bytes": 78201821
 }
