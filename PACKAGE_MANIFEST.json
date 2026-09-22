@@ -1,5 +1,5 @@
 {
-  "file_count": 3341,
+  "file_count": 3343,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -10832,6 +10832,16 @@
       "size_bytes": 4320
     },
     {
+      "path": "tools/devcycle/dsv4pro_restore_missing_packs.sh",
+      "sha256": "8afa065b440abb4ae726ccbcf8fe27f15135d78916dbc76320247a6a81e4493d",
+      "size_bytes": 4903
+    },
+    {
+      "path": "tools/devcycle/dsv4pro_restore_ranks.py",
+      "sha256": "a38c02fd2d9028907e9b98ae303472727b5b9fb2cbd8ad0103539b58f7cbca79",
+      "size_bytes": 7432
+    },
+    {
       "path": "tools/devcycle/dsv4pro_smoke_warm.sh",
       "sha256": "20155251720094302590528fba0bb2be18138350478fec0c5f33d1964e01d572",
       "size_bytes": 1797
@@ -16710,5 +16720,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79668353
+  "total_bytes": 79680688
 }
