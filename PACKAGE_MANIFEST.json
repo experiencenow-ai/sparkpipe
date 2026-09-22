@@ -12983,8 +12983,8 @@
     },
     {
       "path": "tools/qwen38max_multidev_lane.py",
-      "sha256": "dbec6daf59e17f0c69b9416a13587836f044a23ce72c32fd5cae63cd59838551",
-      "size_bytes": 16311
+      "sha256": "f0e6d601feb3e4d502d520a48093eb2e2a8e9ceb7fb1c5736da8fc060420cf0f",
+      "size_bytes": 17084
     },
     {
       "path": "tools/qwen38max_multidev_pack_emit.sh",
@@ -12993,8 +12993,8 @@
     },
     {
       "path": "tools/qwen38max_multidev_run_family.sh",
-      "sha256": "1a9168fd07bdbc2f7a59217fd78d3e4894b6cc17d17783db49bfb12c3dbc7ad2",
-      "size_bytes": 17796
+      "sha256": "a27978003ab8e5b1dc4561f5b029e0a29c82dab88558b4645a6caaebc68cf28a",
+      "size_bytes": 17949
     },
     {
       "path": "tools/qwen38max_multidev_warm_probe.sh",
@@ -16895,5 +16895,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80417924
+  "total_bytes": 80418850
 }
