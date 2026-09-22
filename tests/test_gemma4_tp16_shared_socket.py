@@ -59,6 +59,9 @@ def test_generator(output: Path) -> dict:
     check(deployment["schema_version"] == 2, "model_resident schema_version")
     check(deployment["coordinator_rank_index"] == 0, "coordinator rank")
     check(deployment["eos_token_ids"] == [1, 106, 50], "eos token ids")
+    limits = deployment["runtime_limits"]
+    check(limits["max_inflight_submissions"] == 1, "inflight within adapter cap")
+    check(limits["max_input_rows"] <= 512, "input rows within adapter cap")
     check(deployment["adapter"]["shared_object_path"] == "lib/model_serving_adapter.so",
           "adapter path")
     check(deployment["driver"]["shared_object_path"] == "stages/stage_000/model_driver.so",
