@@ -155,6 +155,8 @@ typedef struct SparkWeightdArena
 
 #define SPARK_WEIGHTD_ARENA_STAGING_BYTES (4ull * 1024ull * 1024ull)
 
+static void SparkWeightdLoadRecordedWorkingSet(SparkWeightdArena *arena);
+
 typedef struct SparkWeightdAttachRef
 {
     uint64_t arena_generation;
@@ -723,7 +725,10 @@ static SparkStatus SparkWeightdVmmAllocate(uint64_t arena_bytes,
         arena->chunk_count = chunk_count;
         arena->staging = (uint8_t *)malloc(SPARK_WEIGHTD_ARENA_STAGING_BYTES);
         if (arena->staging != 0)
+        {
+            SparkWeightdLoadRecordedWorkingSet(arena);
             return SPARK_STATUS_OK;
+        }
     }
     /* unwind: unmap what was mapped, release what was created, free the VA */
     if (mapped != 0u)
@@ -829,6 +834,7 @@ static SparkStatus SparkWeightdVmmReserve(uint64_t arena_bytes,
         SparkWeightdVmmRelease(arena);
         SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
     }
+    SparkWeightdLoadRecordedWorkingSet(arena);
     return SPARK_STATUS_OK;
 }
 
