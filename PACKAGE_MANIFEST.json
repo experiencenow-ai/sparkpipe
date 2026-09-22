@@ -12538,8 +12538,8 @@
     },
     {
       "path": "tools/qwen38max_multidev_pack_emit.sh",
-      "sha256": "3169a0753dc7bd7689a6f8cfa8eb29259501dd1aadb0a0db678d565c469ef761",
-      "size_bytes": 6205
+      "sha256": "15336cfcb76cb8c2dfe1aa5a4304c128de4cffe822ad91fac2c7c59870f8ded0",
+      "size_bytes": 6651
     },
     {
       "path": "tools/qwen38max_multidev_run_family.sh",
@@ -16435,5 +16435,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78361806
+  "total_bytes": 78362252
 }

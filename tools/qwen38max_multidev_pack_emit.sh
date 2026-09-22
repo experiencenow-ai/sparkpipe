@@ -27,7 +27,11 @@
 # place atomically at the end; a completed rank is verified-and-skipped
 # (idempotent re-runs are safe).
 #
-# Required environment: the standard SPARK_QUEUE_* contract.
+# Required environment: the standard SPARK_QUEUE_* contract only - the
+# queue cmd stays BARE (no env prefixes; systemd-run pre-expands $VAR).
+# The emitted rank derives from the hostname (identity mesh), so the
+# fleet form (--nodes spark0,..,sparkf --per-node) and a targeted
+# single-node run on sparkN both emit world rank N without any env.
 # Optional: QMAX_EMIT_CHECKPOINT (default the recorded warm checkpoint).
 set -euo pipefail
 
@@ -47,25 +51,27 @@ case "$ATTEMPT" in
   *[!0-9a-f]*|""|?????????????????????????????????*) fail "bad attempt id" ;;
 esac
 [ "${#ATTEMPT}" -eq 32 ] || fail "bad attempt id length"
-# Under --nodes spark0,..,sparkf --per-node the queue rank IS the world
-# rank. QMAX_EMIT_RANK overrides it for targeted single-node emission
-# (smoke runs, re-emitting one rank); the hostname check below still
-# fails closed unless the rank matches the host.
-RANK="${QMAX_EMIT_RANK:-${SPARK_QUEUE_RANK:?SPARK_QUEUE_RANK is required}}"
-if [ -n "${QMAX_EMIT_RANK:-}" ]; then
-  # Targeted single-node emission: one rank, on its own host.
-  [ "${SPARK_QUEUE_SIZE:-}" = "1" ] ||
-    fail "targeted emission is single-node (got size '${SPARK_QUEUE_SIZE:-}')"
-else
-  [ "${SPARK_QUEUE_SIZE:-}" = "$WORLD" ] ||
-    fail "SPARK_QUEUE_SIZE must be $WORLD (got '${SPARK_QUEUE_SIZE:-}')"
-fi
+# Rank derives from the HOSTNAME (identity mesh: rank i lives on
+# spark{hex(i)}), so the queue cmd stays BARE - no env prefixes or other
+# shell syntax (systemd-run pre-expands $VAR; lane-5/lane-6 findings).
+# The fleet form cross-checks the queue rank against it.
+HOST="$(hostname)"
+case "$HOST" in
+  spark[0-9a-f]) ;;
+  *) fail "cannot derive rank: unexpected hostname '$HOST'" ;;
+esac
+HEXDigit="${HOST#spark}"
+RANK="$((16#$HEXDigit))"
 [ "$RANK" -ge 0 ] && [ "$RANK" -lt "$WORLD" ] ||
-  fail "SPARK_QUEUE_RANK must be 0..$((WORLD - 1))"
-
-HOST="spark$(printf '%x' "$RANK")"
-[ "$(hostname)" = "$HOST" ] ||
-  fail "node order mismatch: rank $RANK expects $HOST but this job runs on $(hostname)"
+  fail "rank out of range from hostname '$HOST'"
+if [ "${SPARK_QUEUE_SIZE:-}" = "$WORLD" ]; then
+  [ "${SPARK_QUEUE_RANK:-}" = "$RANK" ] ||
+    fail "queue rank '${SPARK_QUEUE_RANK:-}' disagrees with host rank $RANK ($HOST)"
+elif [ "${SPARK_QUEUE_SIZE:-}" = "1" ]; then
+  : # targeted single-node emission of this host's own rank
+else
+  fail "SPARK_QUEUE_SIZE must be $WORLD or 1 (got '${SPARK_QUEUE_SIZE:-}')"
+fi
 
 CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
 CHECKPOINT="${QMAX_EMIT_CHECKPOINT:-$CHECKPOINT_DEFAULT}"
@@ -100,7 +106,10 @@ fi
 
 START="$(date +%s)"
 PARTIAL="$DEST/partial-$ATTEMPT.qwen38sp"
-rm -f "$PARTIAL" "$PARTIAL.experts" "$PARTIAL.receipt.json"
+# A ttl kill bypasses the EXIT trap; sweep partials of dead attempts
+# first (queue conflict rules keep this lane alone on the node).
+rm -f "$DEST"/partial-*.qwen38sp "$DEST"/partial-*.qwen38sp.* \
+      "$DEST"/.partial-*.qwen38sp.* 2>/dev/null || true
 trap 'rm -f "$PARTIAL" "$PARTIAL.experts" "$PARTIAL.receipt.json"' EXIT
 
 python3 "$CHECKOUT/tools/qwen38_stagepack.py" \
