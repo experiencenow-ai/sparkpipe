@@ -2377,7 +2377,20 @@ static SparkStatus SparkGlm5NextMtpStashHidden(
 }
 
 static SparkStatus SparkGlm5NextLazyRelease(SparkGlm5NextTpChain *chain);
-static void SparkGlm5NextLazyReleaseQuiet(SparkGlm5NextTpChain *chain);
+static void SparkGlm5NextFinishChain(SparkGlm5NextTpChain *chain)
+{
+	SparkStatus status = chain->expert_lease != 0u ? SparkGlm5NextLazyRelease(chain) : SPARK_STATUS_OK;
+	if ( status == SPARK_STATUS_OK )
+		status = SparkGlm5NextEnqueueAsyncCompletion(chain->state,chain->slot,chain->slot_index);
+	if ( status != SPARK_STATUS_OK )
+	{
+		SparkGlm5NextTpChainFail(chain,status);
+		return;
+	}
+	chain->stage = SPARK_GLM5_NEXT_CHAIN_STAGE_FINISH;
+	chain->active = 0u;
+	free(chain);
+}
 
 static void SparkGlm5NextMtpResolveOnWorker(void *context)
 {
@@ -2425,16 +2438,9 @@ static void SparkGlm5NextMtpResolveOnWorker(void *context)
 			launch = SparkGlm5NextLaunchCudaMtpCommit(&chain->wave,result.committed_token_count);
 	}
 	if ( status != SPARK_STATUS_OK || error != cudaSuccess || launch != 0 )
-		async->completion.status = SPARK_STATUS_INTERNAL_ERROR;
-	if ( SparkGlm5NextEnqueueAsyncCompletion(state,slot,chain->slot_index) != SPARK_STATUS_OK )
-	{
-		async->completion.status = SPARK_STATUS_INTERNAL_ERROR;
-		SparkGlm5NextCompleteAsync(async);
-	}
-	chain->stage = SPARK_GLM5_NEXT_CHAIN_STAGE_FINISH;
-	chain->active = 0u;
-	SparkGlm5NextLazyReleaseQuiet(chain);
-	free(chain);
+		SparkGlm5NextTpChainFail(chain,SPARK_STATUS_INTERNAL_ERROR);
+	else
+		SparkGlm5NextFinishChain(chain);
 }
 
 static void CUDART_CB SparkGlm5NextMtpResolveHost(void *context)
@@ -2521,18 +2527,6 @@ static SparkStatus SparkGlm5NextLazyRelease(SparkGlm5NextTpChain *chain)
 		chain->wave.expert_lease_base = 0;
 	}
 	SPARK_RETURN(status);
-}
-
-static void SparkGlm5NextLazyReleaseQuiet(SparkGlm5NextTpChain *chain)
-{
-	SparkStatus release_status;
-	if ( chain == 0 || chain->expert_lease == 0u )
-		return;
-	release_status = SparkGlm5NextLazyRelease(chain);
-	if ( release_status != SPARK_STATUS_OK )
-		fprintf(stderr,"LAZYWORK-RELEASE-FAIL slot=%u status=%d lease=%llu\n",
-			(unsigned)chain->slot_index,(int)release_status,
-			(unsigned long long)chain->expert_lease);
 }
 
 static SparkStatus SparkGlm5NextLazyRecoverLease(SparkGlm5NextModuleState *state,uint32_t slot,SparkGlm5NextTpChain **out)
@@ -3445,18 +3439,7 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 			SparkGlm5NextGraphEnsure(chain,&graph_status);
 			if ( graph_status == SPARK_STATUS_OK )
 			{
-				SparkStatus completion_status;
-				completion_status = SparkGlm5NextEnqueueAsyncCompletion(
-					state,chain->slot,chain->slot_index);
-				if ( completion_status != SPARK_STATUS_OK )
-				{
-					SparkGlm5NextTpChainFail(chain,completion_status);
-					return;
-				}
-				chain->stage = SPARK_GLM5_NEXT_CHAIN_STAGE_FINISH;
-				chain->active = 0u;
-				SparkGlm5NextLazyReleaseQuiet(chain);
-				free(chain);
+				SparkGlm5NextFinishChain(chain);
 				return;
 			}
 			SparkGlm5NextTerminalFailure(state,graph_status);
@@ -3631,16 +3614,7 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 			fprintf(stderr,
 			    "GRAPH-WARM experts resident after first eager chain\n");
 		}
-		launch_status = SparkGlm5NextEnqueueAsyncCompletion(state,chain->slot,chain->slot_index);
-		if ( launch_status != SPARK_STATUS_OK )
-		{
-			SparkGlm5NextTpChainFail(chain,launch_status);
-			return;
-		}
-		chain->stage = SPARK_GLM5_NEXT_CHAIN_STAGE_FINISH;
-		chain->active = 0u;
-		SparkGlm5NextLazyReleaseQuiet(chain);
-		free(chain);
+		SparkGlm5NextFinishChain(chain);
 		return;
 	default:
 		SparkGlm5NextTpChainFail(chain,SPARK_STATUS_INTERNAL_ERROR);

@@ -56,6 +56,19 @@ cudaError_t cudaLaunchHostFunc(cudaStream_t stream,cudaHostFn_t function,void *c
 	return(cudaSuccess);
 }
 static cudaError_t DRAIN_STATUS;
+
+cudaError_t cudaGetLastError(void)
+{
+	assert(IN_CUDA_CALLBACK == 0u);
+	return(cudaSuccess);
+}
+
+SparkStatus SparkTpDeviceCollectiveChainRetire(SparkTpDeviceCollective *collective)
+{
+	(void)collective;
+	return(SPARK_STATUS_OK);
+}
+
 static uint32_t REAL_BACKEND;
 static int32_t ALLOCATIONS_BEFORE_FAILURE = -1;
 
@@ -308,10 +321,11 @@ int32_t SparkGlm5NextLaunchCudaMtpCommit(const SparkGlm5NextCudaWave *wave,uint3
 	return(0);
 }
 
-static void check_mtp_callback_handoff(SparkStatus submit_status)
+static void check_mtp_callback_handoff(SparkStatus submit_status,uint32_t release_failure)
 {
 	uint16_t hidden[SPARK_GLM5_NEXT_MODEL_HIDDEN_DIMENSION],saved[SPARK_GLM5_NEXT_MODEL_HIDDEN_DIMENSION];
 	uint32_t tokens[3] = {11u,12u,13u},errors[6] = {0},host_errors[6] = {0};
+	SparkWeightdLazyPack pack = {0};
 	SparkGlm5NextTpChain *chain = calloc(1u,sizeof(*chain));
 	SparkWeightdWorkFunction resolver;
 	void *resolver_context;
@@ -320,6 +334,9 @@ static void check_mtp_callback_handoff(SparkStatus submit_status)
 	memset(saved,0,sizeof(saved));
 	assert(chain != 0 && pthread_mutex_init(&state.completion_queue_lock,0) == 0);
 	state.completion_worker = (SparkWeightdWorker *)(uintptr_t)1u;
+	state.pipeline_slot_count = 1u;
+	state.execution_stream = state.slots[0].stream = (void *)(uintptr_t)7u;
+	assert(SparkStageModuleCudaWaitInitialize(&state.stream_wait,(cudaStream_t)state.execution_stream) == SPARK_STATUS_OK);
 	state.mtp_lane_hidden_bf16 = saved;
 	state.completions[0].state = &state;
 	state.completions[0].mtp_draft_tokens[0] = 10u;
@@ -331,6 +348,17 @@ static void check_mtp_callback_handoff(SparkStatus submit_status)
 	chain->state = &state;
 	chain->slot = &state.slots[0];
 	chain->active = 1u;
+	DRAIN_STATUS = cudaSuccess;
+	if ( release_failure != 0u )
+	{
+		pack.map = (SparkWeightdMap *)(uintptr_t)1u;
+		state.lazy_pack = &pack;
+		chain->expert_lease = 1u;
+		chain->expert_lease_begun = 1u;
+		PIN_CALLS = PIN_FAIL_RELEASE = 1u;
+		PIN_RECORDS = PIN_RELEASES = PIN_FAIL_RECORD = 0u;
+		PIN_PHASES[1] = 1u;
+	}
 	atomic_store(&state.tp_chain_active,1u);
 	atomic_store(&state.slot_states[0],SPARK_STAGE_MODULE_SLOT_CLAIMED);
 	WORK_STATUS = submit_status;
@@ -356,8 +384,21 @@ static void check_mtp_callback_handoff(SparkStatus submit_status)
 	resolver(resolver_context);
 	assert(MTP_COMMITS == 1u && memcmp(hidden,saved,sizeof(hidden)) == 0);
 	assert(state.completions[0].completion.accepted_token_count == 1u);
+	if ( release_failure != 0u )
+	{
+		assert(COMPLETION_WORK == 0 && atomic_load(&state.lazy_retained[0]) == chain);
+		assert(chain->expert_lease == 1u && chain->active == 0u && chain->expert_lease_recorded == 1u);
+		assert(PIN_RECORDS == 1u && PIN_RELEASES == 2u && PIN_PHASES[1] == 2u);
+		assert(atomic_load(&state.tp_chain_active) == 1u && atomic_load(&state.slot_states[0]) == SPARK_STAGE_MODULE_SLOT_CLAIMED);
+		PIN_FAIL_RELEASE = 0u;
+		SparkGlm5NextLazyRetryRetained(&state);
+		assert(atomic_load(&state.lazy_retained[0]) == 0);
+		assert(state.completions[0].completion.status == SPARK_STATUS_IO_ERROR);
+		assert(PIN_RECORDS == 1u && PIN_RELEASES == 3u && PIN_PHASES[1] == 3u);
+	}
 	assert(COMPLETION_WORK == SparkGlm5NextCompleteOnWorker && COMPLETION_CONTEXT == &state.completions[0]);
 	assert(atomic_load(&state.tp_chain_active) == 1u && atomic_load(&state.slot_states[0]) == SPARK_STAGE_MODULE_SLOT_CLAIMED);
+	assert(SparkStageModuleCudaWaitDestroy(&state.stream_wait) == SPARK_STATUS_OK);
 	assert(pthread_mutex_destroy(&state.completion_queue_lock) == 0);
 }
 
@@ -1322,8 +1363,10 @@ int32_t main(void)
 	check_graph_expert_ownership(12u,12u,12u,0u,0u);
 	check_graph_expert_ownership(12u,12u,12u,2u,0u);
 	check_graph_expert_ownership(12u,12u,12u,0u,2u);
-	check_mtp_callback_handoff(SPARK_STATUS_OK);
-	check_mtp_callback_handoff(SPARK_STATUS_BUSY);
+	check_mtp_callback_handoff(SPARK_STATUS_OK,0u);
+	check_mtp_callback_handoff(SPARK_STATUS_OK,1u);
+	check_mtp_callback_handoff(SPARK_STATUS_BUSY,0u);
+	check_mtp_callback_handoff(SPARK_STATUS_BUSY,1u);
 	check_stream_receipt();
 	check_chain_ownership();
 	int32_t status = check_cache_transactions(SPARK_STATUS_IO_ERROR,SPARK_STATUS_OK,cudaSuccess);
