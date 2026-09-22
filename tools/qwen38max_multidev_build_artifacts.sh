@@ -91,6 +91,7 @@ if [ "$STAGE" != publish ]; then
   make -C "$CHECKOUT" -j4 \
     build/sparkpipe_model_residentd \
     build/sparkpipe_model_compile \
+    build/sparkpipe_model_batch \
     build/weightd_warm \
     hidden_transport_spark_host_rdma_verbs
   make -C "$CHECKOUT/modules/qwen38_max_resident_decode_stage" -j4 \
@@ -102,6 +103,7 @@ if [ "$STAGE" != publish ]; then
   ADAPTER="$CHECKOUT/build/modules/qwen38_max_resident_decode_stage/$EXPERT_CODEC/libqwen38_max_serving_adapter_$EXPERT_CODEC.so"
   [ -f "$ADAPTER" ] || fail "adapter not built: $ADAPTER"
   install -m 0755 "$CHECKOUT/build/sparkpipe_model_residentd" "$PARTIAL/"
+  install -m 0755 "$CHECKOUT/build/sparkpipe_model_batch" "$PARTIAL/"
   install -m 0755 "$CHECKOUT/build/weightd_warm" "$PARTIAL/"
   install -m 0644 "$ADAPTER" "$PARTIAL/model_serving_adapter.so"
   install -m 0644 \
@@ -109,7 +111,7 @@ if [ "$STAGE" != publish ]; then
     "$PARTIAL/hidden_transport.so"
   rm -rf "$OUT" && mv "$PARTIAL" "$OUT"
   END="$(date +%s)"
-  for artifact in sparkpipe_model_residentd model_serving_adapter.so \
+  for artifact in sparkpipe_model_residentd sparkpipe_model_batch model_serving_adapter.so \
       hidden_transport.so weightd_warm; do
     [ -f "$OUT/$artifact" ] || fail "missing artifact: $OUT/$artifact"
   done
