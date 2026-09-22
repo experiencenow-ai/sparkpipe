@@ -998,11 +998,19 @@ static int SparkGemma4ValKvCheckErrorClear(SparkGemma4ValKv *kv, const char *che
 	return(0);
 }
 
-static void SparkGemma4ValMirrorDecode(const SparkGemma4ValKv *kv, const uint16_t *query, const uint32_t *window, uint32_t window_count, uint32_t query_heads, uint16_t *output)
+static void SparkGemma4ValMirrorDecode(const SparkGemma4ValKv *kv, const uint16_t *query, const uint32_t *window, uint32_t window_count, uint32_t query_heads, uint16_t *output, uint32_t rows)
+{
+	/* rows is caller-owned: the standalone checks use SPARK_GEMMA4_VAL_ROWS-sized
+	   buffers, the chain tier uses SPARK_GEMMA4_VAL_CHAIN_ROWS-sized buffers. The
+	   former hardcoded bound overran the chain's two-row output by two rows
+	   (2048 bytes of host heap), corrupting the heap under libcuda: the next
+	   CUDA call segfaulted layout-dependently (-O3 publish builds died at the
+	   window copy; -lineinfo builds leaked the garbage into the compare). */
+
 {
 	uint32_t row,head,step,element;
 	uint32_t group = query_heads / kv->kv_heads;
-	for (row = 0u; row < SPARK_GEMMA4_VAL_ROWS; row++)
+	for (row = 0u; row < rows; row++)
 		for (head = 0u; head < query_heads; head++)
 		{
 			uint32_t kv_head = head / group;
@@ -1112,7 +1120,7 @@ static int SparkGemma4ValCheckKvSliding(void)
 	if (error == cudaSuccess) error = SparkGemma4ValCopyDown(actual_rerun,output_device,count * 2u);
 	if (SparkGemma4ValCuda(error,"kv_sliding") != 0)
 		return(1);
-	SparkGemma4ValMirrorDecode(&kv,query,window,window_count,query_heads,expected);
+	SparkGemma4ValMirrorDecode(&kv,query,window,window_count,query_heads,expected,SPARK_GEMMA4_VAL_ROWS);
 	if (memcmp(actual,actual_rerun,count * 2u) != 0)
 		return(SparkGemma4ValFail("kv_sliding_determinism","rerun_bit_exact"));
 	actual_f = (float *)malloc(count * sizeof(float));
@@ -1165,7 +1173,7 @@ static int SparkGemma4ValCheckKvSliding(void)
 	if (error == cudaSuccess) error = SparkGemma4ValCopyDown(actual,output_device,count * 2u);
 	if (SparkGemma4ValCuda(error,"kv_sliding_g2") != 0)
 		return(1);
-	SparkGemma4ValMirrorDecode(&kv,query,window,window_count,query_heads,expected);
+	SparkGemma4ValMirrorDecode(&kv,query,window,window_count,query_heads,expected,SPARK_GEMMA4_VAL_ROWS);
 	actual_f = (float *)malloc(count * sizeof(float));
 	expected_f = (float *)malloc(count * sizeof(float));
 	if (actual_f == 0 || expected_f == 0)
@@ -1274,7 +1282,7 @@ static int SparkGemma4ValCheckKvFull(void)
 		memcpy(kv.key_host + target,k_rope + source,(uint64_t)kv_heads * dimension * 2u);
 		memcpy(kv.value_host + target,v_norm + source,(uint64_t)kv_heads * dimension * 2u);
 	}
-	SparkGemma4ValMirrorDecode(&kv,query,kv.positions_host,context,query_heads,expected);
+	SparkGemma4ValMirrorDecode(&kv,query,kv.positions_host,context,query_heads,expected,SPARK_GEMMA4_VAL_ROWS);
 	for (element = 0u; element < row_count; element++)
 		if (k_rope[element] != kraw[element])
 			changed++;
@@ -1674,7 +1682,7 @@ static void SparkGemma4ValChainMirror(SparkGemma4ValChain *chain, SparkGemma4Val
 	start = chain->context[0] - selected;
 	for (element = 0u; element < SPARK_GEMMA4_VAL_WINDOW; element++)
 		window[element] = element < selected ? start + element : 0xffffffffu;
-	SparkGemma4ValMirrorDecode(kv,chain->mirror_query,window,SPARK_GEMMA4_VAL_WINDOW,chain->query_out / chain->head_dimension,chain->expected_dec);
+	SparkGemma4ValMirrorDecode(kv,chain->mirror_query,window,SPARK_GEMMA4_VAL_WINDOW,chain->query_out / chain->head_dimension,chain->expected_dec,SPARK_GEMMA4_VAL_CHAIN_ROWS);
 	SparkGemma4ValMirrorLinear(chain->output_weight,chain->expected_dec,attended,rows,chain->query_out,chain->hidden);
 	for (row = 0u; row < rows; row++)
 		for (element = 0u; element < chain->hidden; element++)
@@ -1795,6 +1803,15 @@ static int SparkGemma4ValCheckChainSliding(void)
 	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.positions_device,chain.positions,sizeof(chain.positions));
 	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.query_norm_device,chain.query_norm,(uint64_t)chain.head_dimension * 2u);
 	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.key_norm_device,chain.key_norm,(uint64_t)chain.head_dimension * 2u);
+	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.query_weight_device,chain.query_weight,(uint64_t)chain.query_out * chain.hidden * 2u);
+	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.kv_weight_device,chain.kv_weight,(uint64_t)chain.kv_out * chain.hidden * 2u);
+	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.output_weight_device,chain.output_weight,(uint64_t)chain.hidden * chain.query_out * 2u);
+	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.gate_up_weight_device,chain.gate_up_weight,(uint64_t)chain.intermediate * 2u * chain.hidden * 2u);
+	if (error == cudaSuccess) error = SparkGemma4ValCopyUp(chain.down_weight_device,chain.down_weight,(uint64_t)chain.hidden * chain.intermediate * 2u);
+	/* the five weight payloads above were previously never uploaded: the
+	   device GEMMs read uninitialized device memory while the host mirror
+	   used the filled weights (chain_sliding_attention_dataflow relative_l2
+	   ~0.99). */
 	if (error == cudaSuccess) error = SparkGemma4ValSync();
 	if (SparkGemma4ValCuda(error,"chain_sliding") != 0)
 		return(1);
