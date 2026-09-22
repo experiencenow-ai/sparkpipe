@@ -401,6 +401,9 @@ SparkStatus SparkTpDeviceCollectiveChainRetire(
 SparkStatus SparkTpDeviceCollectiveChainKey(
     SparkTpDeviceCollective *collective,
     uint64_t request_id);
+SparkStatus SparkTpDeviceCollectiveEndChain(
+    SparkTpDeviceCollective *collective,
+    void *cuda_stream);
 
 uint64_t SparkTpDeviceCollectiveRoundIndex(
     SparkTpDeviceCollective *collective);

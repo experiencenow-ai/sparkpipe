@@ -50,6 +50,27 @@ uint32_t SparkWeightdClientAlive(const SparkWeightdClient *client)
 	return((uint32_t)mock_client_alive);
 }
 
+SparkStatus SparkWeightdClientMeshActivity(SparkWeightdClient *client,
+    uint64_t generation,uint32_t active,uint64_t timeout_nanoseconds)
+{
+    uint64_t *state = (uint64_t *)client;
+    (void)timeout_nanoseconds;
+    if ( active != 0u )
+    {
+        if ( state[1] != 0u || generation <= state[0] )
+            return SPARK_STATUS_INVALID_ARGUMENT;
+        state[0] = generation;
+        state[1] = 1u;
+    }
+    else
+    {
+        if ( state[1] == 0u || generation != state[0] )
+            return SPARK_STATUS_INVALID_ARGUMENT;
+        state[1] = 0u;
+    }
+    return SPARK_STATUS_OK;
+}
+
 SparkStatus SparkWeightdClientMeshBroadcast(SparkWeightdClient *client, uint32_t peer_mask, uint64_t source_offset, uint64_t remote_offset, uint32_t length, uint64_t seq_value, uint64_t seq_remote_offset, uint64_t timeout_nanoseconds)
 {
 	(void)client; (void)peer_mask; (void)source_offset; (void)remote_offset;

@@ -13,6 +13,7 @@
 #define SPARK_TP_CUDA_MEMCPY_HOST_TO_HOST 0
 #define SPARK_TP_CUDA_MEMCPY_HOST_TO_DEVICE 1
 #define SPARK_TP_CUDA_MEMCPY_DEVICE_TO_HOST 2
+#define SPARK_TP_CUDA_ERROR_NOT_READY 600
 extern int cudaGetLastError(void);
 extern const char *cudaGetErrorString(int error);
 extern int cudaMemsetAsync(void *destination,int value,size_t bytes,
@@ -29,6 +30,7 @@ extern int cudaMemcpy(void *destination,const void *source,
 extern int cudaMalloc(void **address,size_t bytes);
 extern int cudaHostAlloc(void **address,size_t bytes,unsigned int flags);
 extern int cudaStreamSynchronize(void *stream);
+extern int cudaStreamQuery(void *stream);
 extern int SparkGlm5NextLaunchMeshCopyDown(void *stream,
     volatile void *destination,const void *source,uint64_t bytes,
     const volatile void *shipped,void *round_control,
@@ -96,6 +98,10 @@ typedef struct SparkTpDeviceCollectiveCompletionNode
 typedef struct SparkTpDeviceCollectiveImplementation
 {
     SparkWeightdClient *client;
+    uint64_t mesh_activity_generation;
+    uint32_t mesh_activity_active;
+    uint32_t active_stream_valid;
+    void *active_stream;
     uint8_t *mesh_buffer;
     uint64_t band_base;
     uint64_t slot_bytes;
@@ -461,6 +467,85 @@ SparkStatus SparkTpDeviceCollectiveChainRetire(
 static SparkStatus SparkTpDeviceCollectiveEnsureCells(
     SparkTpDeviceCollectiveImplementation *implementation);
 
+static SparkStatus SparkTpDeviceCollectiveStreamTerminal(void *stream)
+{
+    int result;
+    result = cudaStreamQuery(stream);
+    if ( result == SPARK_TP_CUDA_ERROR_NOT_READY )
+        return SPARK_STATUS_BUSY;
+    return result == 0 ? SPARK_STATUS_OK : SPARK_STATUS_IO_ERROR;
+}
+
+static SparkStatus SparkTpDeviceCollectiveBeginActivity(
+    SparkTpDeviceCollectiveImplementation *implementation)
+{
+    SparkStatus status;
+    if ( implementation->mesh_activity_active != 0u )
+        return SPARK_STATUS_OK;
+    if ( implementation->mesh_activity_generation == UINT64_MAX )
+        return SPARK_STATUS_CAPACITY_EXCEEDED;
+    status = SparkWeightdClientMeshActivity(implementation->client,
+        ++implementation->mesh_activity_generation,1u,
+        implementation->round_timeout_ns);
+    if ( status == SPARK_STATUS_OK )
+        implementation->mesh_activity_active = 1u;
+    return status;
+}
+
+static SparkStatus SparkTpDeviceCollectiveUseStream(
+    SparkTpDeviceCollectiveImplementation *implementation,void *stream)
+{
+    SparkStatus status;
+    if ( implementation->active_stream_valid != 0u && implementation->active_stream != stream )
+    {
+        status = SparkTpDeviceCollectiveStreamTerminal(implementation->active_stream);
+        if ( status != SPARK_STATUS_OK )
+            return status;
+    }
+    status = SparkTpDeviceCollectiveBeginActivity(implementation);
+    if ( status == SPARK_STATUS_OK )
+    {
+        implementation->active_stream = stream;
+        implementation->active_stream_valid = 1u;
+    }
+    return status;
+}
+
+static SparkStatus SparkTpDeviceCollectiveEndActivity(
+    SparkTpDeviceCollectiveImplementation *implementation)
+{
+    SparkStatus status;
+    if ( implementation->mesh_activity_active == 0u )
+        return SPARK_STATUS_OK;
+    status = SparkWeightdClientMeshActivity(implementation->client,
+        implementation->mesh_activity_generation,0u,implementation->round_timeout_ns);
+    if ( status == SPARK_STATUS_OK )
+    {
+        implementation->mesh_activity_active = 0u;
+        implementation->active_stream = 0;
+        implementation->active_stream_valid = 0u;
+    }
+    return status;
+}
+
+SparkStatus SparkTpDeviceCollectiveEndChain(
+    SparkTpDeviceCollective *collective,void *stream)
+{
+    SparkTpDeviceCollectiveImplementation *implementation;
+    SparkStatus status;
+    if ( collective == 0 || collective->implementation == 0 )
+        return SPARK_STATUS_INVALID_ARGUMENT;
+    implementation = collective->implementation;
+    if ( implementation->mesh_activity_active == 0u )
+        return SPARK_STATUS_OK;
+    if ( implementation->active_stream_valid != 0u && implementation->active_stream != stream )
+        return SPARK_STATUS_INVALID_ARGUMENT;
+    status = SparkTpDeviceCollectiveStreamTerminal(stream);
+    if ( status != SPARK_STATUS_OK )
+        return status;
+    return SparkTpDeviceCollectiveEndActivity(implementation);
+}
+
 SparkStatus SparkTpDeviceCollectiveChainKey(
     SparkTpDeviceCollective *collective,uint64_t request_id)
 {
@@ -475,6 +560,14 @@ SparkStatus SparkTpDeviceCollectiveChainKey(
     if ( implementation->mesh_buffer == 0 ||
          implementation->capture_armed != 0u )
         SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
+    {
+        SparkStatus status = implementation->active_stream_valid != 0u ?
+            SparkTpDeviceCollectiveStreamTerminal(implementation->active_stream) : SPARK_STATUS_OK;
+        if ( status == SPARK_STATUS_OK )
+            status = SparkTpDeviceCollectiveBeginActivity(implementation);
+        if ( status != SPARK_STATUS_OK )
+            return status;
+    }
     band_index = (uint32_t)(implementation->band_base /
         (SPARK_WEIGHTD_MESH_SLOT_BYTES *
          SPARK_WEIGHTD_MESH_SLOTS_PER_BAND));
@@ -744,6 +837,11 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
                 SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_GATHER &&
             implementation->combine_gather_bf16 == 0) )
         return SPARK_STATUS_UNSUPPORTED;
+    {
+        SparkStatus status = SparkTpDeviceCollectiveUseStream(implementation,submission->cuda_stream);
+        if ( status != SPARK_STATUS_OK )
+            return status;
+    }
     if ( implementation->chain_key != 0ull )
     {
         if ( implementation->round_index >=
@@ -1451,6 +1549,9 @@ static SparkStatus SparkTpDeviceCollectiveEnqueueRoundsInternal(
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
     if ( implementation->combine_bf16 == 0 )
         SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
+    status = SparkTpDeviceCollectiveUseStream(implementation,submission->cuda_stream);
+    if ( status != SPARK_STATUS_OK )
+        return status;
     if ( implementation->chain_key == 0ull )
     {
         fprintf(stderr,
@@ -1784,6 +1885,11 @@ SparkStatus SparkTpDeviceCollectiveArmCapture(
     if ( implementation->mesh_buffer == 0 )
         SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
     {
+        SparkStatus status = SparkTpDeviceCollectiveBeginActivity(implementation);
+        if ( status != SPARK_STATUS_OK )
+            return status;
+    }
+    {
         SparkStatus ensure = SparkTpDeviceCollectiveEnsureCells(implementation);
         if ( ensure != SPARK_STATUS_OK )
             return ensure;
@@ -1825,6 +1931,11 @@ SparkStatus SparkTpDeviceCollectiveGraphPreLaunch(
     implementation = collective->implementation;
     if ( implementation->seq_cell == 0 )
         SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
+    {
+        SparkStatus status = SparkTpDeviceCollectiveUseStream(implementation,stream);
+        if ( status != SPARK_STATUS_OK )
+            return status;
+    }
     if ( implementation->arrival_ring != 0 && stream != 0 &&
          cudaMemsetAsync(implementation->arrival_ring,0,
             256u * sizeof(uint64_t),stream) != 0 )
@@ -2113,6 +2224,19 @@ void SparkTpDeviceCollectiveDestroy(SparkTpDeviceCollective *collective)
     if ( collective == 0 || collective->implementation == 0 )
         return;
     implementation = collective->implementation;
+    {
+        SparkStatus status = implementation->active_stream_valid != 0u ?
+            SparkTpDeviceCollectiveStreamTerminal(implementation->active_stream) : SPARK_STATUS_OK;
+        if ( status == SPARK_STATUS_OK )
+            status = SparkTpDeviceCollectiveEndActivity(implementation);
+        if ( status != SPARK_STATUS_OK )
+        {
+            fprintf(stderr,"COLLECTIVE-DESTROY-RETAIN rank=%u status=%d generation=%llu\n",
+                implementation->tp_rank,(int)status,
+                (unsigned long long)implementation->mesh_activity_generation);
+            return;
+        }
+    }
     if ( implementation->completion_thread_live != 0u )
     {
         pthread_mutex_lock(&implementation->completion_lock);

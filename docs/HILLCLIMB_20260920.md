@@ -2530,3 +2530,18 @@ PR's explicit-graph-mode default is live.
   + this state stalls before first completion — the request-level gap
   moved earlier. Next: trace the graph-mode chain start (gate armed?
   experts_warm under graph default? the demand walk inside graph mode).
+
+### Source clarification: the current payload and completion tails are already pushed locally
+
+`SparkWeightdClientAttach` maps the local mesh file descriptor with `MAP_SHARED`
+and replaces `mesh_send_buffer_addr` with that local mapping. GLM passes this
+address to `SparkTpDeviceCollectivePrepareReceiveBf16`; `SparkGlm5NextMeshWaitKernel`
+derives every peer tail from the same local band base plus the peer's slot offset.
+`SparkWeightdMeshPostTransfer` posts `IBV_WR_RDMA_WRITE` for the payload and its
+tail into the receiving peer's corresponding local mesh region. Thus
+`ld.global.cv` polls mapped local host memory through the GPU memory fabric;
+it does not issue an RDMA read verb to another host. Moving readiness into GPU
+memory or replacing the spinning kernel with a stream memory wait is a separate
+optimization requiring a publication and visibility contract. This source trace
+does not invalidate the measured idle SM utilization or identify which stream
+owned the reported abandoned kernels.
