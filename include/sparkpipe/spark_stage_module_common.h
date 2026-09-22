@@ -40,6 +40,7 @@ typedef struct SparkStageModuleCudaWait
     uint64_t completed_generation;
     uint32_t initialized;
     uint32_t waiting;
+    uint32_t terminal_pending;
 } SparkStageModuleCudaWait;
 
 SparkStatus SparkStageModuleCudaWaitInitialize(SparkStageModuleCudaWait *wait,cudaStream_t stream);

@@ -52,6 +52,7 @@ SparkStatus SparkStageModuleCudaWaitInitialize(SparkStageModuleCudaWait *wait,cu
     wait->stream = stream;
     wait->generation = wait->completed_generation = 0u;
     wait->waiting = 0u;
+    wait->terminal_pending = 0u;
     wait->initialized = 1u;
     return(SPARK_STATUS_OK);
 }
@@ -79,7 +80,7 @@ SparkStatus SparkStageModuleCudaWaitFor(SparkStageModuleCudaWait *wait,uint64_t 
         return(SPARK_STATUS_BUSY);
     }
     wait->waiting = 1u;
-    if ( wait->generation == wait->completed_generation )
+    if ( wait->terminal_pending == 0u )
     {
         error = cudaStreamQuery(wait->stream);
         if ( error != cudaErrorNotReady )
@@ -89,12 +90,14 @@ SparkStatus SparkStageModuleCudaWaitFor(SparkStageModuleCudaWait *wait,uint64_t 
             return(error == cudaSuccess ? SPARK_STATUS_OK : SPARK_STATUS_IO_ERROR);
         }
         wait->generation++;
+        wait->terminal_pending = 1u;
         pthread_mutex_unlock(&wait->mutex);
         error = cudaLaunchHostFunc(wait->stream,SparkStageModuleCudaWaitComplete,wait);
         pthread_mutex_lock(&wait->mutex);
         if ( error != cudaSuccess )
         {
             wait->completed_generation = wait->generation;
+            wait->terminal_pending = 0u;
             wait->waiting = 0u;
             pthread_mutex_unlock(&wait->mutex);
             return(SPARK_STATUS_IO_ERROR);
@@ -121,9 +124,39 @@ SparkStatus SparkStageModuleCudaWaitFor(SparkStageModuleCudaWait *wait,uint64_t 
         result = pthread_cond_timedwait(&wait->changed,&wait->mutex,&deadline);
 #endif
     }
-    wait->waiting = 0u;
     if ( wait->generation == wait->completed_generation )
-        result = 0;
+    {
+        pthread_mutex_unlock(&wait->mutex);
+        for (;;)
+        {
+            struct timespec now,pause = {0,50000};
+            error = cudaStreamQuery(wait->stream);
+            if ( error != cudaErrorNotReady ) break;
+            if ( clock_gettime(CLOCK_MONOTONIC,&now) != 0 )
+            {
+                result = EINVAL;
+                break;
+            }
+            if ( now.tv_sec > deadline.tv_sec ||
+                 (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec) )
+            {
+                result = ETIMEDOUT;
+                break;
+            }
+            if ( now.tv_sec == deadline.tv_sec && deadline.tv_nsec - now.tv_nsec < pause.tv_nsec )
+                pause.tv_nsec = deadline.tv_nsec - now.tv_nsec;
+            nanosleep(&pause,0);
+        }
+        pthread_mutex_lock(&wait->mutex);
+        if ( error != cudaErrorNotReady )
+        {
+            wait->terminal_pending = 0u;
+            wait->waiting = 0u;
+            pthread_mutex_unlock(&wait->mutex);
+            return(error == cudaSuccess ? SPARK_STATUS_OK : SPARK_STATUS_IO_ERROR);
+        }
+    }
+    wait->waiting = 0u;
     pthread_mutex_unlock(&wait->mutex);
     return(result == 0 ? SPARK_STATUS_OK : result == ETIMEDOUT ? SPARK_STATUS_BUSY : SPARK_STATUS_INTERNAL_ERROR);
 }
@@ -133,7 +166,7 @@ SparkStatus SparkStageModuleCudaWaitDestroy(SparkStageModuleCudaWait *wait)
     if ( wait == 0 || wait->initialized == 0u )
         return(SPARK_STATUS_INVALID_ARGUMENT);
     pthread_mutex_lock(&wait->mutex);
-    if ( wait->waiting != 0u || wait->generation != wait->completed_generation )
+    if ( wait->waiting != 0u || wait->terminal_pending != 0u || wait->generation != wait->completed_generation )
     {
         pthread_mutex_unlock(&wait->mutex);
         return(SPARK_STATUS_BUSY);

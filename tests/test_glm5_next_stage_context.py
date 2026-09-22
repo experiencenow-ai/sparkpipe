@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the real module configurator without allocating CUDA state."""
 from pathlib import Path
+import argparse
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,7 @@ static uint32_t HOST_MODE,HOST_COUNT,IN_CUDA_CALLBACK,MTP_COMMITS;
 static cudaHostFn_t HOST_FUNCTIONS[16];
 static void *HOST_CONTEXTS[16];
 static pthread_t HOST_THREAD;
+static atomic_int DRAIN_STATUS;
 
 static void *complete_delayed(void *context)
 {
@@ -35,6 +37,8 @@ static void *complete_delayed(void *context)
 	struct timespec pause = {0,20000000};
 	nanosleep(&pause,0);
 	HOST_FUNCTIONS[index](HOST_CONTEXTS[index]);
+	nanosleep(&pause,0);
+	DRAIN_STATUS = cudaSuccess;
 	return(0);
 }
 
@@ -53,12 +57,12 @@ cudaError_t cudaLaunchHostFunc(cudaStream_t stream,cudaHostFn_t function,void *c
 		IN_CUDA_CALLBACK = 1u;
 		function(context);
 		IN_CUDA_CALLBACK = 0u;
+		DRAIN_STATUS = cudaSuccess;
 	}
 	if ( HOST_MODE == 2u )
 		assert(pthread_create(&HOST_THREAD,0,complete_delayed,(void *)(uintptr_t)index) == 0);
 	return(cudaSuccess);
 }
-static cudaError_t DRAIN_STATUS;
 
 cudaError_t cudaGetLastError(void)
 {
@@ -242,6 +246,101 @@ static void observe_completion(void *context,const SparkModelDriverCompletion *c
 		SparkStageModuleIndexSetRelease(state.lane_states,state.resident_sequence_capacity,lanes,2u);
 		SparkStageModuleSlotRelease(state.slot_states,slot);
 	}
+}
+
+static uint64_t EPOCH_WORDS[SPARK_GLM5_NEXT_MODEL_MISS_RING_BYTES / sizeof(uint64_t)];
+const void *SparkWeightdMapEpochDevice(const SparkWeightdMap *map)
+{ (void)map;return(EPOCH_WORDS); }
+static uint32_t GRAPH_LAUNCHES;
+static uint64_t GRAPH_ERROR;
+
+cudaError_t cudaGraphLaunch(cudaGraphExec_t exec,cudaStream_t stream)
+{
+	assert(exec == (cudaGraphExec_t)(uintptr_t)9u && stream == state.execution_stream);
+	GRAPH_LAUNCHES++;
+	EPOCH_WORDS[SPARK_GLM5_NEXT_MODEL_MISS_EPOCH_WORD_U64]++;
+	return(cudaSuccess);
+}
+SparkStatus SparkTpDeviceCollectiveGraphPreLaunch(SparkTpDeviceCollective *collective,void *stream)
+{ (void)collective;(void)stream;return(SPARK_STATUS_OK); }
+SparkStatus SparkTpDeviceCollectiveGraphCancelSeed(SparkTpDeviceCollective *collective,void *stream)
+{ (void)collective;(void)stream;return(SPARK_STATUS_OK); }
+SparkStatus SparkTpDeviceCollectiveDisarmCapture(SparkTpDeviceCollective *collective)
+{ (void)collective;return(SPARK_STATUS_OK); }
+uint64_t SparkTpDeviceCollectiveGraphError(SparkTpDeviceCollective *collective)
+{ (void)collective;return(GRAPH_ERROR); }
+uint64_t SparkTpDeviceCollectiveGraphDiag(SparkTpDeviceCollective *collective)
+{ (void)collective;return(0u); }
+uint64_t SparkTpDeviceCollectiveGraphProgress(SparkTpDeviceCollective *collective,uint64_t *cell)
+{ (void)collective;*cell=0u;return(0u); }
+uint64_t SparkTpDeviceCollectiveGraphStuckDump(SparkTpDeviceCollective *collective)
+{ (void)collective;return(0u); }
+SparkStatus SparkTpDeviceCollectiveGraphArrivalDump(SparkTpDeviceCollective *collective,uint32_t rank)
+{ (void)collective;(void)rank;return(SPARK_STATUS_OK); }
+
+static void check_graph_epoch_ownership(void)
+{
+	SparkGlm5NextTpChain chain = {0};
+	uint32_t position = 7u,token = 3u,output = 123u;
+	SparkStatus status;
+	memset(&state,0,sizeof(state));
+	memset(EPOCH_WORDS,0,sizeof(EPOCH_WORDS));
+	state.execution_stream = (void *)(uintptr_t)7u;
+	state.slots[0].stream = state.execution_stream;
+	state.slots[0].graph_exec_a = (void *)(uintptr_t)9u;
+	state.slots[0].host_output_token_ids = &output;
+	state.decode_miss_host = (uint32_t *)EPOCH_WORDS;
+	EPOCH_WORDS[SPARK_GLM5_NEXT_MODEL_MISS_EPOCH_WORD_U64] = 41u;
+	LEGACY_EPOCH_SETUP
+	assert(SparkStageModuleCudaWaitInitialize(&state.stream_wait,(cudaStream_t)state.execution_stream) == SPARK_STATUS_OK);
+	state.tp_device_collective.operation_timeout_milli = 50u;
+	chain.state = &state;chain.slot = &state.slots[0];
+	chain.wave.host_positions = &position;chain.wave.host_token_ids = &token;
+	GRAPH_LAUNCHES = 0u;GRAPH_ERROR = 0u;DRAIN_STATUS = cudaSuccess;
+	SparkGlm5NextGraphStep(&chain,&status);
+	assert(status == SPARK_STATUS_OK && position == 8u && token == output);
+	assert(GRAPH_LAUNCHES == 1u && EPOCH_WORDS[SPARK_GLM5_NEXT_MODEL_MISS_EPOCH_WORD_U64] == 42u);
+	state.decode_miss_host[0] = 1u;
+	SparkGlm5NextGraphStep(&chain,&status);
+	assert(status == SPARK_STATUS_BUSY && position == 8u);
+	state.decode_miss_host[0] = 0u;GRAPH_ERROR = 7u;
+	SparkGlm5NextGraphStep(&chain,&status);
+	assert(status == SPARK_STATUS_INTERNAL_ERROR && position == 8u);
+	GRAPH_ERROR = 0u;
+	state.lane_client = (SparkWeightdClient *)(uintptr_t)1u;HEALTH_DEAD_MASK = 1u;
+	SparkGlm5NextGraphStep(&chain,&status);
+	assert(status == SPARK_STATUS_IO_ERROR && position == 8u && GRAPH_LAUNCHES == 3u);
+	HEALTH_DEAD_MASK = 0u;
+	assert(SparkStageModuleCudaWaitDestroy(&state.stream_wait) == SPARK_STATUS_OK);
+}
+
+static uint32_t LAZY_OPEN_CALLS,LAZY_OPEN_MODE;
+static SparkWeightdLazyPack OPEN_PACK;
+SparkStatus SparkWeightdAttachRequested(void) { return(SPARK_STATUS_OK); }
+SparkStatus SparkWeightdLazyPackCreateChecked(const char *socket,const SparkWeightdLazyAttachRequest *request,uint64_t budget,uint64_t timeout,SparkWeightdManifestCheck check,void *context,SparkWeightdLazyPack **out)
+{
+	(void)socket;(void)request;(void)budget;(void)timeout;(void)check;(void)context;
+	assert(*out == 0);
+	LAZY_OPEN_CALLS++;
+	*out = LAZY_OPEN_MODE == 1u && LAZY_OPEN_CALLS == 1u ? 0 : &OPEN_PACK;
+	return(LAZY_OPEN_CALLS == 1u ? SPARK_STATUS_IO_ERROR : SPARK_STATUS_OK);
+}
+
+static void check_lazy_open_retained_owner(void)
+{
+	setenv(SPARK_WEIGHTD_ATTACH_ENV_SHA256,"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",1);
+	setenv("SPARK_WEIGHTD_EXPERT_POOL_BYTES","4096",1);
+	unsetenv("SPARK_GLM5_NEXT_PIN_EXPERTS");
+	for (uint32_t mode=0u; mode<2u; mode++)
+	{
+		memset(&state,0,sizeof(state));
+		strcpy(state.model_revision,"test");
+		LAZY_OPEN_CALLS = 0u;LAZY_OPEN_MODE = mode;
+		assert(SparkGlm5NextLazyOpen(&state,"fixture.pack",8192u,0,0u) == (mode == 0u ? SPARK_STATUS_IO_ERROR : SPARK_STATUS_OK));
+		assert(LAZY_OPEN_CALLS == mode + 1u && state.lazy_pack == &OPEN_PACK);
+	}
+	unsetenv(SPARK_WEIGHTD_ATTACH_ENV_SHA256);
+	unsetenv("SPARK_WEIGHTD_EXPERT_POOL_BYTES");
 }
 
 static uint32_t PIN_FIRST_EXPECTED,PIN_LAST_EXPECTED;
@@ -520,6 +619,21 @@ static void check_collective_destroy_order(uint32_t failure)
 	DESTROY_STATE = 0;
 }
 
+static void check_callback_retirement(void)
+{
+	SparkStageModuleCudaWait wait = {0};
+	uint64_t started;
+	assert(SparkStageModuleCudaWaitInitialize(&wait,(cudaStream_t)(uintptr_t)1u) == SPARK_STATUS_OK);
+	DRAIN_STATUS = cudaErrorNotReady;HOST_MODE = 2u;HOST_COUNT = STREAM_QUERY_COUNT = 0u;
+	started = SparkGlm5NextNowNs();
+	assert(SparkStageModuleCudaWaitFor(&wait,UINT64_C(500000000)) == SPARK_STATUS_OK);
+	assert(SparkGlm5NextNowNs() - started >= UINT64_C(30000000));
+	assert(DRAIN_STATUS == cudaSuccess && HOST_COUNT == 1u);
+	assert(pthread_join(HOST_THREAD,0) == 0);
+	assert(SparkStageModuleCudaWaitDestroy(&wait) == SPARK_STATUS_OK);
+	HOST_MODE = 0u;
+}
+
 static void check_stream_receipt(void)
 {
 	SparkStageModuleCudaWait first = {0},second = {0};
@@ -536,6 +650,7 @@ static void check_stream_receipt(void)
 	assert(SparkStageModuleCudaWaitFor(&first,UINT64_C(1000000)) == SPARK_STATUS_OK);
 	assert(first.generation == 1u && first.completed_generation == 1u && HOST_COUNT == 1u);
 	HOST_MODE = 1u;
+	DRAIN_STATUS = cudaErrorNotReady;
 	assert(SparkStageModuleCudaWaitFor(&first,UINT64_C(1000000)) == SPARK_STATUS_BUSY);
 	assert(SparkStageModuleCudaWaitDestroy(&first) == SPARK_STATUS_BUSY);
 	count = STREAM_QUERY_COUNT;
@@ -544,20 +659,28 @@ static void check_stream_receipt(void)
 	assert(SparkStageModuleCudaWaitFor(&second,UINT64_C(1000000)) == SPARK_STATUS_BUSY);
 	HOST_FUNCTIONS[1](HOST_CONTEXTS[1]);
 	assert(first.completed_generation == 2u && second.completed_generation == 0u);
+	assert(SparkStageModuleCudaWaitFor(&first,UINT64_C(1000000)) == SPARK_STATUS_BUSY);
+	assert(HOST_COUNT == 3u && first.generation == 2u);
+	assert(SparkStageModuleCudaWaitDestroy(&first) == SPARK_STATUS_BUSY);
+	DRAIN_STATUS = cudaSuccess;
+	assert(SparkStageModuleCudaWaitFor(&first,UINT64_C(1000000)) == SPARK_STATUS_OK);
 	assert(SparkStageModuleCudaWaitDestroy(&first) == SPARK_STATUS_OK);
 	assert(SparkStageModuleCudaWaitDestroy(&second) == SPARK_STATUS_BUSY);
 	HOST_FUNCTIONS[2](HOST_CONTEXTS[2]);
+	assert(SparkStageModuleCudaWaitFor(&second,UINT64_C(1000000)) == SPARK_STATUS_OK);
 	assert(SparkStageModuleCudaWaitDestroy(&second) == SPARK_STATUS_OK);
 	assert(SparkStageModuleCudaWaitInitialize(&first,(cudaStream_t)(uintptr_t)3u) == SPARK_STATUS_OK);
 	HOST_MODE = 2u;
+	DRAIN_STATUS = cudaErrorNotReady;
 	count = STREAM_QUERY_COUNT;
 	start = SparkGlm5NextNowNs();
 	assert(SparkStageModuleCudaWaitFor(&first,UINT64_C(500000000)) == SPARK_STATUS_OK);
-	assert(SparkGlm5NextNowNs() - start >= UINT64_C(10000000));
+	assert(SparkGlm5NextNowNs() - start >= UINT64_C(30000000));
 	assert(SparkGlm5NextNowNs() - start < UINT64_C(250000000));
 	assert(pthread_join(HOST_THREAD,0) == 0);
-	assert(STREAM_QUERY_COUNT == count + 1u && HOST_COUNT == 4u);
+	assert(STREAM_QUERY_COUNT > count + 1u && HOST_COUNT == 4u);
 	HOST_MODE = 3u;
+	DRAIN_STATUS = cudaErrorNotReady;
 	assert(SparkStageModuleCudaWaitFor(&first,UINT64_C(1000000)) == SPARK_STATUS_IO_ERROR);
 	assert(first.generation == first.completed_generation);
 	DRAIN_STATUS = cudaErrorInvalidValue;
@@ -592,7 +715,7 @@ static void check_chain_ownership(void)
 	HOST_COUNT = STREAM_QUERY_COUNT = 0u;
 	assert(SparkGlm5NextBoundedStreamSync(&state,(void *)(uintptr_t)8u,UINT64_C(500000000)) == -1);
 	assert(SparkGlm5NextBoundedStreamSync(&state,state.execution_stream,UINT64_C(500000000)) == 0);
-	assert(pthread_join(HOST_THREAD,0) == 0 && STREAM_QUERY_COUNT == 1u && HOST_COUNT == 1u);
+	assert(pthread_join(HOST_THREAD,0) == 0 && STREAM_QUERY_COUNT >= 2u && HOST_COUNT == 1u);
 	assert(SparkStageModuleCudaWaitDestroy(&state.stream_wait) == SPARK_STATUS_OK);
 	DRAIN_STATUS = cudaSuccess;
 	HOST_MODE = 0u;
@@ -653,6 +776,10 @@ static int32_t check_cache_transactions(SparkStatus completion_status,SparkStatu
 	state.execution_stream = (void *)(uintptr_t)7u;
 	assert(SparkStageModuleCudaWaitInitialize(&state.stream_wait,(cudaStream_t)state.execution_stream) == SPARK_STATUS_OK);
 	assert(pthread_mutex_init(&state.completion_queue_lock,0) == 0);
+	state.decode_miss_host = (uint32_t *)EPOCH_WORDS;
+	memset(EPOCH_WORDS,0,sizeof(EPOCH_WORDS));
+	EPOCH_WORDS[SPARK_GLM5_NEXT_MODEL_MISS_EPOCH_WORD_U64] = 42u;
+	LEGACY_EPOCH_SETUP
 	state.completions[0].completion.status = completion_status;
 	state.completions[0].completion_function = observe_completion;
 	state.slots[0].host_kv_access_error = errors;
@@ -1505,6 +1632,8 @@ int32_t main(void)
 	SparkFirmwareModuleHostServices services = {0};
 	const char *path = 0;
 	uint32_t first[4] = {0u,12u,23u,34u},counts[4] = {12u,11u,11u,11u},stage;
+	check_graph_epoch_ownership();
+	check_lazy_open_retained_owner();
 	check_graph_expert_ownership(0u,45u,3u,0u,0u);
 	check_graph_expert_ownership(12u,12u,12u,0u,0u);
 	check_graph_expert_ownership(12u,12u,12u,2u,0u);
@@ -1517,6 +1646,7 @@ int32_t main(void)
 	check_mtp_callback_handoff(SPARK_STATUS_OK,1u);
 	check_mtp_callback_handoff(SPARK_STATUS_BUSY,0u);
 	check_mtp_callback_handoff(SPARK_STATUS_BUSY,1u);
+	check_callback_retirement();
 	check_stream_receipt();
 	check_chain_ownership();
 	int32_t status = check_cache_transactions(SPARK_STATUS_IO_ERROR,SPARK_STATUS_OK,cudaSuccess);
@@ -1605,11 +1735,19 @@ int32_t main(void)
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--module-source', type=Path, default=ROOT / 'modules/glm5_next_resident_decode_stage/source/spark_glm5_next_resident_decode_stage_module.c')
+    parser.add_argument('--common-source', type=Path, default=ROOT / 'runtime/stage_module_common.c')
+    parser.add_argument('--sanitize', action='store_true')
+    args = parser.parse_args()
+    module = args.module_source.read_text()
+    legacy = 'state.epoch_device = EPOCH_WORDS; state.epoch_validated = 41u;' if 'epoch_validated;' in module else ''
+    harness = HARNESS.replace('LEGACY_EPOCH_SETUP', legacy).replace('"modules/glm5_next_resident_decode_stage/source/spark_glm5_next_resident_decode_stage_module.c"', '"' + str(args.module_source.resolve()) + '"')
     with tempfile.TemporaryDirectory() as directory:
         emitter = generate_admission(Path(directory), 1, "SparkGlm5NextResidentDecodeStageAdmit")
         Path(directory, "generated_admission.inc").write_text(subprocess.check_output([str(emitter), "module"], text=True))
         source, binary = Path(directory) / "probe.c", Path(directory) / "probe"
-        source.write_text(HARNESS)
+        source.write_text(harness)
         includes = [".", "include", "tests/cuda_stub", "model-families/common/include",
                     "model-families/glm5_next/include", "modules/glm5_next_resident_decode_stage/include",
                     "modules/glm5_next_resident_decode_stage/source"]
@@ -1617,10 +1755,10 @@ def main():
                         "-Wl,-dead_strip" if sys.platform == "darwin" else "-Wl,--gc-sections",
                         *["-I" + p for p in includes], "-DGLM5_NEXT_EXPERT_WEIGHT_CODEC=5",
                         '-DGLM5_NEXT_EXPERT_CODEC_NAME="fp8"', '-DGLM5_NEXT_CONTRACT_SHA256="fixture"',
-                        str(source), "runtime/stage_module_common.c", "cache/kv_cache.c", "cache/kv_page_cache.c",
-                        "-o", str(binary)], cwd=ROOT, check=True)
+                        str(source), str(args.common_source.resolve()), "cache/kv_cache.c", "cache/kv_page_cache.c",
+                        "-o", str(binary), *(["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if args.sanitize else [])], cwd=ROOT, check=True)
         subprocess.run([str(binary)], check=True)
-    print("PASS actual module context, cache transaction ownership, release, physical mapping and unchanged-map upload suppression")
+    print("PASS actual module context/cache ownership, global epoch independence, retained attach ownership and terminal CUDA receipts")
 
 
 if __name__ == "__main__":
