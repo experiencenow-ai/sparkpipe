@@ -72,7 +72,8 @@ include_flags=(
 	-I"${repository_root}/modules/qwen38_27b_resident_decode_stage/source"
 	-I"${repository_root}/modules/minimax_resident_decode_stage/include"
 	-I"${repository_root}/modules/minimax_resident_decode_stage/source"
-	-I"${repository_root}/modules/minimax/include"
+	-I"${repository_root}/model-families/minimax/include"
+	-I"${repository_root}/model-families/minimax/include/sparkpipe"
 )
 object_flags=(
 	-std=c++17
