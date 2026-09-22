@@ -61,7 +61,7 @@ with open(sys.argv[1], 'rb') as fh:
 print(h[17])
 PY
 )"
-SIZE_FILE="$(stat -c %s "$NEW")"
+SIZE_FILE="$(stat -Lc %s "$NEW")"
 [ "$SIZE_HEADER" = "$SIZE_FILE" ] || { echo "size mismatch: header $SIZE_HEADER file $SIZE_FILE" >&2; exit 4; }
 printf '%s  %s\n' "$SHA" "$NEW" > "$NEW.sha256"
 
