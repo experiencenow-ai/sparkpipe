@@ -41,6 +41,12 @@ here=$(cd -- "$(dirname -- "$0")" && pwd)
 staged=$(python3 "${here}/qwen38_27b_lane_deployment.py")
 runtime_root=$(printf '%s' "${staged}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["runtime_root"])')
 
+if [ ! -S "${QWEN38_27B_LANE_SHARED_SOCKET}" ]; then
+    echo "qwen38_27b lane: shared weightd socket is not present: ${QWEN38_27B_LANE_SHARED_SOCKET} (operator-level; do not start daemons by hand)" >&2
+    exit 2
+fi
+
+export SPARK_WEIGHTD_ATTACH=1
 export SPARK_WEIGHTD_SOCKET="${QWEN38_27B_LANE_SHARED_SOCKET}"
 export SPARK_WEIGHTD_LANE="${QWEN38_27B_LANE_WEIGHTD_LANE:-1}"
 export SPARK_TP_MESH_RANKS="${QWEN38_27B_LANE_MESH_RANKS:-0,1,2,3}"

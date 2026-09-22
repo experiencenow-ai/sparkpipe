@@ -366,6 +366,7 @@ PYTHON_TESTS := \
 	tests/test_multi_dev_orchestrate.py \
 	tests/test_inference_smoke.py \
 	tests/test_qwen38_27b_lane_deployment.py \
+	tests/test_qwen38_27b_experts_manifest.py \
 	tests/test_hy4_model_header.py \
 	tests/test_qwen4_flash_model_header.py \
 	tests/test_gemma4_model_header.py \
@@ -1327,6 +1328,8 @@ build/glm5_next_experts_manifest: tools/glm5_next_experts_manifest.c runtime/spa
 
 build/dsv4_pro_experts_manifest: tools/dsv4_pro_experts_manifest.c runtime/spark_weightd_manifest.c include/sparkpipe/spark_weightd_manifest.h $(CORE_LIBRARY) | build
 	$(CC) $(CORE_INCLUDE_FLAGS) $(CFLAGS) tools/dsv4_pro_experts_manifest.c runtime/spark_weightd_manifest.c $(CORE_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@
+build/qwen38_27b_experts_manifest: tools/qwen38_27b_experts_manifest.c runtime/spark_weightd_manifest.c include/sparkpipe/spark_weightd_manifest.h $(CORE_LIBRARY) | build
+	$(CC) $(CORE_INCLUDE_FLAGS) -Imodel-families/qwen38_27b/include -Imodules/qwen38_27b_resident_decode_stage/include $(CFLAGS) tools/qwen38_27b_experts_manifest.c runtime/spark_weightd_manifest.c $(CORE_LIBRARY) $(LDFLAGS) $(LDLIBS) -o $@
 
 build/weightd_lazy_consumer: tools/weightd_lazy_consumer.c $(RUNTIME_LIBRARY) $(CORE_LIBRARY) $(SPARKPIPE_HOST_CUDA_STUB_SOURCE) | build
 	$(CC) $(MODEL_COMMON_INCLUDE_FLAGS) $(CFLAGS) $^ $(LDFLAGS) $(LDLIBS) $(SPARKPIPE_CUDA_RUNTIME_LINK) $(SPARKPIPE_CUDA_DRIVER_LINK) -o $@
