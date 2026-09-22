@@ -72,10 +72,30 @@ SparkStatus SparkTpDeviceCollectiveChainRetire(SparkTpDeviceCollective *collecti
 static uint32_t REAL_BACKEND;
 static int32_t ALLOCATIONS_BEFORE_FAILURE = -1;
 
+static uint32_t HEALTH_DEAD_MASK,HEALTH_CALLS;
 uint32_t SparkWeightdClientAlive(const SparkWeightdClient *client)
 {
-    (void)client;
-    return(1u);
+	HEALTH_CALLS++;
+	return((HEALTH_DEAD_MASK & (uint32_t)(uintptr_t)client) == 0u);
+}
+
+static void check_weightd_health(void)
+{
+	SparkWeightdLazyPack pack = {0};
+	for (uint32_t mask=1u; mask<4u; mask++)
+	{
+		memset(&state,0,sizeof(state));
+		pack.client = (SparkWeightdClient *)(uintptr_t)2u;
+		state.lane_client = (SparkWeightdClient *)(uintptr_t)1u;
+		state.lazy_pack = &pack;
+		HEALTH_DEAD_MASK = mask;
+		HEALTH_CALLS = 0u;
+		assert(SparkGlm5NextWeightdHealth(&state) == SPARK_STATUS_IO_ERROR);
+		assert(HEALTH_CALLS == 2u);
+		HEALTH_DEAD_MASK = 0u;
+		assert(SparkGlm5NextWeightdHealth(&state) == SPARK_STATUS_IO_ERROR);
+		assert(HEALTH_CALLS == 2u);
+	}
 }
 
 void SparkTpDeviceCollectiveBroadcastCancel(SparkTpDeviceCollective *collective)
@@ -1363,6 +1383,7 @@ int32_t main(void)
 	check_graph_expert_ownership(12u,12u,12u,0u,0u);
 	check_graph_expert_ownership(12u,12u,12u,2u,0u);
 	check_graph_expert_ownership(12u,12u,12u,0u,2u);
+	check_weightd_health();
 	check_mtp_callback_handoff(SPARK_STATUS_OK,0u);
 	check_mtp_callback_handoff(SPARK_STATUS_OK,1u);
 	check_mtp_callback_handoff(SPARK_STATUS_BUSY,0u);

@@ -1480,15 +1480,15 @@ static SparkStatus SparkGlm5NextAllocateCaches(SparkGlm5NextModuleState *state)
 }
 
 static SparkStatus SparkGlm5NextTerminalFailure(
-	SparkGlm5NextModuleState *state,SparkStatus status)
+	SparkGlm5NextModuleState *state,SparkStatus status,const char *source)
 {
 	uint32_t expected = SPARK_STATUS_OK;
 	if ( status == SPARK_STATUS_OK )
 		return(SPARK_STATUS_OK);
 	if ( atomic_compare_exchange_strong_explicit(&state->terminal_status,
 	        &expected,(uint32_t)status,memory_order_acq_rel,memory_order_acquire) )
-		fprintf(stderr,"GLM engine terminal status=%u; full engine restart required\n",
-		    (unsigned)status);
+		fprintf(stderr,"GLM engine terminal status=%u source=%s; full engine restart required\n",
+		    (unsigned)status,source);
 	return((SparkStatus)atomic_load_explicit(&state->terminal_status,memory_order_acquire));
 }
 
@@ -1496,12 +1496,15 @@ static SparkStatus SparkGlm5NextWeightdHealth(SparkGlm5NextModuleState *state)
 {
 	SparkStatus status = (SparkStatus)atomic_load_explicit(
 		&state->terminal_status,memory_order_acquire);
+	uint32_t lane_dead,lazy_dead;
 	if ( status != SPARK_STATUS_OK )
 		return(status);
-	if ( (state->lane_client != 0 && SparkWeightdClientAlive(state->lane_client) == 0u) ||
-	     (state->lazy_pack != 0 && state->lazy_pack->client != 0 &&
-	      SparkWeightdClientAlive(state->lazy_pack->client) == 0u) )
-		return(SparkGlm5NextTerminalFailure(state,SPARK_STATUS_IO_ERROR));
+	lane_dead = state->lane_client != 0 && SparkWeightdClientAlive(state->lane_client) == 0u;
+	lazy_dead = state->lazy_pack != 0 && state->lazy_pack->client != 0 &&
+		SparkWeightdClientAlive(state->lazy_pack->client) == 0u;
+	if ( lane_dead != 0u || lazy_dead != 0u )
+		return(SparkGlm5NextTerminalFailure(state,SPARK_STATUS_IO_ERROR,
+			lane_dead != 0u ? (lazy_dead != 0u ? "weightd-lane-and-lazy" : "weightd-lane") : "weightd-lazy"));
 	return(SPARK_STATUS_OK);
 }
 
@@ -3442,7 +3445,7 @@ static void SparkGlm5NextTpChainAdvance(void *chain_context,SparkStatus status)
 				SparkGlm5NextFinishChain(chain);
 				return;
 			}
-			SparkGlm5NextTerminalFailure(state,graph_status);
+			SparkGlm5NextTerminalFailure(state,graph_status,"graph-execution");
 			fprintf(stderr,"GRAPH-PATH-FAILED status=%d; engine restart required\n",
 				(int32_t)graph_status);
 			SparkGlm5NextTpChainFail(chain,graph_status);
@@ -3852,7 +3855,7 @@ static SparkStatus SparkGlm5NextCompletionStatus(
 		if ( slot->host_output_token_ids[output] >=
 		        SPARK_GLM5_NEXT_MODEL_OUTPUT_VOCAB_COUNT )
 			return(SparkGlm5NextTerminalFailure(async->state,
-			    SPARK_STATUS_VALIDATION_FAILED));
+			    SPARK_STATUS_VALIDATION_FAILED,"output-token-range"));
 	return(SPARK_STATUS_OK);
 }
 
@@ -3881,7 +3884,7 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 	}
 	if ( SparkGlm5NextBoundedStreamSync(state,state->execution_stream,UINT64_C(35000000000)) != 0 )
 	{
-		(void)SparkGlm5NextTerminalFailure(state,SPARK_STATUS_IO_ERROR);
+		(void)SparkGlm5NextTerminalFailure(state,SPARK_STATUS_IO_ERROR,"completion-drain");
 		fprintf(stderr,"GLM completion drain failed; retaining slot %u and chain ownership\n",async->slot_index);
 		return;
 	}
@@ -3900,7 +3903,7 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 			end_status = SparkTpDeviceCollectiveEndChain(&state->tp_device_collective_hc,state->execution_stream);
 		if ( end_status != SPARK_STATUS_OK )
 		{
-			(void)SparkGlm5NextTerminalFailure(state,end_status);
+			(void)SparkGlm5NextTerminalFailure(state,end_status,"collective-end");
 			fprintf(stderr,"GLM chain end failed: slot %u status %d; retaining ownership\n",async->slot_index,(int)end_status);
 			return;
 		}
@@ -3982,7 +3985,7 @@ static void SparkGlm5NextParkCompletionLocked(
 			state->overflow_parked_count++;
 			return;
 		}
-	(void)SparkGlm5NextTerminalFailure(state,SPARK_STATUS_CAPACITY_EXCEEDED);
+	(void)SparkGlm5NextTerminalFailure(state,SPARK_STATUS_CAPACITY_EXCEEDED,"completion-work-capacity");
 	fprintf(stderr,"GLM callback work pool exhausted; retaining occupied slots\n");
 }
 
@@ -4138,7 +4141,7 @@ static SparkStatus SparkGlm5NextClaimTpChain(SparkGlm5NextModuleState *state)
 	if ( error == cudaSuccess )
 		return(SPARK_STATUS_OK);
 	atomic_store_explicit(&state->tp_chain_active,0u,memory_order_release);
-	return(error == cudaErrorNotReady ? SPARK_STATUS_BUSY : SparkGlm5NextTerminalFailure(state,SPARK_STATUS_IO_ERROR));
+	return(error == cudaErrorNotReady ? SPARK_STATUS_BUSY : SparkGlm5NextTerminalFailure(state,SPARK_STATUS_IO_ERROR,"chain-rearm"));
 }
 
 static SparkStatus SparkGlm5NextStartClaimedBatch(SparkGlm5NextModuleState *state,SparkModelDriverFrame *frame,const SparkGlm5NextResidentDecodeStageFrameContext *context,uint32_t slot_index)
