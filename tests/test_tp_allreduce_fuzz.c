@@ -1599,10 +1599,14 @@ static void FuzzMandatoryFaults(void)
     FuzzNumerics(1300000u,1400000u,1u);
 }
 
+static void FuzzLegacyCallbacks(uint32_t enabled);
+
 static void FuzzTreeCases(void)
 {
     uint32_t run[FUZZ_MAX_RANKS], peers[FUZZ_MAX_RANKS];
     uint32_t count = FuzzAllRanks(run),rank,n = 0u;
+    FuzzCase("tree-native-operations-without-legacy-callbacks");
+    FuzzLegacyCallbacks(0u);
     g_logical_rows = 3u;
     FuzzNumerics(1600000u,1700000u,3u);
     g_rows = 1u;
@@ -1651,6 +1655,7 @@ static void FuzzTreeCases(void)
         CHECK(g_tasks[rank].status == SPARK_STATUS_OK,"recovered tree succeeds");
         CHECK(FuzzSumOk(rank,3u),"recovered tree contains fresh values");
     }
+    FuzzLegacyCallbacks(1u);
     g_logical_rows = 1u;
 }
 
@@ -2026,6 +2031,17 @@ static int FuzzCudaHostAlloc(void **pointer,size_t bytes,unsigned int flags)
 #undef cudaMemsetAsync
 #undef cudaMemcpy
 #undef cudaHostAlloc
+
+static void FuzzLegacyCallbacks(uint32_t enabled)
+{
+    for (uint32_t rank = 0u; rank < g_rank_count; rank++)
+    {
+        SparkTpDeviceCollectiveImplementation *implementation = g_ranks[rank].collective.implementation;
+        implementation->combine_bf16 = enabled != 0u ? FuzzCombineBf16 : 0;
+        implementation->combine_u64_max = enabled != 0u ? FuzzCombineU64 : 0;
+        implementation->combine_gather_bf16 = enabled != 0u ? FuzzGather : 0;
+    }
+}
 
 static void FuzzLaneNamespace(void)
 {

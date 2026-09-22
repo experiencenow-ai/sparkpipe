@@ -964,8 +964,10 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
     if ( submission->logical_sequence_count == 1u &&
          bytes + 16u > implementation->slot_bytes )
         return SPARK_STATUS_CAPACITY_EXCEEDED;
-    if ( implementation->mesh_buffer == 0 ||
-         (operation_kind ==
+    if ( implementation->mesh_buffer == 0 )
+        return SPARK_STATUS_UNSUPPORTED;
+    if ( implementation->hardware_wait == 0u && submission->logical_sequence_count == 1u &&
+         ((operation_kind ==
                 SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_REDUCE_SUM_BF16 &&
             implementation->combine_bf16 == 0) ||
          (operation_kind ==
@@ -973,7 +975,7 @@ static SparkStatus SparkTpDeviceCollectiveRunRound(
             implementation->combine_u64_max == 0) ||
          (operation_kind ==
                 SPARK_TP_DEVICE_COLLECTIVE_OPERATION_ALL_GATHER &&
-            implementation->combine_gather_bf16 == 0) )
+            implementation->combine_gather_bf16 == 0)) )
         return SPARK_STATUS_UNSUPPORTED;
     {
         SparkStatus status = SparkTpDeviceCollectiveUseStream(implementation,submission->cuda_stream);
@@ -1765,7 +1767,8 @@ static SparkStatus SparkTpDeviceCollectiveEnqueueRoundsInternal(
         SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
     if ( submission->completion_function == 0 )
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
-    if ( implementation->combine_bf16 == 0 )
+    if ( implementation->hardware_wait == 0u && submission->logical_sequence_count == 1u &&
+         implementation->combine_bf16 == 0 )
         SPARK_FAIL(SPARK_STATUS_UNSUPPORTED);
     status = SparkTpDeviceCollectiveUseStream(implementation,submission->cuda_stream);
     if ( status != SPARK_STATUS_OK )

@@ -269,7 +269,9 @@ static void TestHardwareDispatch(SparkTpDeviceCollectiveConfig config,void *mesh
     uint32_t old_publish = cuda_stub_mesh_publish_calls;
     SparkWeightdMeshWaitRequest *request = (SparkWeightdMeshWaitRequest *)
         ((uint8_t *)mesh + SPARK_WEIGHTD_MESH_WAIT_ENTRY(0u,0u));
-    config.combine_gather_bf16_function = TestCombineFusedBf16;
+    config.combine_bf16_function = 0;
+    config.combine_u64_max_function = 0;
+    config.combine_gather_bf16_function = 0;
     setenv("SPARK_TP_WAIT_MODE","automatic",1);
     CHECK(SparkTpDeviceCollectiveCreate(&config,&collective) == SPARK_STATUS_INVALID_ARGUMENT,
         "unknown wait mode fails instead of silently selecting spin");
@@ -326,10 +328,25 @@ static void TestHardwareDispatch(SparkTpDeviceCollectiveConfig config,void *mesh
         "hardware capture never dispatches spinning publish or wait path");
     CHECK(SparkTpDeviceCollectiveDisarmCapture(&collective) == SPARK_STATUS_OK,"hardware disarm capture");
     cuda_stub_mesh_hardware_launch_result = cudaErrorUnknown;
-    submission.logical_sequence_count = 1u;
-    CHECK(SparkTpDeviceCollectiveEnqueue(&collective,&submission,1u) == SPARK_STATUS_IO_ERROR,
-        "eager hardware launch failure is returned without fallback");
+    for (logical = 1u; logical <= 2u; logical++)
+    {
+        submission.logical_sequence_count = logical;
+        for (operation = 0u; operation < 3u; operation++)
+        {
+            uint32_t calls = cuda_stub_mesh_hardware_calls;
+            CHECK(SparkTpDeviceCollectiveEnqueue(&collective,&submission,operation) == SPARK_STATUS_IO_ERROR &&
+                cuda_stub_mesh_hardware_calls == calls + 1u &&
+                cuda_stub_mesh_hardware_operation == operation,
+                "eager native operation reaches hardware and propagates launch error without legacy callbacks");
+        }
+        uint32_t calls = cuda_stub_mesh_hardware_calls;
+        CHECK(SparkTpDeviceCollectiveEnqueueRounds(&collective,&submission,3u) == SPARK_STATUS_IO_ERROR &&
+            cuda_stub_mesh_hardware_calls == calls + 1u,
+            "native round loop reaches hardware without a legacy BF16 callback");
+    }
     CHECK(cuda_stub_mesh_publish_calls == old_publish,"failed hardware launch never selects spin path");
+    CHECK(cuda_stub_mesh_hardware_control != 0,"native dispatch provides a control record");
+    if (cuda_stub_mesh_hardware_control != 0)
     {
         SparkTpMeshRoundControl *control = cuda_stub_mesh_hardware_control;
         SparkTpDeviceCollectiveHardwareTiming timing = {0};
@@ -359,6 +376,19 @@ static void TestHardwareDispatch(SparkTpDeviceCollectiveConfig config,void *mesh
     CHECK(collective.implementation == 0,"hardware mapping owner destroys after terminal stream");
     cuda_stub_mesh_hardware_alias = 0;
     unsetenv("SPARK_TP_WAIT_MODE");
+    CHECK(SparkTpDeviceCollectiveCreate(&config,&collective) == SPARK_STATUS_OK &&
+        SparkTpDeviceCollectivePrepareReceiveBf16(&collective,mesh,2u,64u,0u,0) == SPARK_STATUS_OK,
+        "legacy route fixture has no registered callbacks");
+    submission.logical_sequence_count = 1u;
+    for (operation = 0u; operation < 3u; operation++)
+        CHECK(SparkTpDeviceCollectiveEnqueue(&collective,&submission,operation) == SPARK_STATUS_UNSUPPORTED &&
+            SparkTpDeviceCollectiveRoundIndex(&collective) == 0u,
+            "legacy B1 still rejects its missing operation callback before consuming a round");
+    CHECK(SparkTpDeviceCollectiveEnqueueRounds(&collective,&submission,3u) == SPARK_STATUS_UNSUPPORTED,
+        "legacy B1 round loop retains its missing callback rejection");
+    CHECK(cuda_stub_mesh_publish_calls == old_publish,
+        "missing legacy callbacks never publish data");
+    SparkTpDeviceCollectiveDestroy(&collective);
 }
 
 static void TestSharedLanes(SparkTpDeviceCollectiveConfig config,void *mesh)
