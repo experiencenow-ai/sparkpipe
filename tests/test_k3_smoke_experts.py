@@ -35,6 +35,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import k3_smoke_experts as producer  # noqa: E402
 
 MANIFEST = ROOT / "model-families/k3/smoke_experts.json"
+WSET = ROOT / "model-families/k3/smoke-k3-v1.wset"
 FIXTURE_DIR = ROOT / "qualification/t1_reference/k3"
 DEFINES = ROOT / "model-families/k3/include/sparkpipe/spark_k3_llm_defines.h"
 GIB = 2 ** 30
@@ -195,11 +196,47 @@ def synthetic_gates(failures):
         pass
 
 
+def wset_gates(document, failures):
+    """The binary working set IS the manifest preload list; the rank-local
+    subsets stay inside each PP stage's layers so weightd_warm's manifest
+    validation cannot fail closed on a foreign-layer key."""
+    if not WSET.is_file():
+        failures.append("committed wset missing (run --emit-wset)")
+        return
+    data = WSET.read_bytes()
+    check(len(data) > 0 and len(data) % 8 == 0, failures,
+          "wset must be complete key pairs")
+    pairs = [struct.unpack_from("<II", data, index)
+             for index in range(0, len(data), 8)]
+    expected = [(entry["layer"], entry["expert"])
+                for entry in document["experts"]]
+    check(sorted(pairs) == sorted(expected), failures,
+          "wset pairs must equal the manifest experts exactly")
+    check(len(set(pairs)) == len(pairs), failures, "wset must be deduplicated")
+    check(producer.wset_bytes(pairs) == data, failures,
+          "wset bytes must be the producer's canonical encoding")
+    check(producer.WSET_NAME == "smoke-k3-v1.wset", failures,
+          "wset artifact name drifted")
+    stage_table = {0: (0, 23), 1: (24, 46), 2: (47, 69), 3: (70, 92)}
+    check(producer.STAGE_LAYERS == tuple(stage_table.values()), failures,
+          "stage layer table must match the PP4 runner table "
+          "{0,24,47,70} x {24,23,23,23}")
+    subsets = [producer.stage_pairs(pairs, stage) for stage in range(4)]
+    check(sum(len(subset) for subset in subsets) == len(pairs), failures,
+          "per-stage subsets must partition the working set")
+    for stage, subset in enumerate(subsets):
+        first, last = stage_table[stage]
+        check(all(first <= layer <= last for layer, _ in subset), failures,
+              f"stage {stage} subset leaks a foreign layer")
+        check(len(subset) > 0, failures, f"stage {stage} subset is empty")
+
+
 def main():
     failures = []
     document = json.loads(MANIFEST.read_text())
     manifest_gates(document, failures)
     synthetic_gates(failures)
+    wset_gates(document, failures)
     if failures:
         for failure in failures:
             print(f"FAIL {failure}")
