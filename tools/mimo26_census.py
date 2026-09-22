@@ -126,6 +126,8 @@ def census_shard(path, state):
         pat = state["patterns"][tag]
         pat["count"] += 1
         pat["bytes"] += payload
+        shape_key = rec["dtype"] + ":" + json.dumps(rec["shape"])
+        pat.setdefault("shape_variants", defaultdict(int))[shape_key] += 1
         if pat["sample"] is None:
             pat["sample"] = {"name": name, "dtype": rec["dtype"], "shape": rec["shape"]}
         pat.setdefault("dtypes", defaultdict(int))[rec["dtype"]] += 1
@@ -286,7 +288,8 @@ def main():
                    "sum_shard_file_bytes": sum(f["bytes"] for f in state["files"])},
         "group_totals": dict(group_totals),
         "patterns": {t: {"count": r["count"], "bytes": r["bytes"], "sample": r["sample"],
-                         "dtypes": dict(r["dtypes"])}
+                         "dtypes": dict(r["dtypes"]),
+                         "shape_variants": dict(r.get("shape_variants", {}))}
                      for t, r in sorted(state["patterns"].items()) if r["count"]},
         "codecs": classify_codec(state["patterns"]),
         "experts": {"moe_layers": len(state["experts"]["layers"]),
