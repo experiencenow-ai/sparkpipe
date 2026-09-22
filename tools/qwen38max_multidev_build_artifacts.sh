@@ -156,7 +156,10 @@ export SPARK_WEIGHTD_ATTACH=1
 export SPARK_WEIGHTD_PACK_SHA256="$PACK_SHA"
 export SPARK_WEIGHTD_EXPERT_POOL_BYTES="$POOL_BYTES"
 export SPARK_WEIGHTD_SPINE_BUDGET_BYTES="$SPINE_BYTES"
-make -C "$CHECKOUT/modules/qwen38_max_resident_decode_stage" -j2 \
+# -j1: two concurrent nvcc passes peak ~10 GiB host and OOM a queue
+# unit whose host slice is the admission-fit 8 GiB (r22p2: oom-kill at
+# 3 s on every node); the fat TU alone fits comfortably.
+make -C "$CHECKOUT/modules/qwen38_max_resident_decode_stage" -j1 \
   CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
   EXPERT_CODEC="$EXPERT_CODEC" \
   MODEL_REVISION="$MODEL_REVISION" \
