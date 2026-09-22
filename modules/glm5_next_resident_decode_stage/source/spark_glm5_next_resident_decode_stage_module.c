@@ -3753,6 +3753,10 @@ static void SparkGlm5NextCompleteOnWorker(void *context)
 	SparkGlm5NextDrainParkedCompletions(state);
 	pthread_mutex_unlock(&state->completion_queue_lock);
 	state->tp_chain_active = 0u;
+	SparkTpDeviceCollectiveBroadcastCancel(&state->tp_device_collective);
+	if ( state->tp_device_collective_hc_initialized != 0u )
+		SparkTpDeviceCollectiveBroadcastCancel(
+			&state->tp_device_collective_hc);
 	if ( async->slot_index >= state->pipeline_slot_count )
 		return;
 	slot = &state->slots[async->slot_index];
