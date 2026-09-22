@@ -1,5 +1,5 @@
 {
-  "file_count": 3303,
+  "file_count": 3305,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -10887,6 +10887,11 @@
       "size_bytes": 846
     },
     {
+      "path": "tools/devcycle/sparkpipe-weightd-shared.service",
+      "sha256": "47dd35b353b79f1cc93fd244a40b6795b7b9c222c069ad5f3aaa085c66ed7ab5",
+      "size_bytes": 1002
+    },
+    {
       "path": "tools/devcycle/sparkpipe_fleet_root.pub",
       "sha256": "cec6e4c48de44107648caa327cc153c44601681a7e87c13649093acb3446fcc4",
       "size_bytes": 111
@@ -10955,6 +10960,11 @@
       "path": "tools/devcycle/verify_rank_packs_pro.sh",
       "sha256": "473541ef503cf0045ef4e8074ffb79580f7fd6e1ba640acc29c3b93844ca11f9",
       "size_bytes": 1595
+    },
+    {
+      "path": "tools/devcycle/weightd_shared_deploy.sh",
+      "sha256": "3c62a6e47bcaa680eee1ddbd774a31ea039da7dff42ceefd44104b8c78af45de",
+      "size_bytes": 950
     },
     {
       "path": "tools/dist_experts.sh",
@@ -16520,5 +16530,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78558294
+  "total_bytes": 78560246
 }
