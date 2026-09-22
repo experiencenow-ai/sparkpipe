@@ -12,12 +12,12 @@ contract:
      and the KV backing stays a finite cap under the private runtime
      root (never the shared sparkdata tree);
   3. every adapter configuration binds its host TCP collective inside
-     67048..67051 with STEP-ordered peers, points at the rank's deployed
+     53048..53051 with STEP-ordered peers, points at the rank's deployed
      pack, and keeps the device-collective session table inside the lane
-     blocks (67052..67063) so a future listener cannot leak into another
+     blocks (53052..53063) so a future listener cannot leak into another
      lane's range;
   4. no port of any kind lands outside lane 3's three blocks
-     (23048-23063, 67048-67063, 64048-64063), and no host listens one
+     (23048-23063, 53048-53063, 64048-64063), and no host listens one
      number twice;
   5. the mesh map is the identity permutation (logical rank = index in
      --nodes), the wrapper scripts parse, and the generator's --check
@@ -132,8 +132,8 @@ def adapter_gates(config, rank, failures, per_host_ports):
                 check(value == 0, failures,
                       f"{host}: session[{a}][{b}] diagonal must be 0")
             else:
-                check(value in range(67052, 67064), failures,
-                      f"{host}: session[{a}][{b}]={value} outside 67052..67063")
+                check(value in range(53052, 53064), failures,
+                      f"{host}: session[{a}][{b}]={value} outside 53052..53063")
                 check(value not in sessions, failures,
                       f"{host}: session value {value} used twice")
                 sessions.add(value)
@@ -161,7 +161,7 @@ def wrapper_contract_gates(failures):
         "K3_SPINE_BUDGET_BYTES": "1",
         "HOME": "/nonexistent",
     }
-    lane_ranges = "23048:23063,67048:67063,64048:64063"
+    lane_ranges = "23048:23063,53048:53063,64048:64063"
 
     def run(env):
         complete = dict(os.environ)

@@ -46,13 +46,14 @@ WORLD=16
 MESH_RANKS="0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15"
 
 # Lane port math (tools/devcycle/lane_assignments.json): lane L owns
-#   control 23000+16L..+15, collective 67000+16L..+15, transport 64000+16L..+15
+#   control 23000+16L..+15, collective 53000+16L..+15 (u16-valid, #1094),
+#   transport 64000+16L..+15
 CONTROL_BASE=$((23000 + 16 * LANE))
-COLLECTIVE_BASE=$((67000 + 16 * LANE))
+COLLECTIVE_BASE=$((53000 + 16 * LANE))
 TRANSPORT_BASE=$((64000 + 16 * LANE))
 # No extra session block is reserved: under the shared socket the k3 device
 # collective rides the weightd mesh and its session table (packed into
-# 67052..67063 inside the collective block) binds nothing — topology-only
+# 53052..53063 inside the collective block) binds nothing — topology-only
 # values documented in tools/k3_multidev_lane.py. Re-plan if a
 # verbs-qualified binding path ever lands (see the M1 port finding).
 

@@ -14,19 +14,19 @@ permutation 0,1,...,15 (SPARK_TP_MESH_RANKS), so rank i lives on
 spark{hex(i)}, PP stage i//4, TP rank i%4, and stage s rank t pack
 k3.stage{s}.rank0{t}.pack sits in that host's deployed pack directory.
 
-Port ledger (lane 3 owns control 23048-23063, collective 67048-67063,
+Port ledger (lane 3 owns control 23048-23063, collective 53048-53063,
 transport 64048-64063; every number below stays inside those blocks):
 
   control_endpoint      23048 + rank   BOUND (residentd client listener);
                                       one per host, so the block is full.
-  tp_collective listen  67048 + tp     BOUND (host TCP collective; required
+  tp_collective listen  53048 + tp     BOUND (host TCP collective; required
                                       by the k3 adapter at tp_degree 4).
                                       Group-local: the four ranks of a PP
-                                      stage listen 67048..67051 and every
+                                      stage listen 53048..53051 and every
                                       stage reuses those numbers because
                                       its ranks are on disjoint hosts.
   device session table  packed into    TOPOLOGY ONLY under the shared
-                        67052..67063   socket: SparkTpDeviceCollectiveCreate
+                        53052..53063   socket: SparkTpDeviceCollectiveCreate
                                       transports through the weightd mesh
                                       (SPARK_WEIGHTD_SOCKET + lane), and
                                       libhidden_transport.so likewise
@@ -65,7 +65,7 @@ HEX = "0123456789abcdef"
 HOSTS = [f"spark{HEX[i]}" for i in range(WORLD)]
 
 CONTROL_BASE = 23048                            # 23048 .. 23063
-COLLECTIVE_BASE = 67048                         # 67048 .. 67063
+COLLECTIVE_BASE = 53048                         # 53048 .. 53063 (u16-valid, #1094)
 TRANSPORT_BASE = 64048                          # 64048 .. 64063
 
 TP_COLLECTIVE_PORT = COLLECTIVE_BASE      # + tp rank (group-local, bound)
@@ -97,13 +97,13 @@ def deployed_pack(rank: int) -> str:
 
 
 def session_table() -> list[list[int]]:
-    """12 numbers packed into 67052..67063 with no per-host overlap.
+    """12 numbers packed into 53052..53063 with no per-host overlap.
 
     Row a is listened by the host whose TP rank is a (every PP stage
     reuses the table because stages own disjoint hosts). The packing
-    67052 + 3a + (b if b < a else b - 1) keeps all twelve values inside
+    53052 + 3a + (b if b < a else b - 1) keeps all twelve values inside
     the twelve numbers left in the collective block after the bound
-    tp_collective listeners take 67048..67051.
+    tp_collective listeners take 53048..53051.
     """
     table = []
     for a in range(TP):

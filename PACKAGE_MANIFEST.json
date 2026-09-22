@@ -9393,7 +9393,7 @@
     },
     {
       "path": "tests/test_k3_multidev_lane.py",
-      "sha256": "c0d52bf99fda6be93dfec51d36b14cc7d3b85fa63b39323ef0f0cf909204786e",
+      "sha256": "382c45e0a832d80e7c0444a3f75e2aea0d560275fcd7e2efae8913aaa762315c",
       "size_bytes": 12357
     },
     {
@@ -11878,13 +11878,13 @@
     },
     {
       "path": "tools/k3_multidev_lane.py",
-      "sha256": "1f2ba05224546ba1fb55c8b7a5fc4c8d420a1256ccf7e9bdf6a865800463813d",
-      "size_bytes": 11017
+      "sha256": "14483b82cf0a78c663bc1e49acf15a888d2accc3bdb8a003d8cb8bb8ebe4b309",
+      "size_bytes": 11036
     },
     {
       "path": "tools/k3_multidev_run_family.sh",
-      "sha256": "858038eecf9ba4b51d36d6cc4d0e09a2a8277a53ea535632045f65759086970c",
-      "size_bytes": 9671
+      "sha256": "00c43b84c5f5be3400fe64ad316ce444a9054c38710fd7a2f970d58de36601e1",
+      "size_bytes": 9694
     },
     {
       "path": "tools/k3_pack.py",
@@ -16365,5 +16365,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78116630
+  "total_bytes": 78116672
 }
