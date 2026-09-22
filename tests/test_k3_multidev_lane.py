@@ -61,8 +61,19 @@ def deployment_gates(deployment, runtime_root, socket, failures):
     check(deployment["weightd"]["socket_path"] == socket, failures,
           "weightd socket path must be the shared socket")
     limits = deployment["runtime_limits"]
+    # residentd's runtime-limits check fails closed on zeros: kv_physical
+    # >= max_active_sequences and kv_logical >= resident_sequence_capacity.
+    # k3's honest bound: resident capacity x the adapter's kv_pages per
+    # sequence (the per-sequence token ceiling the seam commits to).
+    expected_pages = limits["resident_sequence_capacity"] * lane.KV_PAGES_PER_SEQUENCE
     for key in ("kv_logical_page_capacity", "kv_physical_page_capacity"):
-        check(limits[key] == 0, failures, f"{key} must stay 0 for k3")
+        check(limits[key] == expected_pages, failures,
+              f"{key} must equal resident_capacity x kv_pages "
+              f"({expected_pages}), got {limits[key]}")
+    check(limits["kv_physical_page_capacity"] >= limits["max_active_sequences"],
+          failures, "kv_physical_page_capacity must cover max_active_sequences")
+    check(limits["kv_logical_page_capacity"] >= limits["resident_sequence_capacity"],
+          failures, "kv_logical_page_capacity must cover resident capacity")
     nodes = deployment["nodes"]
     check(len(nodes) == 16, failures, f"expected 16 nodes, got {len(nodes)}")
     endpoints = set()
