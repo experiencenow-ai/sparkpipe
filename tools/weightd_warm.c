@@ -187,12 +187,13 @@ int main(int argument_count,char **arguments)
     }
     arguments = filtered;
     argument_count = filtered_count;
-    if ( family != 0 && strcmp(family,"dsv4_pro") != 0 )
+    if ( family != 0 && strcmp(family,"dsv4_pro") != 0 &&
+         strcmp(family,"dsv41_flash") != 0 )
     {
-        fprintf(stderr,"weightd_warm: unknown family %s (dsv4_pro)\n",family);
+        fprintf(stderr,"weightd_warm: unknown family %s (dsv4_pro, dsv41_flash)\n",family);
         goto usage;
     }
-    if ( family != 0 && !world_rank_given )
+    if ( family != 0 && strcmp(family,"dsv4_pro") == 0 && !world_rank_given )
     {
         fprintf(stderr,"weightd_warm: --family dsv4_pro requires --world-rank\n");
         goto usage;
@@ -255,7 +256,16 @@ int main(int argument_count,char **arguments)
     request.identity.abi_version = SPARK_WEIGHTD_IPC_ABI_VERSION;
     request.identity.arena_bytes = (uint64_t)pack.st_size;
     request.identity.topology = (uint32_t)topology;
-    if ( family != 0 )
+    if ( family != 0 && strcmp(family,"dsv41_flash") == 0 )
+    {
+        /* Lane 4 (dsv41_flash): the module pins only the model tag
+         * (SPARK_DSV41_FLASH_MODULE_TAG "dsv41_flash_stage") and sends
+         * revision/topology from its node context, geometry unset (0).
+         * REVISION/TOPOLOGY arguments stay authoritative here - they come
+         * from the stage config - so the family hook pins the tag only. */
+        strcpy(request.identity.model,"dsv41_flash_stage");
+    }
+    else if ( family != 0 )
     {
         /* Preserve the pack_sha256/abi/arena_bytes filled above; the
          * family owns model/revision/topology/geometry. */
@@ -356,6 +366,7 @@ usage:
         "       weightd_warm SOCKET --reclaim\n"
         "       options (any position): --family dsv4_pro --world-rank R (derive the exact\n"
         "       DSV4 Pro module attach identity; REVISION/TOPOLOGY args are then ignored)\n"
+        "                           --family dsv41_flash (pin the module tag; REVISION/TOPOLOGY stay authoritative)\n"
         "                           --identity-print (print the derived identity and exit)\n"
         "       finite SPARK_WEIGHTD_EXPERT_POOL_BYTES is required\n");
     return 2;
