@@ -13,7 +13,7 @@
 
 #define PROBE_ROWS 5u
 #define PROBE_STEPS 4u
-#define PROBE_PREFIX_TOKENS 64u
+#define PROBE_PREFIX_TOKENS 63u
 #define PROBE_TARGET "cuda.sm121.glm5_next.resident_decode_stage.bf16.expert_fp8"
 
 typedef struct probe_state
@@ -348,17 +348,19 @@ static void probe_checkpoint_frame(probe_state_t *state,uint32_t rows,uint32_t s
 			state->sequences[row] = lane->sequence_id = rows + row + 1u;
 		}
 		// Fixed-input test identities distinguish the three complete prompts.
-		if ( step + 1u == PROBE_PREFIX_TOKENS )
+		if ( step + 1u == PROBE_PREFIX_TOKENS || step + 1u == 64u )
 		{
 			lane->flags = SPARK_MODEL_DRIVER_CACHE_LANE_FLAG_PUBLISH;
-			lane->publish_token_count = PROBE_PREFIX_TOKENS;
+			lane->publish_token_count = step + 1u;
 			lane->publish_identity.sha256[0] = (uint8_t)(row + 1u);
+			lane->publish_identity.sha256[1] = (uint8_t)(step + 1u);
 		}
 		if ( replay == 1u && step == PROBE_PREFIX_TOKENS )
 		{
-			lane->flags = SPARK_MODEL_DRIVER_CACHE_LANE_FLAG_PREFIX;
+			lane->flags |= SPARK_MODEL_DRIVER_CACHE_LANE_FLAG_PREFIX;
 			lane->prefix_token_count = PROBE_PREFIX_TOKENS;
 			lane->prefix_identity.sha256[0] = (uint8_t)(row + 1u);
+			lane->prefix_identity.sha256[1] = PROBE_PREFIX_TOKENS;
 		}
 	}
 	if ( replay >= 2u )
@@ -530,7 +532,7 @@ int main(int argc,char **argv)
 		return(5);
 	SparkUnloadModelDriver(&state.driver);
 	if ( state.prefix_probe != 0u )
-		printf("PASS local-prefix-reuse mode=%s rows=%u prefix=64 continuation=4 eviction=verified movement=verified state=exact reset=verified; rank-local computation only\n",argv[3],rows);
+		printf("PASS local-prefix-reuse mode=%s rows=%u prefix=63 continuation=4 cow=required boundary64=published eviction=verified movement=verified state=exact reset=verified; rank-local computation only\n",argv[3],rows);
 	else
 		printf("PASS local-token-smoke mode=%s rows=%u steps=%u; not full-model numerical qualification\n",argv[3],rows,PROBE_STEPS);
 	return(0);

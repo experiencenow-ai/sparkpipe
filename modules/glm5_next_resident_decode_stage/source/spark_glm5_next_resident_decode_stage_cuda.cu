@@ -265,7 +265,7 @@ static void SparkGlm5NextBuildKvView(
 	view->page_table = wave->page_table;
 	view->page_table_stride = wave->pages_per_sequence;
 	view->sequence_count = wave->resident_sequence_capacity;
-	view->pool_page_count = wave->resident_sequence_capacity * wave->pages_per_sequence;
+	view->pool_page_count = wave->physical_page_count;
 	view->access_error = (LmKvAccessError *)wave->slot->kv_access_error;
 }
 static uint32_t index_ordinal_of(const SparkGlm5NextCudaWave *wave,uint32_t local_layer,uint32_t layer)

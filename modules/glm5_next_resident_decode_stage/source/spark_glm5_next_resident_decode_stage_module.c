@@ -1852,6 +1852,7 @@ static void SparkGlm5NextBuildWave(SparkGlm5NextTpChain *chain)
 	wave->max_sequence_positions = state->max_sequence_positions;
 	wave->execution_row_capacity = state->execution_row_capacity;
 	wave->pages_per_sequence = state->pages_per_sequence;
+	wave->physical_page_count = state->physical_page_count;
 	wave->owns_embedding = state->owns_embedding;
 	wave->owns_final_head = state->owns_final_head;
 	wave->sideband_input = SparkGlm5NextResidentDecodeStageRequiresSidebandInput(state->stage_index);

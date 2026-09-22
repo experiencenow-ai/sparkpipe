@@ -18,14 +18,14 @@ class DriverProbeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "receipt"
             for prefix in (False, True):
-                batches = ([(step, 3) for step in range(68)] + [(1000, 1), (1001, 3), (1002, 3)] +
-                           [(step, 3) for step in list(range(64, 68)) + list(range(4))] if prefix else
+                batches = ([(step, 3) for step in range(67)] + [(1000, 1), (1001, 3), (1002, 3)] +
+                           [(step, 3) for step in list(range(63, 67)) + list(range(4))] if prefix else
                            [(step, 3) for step in range(4)])
                 marker = "PASS local-prefix-reuse fixture" if prefix else "PASS local-token-smoke fixture"
                 lines = [f"TOKEN step={step} row={row} input=1 output=2"
                          for step, width in batches for row in range(width)]
                 states = ([f"STATE step={step} row={row} bytes=32 hash=0000000000000001 score=00000000"
-                           for step in list(range(4)) + list(range(64, 68)) * 2 + list(range(4))
+                           for step in list(range(4)) + list(range(63, 67)) * 2 + list(range(4))
                            for row in range(3)] if prefix else [])
                 restore = (["JOIN existing=1 new=2 launched=3 unequal_positions=1",
                             "RESTORE rows=3 moved=3 state=exact selected-logit=exact full-vocabulary-logits=unavailable"]
@@ -96,7 +96,7 @@ class DriverProbeTests(unittest.TestCase):
                     self.assertEqual(result.returncode, expected, result.stderr)
                     if expected == 0:
                         self.assertIn("PASS local-prefix-reuse", result.stdout)
-                        self.assertEqual(result.stdout.count("TOKEN "), int(rows) * 78 + (3 if rows == "5" else 1))
+                        self.assertEqual(result.stdout.count("TOKEN "), int(rows) * 77 + (3 if rows == "5" else 1))
                     else:
                         self.assertNotIn("PASS ", result.stdout)
 

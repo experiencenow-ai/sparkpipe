@@ -14,8 +14,8 @@ import time
 def token_receipt(path, rows, prefix=False):
     lines = path.read_text().splitlines()
     tokens = [line for line in lines if line.startswith("TOKEN ")]
-    batches = ([(step, rows) for step in range(68)] + [(1000, 3 if rows == 5 else 1), (1001, rows), (1002, rows)] +
-               [(step, rows) for step in list(range(64, 68)) + list(range(4))] if prefix else
+    batches = ([(step, rows) for step in range(67)] + [(1000, 3 if rows == 5 else 1), (1001, rows), (1002, rows)] +
+               [(step, rows) for step in list(range(63, 67)) + list(range(4))] if prefix else
                [(step, rows) for step in range(4)])
     expected_rows = [(step, row) for step, width in batches for row in range(width)]
     marker = "PASS local-prefix-reuse " if prefix else "PASS local-token-smoke "
@@ -27,7 +27,7 @@ def token_receipt(path, rows, prefix=False):
             raise RuntimeError(f"invalid token ordering: {path}")
     if prefix:
         states = [line for line in lines if line.startswith("STATE ")]
-        state_steps = list(range(4)) + list(range(64, 68)) * 2 + list(range(4))
+        state_steps = list(range(4)) + list(range(63, 67)) * 2 + list(range(4))
         if len(states) != rows * len(state_steps):
             raise RuntimeError(f"incomplete state receipt: {path}")
         for index, line in enumerate(states):

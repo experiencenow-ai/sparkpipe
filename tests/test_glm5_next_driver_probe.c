@@ -173,8 +173,10 @@ static SparkStatus fake_submit(void *instance,SparkModelDriverFrame *frame)
 			prefix_positions[slot] = (uint32_t)batch->row_positions[row] + 1u;
 			if ( (frame->cache_lanes[row].flags & SPARK_MODEL_DRIVER_CACHE_LANE_FLAG_PUBLISH) != 0u )
 			{
-				assert(prefix_positions[slot] == PROBE_PREFIX_TOKENS);
-				prefix_saved[row] = 1u;
+				assert(prefix_positions[slot] == PROBE_PREFIX_TOKENS || prefix_positions[slot] == 64u);
+				assert(frame->cache_lanes[row].publish_identity.sha256[1] == prefix_positions[slot]);
+				if ( prefix_positions[slot] == PROBE_PREFIX_TOKENS )
+					prefix_saved[row] = 1u;
 			}
 			if ( (slot >= expected_rows && getenv("PROBE_BAD_PREFIX") != 0) || (reset_count != 0u && getenv("PROBE_BAD_RESET") != 0) )
 				output[row]++;

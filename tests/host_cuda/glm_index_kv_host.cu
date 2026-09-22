@@ -1,7 +1,11 @@
 #include "tests/host_cuda/lm_host_cuda.cuh"
 #include <stdio.h>
+#include <assert.h>
 LmHostDim3 blockIdx,threadIdx,blockDim,gridDim;
 #include "modules/glm5_next_resident_decode_stage/source/cuda/index_kv.cuh"
+
+#include "modules/glm5_next_resident_decode_stage/source/spark_glm5_next_resident_decode_stage_internal.h"
+#include "glm_kv_view_body.h"
 
 int main(void)
 {
@@ -39,6 +43,20 @@ int main(void)
 				address[0] = (uint8_t)(sequence + 1u);
 			}
 	}
+	SparkGlm5NextExecutionSlot slot = {};
+	SparkGlm5NextCudaWave wave = {};
+	wave.slot = &slot;
+	wave.page_table = table;
+	wave.pages_per_sequence = pages_per_sequence;
+	wave.resident_sequence_capacity = sequences;
+	wave.physical_page_count = 2u;
+	slot.kv_access_error = (uint32_t *)&error;
+	SparkGlm5NextBuildKvView(&view,pool,&wave);
+	assert(view.pool_page_count == 2u);
+	table[0] = 2u;
+	assert(LmKvSlotMutable<Glm5NextIndexKv>(view,0u,0u) == 0);
+	table[0] = 1u;
+	assert(LmKvSlotMutable<Glm5NextIndexKv>(view,0u,0u) == pool + 64u * slot_bytes);
 	puts("PASS GLM index KV: every sequence and page stays in its layer slab");
 	return(0);
 }
