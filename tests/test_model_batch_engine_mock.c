@@ -363,11 +363,11 @@ static void TestScenarioPartialPrefixAppend(const SparkModelResidentDeployment *
 	SparkModelBatchEngineDestroy(engine);
 }
 
-static void TestScenarioChainDoesNotInventCheckpoints(const SparkModelResidentDeployment *deployment,const char *runtime_root)
+static void TestScenarioChainPublishesFinalCheckpoint(const SparkModelResidentDeployment *deployment,const char *runtime_root)
 {
 	TestBatchState state = {0};
 	SparkModelBatchEngine *engine;
-	SparkModelServingLane lane = {0};
+	SparkModelServingLane lane = {0},published = {0};
 	uint32_t prompt[8] = {11u,12u,13u,14u,1000u,1000u,1001u,1002u};
 	MockResidentClientReset();
 	engine = TestConnect(deployment,&state,runtime_root);
@@ -380,17 +380,53 @@ static void TestScenarioChainDoesNotInventCheckpoints(const SparkModelResidentDe
 	CHECK(TestWaitLane(engine,1u,4u,&lane) != 0u && lane.cache_publish_token_count == 0u,
 		"chain: intermediate decode has no requested checkpoint");
 	MockResidentClientSetAutoTokens(3u);
+	CHECK(TestWaitLane(engine,1u,7u,&published) != 0u && published.flags == SPARK_MODEL_SERVING_LANE_FLAG_CACHE_PUBLISH && published.context_token_count == 7u && published.cache_publish_token_count == 7u,
+		"chain: zero-row publication names actual processed context before release");
 	TestDriveUntilTerminal(engine,&state,1u,400u);
 	CHECK(state.completed_events[1] == 1u && state.token_events[1] == 4u,
 		"chain: three returned tokens do not imply three checkpoints");
 	MockResidentClientSetAutoTokens(1u);
 	TestSubmitPrompt(engine,2u,601u,1u,prompt,8u);
 	CHECK(TestWaitFirstRequestLane(engine,2u,&lane) != 0u &&
-		lane.sequence_position == 4u && lane.cache_prefix_token_count == 4u,
-		"chain: only actually published checkpoint can produce a prefix hit");
+		lane.sequence_position == 7u && lane.cache_prefix_token_count == 7u && lane.input_token_id == prompt[7] &&
+		memcmp(&lane.cache_prefix_identity,&published.cache_publish_identity,sizeof(lane.cache_prefix_identity)) == 0,
+		"chain: final processed checkpoint is published before release");
 	TestDriveUntilTerminal(engine,&state,2u,400u);
-	CHECK(state.completed_events[2] == 1u && state.cached_tokens[2] == 4u,
-		"chain: unpublished intermediate state is recomputed explicitly as a miss");
+	CHECK(state.completed_events[2] == 1u && state.cached_tokens[2] == 7u,
+		"chain: required hit consumes final checkpoint without replay");
+	TestSubmitPrompt(engine,3u,602u,1u,prompt,6u);
+	CHECK(TestWaitFirstRequestLane(engine,3u,&lane) != 0u && lane.cache_prefix_token_count == 4u,
+		"chain: final publication does not invent intermediate recurrent checkpoints");
+	TestDriveUntilTerminal(engine,&state,3u,400u);
+	CHECK(state.completed_events[3] == 1u && state.cached_tokens[3] == 4u,
+		"chain: unavailable intermediate state is an explicit miss");
+	SparkModelBatchEngineDestroy(engine);
+}
+
+static void TestScenarioChainEosCheckpoint(const SparkModelResidentDeployment *deployment,const char *runtime_root)
+{
+	TestBatchState state = {0};
+	SparkModelBatchEngine *engine;
+	SparkModelServingLane lane = {0};
+	uint32_t prompt[8] = {11u,12u,13u,14u,154819u,154819u,154820u,154821u};
+	MockResidentClientReset();
+	engine = TestConnect(deployment,&state,runtime_root);
+	if ( engine == 0 ) return;
+	MockResidentClientSetAutoTokens(1u);
+	MockResidentClientSetTokenStart(154819u);
+	MockResidentClientSetFinalRank(TEST_RANKS - 1u,1u);
+	TestSubmitPrompt(engine,1u,610u,4u,prompt,4u);
+	CHECK(TestWaitLane(engine,1u,4u,&lane) != 0u,"chain EOS: prefill emits before decode chain");
+	MockResidentClientSetAutoTokens(3u);
+	TestDriveUntilTerminal(engine,&state,1u,400u);
+	CHECK(state.completed_events[1] == 1u && state.error_events[1] == 0u && state.token_events[1] == 3u,
+		"chain EOS: early output stop completes without pretending to rewind resident state");
+	MockResidentClientSetAutoTokens(1u);
+	TestSubmitPrompt(engine,2u,611u,1u,prompt,8u);
+	CHECK(TestWaitFirstRequestLane(engine,2u,&lane) != 0u && lane.cache_prefix_token_count == 4u,
+		"chain EOS: truncated emitted token count is never indexed as a checkpoint");
+	TestDriveUntilTerminal(engine,&state,2u,400u);
+	CHECK(state.completed_events[2] == 1u && state.cached_tokens[2] == 4u,"chain EOS: subsequent request uses valid prefill checkpoint");
 	SparkModelBatchEngineDestroy(engine);
 }
 
@@ -576,7 +612,8 @@ int main(void)
 		TestScenarioRankKilledAndRevived(&deployment,runtime_root);
 		TestScenarioCachedPrefixSessionReset(&deployment,runtime_root);
 		TestScenarioPartialPrefixAppend(&deployment,runtime_root);
-		TestScenarioChainDoesNotInventCheckpoints(&deployment,runtime_root);
+		TestScenarioChainPublishesFinalCheckpoint(&deployment,runtime_root);
+		TestScenarioChainEosCheckpoint(&deployment,runtime_root);
 		TestScenarioPartialCopyCapacity(&deployment,runtime_root);
 		TestScenarioRankBusyBackpressure(&deployment,runtime_root);
 		TestScenarioEosEarlyStop(&deployment,runtime_root);

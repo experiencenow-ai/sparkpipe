@@ -617,6 +617,8 @@ static void check_checkpoint_restore(SparkTestKvTransactions *fixture,const uint
 	SparkTestKvPagePrefix(&fixture->lanes[0],prefix_tokens,81u);
 	fixture->request.request_id++;
 	fixture->request.new_token_count = 1u;
+	fixture->request.frame_flags = 0u;
+	fixture->request.sequence_position = 0u;
 	fixture->request.admission_flags = SPARK_MODEL_DRIVER_ADMISSION_FLAG_CACHE_PREPARE;
 	assert(SparkKvLaneTransactionsAdmit(&state.kv_transactions,&fixture->request) == SPARK_STATUS_OK);
 	fixture->request.admission_flags = SPARK_MODEL_DRIVER_ADMISSION_FLAG_CACHE_COMMIT;
@@ -669,7 +671,17 @@ static void check_checkpoint_restore(SparkTestKvTransactions *fixture,const uint
 	SparkStageModuleIndexSetRelease(state.lane_states,4u,&resident,1u);
 }
 
-static void check_checkpoint_finish(uint32_t fail_copy,uint32_t prefix_tokens)
+static uint32_t PUBLISH_CALLBACKS;
+static SparkStatus PUBLISH_STATUS;
+static void publish_complete(void *context,const SparkModelDriverCompletion *completion)
+{
+	(void)context;
+	PUBLISH_CALLBACKS++;
+	PUBLISH_STATUS = completion->status;
+	assert(completion->accepted_token_count == 0u && completion->tokens_per_sequence == 0u);
+}
+
+static void check_checkpoint_finish(uint32_t fail_copy,uint32_t prefix_tokens,uint32_t post_publish)
 {
 	SparkTestKvTransactions fixture;
 	SparkGlm5NextAsyncCompletion completion = {0};
@@ -680,7 +692,7 @@ static void check_checkpoint_finish(uint32_t fail_copy,uint32_t prefix_tokens)
 	char path[] = "/tmp/glm-checkpoint-finish-XXXXXX",kv_path[] = "/tmp/glm-checkpoint-kv-XXXXXX";
 	SparkTestKvTransactionsInitialize(&fixture,1u);
 	fixture.lanes[0].context_token_count = fixture.request.new_token_count = prefix_tokens;
-	SparkTestKvPagePublish(&fixture.lanes[0],prefix_tokens,81u);
+	if ( post_publish == 0u ) SparkTestKvPagePublish(&fixture.lanes[0],prefix_tokens,81u);
 	memset(&state,0,sizeof(state));
 	state.resident_sequence_capacity = 4u;
 	state.page_count = SPARK_TEST_LOGICAL_BLOCK_COUNT;
@@ -720,9 +732,43 @@ static void check_checkpoint_finish(uint32_t fail_copy,uint32_t prefix_tokens)
 	completion.lane_bound[0] = 1u;
 	completion.lane_sequence_ids[0] = 1u;
 	completion.lane_next_positions[0] = prefix_tokens;
-	if ( fail_copy != 0u )
-		state.kda_v_window_pool = 0;
-	assert(SparkGlm5NextFinishCacheLanes(&completion) == (fail_copy != 0u ? SPARK_STATUS_INVALID_ARGUMENT : SPARK_STATUS_OK));
+	if ( post_publish != 0u )
+	{
+		SparkModelDriverAdmissionDecision decision;
+		assert(SparkGlm5NextFinishCacheLanes(&completion) == SPARK_STATUS_OK);
+		assert(fixture.pages.cache.published_page_count == 0u);
+		state.pipeline_slot_count = 1u;
+		fixture.request.request_id++;
+		fixture.request.submission_id++;
+		fixture.request.transaction_id++;
+		fixture.request.new_token_count = 0u;
+		fixture.request.sequence_position = prefix_tokens;
+		fixture.request.frame_flags = SPARK_MODEL_DRIVER_FRAME_FLAG_CACHE_PUBLISH;
+		fixture.lanes[0].sequence_position = prefix_tokens;
+		SparkTestKvPagePublish(&fixture.lanes[0],prefix_tokens,81u);
+		fixture.request.admission_flags = SPARK_MODEL_DRIVER_ADMISSION_FLAG_CACHE_PREPARE;
+		assert(SparkGlm5NextResidentDecodeStageAdmit(&state,&fixture.request,&decision) == SPARK_STATUS_OK && decision.accepted != 0u);
+		fixture.request.admission_flags = SPARK_MODEL_DRIVER_ADMISSION_FLAG_CACHE_COMMIT;
+		assert(SparkGlm5NextResidentDecodeStageAdmit(&state,&fixture.request,&decision) == SPARK_STATUS_OK);
+		frame = SparkTestKvTransactionFrame(&fixture.request);
+		frame.flags |= SPARK_MODEL_DRIVER_FRAME_FLAG_CACHE_PUBLISH;
+		frame.sequence_position = prefix_tokens;
+		frame.completion_function = publish_complete;
+		PUBLISH_CALLBACKS = 0u;
+		atomic_store(&state.lane_next_positions[0],prefix_tokens + 1u);
+		assert(SparkGlm5NextPublishCache(&state,&frame) == SPARK_STATUS_VALIDATION_FAILED && PUBLISH_CALLBACKS == 0u);
+		assert(fixture.owners[0].phase == SPARK_KV_LANE_TRANSACTION_COMMITTED);
+		atomic_store(&state.lane_next_positions[0],prefix_tokens);
+		if ( fail_copy != 0u ) state.kda_v_window_pool = 0;
+		assert(SparkGlm5NextPublishCache(&state,&frame) == SPARK_STATUS_OK);
+		assert(PUBLISH_CALLBACKS == 1u && PUBLISH_STATUS == (fail_copy != 0u ? SPARK_STATUS_INVALID_ARGUMENT : SPARK_STATUS_OK));
+		assert(atomic_load(&state.slot_states[0]) == SPARK_STAGE_MODULE_SLOT_FREE && atomic_load(&state.lane_states[0]) == SPARK_STAGE_MODULE_SLOT_FREE);
+	}
+	else
+	{
+		if ( fail_copy != 0u ) state.kda_v_window_pool = 0;
+		assert(SparkGlm5NextFinishCacheLanes(&completion) == (fail_copy != 0u ? SPARK_STATUS_INVALID_ARGUMENT : SPARK_STATUS_OK));
+	}
 	assert(fixture.owners[0].phase == SPARK_KV_LANE_TRANSACTION_EMPTY);
 	assert(fixture.pages.kv.blocks[page].residency_reference_count == 0u);
 	assert(fixture.pages.cache.published_page_count == (fail_copy != 0u ? 0u : 1u));
@@ -955,9 +1001,12 @@ int32_t main(void)
 		return(2);
 	assert(check_recurrent_copy() == 0);
 	check_cache_worker_cleanup();
-	check_checkpoint_finish(0u,4u);
-	check_checkpoint_finish(0u,3u);
-	check_checkpoint_finish(1u,4u);
+	check_checkpoint_finish(0u,4u,0u);
+	check_checkpoint_finish(0u,3u,0u);
+	check_checkpoint_finish(1u,4u,0u);
+	check_checkpoint_finish(0u,4u,1u);
+	check_checkpoint_finish(0u,3u,1u);
+	check_checkpoint_finish(1u,3u,1u);
 	check_module_reset();
 	check_execution_environment();
 	check_small_kv();

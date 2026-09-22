@@ -4225,6 +4225,75 @@ static SparkStatus SparkGlm5NextExecuteBatch(SparkGlm5NextModuleState *state,Spa
 	SPARK_RETURN(status);
 }
 
+static SparkStatus SparkGlm5NextPublishCache(SparkGlm5NextModuleState *state,SparkModelDriverFrame *frame)
+{
+	SparkGlm5NextAsyncCompletion *async;
+	SparkModelDriverCompletion completion = {0};
+	uint32_t indices[SPARK_GLM5_NEXT_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT],lane,resident,slot;
+	SparkStatus status;
+	if ( state == 0 || frame == 0 || frame->completion_function == 0 || frame->execution_stream != state->execution_stream || state->pipeline_slot_count == 0u || frame->flags != (SPARK_MODEL_DRIVER_FRAME_FLAG_CACHE_PUBLISH | SPARK_MODEL_DRIVER_FRAME_FLAG_DRIVER_DISPATCH_SLOT_VALID) || frame->new_token_count != 0u || frame->tokens_per_sequence != 0u || frame->cache_lanes == 0 || frame->cache_lane_count == 0u || frame->cache_lane_count != frame->active_slot_count || frame->cache_lane_count > state->resident_sequence_capacity )
+		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	slot = (uint32_t)(frame->request_id % state->pipeline_slot_count);
+	if ( frame->driver_dispatch_slot != slot )
+		SPARK_FAIL(SPARK_STATUS_VALIDATION_FAILED);
+	status = SparkGlm5NextWeightdHealth(state);
+	if ( status != SPARK_STATUS_OK ) return(status);
+	for (lane=0u; lane<frame->cache_lane_count; lane++)
+		indices[lane] = frame->cache_lanes[lane].resident_sequence_slot;
+	status = SparkStageModuleIndexSetClaim(state->lane_states,state->resident_sequence_capacity,indices,frame->cache_lane_count);
+	if ( status != SPARK_STATUS_OK ) return(status);
+	status = SparkStageModuleIndexSetClaim(state->slot_states,state->pipeline_slot_count,&slot,1u);
+	if ( status != SPARK_STATUS_OK )
+	{
+		SparkStageModuleIndexSetRelease(state->lane_states,state->resident_sequence_capacity,indices,frame->cache_lane_count);
+		return(status);
+	}
+	for (lane=0u; lane<frame->cache_lane_count && status==SPARK_STATUS_OK; lane++)
+	{
+		const SparkModelDriverCacheLane *cache_lane = &frame->cache_lanes[lane];
+		resident = indices[lane];
+		if ( cache_lane->flags != SPARK_MODEL_DRIVER_CACHE_LANE_FLAG_PUBLISH || cache_lane->publish_token_count == 0u || cache_lane->sequence_position != cache_lane->publish_token_count || cache_lane->context_token_count != cache_lane->publish_token_count || atomic_load(&state->lane_bound[resident]) == 0u || atomic_load(&state->lane_sequence_ids[resident]) != cache_lane->sequence_id || atomic_load(&state->lane_next_positions[resident]) != cache_lane->sequence_position )
+			status = SPARK_STATUS_VALIDATION_FAILED;
+	}
+	if ( status == SPARK_STATUS_OK )
+	{
+		if ( pthread_mutex_lock(&state->kv_mutex) != 0 ) status = SPARK_STATUS_INTERNAL_ERROR;
+		else
+		{
+			status = SparkKvLaneTransactionsClaim(&state->kv_transactions,frame);
+			(void)pthread_mutex_unlock(&state->kv_mutex);
+		}
+	}
+	if ( status == SPARK_STATUS_OK )
+	{
+		async = &state->completions[slot];
+		memset(async,0,sizeof(*async));
+		async->state = state;
+		async->slot_index = slot;
+		async->lane_count = frame->cache_lane_count;
+		for (lane=0u; lane<async->lane_count; lane++)
+		{
+			async->lane_indices[lane] = indices[lane];
+			async->lane_bound[lane] = 1u;
+			async->lane_sequence_ids[lane] = frame->cache_lanes[lane].sequence_id;
+			async->lane_next_positions[lane] = frame->cache_lanes[lane].context_token_count;
+		}
+		atomic_fetch_add(&state->submitted_count,1u);
+		completion.status = SparkGlm5NextFinishCacheLanes(async);
+		completion.request_id = frame->request_id;
+		completion.sequence_id = frame->sequence_id;
+		completion.sequence_position = frame->sequence_position;
+		completion.program_id = frame->program_id;
+		completion.driver_dispatch_slot = slot;
+		completion.residency = frame->residency;
+		atomic_fetch_add(completion.status == SPARK_STATUS_OK ? &state->completed_count : &state->failed_count,1u);
+	}
+	SparkStageModuleIndexSetRelease(state->lane_states,state->resident_sequence_capacity,indices,frame->cache_lane_count);
+	SparkStageModuleSlotRelease(state->slot_states,slot);
+	if ( status == SPARK_STATUS_OK ) frame->completion_function(frame->completion_context,&completion);
+	return(status);
+}
+
 SparkStatus SparkGlm5NextResidentDecodeStageExecute(
 	void *module_state,
 	SparkModelDriverFrame *frame)
@@ -4234,6 +4303,8 @@ SparkStatus SparkGlm5NextResidentDecodeStageExecute(
 	SparkStatus status;
 	state = (SparkGlm5NextModuleState *)module_state;
 	context = 0;
+	if ( frame != 0 && (frame->flags & SPARK_MODEL_DRIVER_FRAME_FLAG_CACHE_PUBLISH) != 0u )
+		return(SparkGlm5NextPublishCache(state,frame));
 	status = SparkGlm5NextValidateFrame(state,frame,&context);
 	if ( status != SPARK_STATUS_OK )
 	{
@@ -4374,7 +4445,7 @@ SparkStatus SparkGlm5NextResidentDecodeStageAdmit(
 		}
 		SPARK_RETURN(status);
 	}
-	if ( (request->frame_flags & SPARK_MODEL_DRIVER_FRAME_FLAG_CACHE_RELEASE) != 0u )
+	if ( (request->frame_flags & (SPARK_MODEL_DRIVER_FRAME_FLAG_CACHE_RELEASE | SPARK_MODEL_DRIVER_FRAME_FLAG_CACHE_PUBLISH)) != 0u )
 	{
 		if ( SparkModelDriverAdmissionRequestIsValid(request) == 0u || request->new_token_count != 0u )
 			SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);

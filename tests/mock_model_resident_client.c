@@ -611,7 +611,7 @@ uint32_t MockResidentClientDeliverEvent(uint32_t stage_index, uint64_t submissio
 				completion.step_generation = saved.submission.step_generation;
 				completion.residency = saved.submission.residency;
 				if ( c->is_final_rank != 0u && mock_auto_tokens != 0u &&
-					saved.submission.work_kind != SPARK_MODEL_SERVING_WORK_KIND_RELEASE && status == SPARK_STATUS_OK )
+					saved.submission.work_kind < SPARK_MODEL_SERVING_WORK_KIND_RELEASE && status == SPARK_STATUS_OK )
 				{
 					completion.token_count = saved.submission.active_sequence_count * mock_auto_tokens;
 					completion.tokens_per_sequence = mock_auto_tokens;
