@@ -6,6 +6,7 @@
 #include "sparkpipe/spark_weightd.h"
 #include "sparkpipe/spark_error_site.h"
 #include "sparkpipe/spark_weightd_worker.h"
+#include "sparkpipe/spark_weightd_spine.h"
 #include <stdatomic.h>
 
 #include <errno.h>
@@ -1075,6 +1076,7 @@ static void SparkWeightdServerAttachCold(SparkWeightdServer *server,
     struct stat pack_stat_after;
     FILE *file = 0;
     uint8_t *staging = 0;
+    uint8_t materialized_sha[SPARK_SHA256_DIGEST_BYTES];
     SparkCk128Context ck_context;
     SparkSha256Context sha_context;
     SparkStatus verify_status;
@@ -1242,6 +1244,7 @@ static void SparkWeightdServerAttachCold(SparkWeightdServer *server,
         uint8_t digest[SPARK_SHA256_DIGEST_BYTES];
         SparkSha256Finalize(&sha_context, digest);
         SparkSha256DigestToHex(digest, computed_hex);
+        memcpy(materialized_sha, digest, SPARK_SHA256_DIGEST_BYTES);
     }
     verify_status = memcmp(computed_hex, expected_hex, use_ck128 ? 32u : 64u) == 0
         ? SPARK_STATUS_OK
@@ -1252,6 +1255,19 @@ static void SparkWeightdServerAttachCold(SparkWeightdServer *server,
             SparkWeightdStatMtimeNs(&pack_stat_before))
     {
         verify_status = SPARK_STATUS_HASH_MISMATCH;
+    }
+    if (verify_status == SPARK_STATUS_OK && !use_ck128)
+    {
+        /* Spine fast-path receipt (hill-climb, dedicated PR): the daemon
+         * just proved SHA256 over the whole pack image against
+         * identity.pack_sha256 with the file stat stable across the read.
+         * Record the DAEMON_SHA receipt so the client's first spine load
+         * copies spans without repeating that hash (strictly redundant;
+         * see the trust-chain document). ck128-sidecar mode writes none -
+         * there the client hash is the only SHA256 proof. Best-effort:
+         * failure only costs the one-time client hash. */
+        (void)SparkWeightdSpineReceiptRecordDaemon(fileno(file),
+            expected_hex, materialized_sha);
     }
     (void)fclose(file);
     if (verify_status != SPARK_STATUS_OK)
