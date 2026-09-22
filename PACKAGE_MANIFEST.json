@@ -5793,8 +5793,8 @@
     },
     {
       "path": "modules/ling_resident_decode_stage/validation/validate_ling_resident_decode_stage_cuda.sh",
-      "sha256": "d677c9059aaead65914d1d557f792bfc17f40781254b54770f7f5ec37e17ac82",
-      "size_bytes": 1873
+      "sha256": "babc6fd5767701903337299a443401a20d063d85d6da661f733beb90f1161fde",
+      "size_bytes": 2173
     },
     {
       "path": "modules/mimo26_resident_decode_stage/source/spark_mimo26_stagepack_format.h",
@@ -16830,5 +16830,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80139069
+  "total_bytes": 80139369
 }

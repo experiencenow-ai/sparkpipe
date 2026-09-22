@@ -12,7 +12,11 @@ validation_hash_format_check=0
 validation_nvcc_splice=late
 
 validation_include_dirs() {
-    printf '%s\n' "model-families/ling/include"
+    # ling's model header chains llm_defines.h -> spark_driver_defines.h,
+    # which lives in the COMMON family include tree (first exercised by
+    # the lane-9 publish_variants run; the module's own TU always had
+    # both include paths via MODULE_INCLUDE_FLAGS).
+    printf '%s\n' "model-families/ling/include" "model-families/common/include"
 }
 
 validation_nvcc_extra_args() {
