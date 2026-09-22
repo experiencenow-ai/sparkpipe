@@ -49,7 +49,7 @@ struct Probe
     Rank ranks[SPARK_WEIGHTD_MESH_RANKS_PER_BAND];
     uint32_t degree=0u,operation=0u,rows=0u,rounds=0u;
     uint64_t elements=0u,launch_count=0u,epoch=100u,cancel=0u,timeout=UINT64_C(2000000000);
-    uint64_t shipped[16]={},pending[16]={},pending_at[16]={};
+    uint64_t shipped[16]={},pending[16]={},pending_at[16]={},enqueue_ns[16]={};
     std::atomic<bool> stop{false},hold{false};
     std::atomic<uint64_t> transfers{0u},delay_ns{0u};
     std::thread worker;
@@ -219,8 +219,9 @@ struct Probe
         launch_count++;
         for (uint32_t rank=0u;rank<degree;rank++)
         {
+            uint64_t begin=Now();
             if (graph) CUDA(cudaGraphLaunch(ranks[rank].executable,ranks[rank].stream));else Enqueue(rank);
-            CUDA(cudaEventRecord(ranks[rank].done,ranks[rank].stream));
+            CUDA(cudaEventRecord(ranks[rank].done,ranks[rank].stream));enqueue_ns[rank]=Now()-begin;
         }
     }
     bool Done()
@@ -251,6 +252,16 @@ struct Probe
             CUDA(cudaMemcpy(output.data(),ranks[rank].output,output.size(),cudaMemcpyDeviceToHost));
             if ((control.error_word!=0u)!=failed)
             {
+                EndWorker();
+                for (uint32_t peer=0u;peer<degree;peer++)
+                {
+                    SparkTpMeshRoundControl other={};CUDA(cudaMemcpy(&other,ranks[peer].control,sizeof(other),cudaMemcpyDeviceToHost));
+                    std::fprintf(stderr,"PEER rank=%u seq=%llu error=%llx diag=%llx rounds=%llu entry=%llx bytes=%llu slot=%llu mask=%llx enqueue_ms=%.3f\n",peer,
+                        (unsigned long long)other.seq,(unsigned long long)other.error_word,(unsigned long long)other.diag_word,(unsigned long long)other.rounds_done,
+                        (unsigned long long)Load(Entry(peer)),(unsigned long long)Load(Entry(peer)+1),(unsigned long long)Load(Entry(peer)+2),(unsigned long long)Load(Entry(peer)+3),enqueue_ns[peer]/1e6);
+                    for (uint32_t slot=0u;slot<degree*2u;slot++) std::fprintf(stderr,"TAIL rank=%u slot=%u value=%llx\n",peer,slot,
+                        (unsigned long long)Load(reinterpret_cast<uint64_t *>(host+peer*band_bytes+(slot+1u)*SPARK_WEIGHTD_MESH_SLOT_BYTES-8u)));
+                }
                 SparkWeightdMeshWaitRequest *gate=Gate(rank);
                 std::fprintf(stderr,"CONTROL rank=%u op=%u rows=%u seq=%llu round_seq=%llx error=%llx diag=%llx done=%llu expected_error=%u gate_id=%llu kind=%llu tag=%llx mask=%llx ready=%llu gate_error=%llx shipped=%llx transfers=%llu\n",rank,operation,rows,
                     (unsigned long long)control.seq,(unsigned long long)control.round_seq,(unsigned long long)control.error_word,(unsigned long long)control.diag_word,(unsigned long long)control.rounds_done,failed,
