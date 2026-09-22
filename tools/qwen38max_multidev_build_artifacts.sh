@@ -127,6 +127,29 @@ ADAPTER="$CHECKOUT/build/modules/qwen38_max_resident_decode_stage/$EXPERT_CODEC/
 # tier (STAGE_COUNT=1, all 92 layers, TP1, MAS=8) on this node's own
 # placed pack — the validator's admitted single-node tier (qwen38_27b
 # publish precedent: tp4-rank0 pack + standalone whole-stack).
+#
+# The shared runtime refuses standalone full-pack loads by law (build-r9p:
+# "stage-module direct pack load refused: weightd attach is mandatory" —
+# full-pack loads by residentds kill shared nodes), so the validation
+# attaches through THIS node's shared daemon exactly like a residentd:
+# socket + attach switch + the pack's sidecar digest, with the pool and
+# spine budgets from this rank's chunk-basis numbers (the arena rides the
+# daemon's tracked 29,184 MiB, not this unit's device carve-out).
+WEIGHTD_SOCKET="${QMAX_WEIGHTD_SOCKET:-/run/sparkpipe-weightd-shared/weightd.sock}"
+[ -S "$WEIGHTD_SOCKET" ] || fail "shared weightd socket not live: $WEIGHTD_SOCKET"
+[ -r "$PACK.sha256" ] || fail "pack digest sidecar missing: $PACK.sha256"
+PACK_SHA="$(cut -d' ' -f1 "$PACK.sha256")"
+[ "${#PACK_SHA}" -eq 64 ] || fail "bad pack digest in $PACK.sha256"
+BUDGET_LINE="$(python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" \
+  --budgets "$CHECKOUT/model-families/qwen38_max/smoke_experts.json" \
+  --rank "$NODE_RANK")"
+POOL_BYTES="${BUDGET_LINE%% *}"
+SPINE_BYTES="${BUDGET_LINE##* }"
+export SPARK_WEIGHTD_SOCKET="$WEIGHTD_SOCKET"
+export SPARK_WEIGHTD_ATTACH=1
+export SPARK_WEIGHTD_PACK_SHA256="$PACK_SHA"
+export SPARK_WEIGHTD_EXPERT_POOL_BYTES="$POOL_BYTES"
+export SPARK_WEIGHTD_SPINE_BUDGET_BYTES="$SPINE_BYTES"
 make -C "$CHECKOUT/modules/qwen38_max_resident_decode_stage" -j2 \
   CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
   EXPERT_CODEC="$EXPERT_CODEC" \
