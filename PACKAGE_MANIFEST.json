@@ -1,5 +1,5 @@
 {
-  "file_count": 3358,
+  "file_count": 3362,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "cdd9a233a6546eec16db37a0ebd1a916fe1bb80d900404b17d3504d957714ddb",
-      "size_bytes": 127673
+      "sha256": "026c3be0f36b579cca95fc4cc24f1a3d8a017a2ce9a92f2161796189e63d5628",
+      "size_bytes": 127709
     },
     {
       "path": "Makefile.rej",
@@ -4590,6 +4590,16 @@
       "path": "model-families/ling/name_map_lingfin.json",
       "sha256": "6a57235800aaf3624c55a5bcb4fe7957737c3b240915c6835971bb2272488eb7",
       "size_bytes": 13602
+    },
+    {
+      "path": "model-families/ling/smoke-ling-v1.wset",
+      "sha256": "99cf5171c05f0ce9973b833c0b835bbc15b72320c33366b6f0f411e021fa54ed",
+      "size_bytes": 10992
+    },
+    {
+      "path": "model-families/ling/smoke_experts.json",
+      "sha256": "ac80f8c592245c7292151d9a86b563e46bf7f9e147e1aacda0f9e297700eee67",
+      "size_bytes": 119059
     },
     {
       "path": "model-families/ling/tensor_patterns.json",
@@ -9747,6 +9757,11 @@
       "size_bytes": 11864
     },
     {
+      "path": "tests/test_ling_smoke_experts.py",
+      "sha256": "252a0a43259d2fa03c64d40968eeb00ff4cfa45ceca6202a0093f4712773726b",
+      "size_bytes": 13155
+    },
+    {
       "path": "tests/test_ling_verify_pack.py",
       "sha256": "e3720fbc8e05c1a37f73240c5a0aaa58d3cc731c140126ef71424202db7334d4",
       "size_bytes": 5141
@@ -12373,13 +12388,18 @@
     },
     {
       "path": "tools/ling_multidev_lane.py",
-      "sha256": "8f5f4e39974dc06cc912049fab89a9fda488982f65f8cd0ae88929ed0dd8f0d7",
-      "size_bytes": 14770
+      "sha256": "edf8db5a7c7e8451d1c16c618208f7e373f885113cc1b16c2b411a8d420dc362",
+      "size_bytes": 14821
     },
     {
       "path": "tools/ling_multidev_run_family.sh",
       "sha256": "c78a20d7b284a992b252c62c10c9f01aa200e71987dbe1f178975fe820fdb0d9",
       "size_bytes": 13714
+    },
+    {
+      "path": "tools/ling_smoke_experts.py",
+      "sha256": "76daca1630b7aa58f93de219de93ecef5baa8001a34ccd57b6145a36f96b565d",
+      "size_bytes": 26114
     },
     {
       "path": "tools/ling_stagepack.py",
@@ -16795,5 +16815,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79948824
+  "total_bytes": 80118231
 }
