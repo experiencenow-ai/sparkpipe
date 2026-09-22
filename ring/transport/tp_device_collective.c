@@ -266,11 +266,35 @@ SparkStatus SparkTpDeviceCollectiveSliceTopology(
     uint32_t rank_count,
     SparkTpDeviceCollectiveTopology *destination)
 {
-    (void)first_rank;
-    if ( source == 0 || destination == 0 || rank_count == 0u )
+    SparkTpDeviceCollectiveTopology sliced;
+    uint32_t rank,peer,rail;
+    if ( source == 0 || destination == 0 || rank_count == 0u ||
+         source->rank_count > SPARK_TP_DEVICE_COLLECTIVE_MAX_DEGREE ||
+         first_rank >= source->rank_count ||
+         rank_count > source->rank_count - first_rank ||
+         source->rail_count > SPARK_TP_DEVICE_COLLECTIVE_MAX_RAIL_COUNT )
         SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
-    *destination = *source;
-    destination->rank_count = rank_count;
+    if ( source->abi_version != SPARK_TP_DEVICE_COLLECTIVE_TOPOLOGY_ABI_VERSION ||
+         source->descriptor_bytes != SPARK_TP_DEVICE_COLLECTIVE_TOPOLOGY_BYTES )
+        SPARK_FAIL(SPARK_STATUS_ABI_MISMATCH);
+    sliced = *source;
+    sliced.rank_count = rank_count;
+    memset(sliced.rank_hosts,0,sizeof(sliced.rank_hosts));
+    memset(sliced.rail_rank_hosts,0,sizeof(sliced.rail_rank_hosts));
+    memset(sliced.session_ports,0,sizeof(sliced.session_ports));
+    for (rank=0u; rank<rank_count; rank++)
+    {
+        memcpy(sliced.rank_hosts[rank],source->rank_hosts[first_rank + rank],
+            sizeof(sliced.rank_hosts[rank]));
+        for (rail=0u; rail<source->rail_count; rail++)
+            memcpy(sliced.rail_rank_hosts[rail][rank],
+                source->rail_rank_hosts[rail][first_rank + rank],
+                sizeof(sliced.rail_rank_hosts[rail][rank]));
+        for (peer=0u; peer<rank_count; peer++)
+            sliced.session_ports[rank][peer] =
+                source->session_ports[first_rank + rank][first_rank + peer];
+    }
+    *destination = sliced;
     return SPARK_STATUS_OK;
 }
 

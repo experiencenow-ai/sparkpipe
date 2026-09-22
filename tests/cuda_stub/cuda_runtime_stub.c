@@ -1130,6 +1130,17 @@ uint32_t cuda_stub_mesh_publish_null_epoch_cell = 0u;
 
 static uint64_t cuda_stub_roundloop_now_ns(void);
 
+cudaError_t SparkGlm5NextLaunchMeshGuard(cudaStream_t stream,
+    volatile void *error_word,void *output)
+{
+    (void)stream;
+    if ( error_word == NULL || output == NULL )
+        return cudaErrorInvalidValue;
+    if ( *(volatile uint64_t *)error_word != 0u )
+        *(uint64_t *)output = UINT64_MAX;
+    return cudaSuccess;
+}
+
 cudaError_t SparkGlm5NextLaunchMeshCopyDown(cudaStream_t stream,
     volatile void *destination,const void *source,uint64_t bytes,
     const volatile void *shipped_cell,void *round_control,

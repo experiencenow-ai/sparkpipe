@@ -111,11 +111,6 @@ SparkStatus SparkWeightdClientMeshBroadcast(SparkWeightdClient *client, uint32_t
 	return(SPARK_STATUS_OK);
 }
 
-int SparkGlm5NextLaunchMeshGuard(void *stream, volatile void *error_word, void *output)
-{
-	(void)stream; (void)error_word; (void)output;
-	return(0);
-}
 
 static uint16_t FuzzBf16FromFloat(float value)
 {
@@ -1704,7 +1699,17 @@ static void FuzzSourceLifetime(void)
         &control.round_seq,sizeof(source),0u,2u,&tail,&control.error_word,2u) == 0 &&
         control.seq == 0u && entry[0] == 0u && tail == 0u,
         "failed source gate cannot publish a payload or advance sequence");
-    control.error_word = 0u;
+    {
+        uint64_t guarded[2] = {17u,29u};
+        CHECK(SparkGlm5NextLaunchMeshGuard(0,&control.error_word,guarded) == 0 &&
+            guarded[0] == UINT64_MAX && guarded[1] == 29u,
+            "failed mesh guard poisons only the output word");
+        control.error_word = 0u;
+        guarded[0] = 17u;
+        CHECK(SparkGlm5NextLaunchMeshGuard(0,&control.error_word,guarded) == 0 &&
+            guarded[0] == 17u && guarded[1] == 29u,
+            "successful mesh guard preserves output");
+    }
     shipped = control.round_seq;
     CHECK(SparkGlm5NextLaunchMeshCopyDown(0,destination,source,sizeof(source),
         &shipped,&control,&cancel,1000000u) == 0 &&

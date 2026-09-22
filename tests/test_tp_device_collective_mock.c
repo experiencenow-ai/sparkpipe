@@ -25,11 +25,6 @@ static uint32_t test_checks;
 	} while (0)
 
 
-int SparkGlm5NextLaunchMeshGuard(void *stream, volatile void *error_word, void *output)
-{
-	(void)stream; (void)error_word; (void)output;
-	return(0);
-}
 
 extern uint32_t cuda_stub_mesh_publish_calls;
 extern uint32_t cuda_stub_mesh_publish_null_seq_cell;
@@ -115,9 +110,73 @@ static void *PeerWaitMain(void *data)
 	return(0);
 }
 
+static void TestTopologySlice(void)
+{
+	SparkTpDeviceCollectiveTopology source,sliced,before;
+	uint32_t rank,peer,rail,first;
+	char expected[64];
+	memset(&source,0,sizeof(source));
+	source.abi_version = SPARK_TP_DEVICE_COLLECTIVE_TOPOLOGY_ABI_VERSION;
+	source.descriptor_bytes = sizeof(source);
+	source.rank_count = 16u;
+	source.rail_count = 2u;
+	source.algorithm_mask = SPARK_TP_DEVICE_COLLECTIVE_KNOWN_ALGORITHMS;
+	source.direct_all_to_all_max_payload_bytes = 81920u;
+	source.split_ring_min_payload_bytes = 655360u;
+	source.step_rail_indices[1] = 1u;
+	for (rank=0u; rank<16u; rank++)
+	{
+		(void)snprintf(source.rank_hosts[rank],64u,"host%u",rank);
+		for (rail=0u; rail<2u; rail++)
+			(void)snprintf(source.rail_rank_hosts[rail][rank],64u,
+			    "rail%u-host%u",rail,rank);
+		for (peer=0u; peer<16u; peer++)
+			source.session_ports[rank][peer] = rank == peer ? 0u :
+			    (uint16_t)(60000u + rank * 16u + peer);
+	}
+	before = source;
+	for (first=0u; first<16u; first+=4u)
+	{
+		CHECK(SparkTpDeviceCollectiveSliceTopology(&source,first,4u,&sliced) ==
+		    SPARK_STATUS_OK,"each PP stage slices its TP rank group");
+		CHECK(sliced.rank_count == 4u && sliced.rail_count == 2u &&
+		    sliced.algorithm_mask == source.algorithm_mask &&
+		    sliced.direct_all_to_all_max_payload_bytes == 81920u &&
+		    sliced.split_ring_min_payload_bytes == 655360u &&
+		    sliced.step_rail_indices[1] == 1u,"slice preserves algorithm policy");
+		for (rank=0u; rank<4u; rank++)
+		{
+			(void)snprintf(expected,sizeof(expected),"host%u",first + rank);
+			CHECK(strcmp(sliced.rank_hosts[rank],expected) == 0,"slice selects rank host");
+			for (rail=0u; rail<2u; rail++)
+			{
+				(void)snprintf(expected,sizeof(expected),"rail%u-host%u",rail,first + rank);
+				CHECK(strcmp(sliced.rail_rank_hosts[rail][rank],expected) == 0,
+				    "slice selects each rail host");
+			}
+			for (peer=0u; peer<4u; peer++)
+				CHECK(sliced.session_ports[rank][peer] == (rank == peer ? 0u :
+				    60000u + (first + rank) * 16u + first + peer),
+				    "slice selects source and destination session port");
+		}
+		CHECK(sliced.rank_hosts[4][0] == 0 && sliced.rail_rank_hosts[0][4][0] == 0 &&
+		    sliced.session_ports[4][0] == 0 && sliced.session_ports[0][4] == 0,
+		    "slice clears ranks outside selected group");
+	}
+	CHECK(memcmp(&source,&before,sizeof(source)) == 0,"slice preserves source");
+	CHECK(SparkTpDeviceCollectiveSliceTopology(&source,12u,4u,&source) == SPARK_STATUS_OK &&
+	    memcmp(&source,&sliced,sizeof(source)) == 0,"slice supports in-place destination");
+	before = sliced;
+	CHECK(SparkTpDeviceCollectiveSliceTopology(&source,3u,2u,&sliced) == SPARK_STATUS_INVALID_ARGUMENT &&
+	    memcmp(&sliced,&before,sizeof(sliced)) == 0,"invalid slice preserves destination");
+	CHECK(SparkTpDeviceCollectiveSliceTopology(&source,UINT32_MAX,1u,&sliced) == SPARK_STATUS_INVALID_ARGUMENT,
+	    "slice rejects overflowed first rank");
+}
+
 int main(void)
 {
 	SparkTpDeviceCollectiveConfig config;
+	TestTopologySlice();
 	(void)setenv("SPARK_WEIGHTD_SOCKET","/tmp/tp_collective_mock.sock",1);
 	SparkTpDeviceCollective collective;
 	SparkStatus status;
@@ -170,7 +229,7 @@ int main(void)
 		submission.descriptor_bytes = sizeof(submission);
 		submission.slot_index = 0u;
 		submission.active_sequence_count = 2u;
-		submission.logical_sequence_count = 2u;
+		submission.logical_sequence_count = 1u;
 		submission.ordinal = 1u;
 		submission.local_device = device_scratch;
 		submission.full_device = device_scratch;
