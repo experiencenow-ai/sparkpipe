@@ -330,15 +330,15 @@ fi
 
 export SPARK_WEIGHTD_ATTACH=1
 export SPARK_WEIGHTD_SOCKET="$SOCKET"
-# The daemon's mesh lane table holds SPARK_WEIGHTD_MESH_MAX_LANES (8)
-# lanes; dev lanes 0-7 pin their mesh lane, lanes 8+ leave
-# SPARK_WEIGHTD_LANE unset so the daemon assigns a free lane
-# (attach-009: MESH-LANE-FAIL status=1 - a pinned lane 8 is past the
-# table; the deterministic-lane fix is a constant bump + operator daemon
-# replacement, manager ruling).
-if [ "$LANE" -lt 8 ]; then
-  export SPARK_WEIGHTD_LANE="$LANE"
-fi
+# Deterministic mesh lane: the collective's sixteen ranks must sit in
+# ONE lane's band pair and the fleet daemon is PER-NODE, so a
+# daemon-assigned lane cannot be uniform across the job's nodes - the
+# lane is pinned, never assigned. attach-009's assignment stopgap died
+# with the 8-entry table (MESH-LANE-FAIL); the lane-9 constant bump
+# (SPARK_WEIGHTD_MESH_MAX_LANES=16) + the manager's fleet restart wave
+# make pin 8 acquirable - pinning before that wave fails MESH-LANE-FAIL
+# by design, so this launch waits for the wave.
+export SPARK_WEIGHTD_LANE="$LANE"
 export SPARK_TP_MESH_RANKS="$MESH_RANKS"
 # Budget envs were exported at derivation time (the warm leg needs them).
 # Pinned CUDA environment for shared-lane smoke (template hard rule).
