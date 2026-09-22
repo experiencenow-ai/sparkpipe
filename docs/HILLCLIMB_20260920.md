@@ -2103,3 +2103,41 @@ Standing receipts this tick: canary HTTP round-trips clean end-to-end
 (RC=0, well-formed errors); the retry-prefetch + warm-gate deployed
 fleet-wide (driver e9ee22e7); agent fleet restarted with records
 verified flowing.
+
+## 09-22 22:30 TICK — heal-test results: the FABRIC is exonerated; the systemic pattern is "no client survives daemon turnover"
+
+THE COLD-RESTART HEAL TEST (16/16 weightds killed at 11:07:10-16, agents
+relaunched in seconds, mesh rewired peers=15, records fresh at 11:07:11):
+- ZERO CQERR in the fresh era — the vendor-129 errors were a SYMPTOM of
+  the old generation, not the fabric. FABRIC EXONERATED.
+- Acquires STILL failed (prefetch 1/45; chains BUSY at the 30s deadline)
+  → discriminator: the weightd log shows ZERO acquire requests arriving
+  — the residentds' MAP CLIENTS still held sockets to the KILLED daemon
+  generation (the same dead-socket stickiness the lane client had; the
+  map has NO reconnect).
+- Residentd restarts (fresh map attaches) unblocked the requests — and
+  exposed the NEXT surface: submissions rejected status=9 at the module
+  admission SHAPE evaluation (module.c:4522) + ROUTE-STUCK state=1
+  (claimed, not advancing). New class, post-restart.
+
+THE SYSTEMIC PATTERN (the operator's parallel-dev bar): every daemon
+turnover (weightd recycle, agent deploy wave) orphans a client layer —
+lane client (fixed: REVIVE), map client (UNFIXED: no reconnect), kv
+admission state (fixed: RECLAIM), session state (fixed: epochs) — and
+each manual heal surfaces the next one. The converging-system answer:
+EVERY client of the weightd re-establishes on turnover (the map
+reconnect is the missing piece), and the admission shape failure after
+restarts needs its own look (state->resident_sequence_capacity vs
+available vs the request's shape — something disagrees only after a
+warm-daemon/cold-residentd combination).
+
+MEASURED THIS TICK: canary HTTP round-trips clean throughout (RC=0);
+status codes observed 9/15/4 across the classes above; no chain receipt
+(this tick was diagnosis, not throughput).
+
+NEXT (exact order): (a) the map reconnect (SparkWeightdMap* re-
+establishes on dead socket — mirrors the lane revive; kills the
+residentd-restart dependency on every weightd recycle), (b) the
+admission-shape status-9 after restarts (the capacity/limits
+disagreement), (c) then the tail-layer creation class on a stable
+stack, (d) warm canary → GRAPH → ARRIVAL → clean µs/round.
