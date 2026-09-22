@@ -2457,3 +2457,27 @@ The request-level canaries (23, 24) hit RC=28 through the deploy
 transition churn (requests status-4 mid-convergence) — the serving
 receipt is the immediate next item, then: the ladder to ≤100µs now
 runs from a 3.16ms floor with the graph path live.
+
+## 09-24 02:30 — PR #1081 UPDATE MERGED (ff to 4add3eb) + deployed; the chain class holds; the request-completion gap named
+
+THE UPDATE (5 commits: working-set recovery hardening + self-owned buffer
+teardown; serving-ownership fuzzing + removal of unsafe cache takeover —
+my KV-RECLAIM deliberately superseded by strict ownership + real abort
+delivery; TOKENIZER BOUNDS validation (maximum_token_id+1, consistent
+with the added-token floor); pipeline completion defers until every rank
+drains; fuzz campaign records + qualification gates).
+
+DEPLOY TRAP CAUGHT (the evidence law again): the first "deployment" of
+this update shipped OLD binaries — the ff-merge never left the Mac
+(origin still at 1a62b72; both build hosts pulled nothing; the
+unchanged shas were the tell). Pushed, rebuilt for real: residentd
+eae682f7 / daemon 2e4efe57 / x86 api 1f9e20e7 / driver b257f799.
+
+VERIFIED: chains complete at the good class (311.69ms status=0,
+host-submit 108.76ms/91; the 3.16ms/round floor holds on the update).
+OPEN (the exact next item): the REQUEST-level completion still fails —
+engine_completed=0, request status=4 (IO) while chains run; the
+canary RC=28s. The gap is in the request/completion plumbing (their
+every-rank-drain deferral under real traffic needs the look — or the
+API connection path again). Timer stays STOPPED per the operator;
+state parked for the next session/astra's next word.
