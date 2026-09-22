@@ -75,6 +75,8 @@ typedef struct SparkGemma4ModuleSlot
 	void *moe_gate_packed_bf16;
 	void *moe_slot_out_bf16;
 	void *argmax_score_f32;
+	void *argmax_scratch;
+	uint32_t *argmax_candidate_counts;
 	void *argmax_token_ids;
 	uint64_t *head_maxloc_u64;
 	uint32_t *frame_error;
@@ -640,7 +642,8 @@ extern cudaError_t SparkGemma4LaunchAttentionDecodeFull(cudaStream_t stream, voi
 extern cudaError_t SparkGemma4LaunchGatedGelu(cudaStream_t stream, void *gate_up_bf16, uint32_t row_count, uint32_t intermediate);
 extern cudaError_t SparkGemma4LaunchHeadMaxLocPack(cudaStream_t stream, const float *scores_f32, const uint32_t *token_ids_u32, uint64_t *keys_u64, uint32_t row_count);
 extern cudaError_t SparkGemma4LaunchHeadMaxLocUnpack(cudaStream_t stream, const uint64_t *keys_u64, uint32_t *token_ids_u32, uint32_t row_count);
-extern cudaError_t SparkGemma4LaunchHeadDirectArgmax(cudaStream_t stream, const void *hidden_bf16, const void *head_weight_bf16, uint32_t *output_token_ids, float *output_scores, uint32_t candidate_offset, uint32_t row_count, uint32_t candidate_count);
+extern uint32_t SparkGemma4HeadDirectArgmaxScratchElements(uint32_t rows);
+extern cudaError_t SparkGemma4LaunchHeadDirectArgmax(cudaStream_t stream, const void *hidden_bf16, const void *head_weight_bf16, void *scratch, uint32_t *candidate_counts, uint32_t *output_token_ids, float *output_scores, uint32_t candidate_offset, uint32_t row_count, uint32_t candidate_count);
 #if SPARK_GEMMA4_MODEL_MOE_BLOCK
 extern cudaError_t SparkGemma4LaunchRouterSoftmax(cudaStream_t stream, float *scores_f32, uint32_t row_count);
 extern cudaError_t SparkGemma4LaunchRouterTopk(cudaStream_t stream, const float *scores_f32, uint32_t *indices_u32, float *weights_f32, uint32_t row_count);
@@ -919,6 +922,10 @@ static SparkStatus SparkGemma4ModuleAllocateSlot(SparkGemma4ModuleState *state, 
 	{
 		if ( status == SPARK_STATUS_OK )
 			status = SparkStageModuleDeviceAllocate(&state->ledger,rows * sizeof(float),(void **)&slot->argmax_score_f32);
+		if ( status == SPARK_STATUS_OK )
+			status = SparkStageModuleDeviceAllocate(&state->ledger,(uint64_t)SparkGemma4HeadDirectArgmaxScratchElements(rows) * (sizeof(float) + sizeof(uint32_t)),(void **)&slot->argmax_scratch);
+		if ( status == SPARK_STATUS_OK )
+			status = SparkStageModuleDeviceAllocate(&state->ledger,rows * sizeof(uint32_t),(void **)&slot->argmax_candidate_counts);
 		if ( status == SPARK_STATUS_OK )
 			status = SparkStageModuleDeviceAllocate(&state->ledger,rows * sizeof(uint32_t),(void **)&slot->argmax_token_ids);
 		if ( status == SPARK_STATUS_OK )
@@ -1375,7 +1382,7 @@ static cudaError_t SparkGemma4ModuleEmitHead(SparkGemma4ModuleState *state, Spar
 	cudaStream_t stream = (cudaStream_t)slot->cuda_stream;
 	cudaError_t error = SparkGemma4LaunchRmsNorm(stream,slot->hidden_bf16,state->final_norm_weight_bf16,slot->normalized_bf16,rows,SPARK_GEMMA4_MODEL_HIDDEN_DIMENSION,SPARK_GEMMA4_MODEL_RMS_NORM_EPSILON);
 	if ( error == cudaSuccess )
-		error = SparkGemma4LaunchHeadDirectArgmax(stream,slot->normalized_bf16,state->token_embedding_bf16,slot->argmax_token_ids,slot->argmax_score_f32,state->tp_vocab_base,rows,state->tp_vocab_rows);
+		error = SparkGemma4LaunchHeadDirectArgmax(stream,slot->normalized_bf16,state->token_embedding_bf16,slot->argmax_scratch,slot->argmax_candidate_counts,slot->argmax_token_ids,slot->argmax_score_f32,state->tp_vocab_base,rows,state->tp_vocab_rows);
 	if ( error == cudaSuccess )
 		error = SparkGemma4LaunchHeadMaxLocPack(stream,slot->argmax_score_f32,slot->argmax_token_ids,slot->head_maxloc_u64,rows);
 	if ( error == cudaSuccess && state->tp_degree > 1u )
