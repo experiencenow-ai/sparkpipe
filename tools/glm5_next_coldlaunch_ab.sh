@@ -224,10 +224,6 @@ revision="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(
 if [ "$ARM" = "B" ]; then
   PACK="$ROOT/runtime/$pack_rel"
   SHA="$(cut -d' ' -f1 "$PACK.sha256")"
-  # qualified PR #1082 pool/spine ceilings (24 GiB / 4 GiB); the shared
-  # daemon enforces its own arena bounds on top of these client requests
-  export SPARK_WEIGHTD_EXPERT_POOL_BYTES=25769803776
-  export SPARK_WEIGHTD_SPINE_BUDGET_BYTES=4294967296
   t0=$(date +%s.%N)
   "$FAMILY_ROOT/bin/weightd_warm" "$SHARED_SOCKET" "$PACK" "$SHA" "$revision" 16 \
     --wset "$WSET" 300 >"$ROOT/warm.log" 2>&1
@@ -249,6 +245,12 @@ export CUDA_MODULE_DATA_LOADING=LAZY
 export CUDA_DEVICE_MAX_CONNECTIONS=32
 export SPARK_GLM5_NEXT_GRAPH_PATH=1
 export SPARK_GLM5_NEXT_PIN_EXPERTS=1
+# the module requires explicit finite pool/spine budgets at driver load
+# (qualified PR #1082 values: 24 GiB pool / 4 GiB spine; the shared daemon
+# enforces its own arena bounds on top)
+export SPARK_WEIGHTD_EXPERT_POOL_BYTES=25769803776
+export SPARK_WEIGHTD_SPINE_BUDGET_BYTES=4294967296
+export SPARK_WEIGHTD_KV_RESERVE_BYTES=0
 
 t0=$(date +%s.%N)
 setsid "$FAMILY_ROOT/bin/sparkpipe_model_residentd" \
