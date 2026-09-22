@@ -348,6 +348,14 @@ export CUDA_DEVICE_MAX_CONNECTIONS=32
 echo "laguna-$FAMILY-lane$LANE: rank=$RANK host=$HOST stage=$STAGE tp=$TP_RANK \
 pack=$PRIVATE_PACK pool=${LAGUNA_EXPERT_POOL_BYTES}B spine=${LAGUNA_SPINE_BUDGET_BYTES}B \
 socket=$SOCKET collective_id=$COLLECTIVE_ID"
+if [ -n "${LAGUNA_GDB:-}" ]; then
+  # Debug hook (crash triage): run the resident under batch gdb and
+  # print the backtrace on fault before the queue reaps the job.
+  exec gdb --batch -ex run -ex "bt 25" \
+    --args "$ROOT/bin/sparkpipe_model_residentd" \
+    --deployment "$ROOT/deployment.json" \
+    --rank-index "$RANK"
+fi
 exec "$ROOT/bin/sparkpipe_model_residentd" \
   --deployment "$ROOT/deployment.json" \
   --rank-index "$RANK"
