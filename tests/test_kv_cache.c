@@ -1061,6 +1061,112 @@ static void SparkTestPrefixCacheReusesCommittedLogicalBlocks(void)
 	assert(cache.hit_count == 1u);
 }
 
+static void SparkTestPrefixCachePartialPublication(void)
+{
+	for (uint32_t hashed=0u; hashed<2u; hashed++)
+	{
+		SparkPrefixCache cache;
+		SparkPrefixCacheConfiguration config = {0};
+		SparkPrefixCacheEntry entries[8];
+		SparkPrefixCacheSequenceBinding bindings[16];
+		SparkPrefixCacheLookup lookup;
+		uint32_t entry_heads[8],lookup_heads[16],sequence_heads[16];
+		uint32_t tokens[66],other[66],old_index;
+		config.abi_version = SPARK_PREFIX_CACHE_ABI_VERSION;
+		config.descriptor_bytes = SPARK_PREFIX_CACHE_CONFIGURATION_DESCRIPTOR_BYTES;
+		config.block_token_count = 64u;
+		config.entry_count = config.logical_block_count = 8u;
+		config.sequence_binding_count = 16u;
+		config.entries = entries;
+		config.sequence_bindings = bindings;
+		if ( hashed != 0u )
+		{
+			config.entry_hash_bucket_count = 8u;
+			config.binding_hash_bucket_count = 16u;
+			config.entry_hash_bucket_heads = entry_heads;
+			config.binding_lookup_hash_bucket_heads = lookup_heads;
+			config.binding_sequence_hash_bucket_heads = sequence_heads;
+		}
+		assert(SparkPrefixCacheInitialize(&cache,&config) == SPARK_STATUS_OK);
+		for (uint32_t i=0u; i<66u; i++)
+			tokens[i] = other[i] = 100u + i;
+		other[63] += 1000u;
+		assert(SparkPrefixCacheCommitPrompt(&cache,1u,tokens,63u,&lookup) == SPARK_STATUS_OK);
+		assert(lookup.matched_token_count == 63u && lookup.matched_block_count == 1u);
+		assert(SparkPrefixCacheLookupPrompt(&cache,2u,tokens,64u,&lookup) == SPARK_STATUS_OK);
+		assert(lookup.matched_token_count == 63u && lookup.matched_block_count == 1u);
+		old_index = lookup.logical_block_index;
+		assert(SparkPrefixCacheCommitPrompt(&cache,2u,tokens,64u,&lookup) == SPARK_STATUS_OK);
+		assert(lookup.matched_token_count == 64u);
+		assert(entries[old_index].token_count == 63u && entries[old_index].reference_count == 1u);
+		assert(SparkPrefixCacheLookupPrompt(&cache,3u,other,65u,&lookup) == SPARK_STATUS_OK);
+		assert(lookup.matched_token_count == 63u && lookup.logical_block_index == old_index);
+		assert(SparkPrefixCacheCommitPrompt(&cache,3u,other,65u,&lookup) == SPARK_STATUS_OK);
+		assert(lookup.matched_token_count == 65u && lookup.matched_block_count == 2u);
+		assert(SparkPrefixCacheLookupPrompt(&cache,4u,other,66u,&lookup) == SPARK_STATUS_OK);
+		assert(lookup.matched_token_count == 65u);
+		assert(SparkPrefixCacheProbePrompt(&cache,5u,tokens,65u,&lookup) == SPARK_STATUS_OK);
+		assert(lookup.matched_token_count == 64u);
+		assert(SparkPrefixCacheProbePrompt(&cache,5u,tokens,64u,&lookup) == SPARK_STATUS_OK);
+		assert(lookup.matched_token_count == 63u);
+		{
+			uint32_t table[2],matched,count;
+			SparkKvCachePrefetchSourceBlock sources[2];
+			assert(SparkPrefixCacheProbeLogicalBlockTable(&cache,other,66u,table,2u,&matched,&count) == SPARK_STATUS_OK);
+			assert(matched == 65u && count == 2u);
+			assert(SparkPrefixCacheProbeReusablePrefixPrefetchSources(&cache,other,66u,sources,2u,&matched,&count) == SPARK_STATUS_OK);
+			assert(matched == 65u && count == 2u && sources[0].token_count == 64u && sources[1].token_count == 1u);
+			assert(SparkPrefixCacheProtectPromptLookahead(&cache,other,66u,1u,&matched,&count) == SPARK_STATUS_OK);
+			assert(matched == 65u && count == 2u);
+		}
+		for (uint32_t sequence=1u; sequence<=4u; sequence++)
+			assert(SparkPrefixCacheReleaseSequence(&cache,sequence) == SPARK_STATUS_OK);
+		for (uint32_t i=0u; i<8u; i++)
+			assert(entries[i].reference_count == 0u);
+	}
+	{
+		SparkPrefixCache cache;
+		SparkPrefixCacheConfiguration config = {0};
+		SparkPrefixCacheEntry entries[2];
+		SparkPrefixCacheSequenceBinding bindings[4];
+		SparkPrefixCacheLookup lookup;
+		uint32_t tokens[65],other[65];
+		config.abi_version = SPARK_PREFIX_CACHE_ABI_VERSION;
+		config.descriptor_bytes = SPARK_PREFIX_CACHE_CONFIGURATION_DESCRIPTOR_BYTES;
+		config.block_token_count = 64u;
+		config.entry_count = config.logical_block_count = 2u;
+		config.sequence_binding_count = 4u;
+		config.entries = entries;
+		config.sequence_bindings = bindings;
+		assert(SparkPrefixCacheInitialize(&cache,&config) == SPARK_STATUS_OK);
+		for (uint32_t i=0u; i<65u; i++)
+		{
+			tokens[i] = i + 1u;
+			other[i] = i + 101u;
+		}
+		assert(SparkPrefixCacheCommitPrompt(&cache,1u,tokens,63u,&lookup) == SPARK_STATUS_OK);
+		assert(SparkPrefixCacheCommitPrompt(&cache,2u,other,63u,&lookup) == SPARK_STATUS_OK);
+		assert(SparkPrefixCacheCommitPrompt(&cache,1u,tokens,64u,&lookup) == SPARK_STATUS_CAPACITY_EXCEEDED);
+		assert(entries[0].reference_count == 1u && entries[0].token_count == 63u);
+		assert(entries[1].reference_count == 1u && entries[1].token_count == 63u);
+		assert(SparkPrefixCacheLookupPrompt(&cache,3u,tokens,64u,&lookup) == SPARK_STATUS_OK);
+		assert(lookup.matched_token_count == 63u && entries[0].reference_count == 2u);
+		assert(SparkPrefixCacheReleaseSequence(&cache,2u) == SPARK_STATUS_OK);
+		assert(SparkPrefixCacheCommitPrompt(&cache,1u,tokens,65u,&lookup) == SPARK_STATUS_CAPACITY_EXCEEDED);
+		assert(entries[0].reference_count == 2u && entries[0].token_count == 63u);
+		assert(SparkPrefixCacheProbePrompt(&cache,4u,tokens,65u,&lookup) == SPARK_STATUS_OK);
+		assert(lookup.matched_token_count == 63u);
+		assert(SparkPrefixCacheCommitPrompt(&cache,1u,tokens,64u,&lookup) == SPARK_STATUS_OK);
+		assert(entries[0].reference_count == 1u && entries[0].token_count == 63u);
+		assert(SparkPrefixCacheProbePrompt(&cache,4u,tokens,65u,&lookup) == SPARK_STATUS_OK);
+		assert(lookup.matched_token_count == 64u);
+		assert(SparkPrefixCacheReleaseSequence(&cache,1u) == SPARK_STATUS_OK);
+		assert(SparkPrefixCacheReleaseSequence(&cache,3u) == SPARK_STATUS_OK);
+		assert(entries[0].reference_count == 0u && entries[1].reference_count == 0u);
+	}
+
+}
+
 typedef struct SparkTestKvPageFixture
 {
 	SparkTestKvFixture kv;
@@ -1939,6 +2045,7 @@ int main(void)
 	SparkTestKvPageStoreDirectIoContract();
 	SparkTestKvPageStoreFailedPrefetchCancelsReservation();
 	SparkTestPrefixCacheReusesCommittedLogicalBlocks();
+	SparkTestPrefixCachePartialPublication();
 	SparkTestKvPageCacheSharesImmutableChains();
 	SparkTestKvPageCacheDeduplicatesAndRequiresRelease();
 	SparkTestKvPageCacheRejectsMissingPrefix();

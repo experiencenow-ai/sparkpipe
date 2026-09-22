@@ -170,6 +170,12 @@ static void TestModelBatchSchedulerCacheCapacity(void)
 	assert(SparkModelBatchSchedulerRequestFitsPageCapacity(128u,1u,128u,2u) ==
 		0u);
 	assert(SparkModelBatchSchedulerRequestFitsPageCapacity(128u,1u,1u,128u) ==
+		0u);
+	assert(SparkModelBatchSchedulerRequestFitsPageCapacity(128u,2u,1u,128u) ==
+		1u);
+	assert(SparkModelBatchSchedulerRequestFitsPageCapacity(64u,1u,63u,2u) ==
+		0u);
+	assert(SparkModelBatchSchedulerRequestFitsPageCapacity(64u,2u,63u,2u) ==
 		1u);
 	assert(SparkModelBatchSchedulerRequestFitsPageCapacity(128u,1u,1u,129u) ==
 		0u);

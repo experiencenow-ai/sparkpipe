@@ -213,7 +213,7 @@ static void RunCowCase(void)
     CHECK(SparkKvPageCacheCompleteLane(&h.cache,&original_lane) == SPARK_STATUS_OK);
     for (step=0u; step<8u; step++)
     {
-        operation = step < 3u ? step : (uint32_t)(FuzzRand() % 3u);
+        operation = step < 4u ? step : (uint32_t)(FuzzRand() % 4u);
         h.lanes[0] = original_lane;
         h.lanes[0].sequence_id = 200u + step;
         h.lanes[0].resident_sequence_slot = 1u;
@@ -238,7 +238,7 @@ static void RunCowCase(void)
             frame = Frame(&h);
             CHECK(SparkKvLaneTransactionsClaim(&h.transactions,&frame) == SPARK_STATUS_OK);
             ((uint8_t *)mutable_view.key_device_address)[prefix] ^= UINT8_C(0xff);
-            CHECK(SparkKvLaneTransactionsFinish(&h.transactions,(uint32_t[]){1u},1u,operation == 1u ? SPARK_STATUS_IO_ERROR : SPARK_STATUS_OK,0u) == (operation == 1u ? SPARK_STATUS_IO_ERROR : SPARK_STATUS_OK));
+            CHECK(SparkKvLaneTransactionsFinish(&h.transactions,(uint32_t[]){1u},1u,operation == 1u ? SPARK_STATUS_IO_ERROR : SPARK_STATUS_OK,operation == 3u ? 1u : 0u) == (operation == 1u ? SPARK_STATUS_IO_ERROR : operation == 3u ? SPARK_STATUS_UNSUPPORTED : SPARK_STATUS_OK));
             if ( operation == 2u )
             {
                 CHECK(SparkKvPageCacheReleaseLane(&h.cache,1u,200u + step) == SPARK_STATUS_OK);

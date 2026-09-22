@@ -319,11 +319,11 @@ static SparkStatus SparkModelServingAdapterValidateRows(
 			publish_identity_present |= submission->lanes[lane].cache_publish_identity.sha256[row];
 		if ( ((submission->lanes[lane].flags & SPARK_MODEL_SERVING_LANE_FLAG_CACHE_PREFIX) != 0u) != (submission->lanes[lane].cache_prefix_token_count != 0u) || ((submission->lanes[lane].flags & SPARK_MODEL_SERVING_LANE_FLAG_CACHE_PREFIX) != 0u) != (prefix_identity_present != 0u) )
 			SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
-		if ( submission->lanes[lane].cache_prefix_token_count != 0u && (cache_block_token_count == 0u || submission->lanes[lane].cache_prefix_token_count % cache_block_token_count != 0u || submission->lanes[lane].cache_prefix_token_count > submission->lanes[lane].sequence_position) )
+		if ( submission->lanes[lane].cache_prefix_token_count != 0u && (cache_block_token_count == 0u || submission->lanes[lane].cache_prefix_token_count > submission->lanes[lane].sequence_position) )
 			SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 		if ( ((submission->lanes[lane].flags & SPARK_MODEL_SERVING_LANE_FLAG_CACHE_PUBLISH) != 0u) != (submission->lanes[lane].cache_publish_token_count != 0u) || ((submission->lanes[lane].flags & SPARK_MODEL_SERVING_LANE_FLAG_CACHE_PUBLISH) != 0u) != (publish_identity_present != 0u) )
 			SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
-		if ( submission->lanes[lane].cache_publish_token_count != 0u && (cache_block_token_count == 0u || submission->lanes[lane].cache_publish_token_count % cache_block_token_count != 0u || submission->lanes[lane].cache_publish_token_count <= submission->lanes[lane].cache_prefix_token_count || submission->lanes[lane].cache_publish_token_count > submission->lanes[lane].context_token_count) )
+		if ( submission->lanes[lane].cache_publish_token_count != 0u && (cache_block_token_count == 0u || submission->lanes[lane].cache_publish_token_count <= submission->lanes[lane].cache_prefix_token_count || submission->lanes[lane].cache_publish_token_count > submission->lanes[lane].context_token_count) )
 			SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 		seen_slots[slot] = 1u;
 	}
