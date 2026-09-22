@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "sparkpipe/spark_minimax_resident_decode_stage_firmware.h"
+#include "sparkpipe/spark_tp_mesh_kernels.cuh"
 
 #define SPARK_MINIMAX_KERNEL_HIDDEN SPARK_MINIMAX_RESIDENT_DECODE_STAGE_HIDDEN_DIMENSION
 #define SPARK_MINIMAX_KERNEL_HEAD_DIM SPARK_MINIMAX_RESIDENT_DECODE_STAGE_HEAD_DIMENSION
