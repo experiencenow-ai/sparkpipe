@@ -7893,8 +7893,8 @@
     },
     {
       "path": "ring/transport/hidden_transport.c",
-      "sha256": "3c67ef0ac7e99b8f1ebe1799a75a49ab771809714c9a7e0ccee9f953c40a9b25",
-      "size_bytes": 52860
+      "sha256": "560d70e7533c57c0cf30c0f1d723a53525a81b7907c09446b49a3cd2351f3947",
+      "size_bytes": 53298
     },
     {
       "path": "ring/transport/memlink.c",
@@ -16905,5 +16905,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80420299
+  "total_bytes": 80420737
 }
