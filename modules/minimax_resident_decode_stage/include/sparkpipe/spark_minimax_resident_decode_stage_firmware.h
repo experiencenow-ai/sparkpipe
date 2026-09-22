@@ -43,8 +43,17 @@ extern "C" {
 
 #define SPARK_MINIMAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_BF16 SPARK_STAGEPACK_FORMAT_WEIGHT_BF16
 
-_Static_assert(SPARK_MINIMAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_BF16 == 0u,"minimax packs carry bf16 weight code zero");
-_Static_assert(SPARK_LLM_TIED_WORD_EMBEDDINGS == 0u,"minimax serves the untied language modeling head");
+/* nvcc compiles this header inside the C++17 .cu translation unit; the
+ * shared shim convention is spark_driver_defines.h SPARK_LLM_STATIC_ASSERT
+ * (self-contained here because this header does not chain it). */
+#if defined(__cplusplus)
+#define SPARK_MINIMAX_STATIC_ASSERT(condition,message) static_assert(condition,message)
+#else
+#define SPARK_MINIMAX_STATIC_ASSERT(condition,message) _Static_assert(condition,message)
+#endif
+
+SPARK_MINIMAX_STATIC_ASSERT(SPARK_MINIMAX_RESIDENT_DECODE_STAGE_WEIGHT_FORMAT_BF16 == 0u,"minimax packs carry bf16 weight code zero");
+SPARK_MINIMAX_STATIC_ASSERT(SPARK_LLM_TIED_WORD_EMBEDDINGS == 0u,"minimax serves the untied language modeling head");
 
 typedef struct SparkMinimaxLinearView
 {

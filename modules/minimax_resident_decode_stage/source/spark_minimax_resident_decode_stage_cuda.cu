@@ -378,7 +378,13 @@ __global__ void SparkMinimaxVocabArgmaxKernel(const __nv_bfloat16 *lm_head_bf16,
 		}
 	}
 	if ( (threadIdx.x & 31u) == 0u )
-		atomicMax(&argmax_reduce_u64[row],SparkMinimaxSortableScore(score,token));
+	{
+		/* CUDA provides no uint64_t (unsigned long on LP64) atomicMax; the
+		 * intrinsic exists for unsigned long long, which has identical
+		 * width and representation - reinterpret the cell. */
+		atomicMax(reinterpret_cast<unsigned long long *>(&argmax_reduce_u64[row]),
+			static_cast<unsigned long long>(SparkMinimaxSortableScore(score,token)));
+	}
 }
 
 __global__ void SparkMinimaxArgmaxResolveKernel(const uint64_t *argmax_reduce_u64,uint32_t *token_ids,uint32_t row_count)
