@@ -13,6 +13,11 @@ MODULE_ADDITIONAL_HOST_SOURCES = \
 	$(REPOSITORY_ROOT)/ring/transport/tp_collective.c \
 	$(REPOSITORY_ROOT)/ring/transport/tp_device_collective.c
 GEMMA4_MODEL_REVISION ?= 842da3794eaa0b77d5f08bae87a17459d91ff475
+# The serving-adapter descriptor must carry the model-description sha the
+# driver compile embeds (serving_adapter_template.c compares both sides at
+# adapter_initialize): the adapter and the driver are built from the same
+# checkout in one release, so the firmware json's sha is computed here.
+GEMMA4_MODEL_DESCRIPTION_SHA256 := $(shell sha256sum $(CURDIR)/../../examples/model_descriptions/gemma4_resident_decode_stage_bf16_firmware.json 2>/dev/null | awk '{print $$1}')
 GEMMA4_CONTRACT_SHA256 := $(shell sha256sum $(CURDIR)/../../model_contracts/gemma4_31b_authoritative.json | awk '{print $$1}')
 MODULE_COMPILE_FLAGS := \
 	-DSPARK_GEMMA4_MODULE_BUILD=1 \
@@ -96,6 +101,7 @@ adapter:
 		-D_POSIX_C_SOURCE=200809L \
 		-DGEMMA4_MODEL_REVISION=\"$(GEMMA4_MODEL_REVISION)\" \
 		-DGEMMA4_CONTRACT_SHA256=\"$(GEMMA4_CONTRACT_SHA256)\" \
+		-DGEMMA4_MODEL_DESCRIPTION_SHA256=\"$(GEMMA4_MODEL_DESCRIPTION_SHA256)\" \
 		-I"$(CUDA_HOME)/include" \
 		$(MODULE_INCLUDE_FLAGS) -DSPARK_BATCH_BUCKET=1024u \
 		source/spark_gemma4_serving_adapter.c \
