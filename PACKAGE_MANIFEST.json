@@ -5778,8 +5778,8 @@
     },
     {
       "path": "modules/qwen38_27b_resident_decode_stage/source/spark_qwen38_27b_serving_adapter.c",
-      "sha256": "1aa79a8cce0a35bc4443d6c5ec9e93ed15acc5ec9230a32bdcd37ff28e5f3689",
-      "size_bytes": 110713
+      "sha256": "035ddb1ac2be2ca582ae4a3f5db4749e73a2a7e93a810f23470ec5b99472ab27",
+      "size_bytes": 111907
     },
     {
       "path": "modules/qwen38_27b_resident_decode_stage/source/spark_qwen38_27b_stagepack_format.h",
@@ -16430,5 +16430,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78201870
+  "total_bytes": 78203064
 }
