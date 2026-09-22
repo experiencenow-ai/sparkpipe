@@ -197,6 +197,33 @@ int main(int argument_count,char **arguments)
         fprintf(stderr,"weightd_warm: --family dsv4_pro requires --world-rank\n");
         goto usage;
     }
+    if ( argument_count == 3 && strcmp(arguments[2],"--reclaim") == 0 )
+    {
+        /* Lane utility (additive): free every COLD arena (refcount 0, no
+           leases). The pool size is fixed at arena creation, so a stale
+           arena created with the wrong expert-pool budget blocks the
+           correctly-sized one until reclaimed - measured on the lane-4
+           rank3 cell (ACQUIRE-LOAD-STAGE stage=budget). */
+        SparkWeightdReclaimResult reclaim = {0};
+        SparkWeightdClient *reclaim_client = 0;
+        status = SparkWeightdClientConnect(arguments[1],&reclaim_client,0);
+        if ( status == SPARK_STATUS_OK )
+            status = SparkWeightdClientReclaim(reclaim_client,&reclaim,
+                30u * UINT64_C(1000000000));
+        if ( status != SPARK_STATUS_OK || reclaim.status != SPARK_STATUS_OK )
+        {
+            fprintf(stderr,"weightd_warm: reclaim failed status=%d daemon=%u\n",
+                (int)status,reclaim.status);
+            SparkWeightdClientClose(reclaim_client);
+            return 1;
+        }
+        fprintf(stderr,"weightd_warm: RECLAIM freed=%llu arenas=%u resident=%llu\n",
+            (unsigned long long)reclaim.reclaimed_bytes,
+            reclaim.reclaimed_arena_count,
+            (unsigned long long)reclaim.resident_bytes);
+        SparkWeightdClientClose(reclaim_client);
+        return 0;
+    }
     if ( argument_count > 6 && strcmp(arguments[6],"--wset") == 0 )
     {
         if ( argument_count < 8 )
@@ -326,6 +353,7 @@ done:
 usage:
     fprintf(stderr,"usage: weightd_warm SOCKET PACK SHA256 REVISION TOPOLOGY [LAYERS=45 [EXPERTS=288 [TIMEOUT_S=1800]]]\n"
         "       weightd_warm SOCKET PACK SHA256 REVISION TOPOLOGY --wset FILE [TIMEOUT_S=300]\n"
+        "       weightd_warm SOCKET --reclaim\n"
         "       options (any position): --family dsv4_pro --world-rank R (derive the exact\n"
         "       DSV4 Pro module attach identity; REVISION/TOPOLOGY args are then ignored)\n"
         "                           --identity-print (print the derived identity and exit)\n"

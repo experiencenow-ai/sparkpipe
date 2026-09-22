@@ -111,6 +111,9 @@ SparkStatus SparkWeightdClientRelease(SparkWeightdClient *c,uint64_t g,
     uint64_t l,SparkWeightdWorkingSetResult *r,uint64_t t)
     { (void)c;(void)g;(void)l;(void)r;(void)t;
       return SPARK_STATUS_UNSUPPORTED; }
+SparkStatus SparkWeightdClientReclaim(SparkWeightdClient *c,
+    SparkWeightdReclaimResult *r,uint64_t t)
+    { (void)c;(void)r;(void)t; return SPARK_STATUS_UNSUPPORTED; }
 """)
             binary = Path(tmp) / "warm"
             build = subprocess.run(
