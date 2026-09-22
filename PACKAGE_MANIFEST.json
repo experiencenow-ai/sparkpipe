@@ -9528,8 +9528,8 @@
     },
     {
       "path": "tests/test_k3_multidev_lane.py",
-      "sha256": "382c45e0a832d80e7c0444a3f75e2aea0d560275fcd7e2efae8913aaa762315c",
-      "size_bytes": 12357
+      "sha256": "dfdbac8556e0cd5b0123bf7b37511dbf457b13e2dc3bb378b5b1d681d9a8a83e",
+      "size_bytes": 12740
     },
     {
       "path": "tests/test_k3_pack.py",
@@ -16660,5 +16660,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79702244
+  "total_bytes": 79702627
 }
