@@ -4,6 +4,8 @@ The release gate is concurrent inference with correct tokens and bounded shared
 residency, followed by verified cleanup. Starting processes or printing readiness
 is insufficient. Different model families also need their own execution evidence;
 a repeated GLM deployment does not establish their numerical correctness.
+Later exact-source reruns and full logs are attached to the
+[shared-serving release](https://github.com/sparkpipe/sparkpipe/releases/tag/shared-serving-20260922).
 
 ## First shared-daemon fleet campaign
 
