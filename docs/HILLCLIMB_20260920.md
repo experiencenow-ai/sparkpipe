@@ -2330,3 +2330,30 @@ would punish (huge host staging spikes visible in earlyoom's 5s memory
 reports DURING a warm — watch avail memory live while warming), (c) the
 syslog-per-second capture during one warm run (the record may exist
 outside my greps).
+
+## 09-23 16:00 TICK — BOTH KILLERS NAMED: timeout-judged health probes vs a busy daemon
+
+THE VERDICT CHAIN (rc-capturing supervisor + instrumented logs):
+1. The deaths are CLEAN rc=0-then-kill sequences, not crashes — the
+   core-enabled daemon died with NO core, and the syslog finally showed
+   the actor: `weightd: stale or unresponsive instance(s); clearing
+   (production channel only)` — THE AGENT'S HEALTH PROBE: a 3s python
+   connect ×3 to the unix socket; failure = kill -9 every weightd.
+2. THE LATCH KILLER (fixed first, @d380827): holder-aliveness was a
+   connect() probe against a listener that never accepts — one
+   challenger fills the backlog, every later misreads a busy holder as
+   wedged and SIGKILLs it mid-creation. FIXED: aliveness = the /proc
+   scan (pid + exe) — readable state, busy-but-alive is alive.
+3. THE SHARED ROOT: a daemon mid-creation (a synchronous minutes-long
+   handler) starves its accept queue (tiny backlog + the connection
+   flood from the retry ladder) — BOTH the agent probe and the old
+   latch probe judge "dead" by connect-timeout and kill a HEALTHY BUSY
+   daemon. The exact banned class: elapsed-time judgment where readable
+   state exists.
+
+THE REMAINING FIX (next): (a) the agent probe must not kill on
+connect-timeout alone — size to the real creation window (300s) or
+read process state (alive + serving = fine); (b) the daemon's accept
+loop/backlog must survive a busy handler (drain accepts; backlog ≥16;
+or the creation moves off the connection thread). Then the warm run
+finally completes end-to-end and the fleet warms permanently.
