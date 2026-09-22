@@ -1,5 +1,5 @@
 {
-  "file_count": 3356,
+  "file_count": 3357,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -11653,8 +11653,8 @@
     },
     {
       "path": "tools/glm5_next_coldlaunch_ab.sh",
-      "sha256": "d18b0280c72a6cef409d6c588b233c66704d1ff905ba02b0c6cdbe75d02c170f",
-      "size_bytes": 16265
+      "sha256": "44fb5c334576f250dd11ceb8e4a92898e59a5a654744d022d9be7104fb4822cf",
+      "size_bytes": 16675
     },
     {
       "path": "tools/glm5_next_compsec17.py",
@@ -11680,6 +11680,11 @@
       "path": "tools/glm5_next_experts_manifest.c",
       "sha256": "8ca9eff61c61ad9e32447fd146c91ebe92a37c78dbbf62457be1784be8b60c1d",
       "size_bytes": 7452
+    },
+    {
+      "path": "tools/glm5_next_fixed_release_fetch.sh",
+      "sha256": "f7c8327a3b66d7c98eec2dc709fbd5c45e3e10badc7dafc5dd9215dd8a14c163",
+      "size_bytes": 894
     },
     {
       "path": "tools/glm5_next_gen_deployment.py",
@@ -16785,5 +16790,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 79895625
+  "total_bytes": 79896929
 }

@@ -31,7 +31,18 @@ set -euo pipefail
 
 ARM="${ARM:-A}"
 HOST="$(hostname)"
-EXEC_ROOT="${SPARK_EXEC_ROOT:-/home/$HOST/sparkpipe/shared-serving-20260922}"
+# prefer the fixed M3 release (mesh register-skip #1135 + instrument,
+# SOURCE_COMMIT-pinned; fetched per node by glm5_next_fixed_release_fetch.sh),
+# fall back to the operator's frozen shared-serving bundle
+if [ -z "${SPARK_EXEC_ROOT:-}" ]; then
+  if [ -f "/home/$HOST/glm-m3-fixed/glm53_release/SOURCE_COMMIT" ]; then
+    EXEC_ROOT="/home/$HOST/glm-m3-fixed/glm53_release"
+  else
+    EXEC_ROOT="/home/$HOST/sparkpipe/shared-serving-20260922"
+  fi
+else
+  EXEC_ROOT="$SPARK_EXEC_ROOT"
+fi
 FAMILY_ROOT="${SPARK_FAMILY_ROOT:-/home/$HOST/sparkdata/glm53flash.fp8.tp16}"
 SHARED_SOCKET="${SPARK_WEIGHTD_SOCKET:-/run/sparkpipe-weightd-shared/weightd.sock}"
 LANE=0
