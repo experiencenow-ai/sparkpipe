@@ -1,5 +1,5 @@
 {
-  "file_count": 3279,
+  "file_count": 3284,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "e4455aef9b1bd7822a4e126380572a909365592e3247776138cbe67f6822c1fc",
-      "size_bytes": 126225
+      "sha256": "c2b27e129b5bb82ebbd2d8414c5f00befcf112b3c9ee56f68d2202d7d3c6e053",
+      "size_bytes": 126680
     },
     {
       "path": "Makefile.rej",
@@ -4600,6 +4600,11 @@
       "path": "model-families/qwen38_27b/include/sparkpipe/spark_qwen38_27b_work_control.h",
       "sha256": "5d7a9c773631d5dee5e92916b4af6748a109d3b47de6817348e16ed8066ba158",
       "size_bytes": 3457
+    },
+    {
+      "path": "model-families/qwen38_27b/smoke_experts.json",
+      "sha256": "2e76726022b30755aec16aa0571d71b45b13c221ff0ddc5403fa00b972df3663",
+      "size_bytes": 6528
     },
     {
       "path": "model-families/qwen38_27b/src/spark_qwen38_27b_work_control.c",
@@ -9862,9 +9867,14 @@
       "size_bytes": 4108
     },
     {
+      "path": "tests/test_qwen38_27b_experts_manifest.py",
+      "sha256": "cda02edb3480471cf1a2b92ba54e89d700f14f7e8113dc6e63848718866dfbe6",
+      "size_bytes": 11771
+    },
+    {
       "path": "tests/test_qwen38_27b_lane_deployment.py",
-      "sha256": "82373e00d1fd6a4a09ca4646157fb42613d06282a65d2ca50fe737d581b1aaf2",
-      "size_bytes": 12282
+      "sha256": "deb0e98dccb09cc311ef900b989dd3810c3f72e5fb1358f77d201a6f1f1d94c3",
+      "size_bytes": 12463
     },
     {
       "path": "tests/test_qwen38_27b_layer_host.py",
@@ -10555,6 +10565,11 @@
       "path": "tools/devcycle/batches/o24_batch.json",
       "sha256": "4174e6689e7f12432ac84b9e365e919be5d01ca1da873918a82612ae2c74477e",
       "size_bytes": 1308
+    },
+    {
+      "path": "tools/devcycle/batches/qwen38_27b_lane_smoke_v1.json",
+      "sha256": "7100d12b19994c1b4f8759b0385d93a1eb82a4e51079d55e0467f25f15bac7f2",
+      "size_bytes": 4120
     },
     {
       "path": "tools/devcycle/bbench.sh",
@@ -12407,24 +12422,34 @@
       "size_bytes": 6130
     },
     {
+      "path": "tools/qwen38_27b_experts_manifest.c",
+      "sha256": "66144f68e1413c895b854e35589b63bb0b275abfbcee177b140afb63f91ed159",
+      "size_bytes": 10253
+    },
+    {
       "path": "tools/qwen38_27b_gen_deployment.py",
       "sha256": "76f477a9e2c31d2ea36fbf8c0d19ca9772a5a672d8b3fd1e5968939fe97e0aa1",
       "size_bytes": 6874
     },
     {
       "path": "tools/qwen38_27b_lane_deployment.py",
-      "sha256": "b3f43a618469d42ed5a0af2f08b2d93ad71b204d24fcd09ab512e91aa9f9c07b",
-      "size_bytes": 20113
+      "sha256": "b16d2eed239eb7165be2c2342ecbfb8fbf8c0f4b8b9df7d7fad9c1010d0943f4",
+      "size_bytes": 20311
     },
     {
       "path": "tools/qwen38_27b_lane_launch.sh",
-      "sha256": "4b18289c436ecdc8637a7d184fa7a3b92ab594777046c72ad03f5fadf7832706",
-      "size_bytes": 2649
+      "sha256": "5051808fd86d3618da63f20b3f11b1513bc8b3baf33fe32d898930ff4b73b826",
+      "size_bytes": 2897
     },
     {
       "path": "tools/qwen38_27b_nvfp4_smoke.cu",
       "sha256": "b4e6eb46f9d1391401f3b3f00a60d300ebd8b52988275161bd999e6e86a63314",
       "size_bytes": 8761
+    },
+    {
+      "path": "tools/qwen38_27b_smoke_experts.py",
+      "sha256": "ced9a77663a864d6bf42cb98edec35e4dfe6f53790b9f566c5d2374cbdb52c4a",
+      "size_bytes": 10225
     },
     {
       "path": "tools/qwen38_27b_stagepack.py",
@@ -16400,5 +16425,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 78145131
+  "total_bytes": 78189110
 }

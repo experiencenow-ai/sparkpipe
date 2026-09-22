@@ -306,6 +306,11 @@ def verify_firmware(firmware_root: Path) -> dict[str, str]:
 def stage_pack(pack_source: Path, packs_dir: Path, trust_source_digest: bool) -> tuple[str, str]:
     if not pack_source.is_file():
         raise LaneError(f"lane pack is missing: {pack_source}")
+    experts_source = pack_source.with_name(pack_source.name + ".experts")
+    if not experts_source.is_file():
+        raise LaneError(
+            "pack has no .experts manifest (weightd lazy attach refuses without it): "
+            f"{experts_source} - generate it with build/qwen38_27b_experts_manifest")
     packs_dir.mkdir(parents=True, exist_ok=True)
     staged = packs_dir / pack_source.name
     if staged.exists() or staged.is_symlink():
@@ -319,9 +324,7 @@ def stage_pack(pack_source: Path, packs_dir: Path, trust_source_digest: bool) ->
     else:
         digest = digest_file(pack_source)
     (packs_dir / (pack_source.name + ".sha256")).write_text(digest + "\n")
-    experts_source = pack_source.with_name(pack_source.name + ".experts")
-    if experts_source.is_file():
-        (packs_dir / experts_source.name).symlink_to(experts_source.resolve())
+    (packs_dir / experts_source.name).symlink_to(experts_source.resolve())
     digests = sorted(entry.name for entry in packs_dir.iterdir()
                      if entry.name.endswith(".sha256"))
     if digests != [pack_source.name + ".sha256"]:

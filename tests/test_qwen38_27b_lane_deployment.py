@@ -52,6 +52,7 @@ class FakeLane(unittest.TestCase):
         self.pack_name = "tp4-rank02.q38sp"
         self.pack_dir.mkdir()
         (self.pack_dir / self.pack_name).write_bytes(self.pack_payload)
+        (self.pack_dir / (self.pack_name + ".experts")).write_bytes(b"\x00" * 64)
         for relative in ("bin/sparkpipe_model_residentd",
                          "lib/model_serving_adapter.so",
                          "lib/hidden_transport.so",
@@ -162,11 +163,15 @@ class LaneStagingTests(FakeLane):
         with self.assertRaises(lane.LaneError):
             lane.check_reserved(ports, [(23016, 23031), (53016, 53031)])
 
-    def test_experts_sidecar_staged_when_present(self):
-        (self.pack_dir / (self.pack_name + ".experts")).write_bytes(b"\0" * 16)
+    def test_experts_sidecar_staged(self):
         staged = self.stage()
         staged_experts = Path(staged["runtime_root"]) / "packs" / (self.pack_name + ".experts")
         self.assertTrue(staged_experts.is_symlink())
+
+    def test_missing_experts_manifest_refused(self):
+        (self.pack_dir / (self.pack_name + ".experts")).unlink()
+        with self.assertRaises(lane.LaneError):
+            self.stage()
 
     def test_trusted_source_digest_reused(self):
         sidecar_digest = "a" * 64
