@@ -5,6 +5,8 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include <time.h>
+
 int main(int argument_count,char **arguments)
 {
 	const char *socket,*pack_path,*digest,*revision,*topology_text;
