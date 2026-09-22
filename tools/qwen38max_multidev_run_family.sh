@@ -135,9 +135,9 @@ HOST="spark$(printf '%x' "$RANK")"
 $(hostname); --nodes order must stay identical to the mesh map ($MESH_RANKS)"
 
 CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
-DEPLOYED_PACK="/home/$HOST/sparkdata/qwen38max.tp16/packs/qwen38max.tp16-rank$RANK.qwen38sp"
+DEPLOYED_PACK="/home/$HOST/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank$RANK.sp"
 [ -f "$DEPLOYED_PACK" ] || fail "deployed rank pack missing: $DEPLOYED_PACK \
-(rank packs are placed by the lane's pack-emission flow, not this wrapper)"
+(operator-placed set; grep the fleet pack inventory before any warm read)"
 
 # --------------------------- PRIVATE RUNTIME PREP ----------------------------
 
@@ -228,6 +228,17 @@ if [ -r "$CACHED_DIGEST" ] && [ "$(wc -c < "$CACHED_DIGEST")" -ge 65 ] && \
   head -c 64 "$CACHED_DIGEST" > "$ROOT/packs/pack.sha256"
 else
   sha256sum "$PRIVATE_PACK" | awk '{print $1}' > "$ROOT/packs/pack.sha256"
+  # Identity reconciliation (NVMe-only): when the operator-placed pack
+  # carries its emission receipt, the freshly computed digest must match
+  # the receipt's output_sha256 (drift = not the verified emission -
+  # fail closed rather than attach unverified bytes).
+  if [ -r "$DEPLOYED_PACK.receipt.json" ]; then
+    RECEIPT_SHA="$(python3 -c \
+      'import json,sys; print(json.load(open(sys.argv[1])).get("output_sha256") or "")' \
+      "$DEPLOYED_PACK.receipt.json")"
+    [ "$RECEIPT_SHA" = "$(cat "$ROOT/packs/pack.sha256")" ] ||
+      fail "pack digest disagrees with its emission receipt: $DEPLOYED_PACK"
+  fi
   # Best-effort cache beside the deployed pack for later attempts.
   ( set -c; umask 022
     head -c 64 "$ROOT/packs/pack.sha256" > "$CACHED_DIGEST.tmp.$$" 2>/dev/null \

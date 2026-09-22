@@ -110,7 +110,7 @@ def stage_gates(adapter, rank, failures):
     check(adapter["model_revision"] == lane.MODEL_REVISION, failures,
           "pinned model revision")
     check(adapter["stage_pack_path"]
-          == f"packs/qwen38max.tp16-rank{rank}.qwen38sp", failures,
+          == f"packs/qwenmax.nvfp4.tp16.rank{rank}.sp", failures,
           f"rank pack path at {rank}")
     check(adapter["max_sequence_positions"] > 0, failures, "positions cap")
 
