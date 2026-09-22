@@ -62,10 +62,19 @@ PACK="/home/$HOST/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank${HO
 
 CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="/home/$HOST/$OUT_REL"
-PARTIAL="$OUT/../build-partial.$$"
+# The partial MUST NOT be spelled through "$OUT/..": the atomic swap
+# removes $OUT first, and a path containing a removed component fails
+# ENOENT even though the partial exists (build-r7c, all 16 nodes: mv
+# "cannot stat" with the partial present — a latent bug every earlier
+# round died too early to reach). Same filesystem, no traversal.
+PARTIAL="$(dirname "$OUT")/build-partial.$$"
 rm -rf "$PARTIAL"
 mkdir -p "$PARTIAL"
 trap 'rm -rf "$PARTIAL"' EXIT
+# Sweep stale EMPTY partials from the pre-fix runs (their traps no-oped
+# on the unresolvable path); non-empty partials belong to live runs.
+find "$(dirname "$OUT")" -maxdepth 1 -type d -empty \
+  -name 'build-partial.*' -exec rm -rf {} + 2>/dev/null || true
 
 [ "$STAGE" = compile ] || \
   [ -r "$PACK" ] || fail "placed pack for this node missing: $PACK (operator-placed NVMe set; no pack, no publish)"
