@@ -62,7 +62,12 @@ MODULE_INCLUDE_FLAGS = \
 # (qwen38_resident_decode_stage, without the _max) and drop the codec leg.
 BUILD_DIRECTORY ?= $(REPOSITORY_ROOT)/build/modules/qwen38_max_resident_decode_stage/$(EXPERT_CODEC)
 MODULE_ARCHIVE ?= $(BUILD_DIRECTORY)/libqwen38_max_resident_decode_stage_$(EXPERT_CODEC).a
-GPU_VALIDATOR := validation/validate_qwen38_max_resident_decode_stage_cuda.sh
+# The wrapper (the dsv4 pattern) computes the validation .cu digest and
+# exports SPARK_QWEN38_MAX_CUDA_VALIDATOR_SHA256 before exec'ing the real
+# validator; pointing GPU_VALIDATOR at the raw validator fails its source
+# digest check with no digest in the publish environment (build-r5b, all
+# 16 nodes: "Qwen38_max CUDA validator expected SHA-256 is invalid").
+GPU_VALIDATOR := validation/publish_validator_wrapper.sh
 
 STAGE_PACK_PATH ?= $(REPOSITORY_ROOT)/build/stagepacks/qwen38_stage.qwen38sp
 STAGE_COUNT ?= 16
