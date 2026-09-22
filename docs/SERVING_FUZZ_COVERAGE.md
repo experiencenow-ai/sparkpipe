@@ -147,10 +147,19 @@ geometry and negative controls; K3 host emulation; Qwen work control; and common
 cache/model/kernel metadata. Their transitive build recipes use host compilers,
 fixture modules or explicit CUDA stubs with `CUDA_HOME=/nonexistent`. This is
 registration, not an execution verdict or a complete semantic audit.
-`test_qwen38_math_kernels` remains unrun because its recipe uses NVCC and the
-real CUDA runtime even when the rest of the campaign uses host stubs. Unselected
-Python files remain listed separately in each receipt. Host reference results
-do not qualify model inference, GPU lifetimes or real RDMA transfers.
+`test_qwen38_math_kernels` is separate from that host campaign because it uses
+NVCC and the real CUDA runtime. On 2026-09-22, exact source
+`d8cc2a906c1d3325899ebe601b525e65bbfaca91` compiled with CUDA 13.0.88 for
+`sm_121a` and passed on Spark0: exit 0 in 0.314 seconds under a 30-second
+process limit. The three cases check router softmax, shared gating and the
+weighted reduction with all ten model experts, nonidentity mapping and distinct
+weights. The fixture checks CUDA allocation/copy/free failures; the owned PID
+exited and disappeared from the CUDA process list. The executable SHA256 is
+`54cf5a9c4fbdfd7cbf2c0031c3f8d8a3c9564cb1fa36d0b526d9432c636b4300`.
+This is primitive numerical evidence, not Qwen or GLM model parity, serving
+throughput, distributed inference or RDMA qualification. Unselected Python
+files remain listed separately in each receipt; host reference results retain
+their narrower scope.
 
 The W1 loader gate now verifies real weightd attachment, shared mapped-region
 bytes and pointer offsets, short-pack bounds, and missing-attach rejection.
