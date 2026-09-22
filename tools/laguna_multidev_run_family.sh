@@ -325,7 +325,15 @@ fi
 
 export SPARK_WEIGHTD_ATTACH=1
 export SPARK_WEIGHTD_SOCKET="$SOCKET"
-export SPARK_WEIGHTD_LANE="$LANE"
+# The daemon's mesh lane table holds SPARK_WEIGHTD_MESH_MAX_LANES (8)
+# lanes; dev lanes 0-7 pin their mesh lane, lanes 8+ leave
+# SPARK_WEIGHTD_LANE unset so the daemon assigns a free lane
+# (attach-009: MESH-LANE-FAIL status=1 - a pinned lane 8 is past the
+# table; the deterministic-lane fix is a constant bump + operator daemon
+# replacement, manager ruling).
+if [ "$LANE" -lt 8 ]; then
+  export SPARK_WEIGHTD_LANE="$LANE"
+fi
 export SPARK_TP_MESH_RANKS="$MESH_RANKS"
 # Budget envs were exported at derivation time (the warm leg needs them).
 # Pinned CUDA environment for shared-lane smoke (template hard rule).
