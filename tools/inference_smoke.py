@@ -239,7 +239,7 @@ def prepare(spec, environment):
         require(all(deployment["runtime_limits"][key] == 1 for key in ("max_inflight_submissions", "max_active_sequences", "max_input_rows", "resident_sequence_capacity")), "shared smoke requires B1 and one in-flight submission")
         require(len(batch["requests"]) == 1, "shared B1 smoke requires exactly one request per resident")
         require(all(spec["environment"].get(key) == value for key, value in
-                    {"CUDA_MODULE_LOADING": "LAZY", "CUDA_KERNEL_LOADING": "LAZY", "CUDA_DEVICE_MAX_CONNECTIONS": "32"}.items()), "shared smoke requires pinned CUDA loading and connection settings")
+                    {"CUDA_MODULE_LOADING": "LAZY", "CUDA_MODULE_DATA_LOADING": "LAZY", "CUDA_DEVICE_MAX_CONNECTIONS": "32"}.items()), "shared smoke requires pinned CUDA loading and connection settings")
     if "working_set" in spec:
         working = spec["working_set"]
         require(working["mode"] in ("partial", "full"), "working set mode must be partial or full")
@@ -340,7 +340,7 @@ def run(spec):
         "SPARK_WEIGHTD_ATTACH", "SPARK_WEIGHTD_SOCKET", "SPARK_WEIGHTD_DEVICE_BYTES_MAX",
         "SPARK_WEIGHTD_EXPERT_POOL_BYTES", "SPARK_WEIGHTD_SPINE_BUDGET_BYTES",
         "SPARK_WEIGHTD_KV_RESERVE_BYTES", "SPARK_WEIGHTD_MESH_DIR", "SPARK_WEIGHTD_LATCH_PORT", "SPARK_WEIGHTD_LANE"}
-    require(all((key.startswith("SPARK_") and not key.startswith("SPARK_QUEUE_") or key in {"CUDA_MODULE_LOADING", "CUDA_KERNEL_LOADING", "CUDA_DEVICE_MAX_CONNECTIONS", "CUDA_VISIBLE_DEVICES"}) and key not in owned and isinstance(value, str) for key, value in spec["environment"].items()), "model environment overrides owned job configuration")
+    require(all((key.startswith("SPARK_") and not key.startswith("SPARK_QUEUE_") or key in {"CUDA_MODULE_LOADING", "CUDA_MODULE_DATA_LOADING", "CUDA_DEVICE_MAX_CONNECTIONS", "CUDA_VISIBLE_DEVICES"}) and key not in owned and isinstance(value, str) for key, value in spec["environment"].items()), "model environment overrides owned job configuration")
     env.update(spec["environment"])
     receipt.update(effective_deployment_sha256=digest(root / "deployment.json"),
                    effective_config_sha256=digest(root / "runtime" / deployment["nodes"][rank]["adapter_configuration_path"]),
