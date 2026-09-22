@@ -114,17 +114,29 @@ int main(int argc, char **argv)
     }
     err = cudaFree(0);
     printf("cuda context: %s\n", cudaGetErrorString(err));
-    err = cudaHostRegister(mesh, (size_t)bytes,
-        cudaHostRegisterPortable | cudaHostRegisterMapped);
-    printf("cudaHostRegister(attach mesh va, PORTABLE|MAPPED) -> %s (%d)\n",
-           cudaGetErrorString(err), (int)err);
-    if (err == cudaSuccess)
     {
-        void *device = 0;
-        cudaError_t mapped_err = cudaHostGetDevicePointer(&device, mesh, 0);
-        printf("cudaHostGetDevicePointer -> %s (%d) device=%p\n",
-               cudaGetErrorString(mapped_err), (int)mapped_err, device);
-        cudaHostUnregister(mesh);
+        static const struct { const char *label; unsigned flags; } variants[] = {
+            {"PORTABLE|MAPPED", cudaHostRegisterPortable | cudaHostRegisterMapped},
+            {"PORTABLE", cudaHostRegisterPortable},
+            {"default", 0u},
+        };
+        int failures = 0;
+        for (size_t index = 0; index < sizeof(variants) / sizeof(variants[0]); index++)
+        {
+            err = cudaHostRegister(mesh, (size_t)bytes, variants[index].flags);
+            printf("cudaHostRegister(attach mesh va, %s) -> %s (%d)\n",
+                   variants[index].label, cudaGetErrorString(err), (int)err);
+            if (err == cudaSuccess)
+            {
+                void *device = 0;
+                cudaError_t mapped_err = cudaHostGetDevicePointer(&device, mesh, 0);
+                printf("  cudaHostGetDevicePointer -> %s (%d) device=%p\n",
+                       cudaGetErrorString(mapped_err), (int)mapped_err, device);
+                cudaHostUnregister(mesh);
+            }
+            else
+                failures++;
+        }
+        return failures != 0;
     }
-    return err == cudaSuccess ? 0 : 1;
 }
