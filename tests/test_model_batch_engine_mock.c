@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "fixtures/model_resident_deployment_fixture.h"
 #include "mock_model_resident_client.h"
@@ -588,6 +589,60 @@ static void TestScenarioTwoRequestsRankDies(const SparkModelResidentDeployment *
 	SparkModelBatchEngineDestroy(engine);
 }
 
+static uint64_t TestNowNs(void)
+{
+	struct timespec now;
+	assert(clock_gettime(CLOCK_MONOTONIC,&now) == 0);
+	return((uint64_t)now.tv_sec * UINT64_C(1000000000) + (uint64_t)now.tv_nsec);
+}
+
+static void TestScenarioEventDeadlines(const SparkModelResidentDeployment *deployment,const char *runtime_root)
+{
+	TestBatchState state;
+	SparkModelBatchEngine *engine;
+	uint64_t deadline,now;
+	uint32_t step;
+	MockResidentClientReset();
+	memset(&state,0,sizeof(state));
+	engine = TestConnect(deployment,&state,runtime_root);
+	if ( engine == 0 )
+		return;
+	CHECK(SparkModelBatchEngineNextProgressNs(engine) == 0u,"idle engine has no polling deadline");
+	MockResidentClientSetAutoTokens(1u);
+	MockResidentClientSetFinalRank(TEST_RANKS - 1u,1u);
+	MockResidentClientScriptSubmitStatus(1u,SPARK_STATUS_BUSY);
+	TestSubmit(engine,1u,901u,2u);
+	CHECK(SparkModelBatchEngineNextProgressNs(engine) == 1u,"new submission is immediately runnable");
+	CHECK(SparkModelBatchEngineProgress(engine,8u) == SPARK_STATUS_OK,"dispatch for deadline test");
+	CHECK(SparkModelBatchEngineNextProgressNs(engine) > TestNowNs() + UINT64_C(1000000000),"inflight math waits for socket completion or actual timeout");
+	deadline = 0u;
+	for (step=0u; step<16u; step++)
+	{
+		(void)MockResidentClientDriveAll();
+		CHECK(SparkModelBatchEngineProgress(engine,8u) == SPARK_STATUS_OK,"prepare rejection drains for retry");
+		now = TestNowNs();
+		deadline = SparkModelBatchEngineNextProgressNs(engine);
+		if ( deadline > now && deadline - now <= UINT64_C(320000000) )
+			break;
+	}
+	CHECK(step < 16u,"BUSY advertises a finite retry deadline without polling");
+	if ( step < 16u )
+	{
+		struct timespec delay;
+		uint64_t remaining = deadline - now + UINT64_C(1000000);
+		delay.tv_sec = (time_t)(remaining / UINT64_C(1000000000));
+		delay.tv_nsec = (long)(remaining % UINT64_C(1000000000));
+		CHECK(SparkModelBatchEngineNextProgressNs(engine) == deadline,"reading readiness does not extend retry time");
+		MockResidentClientScriptSubmitStatus(1u,SPARK_STATUS_OK);
+		nanosleep(&delay,0);
+		TestDriveUntilTerminal(engine,&state,1u,400u);
+		CHECK(state.completed_events[1] == 1u && state.error_events[1] == 0u,"deadline wake resumes and completes request");
+		CHECK(SparkModelBatchEngineProgress(engine,8u) == SPARK_STATUS_OK,"drain terminal progress");
+		CHECK(SparkModelBatchEngineNextProgressNs(engine) == 0u,"drained engine returns to event-only wait");
+	}
+	SparkModelBatchEngineDestroy(engine);
+}
+
 int main(void)
 {
 	SparkModelResidentDeployment deployment;
@@ -607,6 +662,7 @@ int main(void)
 	}
 	else
 	{
+		TestScenarioEventDeadlines(&deployment,runtime_root);
 		TestScenarioHappyPath(&deployment,runtime_root);
 		TestScenarioRankDiesMidDecode(&deployment,runtime_root);
 		TestScenarioRankKilledAndRevived(&deployment,runtime_root);

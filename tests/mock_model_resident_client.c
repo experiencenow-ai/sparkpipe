@@ -672,3 +672,9 @@ uint32_t MockResidentClientDriveAll(void)
 	c = MockResidentClientDriveCompletions();
 	return(a + b + c);
 }
+
+uint64_t SparkModelResidentClientNextProgressNs(
+	const SparkModelResidentClient *client)
+{
+	return(client != 0 && client->connected == 0u ? 1u : 0u);
+}

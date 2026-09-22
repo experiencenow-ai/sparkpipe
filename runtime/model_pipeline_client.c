@@ -1015,6 +1015,23 @@ SparkStatus SparkModelPipelineClientProgress(
 	return(SPARK_STATUS_OK);
 }
 
+uint64_t SparkModelPipelineClientNextProgressNs(
+	const SparkModelPipelineClient *pipeline)
+{
+	uint64_t deadline,candidate;
+	uint32_t rank;
+	if ( pipeline == 0 )
+		return(0u);
+	deadline = 0u;
+	for (rank=0u; rank<pipeline->rank_count; rank++)
+	{
+		candidate = SparkModelResidentClientNextProgressNs(pipeline->clients[rank]);
+		if ( candidate != 0u && (deadline == 0u || candidate < deadline) )
+			deadline = candidate;
+	}
+	return(deadline);
+}
+
 SparkStatus SparkModelPipelineClientGetPollDescriptors(
 	const SparkModelPipelineClient *pipeline,
 	SparkModelResidentClientPollDescriptor *descriptors,

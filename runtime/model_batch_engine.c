@@ -126,6 +126,7 @@ struct SparkModelBatchEngine
 	uint32_t free_resident_slot_count;
 	uint32_t next_request_scan;
 	uint32_t admission_open;
+	uint64_t next_progress_ns;
 	uint32_t live_request_count;
 	uint32_t inflight_submission_count;
 	uint32_t failed_status;
@@ -1281,6 +1282,7 @@ SparkStatus SparkModelBatchEngineSubmit(
 	SparkSha256Initialize(&state->cache_published_digest_context);
 	engine->live_request_count++;
 	engine->submitted_request_count++;
+	engine->next_progress_ns = 1u;
 	*request_handle_out = state->handle;
 	SparkModelBatchEmit(engine,state,SPARK_MODEL_BATCH_EVENT_REQUEST_ACCEPTED,SPARK_STATUS_OK,0u,0u);
 	return(SPARK_STATUS_OK);
@@ -1610,7 +1612,11 @@ static uint32_t SparkModelBatchSelectRequestPass(
 			continue;
 		if ( request->busy_retry_not_before_ns != 0u && now_ns != 0u &&
 		     now_ns < request->busy_retry_not_before_ns )
+		{
+			if ( engine->next_progress_ns == 0u || request->busy_retry_not_before_ns < engine->next_progress_ns )
+				engine->next_progress_ns = request->busy_retry_not_before_ns;
 			continue;
+		}
 		aged = request->scheduling_bypass_count >= engine->submission_capacity;
 		if ( (selection == SPARK_MODEL_BATCH_SELECT_AGED && aged == 0u) || (selection == SPARK_MODEL_BATCH_SELECT_PRIORITY && (aged != 0u || request->priority != maximum_priority)) || (selection == SPARK_MODEL_BATCH_SELECT_FILL && (aged != 0u || request->priority == maximum_priority)) )
 			continue;
@@ -1992,6 +1998,7 @@ static void SparkModelBatchRecordSubmission(
 {
 	uint32_t *request_slots,*prefill_counts;
 	uint32_t lane,inflight_state;
+	uint64_t now_ns = SparkModelBatchNowNs();
 	request_slots = SparkModelBatchSubmissionRequestSlots(engine,state);
 	prefill_counts = SparkModelBatchSubmissionPrefillCounts(engine,state);
 	state->lane_count = lane_count;
@@ -2004,6 +2011,8 @@ static void SparkModelBatchRecordSubmission(
 		engine->requests[request_slots[lane]].state = inflight_state;
 		engine->requests[request_slots[lane]].cache_pending_token_count = engine->scratch_lanes[lane].cache_publish_token_count;
 		engine->requests[request_slots[lane]].busy_retry_backoff_ms = 0u;
+		engine->requests[request_slots[lane]].busy_retry_not_before_ns = 0u;
+		engine->requests[request_slots[lane]].inflight_since_ns = now_ns;
 	}
 	engine->inflight_submission_count++;
 	engine->inflight_kv_page_count = engine->selected_kv_page_count;
@@ -2030,7 +2039,10 @@ static SparkStatus SparkModelBatchDispatchKind(
 	*dispatched_out = 0u;
 	now_ns = SparkModelBatchNowNs();
 	if ( engine->circuit_open_until_ns != 0u && now_ns < engine->circuit_open_until_ns )
+	{
+		engine->next_progress_ns = engine->circuit_open_until_ns;
 		SPARK_FAIL(SPARK_STATUS_BUSY);
+	}
 	if ( SparkModelPipelineClientAllRanksReady(engine->pipeline) == 0u )
 		SPARK_FAIL(SPARK_STATUS_BUSY);
 	state = SparkModelBatchReserveSubmission(engine,work_kind);
@@ -2222,6 +2234,7 @@ SparkStatus SparkModelBatchEngineProgress(
 	uint64_t session_fingerprint;
 	if ( engine == 0 || maximum_new_submission_count == 0u )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	engine->next_progress_ns = 0u;
 	(void)SparkModelPipelineClientRecover(engine->pipeline);
 	session_fingerprint = SparkModelPipelineClientSessionFingerprint(engine->pipeline);
 	if ( engine->observed_control_generation == 0u )
@@ -2283,6 +2296,8 @@ SparkStatus SparkModelBatchEngineProgress(
 		step++;
 		misses = 0u;
 	}
+	if ( step == maximum_new_submission_count && engine->inflight_submission_count < engine->submission_capacity )
+		engine->next_progress_ns = 1u;
 	return(SPARK_STATUS_OK);
 }
 
@@ -2427,4 +2442,31 @@ const SparkModelServingAdapterDescriptor *SparkModelBatchEngineGetAdapterDescrip
 	const SparkModelBatchEngine *engine)
 {
 	return(engine != 0 ? engine->adapter_descriptor : 0);
+}
+
+uint64_t SparkModelBatchEngineNextProgressNs(
+	const SparkModelBatchEngine *engine)
+{
+	uint64_t deadline,candidate,budget;
+	uint32_t index;
+	if ( engine == 0 )
+		return(0u);
+	deadline = SparkModelPipelineClientNextProgressNs(engine->pipeline);
+	if ( deadline != 0u )
+		return(deadline);
+	if ( engine->failed_status != SPARK_STATUS_OK )
+		return(0u);
+	deadline = engine->next_progress_ns;
+	budget = SparkModelBatchInflightBudgetNs();
+	for (index=0u; index<engine->request_capacity; index++)
+	{
+		const SparkModelBatchRequestState *request = &engine->requests[index];
+		if ( request->state != SPARK_MODEL_BATCH_REQUEST_PREFILL_INFLIGHT &&
+		     request->state != SPARK_MODEL_BATCH_REQUEST_DECODE_INFLIGHT )
+			continue;
+		candidate = budget < UINT64_MAX - request->inflight_since_ns ? request->inflight_since_ns + budget + 1u : UINT64_MAX;
+		if ( deadline == 0u || candidate < deadline )
+			deadline = candidate;
+	}
+	return(deadline);
 }
