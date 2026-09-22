@@ -1,5 +1,5 @@
 {
-  "file_count": 3276,
+  "file_count": 3278,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -5687,6 +5687,11 @@
       "size_bytes": 1873
     },
     {
+      "path": "modules/mimo26_resident_decode_stage/source/spark_mimo26_stagepack_format.h",
+      "sha256": "dca334db8fa3b8ff9fbdd3568d7e29b1277de697498b032d3637746b5517de2c",
+      "size_bytes": 5415
+    },
+    {
       "path": "modules/muse_glimmer_resident_decode_stage/Makefile",
       "sha256": "e6569699c2a07b42a603ba194c399b948ca8b6a877e4462d9eabc5dccae1243f",
       "size_bytes": 3243
@@ -9670,6 +9675,11 @@
       "path": "tests/test_mimo26_stagepack.py",
       "sha256": "82ba4b57021643cc827cc20f4bc3db8e8f48727c80368e7ee80f45f6e8d27350",
       "size_bytes": 12270
+    },
+    {
+      "path": "tests/test_mimo26_stagepack_format.py",
+      "sha256": "9d17c16b212fc5856fadba7a473500af4b87607c2d3b79082ac5c7012b94c3cc",
+      "size_bytes": 2881
     },
     {
       "path": "tests/test_mla_absorption.py",
@@ -16385,5 +16395,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 77620436
+  "total_bytes": 77628732
 }
