@@ -99,20 +99,79 @@ static int SparkWeightdLatchBind(uint16_t port)
     return(fd);
 }
 
+static pid_t SparkWeightdLatchHolderPid(uint16_t port)
+{
+    char line[512];
+    char path[256];
+    FILE *table = fopen("/proc/net/tcp","r");
+    DIR *procs;
+    struct dirent *entry;
+    pid_t holder = -1;
+    if ( table == 0 )
+        return(-1);
+    while ( holder < 0 && fgets(line,sizeof(line),table) != 0 )
+    {
+        unsigned long inode = 0ul;
+        char state[4] = {0};
+        char local[32] = {0};
+        if ( sscanf(line,"%*s %31s %*s %3s %*s %*s %*s %*s %*s %lu",
+                local,state,&inode) < 3 || inode == 0ul )
+            continue;
+        {
+            const char *port_text = strrchr(local,':');
+            unsigned long listen_port = port_text != 0 ?
+                strtoul(port_text + 1u,0,16) : 0ul;
+            if ( listen_port != (unsigned long)port || strcmp(state,"0A") != 0 )
+                continue;
+        }
+        procs = opendir("/proc");
+        if ( procs == 0 )
+            break;
+        while ( (entry = readdir(procs)) != 0 )
+        {
+            char link_target[192];
+            char exe[128];
+            char exe_path[160];
+            int probe_fd;
+            pid_t candidate;
+            if ( entry->d_name[0] < '0' || entry->d_name[0] > '9' )
+                continue;
+            snprintf(path,sizeof(path),"/proc/%.16s/fd/%lu",entry->d_name,inode);
+            probe_fd = open(path,O_RDONLY);
+            if ( probe_fd < 0 )
+                continue;
+            if ( readlink(path,link_target,sizeof(link_target) - 1u) > 0 &&
+                 strncmp(link_target,"socket:[",8u) == 0 )
+            {
+                snprintf(exe_path,sizeof(exe_path),"/proc/%.16s/exe",entry->d_name);
+                if ( readlink(exe_path,exe,sizeof(exe) - 1u) > 0 &&
+                     strstr(exe,"sparkpipe_weightd") != 0 )
+                {
+                    candidate = (pid_t)strtol(entry->d_name,0,10);
+                    holder = candidate;
+                }
+            }
+            (void)close(probe_fd);
+            if ( holder >= 0 )
+                break;
+        }
+        closedir(procs);
+    }
+    fclose(table);
+    return(holder);
+}
+
 static int SparkWeightdLatchHolderAlive(uint16_t port)
 {
-    struct sockaddr_in address;
-    int fd = socket(AF_INET,SOCK_STREAM,0);
-    int alive;
-    if ( fd < 0 )
+    char exe_path[160];
+    char exe[128];
+    pid_t holder = SparkWeightdLatchHolderPid(port);
+    if ( holder < 0 )
         return(0);
-    memset(&address,0,sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = htons(port);
-    alive = connect(fd,(const struct sockaddr *)&address,sizeof(address)) == 0 ? 1 : 0;
-    (void)close(fd);
-    return(alive);
+    snprintf(exe_path,sizeof(exe_path),"/proc/%d/exe",holder);
+    if ( readlink(exe_path,exe,sizeof(exe) - 1u) <= 0 )
+        return(0);
+    return(strstr(exe,"sparkpipe_weightd") != 0 ? 1 : 0);
 }
 
 static void SparkWeightdLatchKillHolder(uint16_t port)
