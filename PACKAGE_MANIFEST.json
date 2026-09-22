@@ -5638,8 +5638,8 @@
     },
     {
       "path": "modules/k3_resident_decode_stage/source/spark_k3_resident_decode_stage_runner.cu",
-      "sha256": "69a0ac790d25d7d83d0de45fc080d0e981b57b28b33ad15a066e58ff4d707bb4",
-      "size_bytes": 59469
+      "sha256": "36a1a173a1d55d491553930599760ff2f8b78063ea784bdae8eda3a343764f51",
+      "size_bytes": 60024
     },
     {
       "path": "modules/k3_resident_decode_stage/source/spark_k3_serving_adapter.c",
@@ -17020,5 +17020,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80651520
+  "total_bytes": 80652075
 }
