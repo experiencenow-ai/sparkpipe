@@ -38,9 +38,11 @@ rank map. Nothing here starts a daemon in shared-socket mode.
    build prefix, deployment source path, family env flags.
 3. Generate the pack sidecars with the family manifest tooling
    (`tools/<family>_experts_manifest.c` precedent): `<pack>.experts` for
-   routed-expert identity and the exact `<pack>.sha256`. Loading fails
-   closed without them - generic byte segments do not substitute for
-   routed-expert IDs.
+   routed-expert identity and the exact `<pack>.sha256`. The release shared
+   weightd additionally requires the whole-pack `<pack>.ck128` sidecar
+   (stamp once per node; glm5_next precedent:
+   `tools/glm5_next_ck128_stamp.sh`). Loading fails closed without them -
+   generic byte segments do not substitute for routed-expert IDs.
 4. Reserve every listener with `--ports` at submission: control
    `23000+16L..+15`, collective `53000+16L..+15`, transport
    `64000+16L..+15` (from `tools/devcycle/lane_assignments.json`,
@@ -91,3 +93,69 @@ recorded in `model-families/<family>/smoke_experts.json` (lane 0 lands the
 first instance). On a shared socket this materializes pages in the
 operator's daemon: keep the working set inside its declared expert-pool
 budget.
+
+## Local compile-gate fallback (Actions stalls)
+
+When Actions does not queue a run for a pushed head, gate the exact head on
+sparkb through the queue (sync the ref, then a CPU job):
+
+```sh
+export PATH=/usr/local/cuda/bin:$PATH      # cuobjdump is not on sparkb's default PATH
+export NVCC=/usr/local/cuda/bin/nvcc
+export CUDA_ARCH=sm_121a
+export SPARK_CUDA_GATE_SCOPE=complete
+bash tools/cuda13_sm121a_compile_gate.sh
+```
+
+The run must end with `PASS CUDA 13 exact sm_121a compile gate`; retain the
+attempt id and log path in the PR (receipt precedent: PR #1091's
+ebc7cd31 fallback, PR #1085's r5).
+
+## Job-submission rules (each paid for with an incident)
+
+- The queue provides `SPARK_QUEUE_RUNTIME_ROOT` as a PATH, not a
+  directory - wrappers `mkdir -p` their own runtime root before the first
+  write (PR #1101 r1 postmortem).
+- Queue `--cmd` / cmd-files carry NO shell syntax at all: `systemd-run`
+  pre-expands `$VAR` in cmd-file text (lane 5 probe: `[/home/${X}]` became
+  `[/home/]`). Wrappers are bare repo scripts; environment comes from
+  `ARM=A bash tools/<family>_job.sh` style invocations only.
+- `weightd_warm` pins the GLM pack identity (`glm5_next_stage`) in its
+  attach slice; non-GLM families need the identity parameterization before
+  routing a warm path through it (lane 5, additive).
+
+## M3 receipt template (the three-number preload convention)
+
+Per the operator preload model (PR #1103): expert tracing is one-time, the
+smoke-expert manifest IS the permanent working set, new instances
+batch-preload the entire traced set at launch, the shared weightd holds it
+resident for the daemon lifetime, and only a weightd restart re-triggers
+the slow load. Cold-launch receipts therefore report THREE numbers:
+
+1. `daemon_cold_warm_seconds` - one-time warm of the traced set into a
+   cold daemon (per daemon lifetime, NOT the launch target).
+2. `instance_ready_seconds` - a new instance's time-to-ready against the
+   warm daemon. THE `< 5 s` TARGET IS THIS NUMBER, never (1).
+3. `steady_state_decode_tokens_per_second` (+ `ttft_seconds`) - serving
+   from resident RAM.
+
+The A/B contrast arm (no preload) additionally reports the same axes with
+the daemon cold, to show what the preload removes. The receipt is plain
+KEY=VALUE props (`receipt.props`) merged into JSON at finalize - digits
+become numbers, everything else stays a string - plus fixed identity
+fields:
+
+```
+arm, rank, attempt, status
+residentd_sha256, weightd_warm_sha256, model_batch_sha256, wset_sha256
+daemon_census_before, daemon_census_after
+time_to_ready_seconds, ready_line
+warm_seconds, warm_log            (preload arm only)
+request_seconds
+bench: ttft_seconds, decode_tokens_per_second, token_count, valid
+teardown (term|killed), error (if any)
+```
+
+Every number is smoke-relative (shared-lane stdout timing, stated mode)
+unless produced by an isolated fleet window.
+
