@@ -530,7 +530,7 @@ static uint32_t FuzzLaunchRounds(uint64_t ordinal, uint32_t round_count,
 
 static void FuzzS25S3(void)
 {
-	uint32_t run[FUZZ_MAX_RANKS];
+	uint32_t run[FUZZ_MAX_RANKS] = {0};
 	uint32_t run_count = FuzzAllRanks(run);
 	uint64_t request = 700000u;
 	uint64_t completions_before[FUZZ_MAX_RANKS];
