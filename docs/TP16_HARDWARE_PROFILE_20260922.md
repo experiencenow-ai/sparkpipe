@@ -1,4 +1,4 @@
-# Partial TP16 hardware-wait profile
+# TP16 hardware-wait and serving measurements
 
 The isolated GLM5.3 Flash run from source
 `606cc825ca77d6ca9c3f20828b8396871e0c0f54` produced 17 token events, then remained
@@ -10,8 +10,7 @@ records and no malformed/incomplete GPU intervals.
 The measured decode window starts at output token 0 and ends at output token
 16: 16 intervals in 1.480802838 seconds, or 10.80495 tokens/s for that partial,
 profiled window. Startup and prefill are excluded. Same-host monotonic bounds
-are `576116547247054` and `576118028049892` ns. Profiling perturbs timing; a
-matching trace-disabled run remains necessary.
+are `576116547247054` and `576118028049892` ns. Profiling perturbs timing; completed trace-disabled measurements follow below.
 
 | Interval measurement | Median ms | Mean ms |
 | --- | ---: | ---: |
@@ -165,5 +164,66 @@ Binary SHA256:
 Remote logs are in `spark0:/tmp/sparkpipe-hc-regression-012f16a4/`; the small
 [receipt](receipts/glm5-next-hc-mix-012f16a4.json) retains source, binary, timings
 and process cleanup. The [GPU inventory](SERVING_FUZZ_COVERAGE.md) lists the
-explicit build/run target. Fleet output parity and throughput for this change
-remain separate measurements.
+explicit build/run target. Fleet output parity and throughput are measured separately below.
+
+
+## Completed HC fleet and persistent API requests
+
+An immutable serving bundle from production commit
+`1a08cb81583c93e749707fff80504f0012f1097b` passed the same CUDA compilation,
+GPU publication, driver linking/loading and artifact checks. Bundle SHA256:
+`b3ab05e568a8fe1b3fef8672f4f0b62d0a8914600eb3cadc28ba3de97a94ff59`.
+The TP16 geometry, FP8 packs, prompt, graph mode, pinned experts, B1 limits and
+hardware waits match the preceding fleet run; CUPTI remained disabled.
+
+| Request | Output tokens | Completion | Decode tok/s | Median interval | First token | Cached prompt tokens |
+| --- | ---: | --- | ---: | ---: | ---: | ---: |
+| CLI | 32 | status 0 | 11.590 | 80.792 ms | 17.646 s | 0 |
+| Persistent API, first | 32 | status 0 | 12.811 | 77.420 ms | 13.356 s | 0 |
+| Persistent API, second | 32 | status 0 | 11.770 | 82.354 ms | 3.944 s | 128 |
+
+All three token lists match the previous completed baseline hash
+`6955a6afeadbb5b8a88399e8f20a275a22d633fcbafa578ed63e5fdc4e7f87da`.
+The two API requests used one engine in PID 3115283, distinct request IDs
+100001/100002, HTTP 200, and actual engine completion. The second request reused
+128 of the 176 prompt tokens and produced identical continuation tokens. This
+qualifies this persistent-engine prefix-hit case; it does not qualify arbitrary
+batch sizes or every cache eviction/movement scenario.
+
+The HC microbenchmark establishes a kernel improvement, while these variable
+end-to-end results do not establish a large throughput gain or 14 tok/s. The CLI
+stage-profile summary again reported 16 dropped records, so it is not used as a
+complete phase decomposition. All 32 owned fleet processes and the API exited 0
+with their absence verified; no forced kill was needed.
+
+Remote root: `spark0:/tmp/sparkpipe-perf-1a08cb81583c-graph-r4/`. Retained local
+receipts are in `/private/tmp/sparkpipe-pr1082-receipts/fleet-performance/sparkpipe-perf-1a08cb81583c-graph-r4/`.
+Event-file SHA256: `4f520d80d1fac007112ae503a9001ca12725b7ccb6208782c0f05056e14d04f5`.
+CLI measurement SHA256: `39019456b3f74f698131ea5a4440597d7fc121639752843c76b9af92902e2d65`.
+API JSONL SHA256: `077949adbaab537aaebed12d0c522b854c6d37c65fdfaeaab64f7c4930c95980`.
+API summary SHA256: `0fc153483fcc6e0df8f33b31458e80fdecdc51b6b89e45712138297944710beb`.
+
+## Useful-byte memory roofline
+
+The rank-zero FP8 pack is 21,706,046,976 bytes, including every routed expert.
+One token selects eight of 288 experts in each of 42 routed layers, totaling
+544,997,376 bytes of expert FP8 weights and scales. Counting active weights,
+recurrent state, window state and attention KV gives approximately 2.197–2.293 GB
+of useful data per rank per token at context lengths 176–208.
+
+[NVIDIA specifies 273 GB/s](https://docs.nvidia.com/dgx/dgx-spark/hardware.html)
+for DGX Spark memory bandwidth. The useful-byte streaming ceiling is therefore
+119–124 tokens/s; the measured 11.38 tokens/s uses roughly 9–10 percent of that
+ideal. Dividing by the entire pack would wrongly count all inactive experts.
+This is not measured DRAM utilization or an achievable serving target: actual
+physical traffic can reread data, and compute, transport and scheduling add
+time. Memory-controller counters are needed to claim a fraction of actual DRAM
+bandwidth. At 12.81 tokens/s, the same useful-byte ratio is approximately
+10–11 percent.
+
+The reproducible rank-zero pack-directory accounting, read commands, per-group
+formulas and metadata/source hashes are retained in
+`reviews/sparkpipe-pr1077-20260922/implementation/roofline-20260922/` in the
+review workspace. The source revision is
+`84c6a6aa9497188e15a635ba793b0f95a79b1033`; the pack sidecar hash is identified
+as a sidecar value, not a fresh hash of the entire 21.7 GB file.
