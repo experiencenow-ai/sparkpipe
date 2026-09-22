@@ -39,7 +39,7 @@ set -euo pipefail
 
 WORLD=16
 CHECKPOINT_DEFAULT="/mnt/model-warm/qwen3.8-max-nvfp4-radixark-bf16-spine"
-DEST_REL="sparkdata/qwen38max.tp16/packs"
+DEST_REL="sparkdata/qwenmax.nvfp4.tp16/packs"
 LAYER_COUNT=92
 
 fail() { echo "qwen38max-pack-emit: $*" >&2; exit 1; }
@@ -76,7 +76,7 @@ fi
 CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
 CHECKPOINT="${QMAX_EMIT_CHECKPOINT:-$CHECKPOINT_DEFAULT}"
 DEST="/home/$HOST/$DEST_REL"
-PACK="$DEST/qwen38max.tp16-rank$RANK.qwen38sp"
+PACK="$DEST/qwenmax.nvfp4.tp16.rank$RANK.sp"
 MANIFEST="$CHECKOUT/qualification/t1_reference/qwen38_max/MANIFEST.json"
 
 # --------------------------- FAIL-CLOSED IDENTITY ----------------------------
@@ -105,11 +105,11 @@ fi
 # -------------------------------- EMIT ---------------------------------------
 
 START="$(date +%s)"
-PARTIAL="$DEST/partial-$ATTEMPT.qwen38sp"
+PARTIAL="$DEST/partial-$ATTEMPT.sp"
 # A ttl kill bypasses the EXIT trap; sweep partials of dead attempts
 # first (queue conflict rules keep this lane alone on the node).
-rm -f "$DEST"/partial-*.qwen38sp "$DEST"/partial-*.qwen38sp.* \
-      "$DEST"/.partial-*.qwen38sp.* 2>/dev/null || true
+rm -f "$DEST"/partial-*.sp "$DEST"/partial-*.sp.* \
+      "$DEST"/.partial-*.qwen38sp.* "$DEST"/.partial-*.sp.* 2>/dev/null || true
 trap 'rm -f "$PARTIAL" "$PARTIAL.experts" "$PARTIAL.receipt.json"' EXIT
 
 python3 "$CHECKOUT/tools/qwen38_stagepack.py" \

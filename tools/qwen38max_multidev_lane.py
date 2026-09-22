@@ -11,8 +11,10 @@ of this lane stays private to one queue attempt.
 Topology: TP16 single stage, 16 world ranks over spark0..sparkf. Logical
 rank = index in --nodes; the mesh map is the identity permutation
 (SPARK_TP_MESH_RANKS=0,...,15), so rank i lives on spark{hex(i)} and its
-pack is packs/qwen38max.tp16-rank{i}.qwen38sp in that host's deployed pack
-directory.
+pack is the OPERATOR-PLACED set (fleet inventory, Sep 12-15):
+/home/{host}/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank{i}.sp
+with .experts + .receipt.json sidecars - grep the fleet pack inventory
+before any warm read (the operator's expectation IS the map).
 
 The stage configuration member set mirrors the qwen38_max serving
 adapter's EXACT contract (tools/qwen38max_gen_deployment.py precedent:
@@ -80,7 +82,7 @@ MESH_RANKS = ",".join(str(i) for i in range(WORLD))
 MODEL_REVISION = "d2dc35658bcf77e66643428cb52e774cc3b5bd29"
 NODE_TARGET = "cuda.sm121.qwen38.resident_decode_stage.fp8"
 
-DEPLOYED_PACK_TEMPLATE = "/home/{host}/sparkdata/qwen38max.tp16/packs/qwen38max.tp16-rank{rank}.qwen38sp"
+DEPLOYED_PACK_TEMPLATE = "/home/{host}/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank{rank}.sp"
 DEFAULT_KV_BACKING_BYTES = 8 * 1024 * 1024 * 1024
 DEFAULT_KV_PAGE_CAPACITY = 16 * ((32768 + 63) // 64)
 
@@ -98,7 +100,7 @@ def stage_config(rank: int) -> dict:
     return {
         "schema_version": 1,
         "model_revision": MODEL_REVISION,
-        "stage_pack_path": "packs/qwen38max.tp16-rank%d.qwen38sp" % rank,
+        "stage_pack_path": "packs/qwenmax.nvfp4.tp16.rank%d.sp" % rank,
         "max_sequence_positions": 4096,
         "tp_degree": TP,
     }
@@ -166,6 +168,23 @@ def render(rank: int, runtime_root: str, weightd_socket: str,
     }
 
 
+def budgets(source: str) -> int:
+    """Emit 'expert_pool_bytes spine_bytes' (per-node, tp-sharded).
+
+    The arena-side sizing record from the census manifest: the wrapper
+    consumes this to default QMAX_EXPERT_POOL_BYTES/QMAX_SPINE_BUDGET_BYTES
+    without any queue-cmd env syntax.
+    """
+    document = json.load(open(source, encoding="utf-8"))
+    nodes = int(document["nodes"])
+    if document.get("expert_shard") != "tp" or nodes < 1:
+        raise SystemExit("budgets need a tp-sharded manifest with nodes >= 1")
+    pool = -(-sum(int(e["bytes"]) for e in document["experts"]) // nodes)
+    spine = -(-int(document["spine_bytes"]) // nodes)
+    print(f"{pool} {spine}")
+    return 0
+
+
 def emit_wset(source: str, output: str) -> int:
     """Materialize the smoke-expert working set as a .wset binary.
 
@@ -198,6 +217,9 @@ def main() -> int:
                         default=DEFAULT_KV_BACKING_BYTES)
     parser.add_argument("--emit-wset", metavar="OUTPUT",
                         help="write the smoke-expert .wset and exit")
+    parser.add_argument("--budgets", metavar="MANIFEST",
+                        help="print 'expert_pool_bytes spine_bytes' "
+                             "(per-node, tp-sharded) and exit")
     parser.add_argument("--wset-source", default=os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "model-families", "qwen38_max", "smoke_experts.json"))
@@ -206,6 +228,8 @@ def main() -> int:
                              "instead of writing")
     arguments = parser.parse_args()
 
+    if arguments.budgets:
+        return budgets(arguments.budgets)
     if arguments.emit_wset:
         return emit_wset(arguments.wset_source, arguments.emit_wset)
 
