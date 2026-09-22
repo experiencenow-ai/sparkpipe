@@ -99,6 +99,11 @@ PYEOF
 receipt_set arm "$ARM"
 receipt_set rank "$RANK"
 receipt_set attempt "$ATTEMPT"
+# smoke-set byte bases per node (from the .experts spans; lane-5 chunk finding):
+# raw 519.8 MiB; 2 MiB ceil-per-span = 1,344 spans = 2,688 MiB (5.17x raw)
+receipt_set smoke_set_raw_bytes_per_node 544997376
+receipt_set smoke_set_chunked_bytes_per_node 2818572288
+receipt_set chunk_basis "2 MiB ceil per expert span; GLM per-rank spans are all sub-2MiB (5.17x raw)"
 receipt_set residentd_sha256 "$(sha_of "$FAMILY_ROOT/bin/sparkpipe_model_residentd")"
 receipt_set weightd_warm_sha256 "$(sha_of "$FAMILY_ROOT/bin/weightd_warm")"
 receipt_set model_batch_sha256 "$(sha_of "$FAMILY_ROOT/bin/sparkpipe_model_batch")"
