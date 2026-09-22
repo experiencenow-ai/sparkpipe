@@ -110,7 +110,7 @@ void SparkWeightdClientClose(SparkWeightdClient *client)
     assert(mesh->bands == 0u);
     if (mesh->lane < SPARK_WEIGHTD_MESH_MAX_LANES)
         g_lane_masks[mesh->rank] &= ~(1u << mesh->lane);
-	free(client);
+    free(client);
 }
 
 SparkStatus SparkWeightdClientLaneAcquire(SparkWeightdClient *client,
