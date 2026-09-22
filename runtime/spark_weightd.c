@@ -36,6 +36,7 @@ extern uint64_t SparkWeightdMeshBufferAddress(void);
 extern uint32_t SparkWeightdMeshBufferLkey(void);
 extern int SparkWeightdMeshBufferFd(void);
 extern void SparkWeightdMeshPoll(void);
+extern SparkStatus SparkWeightdMeshSetActivity(uint32_t active);
 extern SparkStatus SparkWeightdMeshPostWrite(uint32_t peer,
     uint64_t local_addr, uint32_t lkey, uint32_t length,
     uint64_t remote_offset);
@@ -56,6 +57,11 @@ __attribute__((weak)) void SparkWeightdMeshDeviceProbe(const char *tag,
     (void)tag; (void)device_pointer; (void)bytes;
 }
 __attribute__((weak)) void SparkWeightdMeshPoll(void) { }
+__attribute__((weak)) SparkStatus SparkWeightdMeshSetActivity(uint32_t active)
+{
+    (void)active;
+    return SPARK_STATUS_UNSUPPORTED;
+}
 __attribute__((weak)) SparkStatus SparkWeightdMeshPostWrite(uint32_t peer,
     uint64_t local_addr, uint32_t lkey, uint32_t length,
     uint64_t remote_offset)
@@ -152,6 +158,8 @@ typedef struct SparkWeightdConnection
     uint32_t state;
     uint32_t hello_done;
     uint64_t owner;
+    uint64_t mesh_generation;
+    uint32_t mesh_active;
     uint32_t request_bytes;
     uint32_t request_ready;
     uint32_t attach_count;
@@ -185,6 +193,7 @@ struct SparkWeightdServer
     uint64_t daemon_generation;
     uint64_t next_arena_generation;
     uint64_t next_owner;
+    uint32_t orphan_mesh_owners;
     uint32_t arena_count;
     uint64_t resident_bytes;
     uint16_t lane_owner[SPARK_WEIGHTD_MESH_MAX_LANES];
@@ -350,6 +359,10 @@ static uint32_t SparkWeightdKindBodyBytes(uint32_t kind)
 {
     switch (kind)
     {
+        case SPARK_WEIGHTD_IPC_KIND_MESH_ACTIVITY:
+            return sizeof(SparkWeightdIpcMeshActivity) - SPARK_WEIGHTD_IPC_HEADER_BYTES;
+        case SPARK_WEIGHTD_IPC_KIND_MESH_ACTIVITY_RESULT:
+            return sizeof(SparkWeightdIpcMeshActivityResult) - SPARK_WEIGHTD_IPC_HEADER_BYTES;
         case SPARK_WEIGHTD_IPC_KIND_MESH_WRITE:
             return sizeof(SparkWeightdIpcMeshWrite) - SPARK_WEIGHTD_IPC_HEADER_BYTES;
         case SPARK_WEIGHTD_IPC_KIND_MESH_WRITE_RESULT:
@@ -441,6 +454,8 @@ static uint32_t SparkWeightdKindResultKind(uint32_t kind)
             return SPARK_WEIGHTD_IPC_KIND_RECLAIM_RESULT;
         case SPARK_WEIGHTD_IPC_KIND_EXPORT:
             return SPARK_WEIGHTD_IPC_KIND_EXPORT_RESULT;
+        case SPARK_WEIGHTD_IPC_KIND_MESH_ACTIVITY:
+            return SPARK_WEIGHTD_IPC_KIND_MESH_ACTIVITY_RESULT;
         case SPARK_WEIGHTD_IPC_KIND_MESH_WRITE:
             return SPARK_WEIGHTD_IPC_KIND_MESH_WRITE_RESULT;
         case SPARK_WEIGHTD_IPC_KIND_MESH_BROADCAST:
@@ -2550,6 +2565,43 @@ static uint32_t SparkWeightdServerDispatch(SparkWeightdServer *server,
         return(sizeof(*result));
     }
 
+    if (request_header->kind == SPARK_WEIGHTD_IPC_KIND_MESH_ACTIVITY)
+    {
+        const SparkWeightdIpcMeshActivity *activity =
+            (const SparkWeightdIpcMeshActivity *)request;
+        SparkWeightdIpcMeshActivityResult *result =
+            (SparkWeightdIpcMeshActivityResult *)response;
+        SparkStatus status;
+        memset(result,0,sizeof(*result));
+        SparkWeightdBuildHeader(response,result_kind,request_id);
+        if ( activity->generation == 0u || activity->active > 1u ||
+             activity->reserved0 != 0u )
+            status = SPARK_STATUS_INVALID_ARGUMENT;
+        else if ( activity->active != 0u && server->orphan_mesh_owners != 0u )
+            status = SPARK_STATUS_IO_ERROR;
+        else if ( activity->active != 0u && connection->mesh_active != 0u )
+            status = activity->generation == connection->mesh_generation ?
+                SPARK_STATUS_DUPLICATE : SPARK_STATUS_BUSY;
+        else if ( activity->active != 0u &&
+                  activity->generation <= connection->mesh_generation )
+            status = SPARK_STATUS_INVALID_ARGUMENT;
+        else if ( activity->active == 0u &&
+                 (connection->mesh_active == 0u ||
+                  activity->generation != connection->mesh_generation) )
+            status = SPARK_STATUS_INVALID_ARGUMENT;
+        else
+        {
+            status = SparkWeightdMeshSetActivity(activity->active);
+            if ( status == SPARK_STATUS_OK )
+            {
+                connection->mesh_generation = activity->generation;
+                connection->mesh_active = activity->active;
+            }
+        }
+        result->status = (uint32_t)status;
+        return sizeof(*result);
+    }
+
     if (request_header->kind == SPARK_WEIGHTD_IPC_KIND_MESH_WRITE)
     {
         SparkWeightdIpcMeshWriteResult *result =
@@ -2796,6 +2848,15 @@ static void SparkWeightdServerCloseConnection(SparkWeightdServer *server,
     uint32_t connection_index)
 {
     SparkWeightdConnection *connection = &server->connections[connection_index];
+    if ( connection->mesh_active != 0u )
+    {
+        server->orphan_mesh_owners++;
+        fprintf(stderr,"weightd mesh owner disconnected before GPU drain: owner=%llu generation=%llu; new mesh activity blocked\n",
+            (unsigned long long)connection->owner,
+            (unsigned long long)connection->mesh_generation);
+        connection->mesh_active = 0u;
+    }
+    connection->mesh_generation = 0u;
     if (connection->owner != 0u && connection->attach_count != 0u)
     {
         uint32_t arena_index;
@@ -2983,7 +3044,8 @@ static void SparkWeightdServerHandleReadable(SparkWeightdServer *server,
             }
             if (header->kind != SPARK_WEIGHTD_IPC_KIND_HELLO &&
                 header->kind != SPARK_WEIGHTD_IPC_KIND_MESH_WRITE &&
-                header->kind != SPARK_WEIGHTD_IPC_KIND_MESH_BROADCAST)
+                header->kind != SPARK_WEIGHTD_IPC_KIND_MESH_BROADCAST &&
+                header->kind != SPARK_WEIGHTD_IPC_KIND_MESH_ACTIVITY)
             {
                 connection->request_ready = 1u;
                 return;
@@ -3769,6 +3831,26 @@ SparkStatus SparkWeightdClientAttachLazy(SparkWeightdClient *client,
     result->mesh_send_buffer_bytes = wire_result.mesh_send_buffer_bytes;
     result->pool_fd = wire_result.pool_fd;
     return SPARK_STATUS_OK;
+}
+
+SparkStatus SparkWeightdClientMeshActivity(SparkWeightdClient *client,
+    uint64_t generation, uint32_t active, uint64_t timeout_nanoseconds)
+{
+    SparkWeightdIpcMeshActivity wire;
+    SparkWeightdIpcMeshActivityResult wire_result;
+    SparkStatus status;
+    if ( client == 0 || generation == 0u || active > 1u )
+        return SPARK_STATUS_INVALID_ARGUMENT;
+    memset(&wire,0,sizeof(wire));
+    SparkWeightdBuildHeader((uint8_t *)&wire,SPARK_WEIGHTD_IPC_KIND_MESH_ACTIVITY,
+        ++client->next_request_id);
+    wire.generation = generation;
+    wire.active = active;
+    memset(&wire_result,0,sizeof(wire_result));
+    status = SparkWeightdClientExchange(client,&wire,sizeof(wire),&wire_result,
+        sizeof(wire_result),timeout_nanoseconds);
+    return status == SPARK_STATUS_OK ?
+        SparkWeightdStatusFromWire(wire_result.status) : status;
 }
 
 SparkStatus SparkWeightdClientMeshWrite(

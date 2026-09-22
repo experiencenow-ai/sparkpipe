@@ -15,7 +15,7 @@ extern "C" {
 
 #define SPARK_WEIGHTD_CLIENT_TIMEOUT_DEFAULT_NS UINT64_C(10000000000)
 
-#define SPARK_WEIGHTD_IPC_ABI_VERSION 4u
+#define SPARK_WEIGHTD_IPC_ABI_VERSION 5u
 #define SPARK_WEIGHTD_IPC_MAGIC UINT32_C(0x57444953)
 
 #define SPARK_WEIGHTD_ID_BYTES 64u
@@ -64,6 +64,8 @@ extern "C" {
 #define SPARK_WEIGHTD_IPC_KIND_LANE_ACQUIRE_RESULT 28u
 #define SPARK_WEIGHTD_IPC_KIND_EVICT 29u
 #define SPARK_WEIGHTD_IPC_KIND_EVICT_RESULT 30u
+#define SPARK_WEIGHTD_IPC_KIND_MESH_ACTIVITY 31u
+#define SPARK_WEIGHTD_IPC_KIND_MESH_ACTIVITY_RESULT 32u
 
 #define SPARK_WEIGHTD_MESH_MAX_LANES 8u
 #define SPARK_WEIGHTD_MESH_HOST_PAGE_BYTES (64u * 1024u)
@@ -335,6 +337,21 @@ typedef struct SparkWeightdIpcEvictResult
 #define SPARK_WEIGHTD_IPC_EPOCH_EXPORT_BYTES ((uint32_t)sizeof(SparkWeightdIpcEpochExport))
 #define SPARK_WEIGHTD_IPC_EPOCH_EXPORT_RESULT_BYTES ((uint32_t)sizeof(SparkWeightdIpcEpochExportResult))
 
+typedef struct SparkWeightdIpcMeshActivity
+{
+    SparkWeightdIpcHeader header;
+    uint64_t generation;
+    uint32_t active;
+    uint32_t reserved0;
+} SparkWeightdIpcMeshActivity;
+
+typedef struct SparkWeightdIpcMeshActivityResult
+{
+    SparkWeightdIpcHeader header;
+    uint32_t status;
+    uint32_t reserved0;
+} SparkWeightdIpcMeshActivityResult;
+
 typedef struct SparkWeightdIpcMeshWrite
 {
     SparkWeightdIpcHeader header;
@@ -586,6 +603,9 @@ SparkStatus SparkWeightdClientConnect(const char *socket_path,
 
 void SparkWeightdClientClose(SparkWeightdClient *client);
 uint32_t SparkWeightdClientAlive(const SparkWeightdClient *client);
+
+SparkStatus SparkWeightdClientMeshActivity(SparkWeightdClient *client,
+    uint64_t generation, uint32_t active, uint64_t timeout_nanoseconds);
 
 SparkStatus SparkWeightdClientMeshWrite(SparkWeightdClient *client,
     uint32_t peer_rank,

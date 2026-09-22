@@ -1,3 +1,5 @@
+#include <assert.h>
+#include <stdatomic.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -446,8 +448,181 @@ static void test_slot_lifetimes(uint32_t local_rank)
         CHECK(weightd_mesh.send_pending[i] == 0u,"all accepted SQ ownership returns after terminal completions");
 }
 
+typedef struct TestMeshActivityThread
+{
+    SparkWeightdServer *server;
+    volatile sig_atomic_t stop;
+    atomic_uint waiting;
+    atomic_uint returned;
+    uint64_t cpu_ns;
+} TestMeshActivityThread;
+
+static void *test_mesh_server_run(void *raw)
+{
+    TestMeshActivityThread *state = raw;
+    assert(SparkWeightdServerRun(state->server,&state->stop) == SPARK_STATUS_OK);
+    return 0;
+}
+
+static void *test_mesh_wait(void *raw)
+{
+    TestMeshActivityThread *state = raw;
+    struct timespec before,after;
+    assert(clock_gettime(CLOCK_THREAD_CPUTIME_ID,&before) == 0);
+    atomic_store(&state->waiting,1u);
+    SparkWeightdMeshWaitForActivity();
+    SparkWeightdMeshDoorbellPoll();
+    assert(clock_gettime(CLOCK_THREAD_CPUTIME_ID,&after) == 0);
+    state->cpu_ns = (uint64_t)(after.tv_sec - before.tv_sec) * UINT64_C(1000000000) +
+        (uint64_t)after.tv_nsec - (uint64_t)before.tv_nsec;
+    atomic_store(&state->returned,1u);
+    return 0;
+}
+
+static void test_mesh_join_waiter(pthread_t thread,TestMeshActivityThread *waiter)
+{
+    uint32_t attempt;
+    for (attempt=0u; attempt<250u && atomic_load(&waiter->returned) == 0u; attempt++)
+        test_sleep_ns(UINT64_C(1000000));
+    CHECK(atomic_load(&waiter->returned) != 0u,"mesh wake completes without periodic polling delay");
+    assert(atomic_load(&waiter->returned) != 0u);
+    assert(pthread_join(thread,0) == 0);
+}
+
+static uint32_t test_mesh_owner_count(void)
+{
+    uint32_t count;
+    pthread_mutex_lock(&SparkWeightdMeshWireLock);
+    count = weightd_mesh.activity_owners;
+    pthread_mutex_unlock(&SparkWeightdMeshWireLock);
+    return count;
+}
+
+static void test_mesh_activity_protocol(uint32_t pending_first)
+{
+    SparkWeightdServerConfig config;
+    SparkWeightdClient *first = 0,*second = 0;
+    SparkWeightdHelloResult hello;
+    TestMeshActivityThread server = {0},waiter = {0};
+    pthread_t server_thread,wait_thread;
+    char path[128];
+    uint32_t post_first,post_last,round;
+    const uint64_t timeout = UINT64_C(1000000000);
+    test_complete_range(pending_first,spark_stub_ibv_posted_count());
+    assert(test_mesh_owner_count() == 0u);
+    memset(&config,0,sizeof(config));
+    (void)snprintf(path,sizeof(path),"/tmp/spark-mesh-activity-%ld.sock",(long)getpid());
+    config.socket_path = path;
+    config.device_bytes_max = UINT64_C(1048576);
+    assert(SparkWeightdServerCreate(&config,&server.server) == SPARK_STATUS_OK);
+    assert(pthread_create(&server_thread,0,test_mesh_server_run,&server) == 0);
+    assert(SparkWeightdClientConnect(path,&first,&hello) == SPARK_STATUS_OK);
+    assert(SparkWeightdClientConnect(path,&second,&hello) == SPARK_STATUS_OK);
+    assert(pthread_create(&wait_thread,0,test_mesh_wait,&waiter) == 0);
+    while ( atomic_load(&waiter.waiting) == 0u )
+        test_sleep_ns(UINT64_C(100000));
+    test_sleep_ns(UINT64_C(30000000));
+    CHECK(atomic_load(&waiter.returned) == 0u,"idle mesh blocks instead of polling");
+    CHECK(SparkWeightdClientMeshActivity(first,1u,1u,timeout) == SPARK_STATUS_OK,
+        "begin acknowledges a live producer and wakes idle mesh");
+    test_mesh_join_waiter(wait_thread,&waiter);
+    CHECK(waiter.cpu_ns < UINT64_C(10000000),"idle mesh consumes bounded thread CPU");
+    CHECK(SparkWeightdClientMeshActivity(first,1u,1u,timeout) == SPARK_STATUS_DUPLICATE &&
+        test_mesh_owner_count() == 1u,"duplicate begin cannot acquire another owner");
+    CHECK(SparkWeightdClientMeshActivity(first,2u,1u,timeout) == SPARK_STATUS_BUSY &&
+        test_mesh_owner_count() == 1u,"new generation cannot replace active owner");
+    CHECK(SparkWeightdClientMeshActivity(second,1u,1u,timeout) == SPARK_STATUS_OK &&
+        test_mesh_owner_count() == 2u,"concurrent model owns a separate interval");
+    CHECK(SparkWeightdClientMeshActivity(first,2u,0u,timeout) == SPARK_STATUS_INVALID_ARGUMENT &&
+        test_mesh_owner_count() == 2u,"stale end cannot release either owner");
+    CHECK(SparkWeightdClientMeshActivity(first,1u,0u,timeout) == SPARK_STATUS_OK &&
+        test_mesh_owner_count() == 1u,"first terminal owner cannot retire second producer");
+    CHECK(SparkWeightdClientMeshActivity(first,1u,0u,timeout) == SPARK_STATUS_INVALID_ARGUMENT &&
+        test_mesh_owner_count() == 1u,"duplicate end cannot underflow ownership");
+    CHECK(SparkWeightdClientMeshActivity(first,1u,1u,timeout) == SPARK_STATUS_INVALID_ARGUMENT,
+        "retired generation cannot be reused");
+    pthread_mutex_lock(&SparkWeightdMeshWireLock);
+    post_first = spark_stub_ibv_posted_count();
+    {
+        volatile uint64_t *entry = (volatile uint64_t *)((uint8_t *)weightd_mesh.recv_buffer +
+            SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(0u,0u));
+        entry[1] = 64u;
+        entry[2] = 1u;
+        entry[3] = 0xeu;
+        __sync_synchronize();
+        entry[0] = 2u;
+    }
+    pthread_mutex_unlock(&SparkWeightdMeshWireLock);
+    CHECK(SparkWeightdClientMeshActivity(second,1u,0u,timeout) == SPARK_STATUS_OK &&
+        test_mesh_owner_count() == 0u,"last producer ends after publishing and before host shipment");
+    memset(&waiter,0,sizeof(waiter));
+    assert(pthread_create(&wait_thread,0,test_mesh_wait,&waiter) == 0);
+    test_mesh_join_waiter(wait_thread,&waiter);
+    CHECK(atomic_load(&waiter.returned) == 1u,"queued GPU publication keeps progress awake without active producers");
+    pthread_mutex_lock(&SparkWeightdMeshWireLock);
+    post_last = spark_stub_ibv_posted_count();
+    CHECK(post_last - post_first == 6u && test_shipped(0u,0u) == 1u,
+        "final queued publication posts payload and tail while retaining its source");
+    pthread_mutex_unlock(&SparkWeightdMeshWireLock);
+    memset(&waiter,0,sizeof(waiter));
+    assert(pthread_create(&wait_thread,0,test_mesh_wait,&waiter) == 0);
+    test_mesh_join_waiter(wait_thread,&waiter);
+    CHECK(atomic_load(&waiter.returned) == 1u,"outstanding NIC ownership keeps progress awake");
+    pthread_mutex_lock(&SparkWeightdMeshWireLock);
+    for (round=post_first; round<post_last; round++)
+    {
+        SparkStubIbvPostedWork work;
+        assert(spark_stub_ibv_posted(round,&work) == 0);
+        assert(spark_stub_ibv_complete(work.wr_id,IBV_WC_SUCCESS) == 0);
+    }
+    pthread_mutex_unlock(&SparkWeightdMeshWireLock);
+    SparkWeightdMeshDrainCq();
+    CHECK(test_shipped(0u,0u) == 2u,"terminal NIC completions release the source before idle");
+    memset(&waiter,0,sizeof(waiter));
+    assert(pthread_create(&wait_thread,0,test_mesh_wait,&waiter) == 0);
+    CHECK(SparkWeightdClientMeshWrite(second,1u,0u,0u,64u,timeout) == SPARK_STATUS_OK,
+        "explicit mesh RPC wakes idle progress without a GPU interval");
+    test_mesh_join_waiter(wait_thread,&waiter);
+    pthread_mutex_lock(&SparkWeightdMeshWireLock);
+    {
+        SparkStubIbvPostedWork work;
+        CHECK(spark_stub_ibv_posted_count() == post_last + 1u &&
+            SparkWeightdMeshHasPending() != 0u,"RPC transfer owns exactly one pending WR");
+        assert(spark_stub_ibv_posted(post_last,&work) == 0);
+        assert(spark_stub_ibv_complete(work.wr_id,IBV_WC_SUCCESS) == 0);
+    }
+    pthread_mutex_unlock(&SparkWeightdMeshWireLock);
+    SparkWeightdMeshDrainCq();
+    for (round=2u; round<34u; round++)
+    {
+        memset(&waiter,0,sizeof(waiter));
+        assert(pthread_create(&wait_thread,0,test_mesh_wait,&waiter) == 0);
+        if ( round == 2u )
+        {
+            test_sleep_ns(UINT64_C(10000000));
+            CHECK(atomic_load(&waiter.returned) == 0u,"fully drained mesh returns to blocking idle");
+        }
+        CHECK(SparkWeightdClientMeshActivity(first,round,1u,timeout) == SPARK_STATUS_OK,
+            "producer transition wakes whether it precedes or follows wait enrollment");
+        test_mesh_join_waiter(wait_thread,&waiter);
+        CHECK(SparkWeightdClientMeshActivity(first,round,0u,timeout) == SPARK_STATUS_OK,
+            "matching terminal generation releases repeated activity");
+    }
+    CHECK(SparkWeightdClientMeshActivity(first,34u,1u,timeout) == SPARK_STATUS_OK,
+        "socket loss scenario begins known active generation");
+    SparkWeightdClientClose(first);
+    test_sleep_ns(UINT64_C(50000000));
+    CHECK(SparkWeightdClientMeshActivity(second,2u,1u,timeout) == SPARK_STATUS_IO_ERROR &&
+        test_mesh_owner_count() == 1u,"unexpected active disconnect retains producer and blocks new work");
+    SparkWeightdClientClose(second);
+    __atomic_store_n(&server.stop,1,__ATOMIC_SEQ_CST);
+    assert(pthread_join(server_thread,0) == 0);
+    SparkWeightdServerDestroy(server.server);
+}
+
 int main(void)
 {
+    alarm(30);
     TestMeshRecord own_record;
     TestMeshRecord expected;
     struct stat st;
@@ -461,6 +636,7 @@ int main(void)
     uint64_t modify_before;
     uint64_t failures_before;
     uint64_t post_before;
+    uint32_t protocol_post_first;
     SparkStatus status;
 
     if (strcmp(SPARK_WEIGHTD_MESH_DIR,TEST_MESH_LIVE_DIR) == 0)
@@ -675,6 +851,7 @@ int main(void)
         "broadcast outside configured group rejects before posting");
     CHECK(test_post_slot(0u,0u,1u,1u << 4u) == SPARK_STATUS_INVALID_ARGUMENT,
         "doorbell cannot send to an absent participant");
+    protocol_post_first = spark_stub_ibv_posted_count();
     {
         volatile uint64_t *entry = (volatile uint64_t *)((uint8_t *)weightd_mesh.recv_buffer +
             SPARK_WEIGHTD_MESH_DOORBELL_ENTRY(0u,0u));
@@ -686,6 +863,7 @@ int main(void)
     }
     CHECK(spark_stub_ibv_post_send_calls() - post_before == 6u,
         "TP4 B1 posts payload and tail to three peers only");
+    test_mesh_activity_protocol(protocol_post_first);
     test_rank_mask = 0xffu;
     CHECK(test_write_record(1u,9u) == 0,"peer with inconsistent group published");
     SparkWeightdMeshTryWire();
