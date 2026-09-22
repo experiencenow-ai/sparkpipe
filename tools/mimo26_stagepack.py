@@ -670,6 +670,7 @@ def emit_file_major(source: SafetensorsSource, records: list, stage_dir: Path,
                     by_shard[shard].append((record, span, plane))
     done = 0
     outs = {}
+    plane_state = {}  # path -> "skip" | "write"; decided once per plane
     try:
         for shard in sorted(by_shard):
             items = by_shard[shard]
@@ -677,18 +678,26 @@ def emit_file_major(source: SafetensorsSource, records: list, stage_dir: Path,
             for record, span, plane in items:
                 path = stage_dir / (stage_name(record, "payload" if plane else "scale"))
                 want = record.payload_bytes if plane else record.scale_bytes
-                if path.exists():
-                    if path.stat().st_size == want:
-                        continue  # complete planes are layout-independent
-                    # a PARTIAL plane cannot be resumed across emission
-                    # layouts (span order differs); discard and rewrite
-                    path.unlink()
+                state = plane_state.get(path)
+                if state is None:
+                    if path.exists() and path.stat().st_size == want:
+                        plane_state[path] = "skip"  # complete planes resume
+                        state = "skip"
+                    else:
+                        # a PARTIAL plane cannot be resumed across emission
+                        # layouts (span order differs); discard and rewrite
+                        if path.exists():
+                            path.unlink()
+                        plane_state[path] = "write"
+                        state = "write"
+                        done += want
+                if state == "skip":
+                    continue
                 out = outs.get(path)
                 if out is None:
                     out = open(path, "wb")
                     outs[path] = out
                 reader.produce(span, record, out, payload=plane)
-                done += want
     finally:
         for out in outs.values():
             out.flush()

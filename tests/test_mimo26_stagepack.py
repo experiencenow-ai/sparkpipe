@@ -206,20 +206,6 @@ def main() -> int:
                                                 packer.KIND_EXPERT_DOWN)))
         assert expert_bytes[0] == expert_bytes[1] > 0
 
-        # corrupt one payload byte: verify must fail loudly
-        bad = tmp / "corrupt.sp"
-        bad.write_bytes(packs[0].read_bytes())
-        blob = bytearray(bad.read_bytes())
-        blob[-1] ^= 0xFF
-        bad.write_bytes(bytes(blob))
-        import shutil
-        shutil.copy(str(packs[0]) + ".receipt.json", str(bad) + ".receipt.json")
-        try:
-            packer.do_verify(Args(checkpoint=str(ckpt), tp=2, rank=0, out=str(bad)))
-            raise AssertionError("corrupted pack verified")
-        except (packer.PackFailure, SystemExit):
-            pass
-
         # windowed emission: two disjoint windows + globals merge into one pack
         merged_stage = tmp / "stage_w"
         merged_stage.mkdir()
@@ -236,6 +222,20 @@ def main() -> int:
         args_w.assemble = False
         args_w.verify = True
         assert packer.do_verify(args_w) == 0
+
+        # corrupt one payload byte: verify must fail loudly
+        bad = tmp / "corrupt.sp"
+        bad.write_bytes(packs[0].read_bytes())
+        blob = bytearray(bad.read_bytes())
+        blob[-1] ^= 0xFF
+        bad.write_bytes(bytes(blob))
+        import shutil
+        shutil.copy(str(packs[0]) + ".receipt.json", str(bad) + ".receipt.json")
+        try:
+            packer.do_verify(Args(checkpoint=str(ckpt), tp=2, rank=0, out=str(bad)))
+            raise AssertionError("corrupted pack verified")
+        except (packer.PackFailure, SystemExit):
+            pass
 
         # resume: one deleted staged payload is re-emitted, others untouched
         stage = tmp / "stage0"
