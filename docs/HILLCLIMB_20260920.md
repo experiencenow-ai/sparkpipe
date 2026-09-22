@@ -2275,3 +2275,26 @@ authority today; the daemon should reject UINT64_MAX at attach (queued).
 NEXT: warm completes → engines restarted (fresh maps) → canary → THE
 MEASUREMENT (warm µs/round through the full new stack). Then agent-side
 warming (post-weightd-start) makes every recycle self-healing.
+
+## 09-23 12:00 TICK — the warmer's traps fixed; THE DAEMON CRASH AT CREATION convicted (reproducible)
+
+PROGRESS: the overflow (UINT64_MAX pool + preload wraps) and the arena-
+identity cache (poisoned arenas persist per daemon lifetime) both fixed
+in weightd_warm (reads SPARK_WEIGHTD_EXPERT_POOL_BYTES, 32GiB default);
+layer 3 WARMED once (clean acquire/release traces) — the warmer design
+is proven.
+
+THE CONVICTION (reproduced twice): the daemon DIES SILENTLY at the
+first creation-class acquire — warm5: attach OK → layers 0-2 NOT_FOUND
+(normal) → layer 3's acquire → daemon death (agent restarts it 3-4 min
+later; the client's remaining layers fail IO on the dead socket). NO
+stage instrument fires (the death precedes budget/chunk_ensure/load) —
+the lease-acquisition path or an earlier corruption surfacing. No
+cores (removed in the disk-full era), no dmesg access.
+
+NEXT (the crash hunt): (a) re-enable a BOUNDED core for the weightd
+start (the agent's ensure_weightd: ulimit -c + a core pattern to a
+bounded dir), (b) reproduce → the core names the faulting frame (the
+12:30-era CUDA-context class is the prime suspect: chunk creation on
+the worker context), (c) fix → the warmer completes → agent-driven
+post-start warming → recycle-proof permanently-warm serving.
