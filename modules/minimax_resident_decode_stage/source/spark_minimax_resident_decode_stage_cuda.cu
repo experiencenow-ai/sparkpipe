@@ -490,10 +490,9 @@ extern "C" cudaError_t SparkMinimaxLaunchAttentionDecode(cudaStream_t stream,con
 		return(cudaErrorInvalidValue);
 	SparkMinimaxAttentionDecodeKernel<<<grid,SPARK_MINIMAX_KERNEL_HEAD_DIM,0,stream>>>(
 		(const float *)query_roped_f32,(const __nv_bfloat16 *)kv_cache_bf16,
-		table->physical_block_indices,table->lane_physical_block_counts,table->lane_stride,
-		row_lane_indices,slot_mapping,context_lengths,(__nv_bfloat16 *)attended_bf16,
+		table->physical_block_indices,table->lane_physical_block_counts,row_lane_indices,slot_mapping,context_lengths,(__nv_bfloat16 *)attended_bf16,
 		row_count,local_query_head_count,local_kv_head_count,
-		local_kv_head_dimension,block_span,layer_block_stride,epsilon,tp_rank,layer_index);
+		local_kv_head_dimension,table->lane_stride,block_span,layer_block_stride,epsilon,tp_rank,layer_index);
 	return(cudaGetLastError());
 }
 
@@ -507,7 +506,7 @@ extern "C" cudaError_t SparkMinimaxLaunchAttentionPrefill(cudaStream_t stream,co
 		table->physical_block_indices,table->lane_physical_block_counts,row_lane_indices,row_positions,
 		(const __nv_bfloat16 *)staged_key_bf16,(const __nv_bfloat16 *)staged_value_bf16,attended_bf16,
 		row_count,local_query_head_count,local_kv_head_count,local_kv_head_dimension,
-		block_span,layer_block_stride,epsilon,tp_rank,layer_index,base_position);
+		table->lane_stride,block_span,layer_block_stride,epsilon,tp_rank,layer_index,base_position);
 	return(cudaGetLastError());
 }
 
