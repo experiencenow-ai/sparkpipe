@@ -2533,7 +2533,7 @@ PR's explicit-graph-mode default is live.
 
 ### Source clarification: the current payload and completion tails are already pushed locally
 
-`SparkWeightdClientAttach` maps the local mesh file descriptor with `MAP_SHARED`
+`SparkWeightdClientAttachLazy` maps the local mesh file descriptor with `MAP_SHARED`
 and replaces `mesh_send_buffer_addr` with that local mapping. GLM passes this
 address to `SparkTpDeviceCollectivePrepareReceiveBf16`; `SparkGlm5NextMeshWaitKernel`
 derives every peer tail from the same local band base plus the peer's slot offset.
