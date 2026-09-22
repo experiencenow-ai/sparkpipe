@@ -2246,3 +2246,32 @@ With that + the map re-attach revive, the fleet becomes: recycle-proof,
 permanently warm, serving at the measured cadence — and the µs/round
 climb (330ms/round → the graph path's µs class) becomes the only
 remaining work.
+
+## 09-23 10:00 TICK — THE OVERFLOW CONVICTION + the deploy-time warmer WORKS
+
+THE CHAIN OF CONVICTIONS THIS TICK (each named by its instrument):
+1. FIRST SERVING RECEIPTS stood (8 requests, real tokens, ~1.15s/token).
+2. weightd_warm (tools/weightd_warm.c) written: attach-lazy + per-layer
+   bulk acquire with a creation-sized timeout.
+3. First runs insta-failed 17 → ACQUIRE-LOAD-STAGE instrument (budget/
+   chunk_ensure/open_pack/load_lease per-stage verdicts, deployed via
+   core-announce) → "stage=budget status=17".
+4. THE ROOT: expert_pool_bytes=UINT64_MAX (the unset-env default!)
+   OVERFLOWS the budget sum (pool + preload wraps to ~2MB) → the cap
+   check always fails → eviction finds no victim on a fresh arena → 17.
+   The ENGINES never hit it because their environment sets
+   SPARK_WEIGHTD_EXPERT_POOL_BYTES=34359738368 (32GiB).
+5. Arenas cache by identity: the first poisoned attach (MAX) persisted
+   server-side — a daemon restart was needed for the corrected pool
+   bytes to take effect.
+6. POST-FIX: layer 3 WARM on the first acquire (WD-LEASE-TRACE status=0)
+   — the creation path is sound; the warmer now grinding the cold tail
+   (minutes per layer set, persisting per daemon lifetime).
+
+THE DORMANT TRAP RECORDED: any client attaching without the env gets the
+MAX default → poisoned arena → every acquire 17s. The env is the config
+authority today; the daemon should reject UINT64_MAX at attach (queued).
+
+NEXT: warm completes → engines restarted (fresh maps) → canary → THE
+MEASUREMENT (warm µs/round through the full new stack). Then agent-side
+warming (post-weightd-start) makes every recycle self-healing.
