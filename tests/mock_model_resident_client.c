@@ -56,6 +56,7 @@ struct SparkModelResidentClient
 	uint32_t commit_calls;
 	uint32_t abort_calls;
 	uint64_t last_submission_id;
+	SparkModelServingLane last_lane;
 	MockInflight inflight[MOCK_INFLIGHT_CAPACITY];
 	uint32_t inflight_count;
 	MockPendingDecision pending_decisions[MOCK_INFLIGHT_CAPACITY];
@@ -107,6 +108,15 @@ uint64_t MockResidentClientGeneration(uint32_t stage_index)
 {
 	SparkModelResidentClient *c = MockResidentClientByRank(stage_index);
 	return( c != 0 ? c->client_generation : 0u );
+}
+
+uint32_t MockResidentClientLastLane(uint32_t stage_index,SparkModelServingLane *lane)
+{
+	SparkModelResidentClient *client = MockResidentClientByRank(stage_index);
+	if ( client == 0 || lane == 0 || client->last_lane.request_id == 0u )
+		return(0u);
+	*lane = client->last_lane;
+	return(1u);
 }
 
 void MockResidentClientScriptSubmitStatus(uint32_t stage_index, SparkStatus status)
@@ -286,6 +296,8 @@ static SparkStatus MockResidentClientEnqueue(
 	slot->submission_id = submission->submission_id;
 	slot->submission = *submission;
 	client->last_submission_id = submission->submission_id;
+	if ( submission->lane_count != 0u && submission->lanes != 0 )
+		client->last_lane = submission->lanes[0];
 	if ( MockTraceEnabled() )
 		fprintf(stderr,"MOCK rank=%u %s id=%llu kind=%u rows=%u seq=%llu inflight=%u\n",
 			client->stage_index,op,

@@ -460,48 +460,49 @@ janitor() {
 }
 
 ensure_weightd() {
-    if pgrep -f "sparkpipe_weightd" >/dev/null; then
-        local wdd="$HOME/sparkdata/weightd" q exe_sha disk_sha
-        for q in $(pgrep -f "sparkdata/weightd/sparkpipe_weightd"); do
-            exe_sha=$(sha16 "$(readlink /proc/$q/exe 2>/dev/null)")
-            disk_sha=$(sha16 "$wdd/sparkpipe_weightd")
-            if [ -n "$exe_sha" ] && [ "$exe_sha" != "$disk_sha" ]; then
-                echo "$(date +%T) weightd: running $exe_sha != installed $disk_sha; recycling"
-                kill -TERM "$q" 2>/dev/null
-                sleep 3
-                kill -9 "$q" 2>/dev/null
+    local wdd="$HOME/sparkdata/weightd" q owner="" executable exe_sha disk_sha
+    for q in $(pgrep -f "sparkpipe_weightd"); do
+        executable=$(readlink "/proc/$q/exe" 2>/dev/null) || continue
+        case "$executable" in
+            "$wdd/sparkpipe_weightd"|"$wdd/sparkpipe_weightd (deleted)")
+                if [ -n "$owner" ]; then
+                    echo "weightd: multiple production owners ($owner, $q); refusing automatic cleanup" >&2
+                    return 1
+                fi
+                owner=$q ;;
+            */sparkpipe_weightd|*/"sparkpipe_weightd (deleted)")
+                echo "weightd: unknown owner $q at $executable; refusing automatic startup" >&2
+                return 1 ;;
+        esac
+    done
+    if [ -n "$owner" ]; then
+        exe_sha=$(sha16 "/proc/$owner/exe")
+        disk_sha=$(sha16 "$wdd/sparkpipe_weightd")
+        if [ "$exe_sha" = none ] || [ "$disk_sha" = none ]; then
+            echo "weightd: cannot verify running/installed identity; owner $owner retained" >&2
+            return 1
+        fi
+        if [ "$exe_sha" != "$disk_sha" ]; then
+            if pgrep -f "bin/sparkpipe_model_residentd" >/dev/null; then
+                echo "weightd: update $exe_sha -> $disk_sha requires dependent engines to drain; owner $owner retained" >&2
+                return 1
             fi
-        done
-        local youngest=0 p start_s up_s
-        for p in $(pgrep -f "sparkpipe_weightd"); do
-            start_s=$(awk '{print $22}' "/proc/$p/stat" 2>/dev/null)
-            [ -n "$start_s" ] && [ "$start_s" -gt "$youngest" ] && youngest=$start_s
-        done
-        up_s=$(awk '{printf "%d", $1}' /proc/uptime)
-        if [ "$youngest" -gt 0 ] && [ $(( up_s - youngest / 100 )) -lt 120 ]; then
+            echo "weightd: stopping owned pid $owner for installed update; waiting for process exit"
+            kill -TERM "$owner" 2>/dev/null
+            return 1
+        fi
+        if [ -S /tmp/spark_weightd.sock ] && python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect("/tmp/spark_weightd.sock"); s.close()' 2>/dev/null; then
             return 0
         fi
-        local probe_ok=0 probe_i
-        for probe_i in 1 2 3; do
-            if [ -S /tmp/spark_weightd.sock ] && python3 -c "import socket,sys; s=socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect(\"/tmp/spark_weightd.sock\"); s.close()" 2>/dev/null; then
-                probe_ok=1
-                break
-            fi
-            sleep 2
-        done
-        [ "$probe_ok" = 1 ] && return 0
-        echo "$(date +%T) weightd: stale or unresponsive instance(s); clearing (production channel only)"
-        for p in $(ls -l /proc/[0-9]*/exe 2>/dev/null | grep sparkpipe_weightd | sed "s|.*/proc/\([0-9]*\)/exe.*|\1|"); do
-            case "$(readlink /proc/$p/exe 2>/dev/null)" in
-                "$HOME/sparkdata/weightd/"*) kill -9 "$p" 2>/dev/null ;;
-            esac
-        done
-        sleep 2
-        rm -f /tmp/spark_weightd.sock
+        echo "weightd: owned pid $owner alive, control socket not ready; process and mappings retained" >&2
+        return 1
     fi
     local home="$HOME/sparkdata/weightd"
-    [ -x "$home/sparkpipe_weightd" ] || return 0
-    restart_ok weightd || return 0
+    [ -x "$home/sparkpipe_weightd" ] || {
+        echo "weightd: missing executable $home/sparkpipe_weightd; dependent startup blocked" >&2
+        return 1
+    }
+    restart_ok weightd || return 1
     rm -f /tmp/weightd-mesh/mesh-*.rec /tmp/weightd-mesh/.ready 2>/dev/null
     echo "$(date +%T) weightd: starting (backoff ${BACKOFF[weightd]:-1}s)"
     [ -s "$HOME/weightd.log" ] && mv "$HOME/weightd.log" "$HOME/weightd-$(date +%Y%m%d-%H%M%S).log" 2>/dev/null
@@ -511,6 +512,7 @@ ensure_weightd() {
         > "$HOME/weightd.log" 2>&1 < /dev/null &
     rm -f /tmp/weightd-mesh/.shipped_sha 2>/dev/null
     ( sleep 2; sync_rendezvous "glm53flash.fp8.tp16" ) >/dev/null 2>&1 &
+    return 1
 }
 
 prune_logs() {
@@ -522,7 +524,6 @@ prune_logs() {
 echo "$$" > "$PID_FILE"
 echo "agent: rank=$RANK roots=$ROOTS hub=$HUB http=$RELEASE_HTTP self=$(sha16 "$0")"
 report
-ensure_weightd
 ensure_root() {
     local name="$1"
     local st; st=$(root_state "$name")
@@ -606,7 +607,11 @@ while true; do
     self_update
     node_doctor
     janitor
-    ensure_weightd
+    if ! ensure_weightd; then
+        report_if_changed
+        sleep 1
+        continue
+    fi
     IFS=, read -ra RA <<< "$ROOTS"
     for r in "${RA[@]}"; do sync_root "$r"; done
     for r in "${RA[@]}"; do sync_rendezvous "$r"; done

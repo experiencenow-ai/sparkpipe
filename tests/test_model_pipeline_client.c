@@ -442,35 +442,6 @@ static void TestModelPipelineStopResidents(
 	}
 }
 
-static void TestModelPipelineStopResidentsAfterFailure(
-	pid_t children[TEST_MODEL_PIPELINE_RANK_COUNT],
-	char paths[][108])
-{
-	uint32_t rank,failed_exit_count;
-	int32_t child_status;
-	uint32_t exit_status;
-	uint32_t observed[TEST_MODEL_PIPELINE_RANK_COUNT];
-	failed_exit_count = 0u;
-	for (rank=0u; rank<TEST_MODEL_PIPELINE_RANK_COUNT; rank++)
-	{
-		assert(kill(children[rank],SIGTERM) == 0 || errno == ESRCH);
-		assert(waitpid(children[rank],&child_status,0) == children[rank]);
-		assert(WIFEXITED(child_status));
-		exit_status = (uint32_t)WEXITSTATUS(child_status);
-		observed[rank] = exit_status;
-		assert(exit_status == 0u || exit_status == 1u);
-		if ( exit_status == 1u )
-			failed_exit_count++;
-		unlink(paths[rank]);
-	}
-	if ( failed_exit_count == 0u )
-		for (rank=0u; rank<TEST_MODEL_PIPELINE_RANK_COUNT; rank++)
-			fprintf(stderr,"test_model_pipeline_client rank=%u exit=%u "
-				"(no rank observed the failure at teardown)\n",
-				rank,observed[rank]);
-	assert(failed_exit_count != 0u);
-}
-
 static void TestModelPipelineBuildSubmission(
 	SparkModelServingSubmission *submission,
 	SparkModelServingLane *lanes,
@@ -1712,10 +1683,8 @@ int main(void)
 	assert(view.rejected_count == 3u);
 	assert(view.completed_count == 9u);
 	SparkModelPipelineClientDestroy(pipeline);
-	TestModelPipelineStopResidentsAfterFailure(children,paths);
 	for (rank=0u; rank<TEST_MODEL_PIPELINE_RANK_COUNT; rank++)
-		children[rank] = TestModelPipelineStartResident(deployment_path,rank);
-	TestModelPipelineWaitForSockets(paths);
+		assert(kill(children[rank],0) == 0);
 	TestModelBatchEngineRun(&deployment);
 	TestModelBatchEnginePriority(&deployment);
 	TestModelBatchEngineAggregatePrefill(&deployment);

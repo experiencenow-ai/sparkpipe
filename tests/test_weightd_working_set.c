@@ -553,6 +553,37 @@ static void check_lazy_pack(const char *socket_path,const char *path,const char 
 	assert(SparkWeightdLazyPackDestroy(pack) == SPARK_STATUS_OK);
 }
 
+static void check_budget_contract(SparkWeightdClient *client,const char *path)
+{
+	SparkWeightdLazyAttachRequest request = {0};
+	SparkWeightdLazyAttachResult result;
+	SparkWeightdDetachResult detached;
+	request.identity.abi_version = SPARK_WEIGHTD_IPC_ABI_VERSION;
+	request.identity.arena_bytes = PACK_BYTES;
+	memcpy(request.identity.model,"working-set-test",17u);
+	memset(request.identity.pack_sha256,'a',64u);
+	snprintf(request.pack_path,sizeof(request.pack_path),"%s",path);
+	request.expert_pool_bytes = UINT64_MAX;
+	assert(SparkWeightdClientAttachLazy(client,&request,&result,TIMEOUT) == SPARK_STATUS_INVALID_ARGUMENT);
+	assert(result.arena_count == 0u);
+	request.expert_pool_bytes = 5u * CHUNK;
+	assert(SparkWeightdClientAttachLazy(client,&request,&result,TIMEOUT) == SPARK_STATUS_INVALID_ARGUMENT);
+	assert(result.arena_count == 0u);
+	request.expert_pool_bytes = 2u * CHUNK;
+	assert(SparkWeightdClientAttachLazy(client,&request,&result,TIMEOUT) == SPARK_STATUS_OK);
+	assert(SparkWeightdClientDetach(client,result.arena_generation,&detached,TIMEOUT) == SPARK_STATUS_OK);
+	assert(detached.status == SPARK_STATUS_OK);
+	request.expert_pool_bytes = 3u * CHUNK;
+	assert(SparkWeightdClientAttachLazy(client,&request,&result,TIMEOUT) == SPARK_STATUS_INVALID_ARGUMENT);
+	request.expert_pool_bytes = CHUNK;
+	assert(SparkWeightdClientAttachLazy(client,&request,&result,TIMEOUT) == SPARK_STATUS_INVALID_ARGUMENT);
+	request.expert_pool_bytes = 2u * CHUNK;
+	assert(SparkWeightdClientAttachLazy(client,&request,&result,TIMEOUT) == SPARK_STATUS_OK);
+	assert(SparkWeightdClientDetach(client,result.arena_generation,&detached,TIMEOUT) == SPARK_STATUS_OK);
+	assert(detached.status == SPARK_STATUS_OK);
+	assert(result.expert_pool_bytes == 2u * CHUNK);
+}
+
 int main(void)
 {
 	char root[] = "/tmp/weightd-set-XXXXXX",path[256],manifest[272],socket_path[256];
@@ -573,6 +604,7 @@ int main(void)
 	assert(pthread_create(&thread,0,run_server,&state) == 0);
 	assert(SparkWeightdClientConnect(socket_path,&a,0) == SPARK_STATUS_OK);
 	assert(SparkWeightdClientConnect(socket_path,&b,0) == SPARK_STATUS_OK);
+	check_budget_contract(a,path);
 	generation = attach(a,path,&base);
 	assert(attach(b,path,&other_base) == generation && other_base == base);
 	check_two_clients(a,b,generation,base);

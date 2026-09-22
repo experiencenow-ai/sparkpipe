@@ -84,7 +84,6 @@ __global__ void SparkGlm5NextMeshGuardKernel(
 	if ( *error_word != 0ull )
 	{
 		output[0] = 0xFFFFFFFFFFFFFFFFull;
-		*error_word = 0ull;
 		printf("MESH-GUARD-POISON\\n");
 	}
 }

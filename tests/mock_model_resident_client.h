@@ -17,6 +17,7 @@ enum
 SparkModelResidentClient *MockResidentClientByRank(uint32_t stage_index);
 uint32_t MockResidentClientCalls(uint32_t stage_index, uint32_t kind);
 uint64_t MockResidentClientGeneration(uint32_t stage_index);
+uint32_t MockResidentClientLastLane(uint32_t stage_index,SparkModelServingLane *lane);
 void MockResidentClientScriptSubmitStatus(uint32_t stage_index, SparkStatus status);
 void MockResidentClientFireResult(uint32_t stage_index, uint64_t submission_id, SparkStatus status);
 void MockResidentClientFireDecision(uint32_t stage_index, uint64_t submission_id, uint32_t decision_kind, SparkStatus status);

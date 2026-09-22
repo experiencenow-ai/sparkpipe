@@ -1,5 +1,6 @@
 #include "sparkpipe/spark_model_resident_client.h"
 #include "sparkpipe/spark_error_site.h"
+#include "model_resident_socket.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -13,10 +14,6 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-
-#ifndef MSG_NOSIGNAL
-#define MSG_NOSIGNAL 0
-#endif
 
 typedef struct SparkModelResidentClientOutput
 {
@@ -108,7 +105,7 @@ static ssize_t SparkModelResidentClientSend(
 	const void *bytes,
 	uint32_t byte_count)
 {
-	return(send(fd,bytes,byte_count,MSG_NOSIGNAL));
+	return(SparkModelResidentSend(fd,bytes,byte_count));
 }
 
 static SparkStatus SparkModelResidentClientWait(
@@ -231,12 +228,9 @@ static SparkStatus SparkModelResidentClientAllocate(
 static SparkStatus SparkModelResidentClientPrepareSocket(
 	int32_t fd)
 {
-#if defined(SO_NOSIGPIPE)
-	int32_t enabled;
-	enabled = 1;
-	if ( setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&enabled,sizeof(enabled)) != 0 )
-		SPARK_FAIL(SPARK_STATUS_IO_ERROR);
-#endif
+	SparkStatus status = SparkModelResidentConfigureSocket(fd);
+	if ( status != SPARK_STATUS_OK )
+		SPARK_RETURN(status);
 	return(SparkModelResidentClientSetNonblocking(fd));
 }
 
@@ -294,7 +288,6 @@ static SparkStatus SparkModelResidentClientOpenTcp(
 {
 	struct addrinfo hints,*addresses,*address;
 	char service[16];
-	int32_t enabled;
 	SparkStatus status;
 	if ( snprintf(service,sizeof(service),"%u",endpoint->tcp_port) < 0 )
 		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
@@ -321,22 +314,9 @@ static SparkStatus SparkModelResidentClientOpenTcp(
 		client->fd = socket(address->ai_family,address->ai_socktype,address->ai_protocol);
 		if ( client->fd < 0 )
 			continue;
-		enabled = 1;
-		if ( setsockopt(client->fd,IPPROTO_TCP,TCP_NODELAY,&enabled,sizeof(enabled)) == 0 )
-			status = SparkModelResidentClientPrepareSocket(client->fd);
+		status = SparkModelResidentConfigureTcp(client->fd);
 		if ( status == SPARK_STATUS_OK )
-		{
-			enabled = 1;
-			if ( setsockopt(client->fd,SOL_SOCKET,SO_KEEPALIVE,&enabled,sizeof(enabled)) == 0 )
-			{
-				int32_t keepidle = 10;
-				int32_t keepintvl = 5;
-				int32_t keepcnt = 3;
-				(void)setsockopt(client->fd,IPPROTO_TCP,TCP_KEEPIDLE,&keepidle,sizeof(keepidle));
-				(void)setsockopt(client->fd,IPPROTO_TCP,TCP_KEEPINTVL,&keepintvl,sizeof(keepintvl));
-				(void)setsockopt(client->fd,IPPROTO_TCP,TCP_KEEPCNT,&keepcnt,sizeof(keepcnt));
-			}
-		}
+			status = SparkModelResidentClientPrepareSocket(client->fd);
 		if ( status == SPARK_STATUS_OK )
 			status = SparkModelResidentClientFinishConnect(client->fd,address->ai_addr,(socklen_t)address->ai_addrlen,timeout_ms);
 		if ( status != SPARK_STATUS_OK )
@@ -476,6 +456,10 @@ void SparkModelResidentClientFailStop(SparkModelResidentClient *client)
 	}
 	memset(client->pending,0,(size_t)client->queue_capacity * sizeof(client->pending[0]));
 	client->pending_count = 0u;
+	client->prepared_count = 0u;
+	client->session_epoch += 1u;
+	if ( client->session_epoch == 0u )
+		client->session_epoch = 1u;
 	memset(client->outputs,0,(size_t)client->queue_capacity * sizeof(client->outputs[0]));
 	client->output_count = 0u;
 	client->output_head = 0u;
