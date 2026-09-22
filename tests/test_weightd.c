@@ -1,6 +1,7 @@
 
 #include <assert.h>
 #include <poll.h>
+#include <netinet/in.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
@@ -604,10 +605,21 @@ static void SparkTestDaemonProcessTermPath(void)
     SparkWeightdClient *client = 0;
     char ready_line[256];
     int stdout_pipe[2];
+    int latch_socket;
+    struct sockaddr_in latch_address;
+    socklen_t latch_address_bytes = sizeof(latch_address);
     pid_t daemon_pid;
     int daemon_exit = -1;
     uint64_t waited_ms;
 
+    latch_socket = socket(AF_INET,SOCK_STREAM,0);
+    assert(latch_socket >= 0);
+    memset(&latch_address,0,sizeof(latch_address));
+    latch_address.sin_family = AF_INET;
+    latch_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    assert(bind(latch_socket,(struct sockaddr *)&latch_address,sizeof(latch_address)) == 0);
+    assert(getsockname(latch_socket,(struct sockaddr *)&latch_address,&latch_address_bytes) == 0);
+    assert(ntohs(latch_address.sin_port) != 0u);
     assert(pipe(stdout_pipe) == 0);
     (void)unlink(stderr_path);
     SparkTestWritePack(pack_path, 400u, SPARK_TEST_ARENA_BYTES, digest);
@@ -615,12 +627,15 @@ static void SparkTestDaemonProcessTermPath(void)
         0x991ull, digest, SPARK_TEST_ARENA_BYTES);
     SparkTestMakeRequest(&request, &identity, pack_path);
 
+    assert(close(latch_socket) == 0);
     daemon_pid = fork();
     assert(daemon_pid >= 0);
     if (daemon_pid == 0)
     {
         char ceiling_text[32];
-        setenv("SPARK_WEIGHTD_LATCH_PORT","0",1);
+        char latch_text[16];
+        snprintf(latch_text,sizeof(latch_text),"%u",(unsigned)ntohs(latch_address.sin_port));
+        setenv("SPARK_WEIGHTD_LATCH_PORT",latch_text,1);
         setenv("SPARK_WEIGHTD_KV_RESERVE_BYTES","0",1);
         snprintf(ceiling_text, sizeof(ceiling_text), "%llu",
             (unsigned long long)(2ull * SPARK_TEST_ARENA_BYTES));

@@ -626,7 +626,7 @@ int main(void)
     TestMeshRecord own_record;
     TestMeshRecord expected;
     struct stat st;
-    char path[256];
+    char path[512];
     char log_path[320];
     uint32_t local_rank;
     uint32_t rank;
@@ -826,11 +826,8 @@ int main(void)
             CHECK(first_again.boot_ns == dir1_boot,
                 "case6 original record not clobbered by the second instance");
         }
-        {
-            char cmd[512];
-            (void)snprintf(cmd,sizeof(cmd),"rm -rf %s",dir2);
-            (void)system(cmd);
-        }
+        CHECK(unlink(path) == 0,"case6 remove second instance record");
+        CHECK(rmdir(dir2) == 0,"case6 remove second instance directory");
     }
 
     test_clean_dir();
