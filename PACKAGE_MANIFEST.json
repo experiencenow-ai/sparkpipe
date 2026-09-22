@@ -3193,8 +3193,8 @@
     },
     {
       "path": "examples/model_descriptions/gemma4_resident_decode_stage_bf16_firmware.json",
-      "sha256": "d98c11bec1046e4b2f21719eec51ff3f880e9083a1959428a25a38269cff51e4",
-      "size_bytes": 3312
+      "sha256": "67e813333ae605c2ccd152772416408b77eaba2c24a909fef0f8a0875b13f48e",
+      "size_bytes": 3922
     },
     {
       "path": "examples/model_descriptions/glm52_resident_decode_stage_bf16_firmware.json",
@@ -4308,8 +4308,8 @@
     },
     {
       "path": "model-families/common/include/sparkpipe/spark_qwen38_pp_serving_adapter_common.h",
-      "sha256": "35666a155b9023ec787bf5ec1d8a39e9e51317716ef61c35b9f7500d1d543abf",
-      "size_bytes": 39398
+      "sha256": "ef799c43c72c9d90d7e26af390a284fca357c7bac105c42cdfee220666b73fe5",
+      "size_bytes": 39589
     },
     {
       "path": "model-families/common/include/sparkpipe/spark_qwen38_serving_adapter_common.h",
@@ -5168,8 +5168,8 @@
     },
     {
       "path": "modules/gemma4_resident_decode_stage/Makefile",
-      "sha256": "9f80917f2d099b1a5c37298178500ccd5c0faaba748893a8831bc4a9549fb943",
-      "size_bytes": 4833
+      "sha256": "c3daa27eb770ab7f59708d410ba155b4a12dea08da1c92ee956caab2d38df508",
+      "size_bytes": 5383
     },
     {
       "path": "modules/gemma4_resident_decode_stage/Makefile.moe",
@@ -5198,8 +5198,8 @@
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_serving_adapter.c",
-      "sha256": "fc57775be72ddc312a5ee5152e1b9cc68a4afa92fafd4bde7fec820f0d5d6c6d",
-      "size_bytes": 13172
+      "sha256": "fb90f5c74faaa585262e654fd0320a8fb348d1151dcd953e66c62fde5e20f403",
+      "size_bytes": 13760
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_stagepack_format.h",
@@ -9293,8 +9293,8 @@
     },
     {
       "path": "tests/test_gemma4_tp16_shared_socket.py",
-      "sha256": "50d387c134632c2a5395117f542163889face109cd2da7ef71d65413256e1cbb",
-      "size_bytes": 11624
+      "sha256": "7714311f4edfe3040692addc531cfd8dc3f9701b652819415563518e7b174d42",
+      "size_bytes": 11824
     },
     {
       "path": "tests/test_gemma4_verify_existing.py",
@@ -11623,13 +11623,13 @@
     },
     {
       "path": "tools/gemma4_tp16_gen_deployment.py",
-      "sha256": "57ed3f2cbd41b879e510dbedd3ea6313cbb2dfa3905daae5e0a2523e5d2f2374",
-      "size_bytes": 6892
+      "sha256": "5c48b0fc69bc2d81a04207346741e3693f430c427b2ba5282e0322f7c484d92b",
+      "size_bytes": 7210
     },
     {
       "path": "tools/gemma4_tp16_shared_socket.sh",
-      "sha256": "061031cc76eea84a5ff9e89ad37770f0ca705ca73fb5923c1be7358503b45134",
-      "size_bytes": 8201
+      "sha256": "48e8af7a4e714acc8e9b6d1da8484968520f44ac7f47c86134dd520aa4f5e6f5",
+      "size_bytes": 8372
     },
     {
       "path": "tools/gen_geometry_header.py",
@@ -17045,5 +17045,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80713370
+  "total_bytes": 80715998
 }
