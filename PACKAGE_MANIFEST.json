@@ -5818,8 +5818,8 @@
     },
     {
       "path": "modules/ling_resident_decode_stage/source/spark_ling_resident_decode_stage_module.c",
-      "sha256": "af9402196ce1cd3312eecf29cea00126ac58b5cdb3596a9d679a7534598d9db3",
-      "size_bytes": 96801
+      "sha256": "cd7402eb096773313e917a5f9aeda548a862c83614b60254502933d2e1d7c97b",
+      "size_bytes": 96911
     },
     {
       "path": "modules/ling_resident_decode_stage/source/spark_ling_serving_adapter.c",
@@ -17100,5 +17100,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80803257
+  "total_bytes": 80803367
 }
