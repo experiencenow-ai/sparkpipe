@@ -62,6 +62,8 @@ mkdir -p "$output/bin" "$output/lib"
 cp build/weightd_warm build/sparkpipe_model_residentd build/sparkpipe_weightd build/sparkpipe_model_api build/sparkpipe_model_batch build/sparkpipe_model_compile "$output/bin/"
 cp build/libhidden_transport_spark_host_rdma_verbs.so "$output/lib/hidden_transport.so"
 cp "$adapter" "$output/lib/model_serving_adapter.so"
+ldd -r "$output/lib/model_serving_adapter.so" > "$receipts/adapter-dependencies.log" 2>&1
+if grep -Eq 'not found|undefined symbol' "$receipts/adapter-dependencies.log"; then cat "$receipts/adapter-dependencies.log"; exit 1; fi
 mv "$output/compiled/stages" "$output/compiled/model_package.json" "$output/"
 rmdir "$output/compiled"
 cp -a build/module_library/active "$output/qualification/module-records"

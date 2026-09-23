@@ -60,6 +60,15 @@ def deployment_gates(deployment, runtime_root, socket, failures):
           "deployment schema_version must be 2")
     check(deployment["weightd"]["socket_path"] == socket, failures,
           "weightd socket path must be the shared socket")
+    # The batch engine rejects a deployment with eos_token_count == 0
+    # (SCHEMA_ERROR at SparkModelBatchValidateConfiguration — the cold14
+    # first-decode failure). The list must hold the authoritative contract's
+    # end_of_text id, never a hardcoded copy.
+    contract = json.loads((ROOT / "model_contracts/k3_authoritative.json").read_text())
+    expected_eos = [int(contract["tokens"]["end_of_text"])]
+    check(deployment.get("eos_token_ids") == expected_eos, failures,
+          f"deployment eos_token_ids must be {expected_eos} from the "
+          f"authoritative contract, got {deployment.get('eos_token_ids')!r}")
     limits = deployment["runtime_limits"]
     # residentd's runtime-limits check fails closed on zeros: kv_physical
     # >= max_active_sequences and kv_logical >= resident_sequence_capacity.
