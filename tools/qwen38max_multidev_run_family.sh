@@ -111,6 +111,11 @@ done
 
 # ------------------------------- WEIGHTD MODE --------------------------------
 
+# The synced checkout this script runs from (needed by the budget and
+# deployment steps below; resolved once, before first use - the previous
+# late definition died unbound under set -u before the first attach run).
+CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
+
 # shared-socket only: the lane-2 charter runs smoke and small B* under the
 # shared lanes; a private daemon is never started by this wrapper.
 SOCKET="${QMAX_WEIGHTD_SOCKET:-${SPARK_WEIGHTD_SOCKET:-/run/sparkpipe-weightd-shared/weightd.sock}}"
@@ -123,7 +128,15 @@ the operator must establish the shared daemon (never start one by hand)"
 MANIFEST_JSON="$CHECKOUT/model-families/qwen38_max/smoke_experts.json"
 [ -f "$MANIFEST_JSON" ] ||
   fail "smoke_experts.json missing (the census manifest is the sizing record)"
-BUDGETS="$(python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" --budgets "$MANIFEST_JSON")"
+# --rank: the pool default is THIS rank's chunk-basis size from the pools
+# manifest (per-rank placement is uneven: 3.05-4.44 GiB chunked); budgets
+# fails loud without it by design. --pack: the spine default is MEASURED
+# from this rank's placed pack (.experts sidecar; the lazy tier's exact
+# allocation arithmetic - the spine holds replicated tensors that a
+# spine/16 division under-declares).
+RANK_PACK="/home/spark$(printf '%x' "$RANK")/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank$(printf '%x' "$RANK").sp"
+BUDGETS="$(python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" \
+  --budgets "$MANIFEST_JSON" --rank "$RANK" --pack "$RANK_PACK")"
 DEFAULT_POOL="${BUDGETS%% *}"
 DEFAULT_SPINE="${BUDGETS##* }"
 : "${QMAX_EXPERT_POOL_BYTES:=$DEFAULT_POOL}"
@@ -145,8 +158,7 @@ HOST="spark$(printf '%x' "$RANK")"
   fail "node order mismatch: rank $RANK expects $HOST but this job runs on \
 $(hostname); --nodes order must stay identical to the mesh map ($MESH_RANKS)"
 
-CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
-DEPLOYED_PACK="/home/$HOST/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank$RANK.sp"
+DEPLOYED_PACK="$RANK_PACK"
 [ -f "$DEPLOYED_PACK" ] || fail "deployed rank pack missing: $DEPLOYED_PACK \
 (operator-placed set; grep the fleet pack inventory before any warm read)"
 
@@ -156,7 +168,13 @@ mkdir -p "$ROOT/bin" "$ROOT/lib" "$ROOT/config" "$ROOT/packs" "$ROOT/kvcache"
 
 # 1. Coherent artifacts: build the exact synced source (GPU job: the module
 #    archive and driver need nvcc), or reuse a prior build on this node.
-if [ -n "${QMAX_PREBUILT_DIR:-}" ]; then
+# PREBUILT_DIR resolves without env syntax (bare queue cmd): explicit
+# override, else the build arm's standard node-local layout.
+PREBUILT_CANDIDATE="${QMAX_PREBUILT_DIR:-/home/$HOST/sparkdata/qwen38max.tp16/build-latest}"
+if [ -d "$PREBUILT_CANDIDATE" ]; then
+  QMAX_PREBUILT_DIR="$PREBUILT_CANDIDATE"
+fi
+if [ -n "${QMAX_PREBUILT_DIR:-}" ] && [ -d "$QMAX_PREBUILT_DIR" ]; then
   for artifact in sparkpipe_model_residentd model_serving_adapter.so \
       model_driver.so hidden_transport.so weightd_warm; do
     [ -f "$QMAX_PREBUILT_DIR/$artifact" ] ||
@@ -184,6 +202,22 @@ else
     archive adapter
   ADAPTER="$CHECKOUT/build/modules/qwen38_max_resident_decode_stage/$EXPERT_CODEC/libqwen38_max_serving_adapter_$EXPERT_CODEC.so"
   [ -f "$ADAPTER" ] || fail "adapter not built: $ADAPTER"
+  # The driver compile resolves the module by exact identity from
+  # build/module_library; publish it first (whole-stack smoke tier on
+  # this rank's OWN placed pack — DEPLOYED_PACK, the same pack the
+  # driver attaches; one pack per node, so a rank0 hardcode would fail
+  # the pack check on 15/16 nodes).
+  [ -r "$DEPLOYED_PACK" ] || fail "placed pack for rank $RANK missing: $DEPLOYED_PACK"
+  make -C "$CHECKOUT/modules/qwen38_max_resident_decode_stage" -j1 \
+    CUDA_HOME=/usr/local/cuda CUDA_ARCH=sm_121a \
+    EXPERT_CODEC="$EXPERT_CODEC" \
+    MODEL_REVISION="$MODEL_REVISION" \
+    CONTRACT_SHA256="$CONTRACT_SHA256" \
+    STAGE_PACK_PATH="$DEPLOYED_PACK" \
+    STAGE_COUNT=1 STAGE_INDEX=0 STAGE_FIRST_LAYER=0 STAGE_LAYER_COUNT=92 \
+    MTP_LAYER_COUNT=0 MAX_ACTIVE_SEQUENCES=8 KV_BLOCK_COUNT=8 \
+    ALLOW_UNQUALIFIED_EXECUTION=1 \
+    publish
   rm -rf "$ROOT/driver"
   "$CHECKOUT/build/sparkpipe_model_compile" \
     --model "$CHECKOUT/examples/model_descriptions/qwen38_max_resident_decode_stage_firmware.json" \
@@ -259,16 +293,46 @@ fi
   fail "packs/ must contain exactly one .sha256 sidecar"
 
 # --------------------- COLD-LAUNCH PRELOAD (milestone 3) ---------------------
+# Preload-model directive (2026-09-22): batch-preload the traced set at
+# launch is the DEFAULT posture (the manifest IS the working-set
+# definition); QMAX_WORKING_SET=0 opts out. Default-on also keeps the
+# queue cmd BARE (no env prefix can reach a systemd unit).
 
-if [ -n "${QMAX_WORKING_SET:-}" ]; then
+case "${QMAX_WORKING_SET:-1}" in
+  1|yes|on) WARM_LEG=1 ;;
+  0|no|off) WARM_LEG=0 ;;
+  *) fail "QMAX_WORKING_SET must be a boolean (got '$QMAX_WORKING_SET')" ;;
+esac
+
+if [ "$WARM_LEG" -eq 1 ]; then
   WSET="$ROOT/smoke.wset"
-  python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" --emit-wset "$WSET"
+  # rank-filtered: weightd_warm validates keys against THIS node's pack
+  # manifest; the census spans all 16 packs (104 keys on rank 0).
+  python3 "$CHECKOUT/tools/qwen38max_multidev_lane.py" --emit-wset "$WSET" --rank "$RANK"
   REVISION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["model_revision"])' "$ROOT/config/adapter.json")"
-  "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
-    "$(cat "$ROOT/packs/pack.sha256")" "$REVISION" "$WORLD" \
-    --wset "$WSET" 300 > "$ROOT/warm.log" 2>&1
-  grep -q "WSET-WARM keys=" "$ROOT/warm.log" ||
-    fail "working set warm failed (see $ROOT/warm.log)"
+  # weightd_warm fail-closes without finite pool/spine envs (it attaches
+  # through the same identity path); the resident-launch exports below
+  # come too late for the warm leg - carry them on the invocation. It
+  # also accepts at most 512 manifest key pairs per invocation; the
+  # census wset is 1501 keys, so warm sequential 512-key shards (the
+  # leases persist - coverage is the union; each shard prints its own
+  # WSET-WARM line).
+  WARM_KEYS=$(( $(stat -c %s "$WSET") / 8 ))
+  WARM_PARTS=$(( (WARM_KEYS + 511) / 512 ))
+  : > "$ROOT/warm.log"
+  WARM_SEEN=0
+  for ((warm_start = 0; warm_start < WARM_KEYS; warm_start += 512)); do
+    dd if="$WSET" of="$WSET.$warm_start.part" bs=8 skip="$warm_start" count=512 status=none
+    SPARK_WEIGHTD_EXPERT_POOL_BYTES="$QMAX_EXPERT_POOL_BYTES" \
+    SPARK_WEIGHTD_SPINE_BUDGET_BYTES="$QMAX_SPINE_BUDGET_BYTES" \
+    "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
+      "$(cat "$ROOT/packs/pack.sha256")" "$REVISION" "$WORLD" \
+      --wset "$WSET.$warm_start.part" 300 >> "$ROOT/warm.log" 2>&1 ||
+      fail "working set warm shard $warm_start failed (see $ROOT/warm.log)"
+    WARM_SEEN=$((WARM_SEEN + 1))
+  done
+  [ "$(grep -c "WSET-WARM keys=" "$ROOT/warm.log")" = "$WARM_PARTS" ] ||
+    fail "working set warm incomplete: $WARM_SEEN/$WARM_PARTS shards (see $ROOT/warm.log)"
 fi
 
 # ----------------------------- RESIDENT LAUNCH -------------------------------
@@ -277,6 +341,12 @@ export SPARK_WEIGHTD_ATTACH=1
 export SPARK_WEIGHTD_SOCKET="$SOCKET"
 export SPARK_WEIGHTD_LANE="$LANE"
 export SPARK_TP_MESH_RANKS="$MESH_RANKS"
+# The pack-identity attach path requires the digest env - no fallback,
+# runtime/spark_weightd_attach.c fails "no_identity" without it, and the
+# module's lazy attach reads the same env (#1141 gemma4 digest-export
+# class). The sidecar above is the receipt-reconciled digest; export it
+# so the exec'd residentd inherits the identity it will attach with.
+export SPARK_WEIGHTD_PACK_SHA256="$(cat "$ROOT/packs/pack.sha256")"
 export SPARK_WEIGHTD_EXPERT_POOL_BYTES="$QMAX_EXPERT_POOL_BYTES"
 export SPARK_WEIGHTD_SPINE_BUDGET_BYTES="$QMAX_SPINE_BUDGET_BYTES"
 # Pinned CUDA environment for shared-lane smoke (template hard rule).

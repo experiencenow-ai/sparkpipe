@@ -108,7 +108,10 @@ esac
 # explicit opt-in; the model identity is pinned for deterministic receipts.
 export SPARK_WEIGHTD_ATTACH=1
 export SPARK_WEIGHTD_PACK_SHA256="$SHA_HEX"
-export SPARK_WEIGHTD_IDENTITY_MODEL=spark.gemma4.31b.resident_decode_stage.bf16.linear_bf16.kv_bf16.h5376.l60.v1
+# identity model must fit SPARK_WEIGHTD_ID_BYTES (64, NUL-bounded): the
+# full module identifier is 72 chars and the attach failed "identity"
+# (launch-11); the module target string is the identity.
+export SPARK_WEIGHTD_IDENTITY_MODEL=cuda.sm121.gemma4.31b.resident_decode_stage.bf16
 
 if [ "$DRY_RUN" -eq 0 ]; then
     [ -S "$WEIGHTD_SOCKET" ] || fail "shared weightd socket is not present: $WEIGHTD_SOCKET (weightd is operator-managed; never start it by hand)"
@@ -116,6 +119,9 @@ fi
 
 # --- private deployment under the runtime root ----------------------------
 mkdir -p "$ROOT"/bin "$ROOT"/lib "$ROOT"/packs "$ROOT"/config "$ROOT"/logs
+# residentd requires the kv backing directory to be a real directory
+# (node/model_residentd.c ValidateDirectories fails io_error otherwise).
+mkdir -p "$ROOT/kv"
 ln -sfn "$CHECKOUT/$RELEASE/bin/sparkpipe_model_residentd" "$ROOT/bin/sparkpipe_model_residentd"
 ln -sfn "$CHECKOUT/$RELEASE/lib/model_serving_adapter.so" "$ROOT/lib/model_serving_adapter.so"
 ln -sfn "$CHECKOUT/$RELEASE/lib/hidden_transport.so" "$ROOT/lib/hidden_transport.so"

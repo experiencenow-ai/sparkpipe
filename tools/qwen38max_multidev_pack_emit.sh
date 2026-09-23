@@ -76,7 +76,10 @@ fi
 CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
 CHECKPOINT="${QMAX_EMIT_CHECKPOINT:-$CHECKPOINT_DEFAULT}"
 DEST="/home/$HOST/$DEST_REL"
-PACK="$DEST/qwenmax.nvfp4.tp16.rank$RANK.sp"
+# Placed-set naming: HEX rank suffix (ranka..rankf for 10-15 — the
+# operator placement convention, tools/qwen38max_patch_rank.sh printf %x;
+# decimal rank10..15 would not match the placed set on 6/16 nodes).
+PACK="$DEST/qwenmax.nvfp4.tp16.rank$HEXDigit.sp"
 MANIFEST="$CHECKOUT/qualification/t1_reference/qwen38_max/MANIFEST.json"
 
 # --------------------------- FAIL-CLOSED IDENTITY ----------------------------

@@ -4537,7 +4537,14 @@ static __global__ void SparkLmGroupedScalarLinearKernel(uint32_t weight_format, 
 	const void *group_payload;
 	const uint8_t *group_scale;
 	float accumulator;
-	for (task = blockIdx.x; task < group_tile_prefix[group_count]; task += gridDim.x)
+	/* A TP-windowed launch hands this kernel a prefix window whose first
+	 * entry is THIS rank's first GLOBAL tile index (the window is
+	 * [prefix[0], prefix[group_count]) inside the global route table).
+	 * Tasks below prefix[0] belong to other ranks: with the loop bound
+	 * starting at zero they binary-search into group 0 with a negative
+	 * in_group (unsigned) and read wild rows - rank 0 never saw it (its
+	 * window starts at 0); every other rank faulted data-dependently. */
+	for (task = group_tile_prefix[0] + blockIdx.x; task < group_tile_prefix[group_count]; task += gridDim.x)
 	{
 		group = SparkLmGroupedScalarGroupOfTile(group_tile_prefix,group_count,task);
 		in_group = task - group_tile_prefix[group];

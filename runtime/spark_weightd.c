@@ -1359,8 +1359,15 @@ static void SparkWeightdServerStageMeshFd(SparkWeightdConnection *connection)
     if (result->status != (uint32_t)SPARK_STATUS_OK)
         return;
     result->mesh_ready = SparkWeightdMeshReady();
-    result->mesh_send_buffer_addr = SparkWeightdMeshBufferAddress();
     result->mesh_send_buffer_bytes = SPARK_WEIGHTD_MESH_REGION_BYTES;
+    /* The daemon's own buffer pointer is meaningless (and lethal) in the
+     * client until the mesh fd is staged for a client-side mapping; only
+     * a ready mesh publishes an address, and the client then OVERWRITES
+     * it with its local mmap of that fd anyway. */
+    if (result->mesh_ready != 0u)
+        result->mesh_send_buffer_addr = SparkWeightdMeshBufferAddress();
+    else
+        result->mesh_send_buffer_addr = 0u;
     if (result->mesh_ready == 0u)
         return;
     fd = SparkWeightdMeshBufferFd();
@@ -3831,6 +3838,16 @@ SparkStatus SparkWeightdClientAttachLazy(SparkWeightdClient *client,
                 mesh_fd = fds[0];
             if ( wire_result.pool_fd_staged != 0u )
                 pool_fd = fds[wire_result.mesh_ready != 0u ? 1u : 0u];
+            /* A mesh address from the daemon is its OWN virtual mapping.
+             * Without the mesh fd there is no client-side mapping, and a
+             * nonzero foreign pointer here is a guaranteed SIGSEGV in the
+             * first doorbell scan (k3 first-launch find #11: residents
+             * that attached while the fresh daemon was still wiring mesh
+             * peers crashed in SparkTpDeviceCollectivePrepareReceiveBf16).
+             * Zero it — the runners' mesh_send_buffer_addr != 0 guards
+             * then correctly skip the device-collective receive prep. */
+            if ( wire_result.mesh_ready == 0u )
+                wire_result.mesh_send_buffer_addr = 0u;
             if ( mesh_fd >= 0 )
             {
                 uint64_t bytes = wire_result.mesh_send_buffer_bytes;

@@ -64,6 +64,12 @@ PP = 4
 HEX = "0123456789abcdef"
 HOSTS = [f"spark{HEX[i]}" for i in range(WORLD)]
 
+# Numeric peer addresses for the host TP collective: SparkTpCollectiveCreate
+# validates peers with inet_pton (IPv4 literals only — hostnames are
+# INVALID_ARGUMENT at create). The fleet's sparkN names are static DNS
+# (verified 2026-09-23: spark0=10.10.100.10 .. sparkf=10.10.100.25).
+HOST_ADDRESSES = {f"spark{HEX[i]}": f"10.10.100.{10 + i}" for i in range(WORLD)}
+
 CONTROL_BASE = 23048                            # 23048 .. 23063
 COLLECTIVE_BASE = 53048                         # 53048 .. 53063 (u16-valid, #1094)
 TRANSPORT_BASE = 64048                          # 64048 .. 64063
@@ -77,6 +83,7 @@ DEPLOYED_PACK_TEMPLATE = (
 
 NODE_TARGET = "cuda.sm121.k3.resident_decode_stage.linear_bf16.expert_mxfp4.kv_bf16"
 DEFAULT_KV_BACKING_BYTES = 8 * 1024 * 1024 * 1024
+KV_PAGES_PER_SEQUENCE = 64   # adapter_config default; x SPARK_K3_KV_PAGE_SLOTS (64) tokens
 
 
 def host_of(rank: int) -> str:
@@ -153,7 +160,7 @@ def adapter_config(rank: int, kv_pages: int = 64) -> dict:
             "collective_identifier": 1,
             "peers": [
                 "{host}:{port}".format(
-                    host=group_hosts(rank)[partner],
+                    host=HOST_ADDRESSES[group_hosts(rank)[partner]],
                     port=TP_COLLECTIVE_PORT + partner)
                 for partner in (tp ^ 1, tp ^ 2)
             ],
@@ -198,13 +205,20 @@ def resident_deployment(runtime_root: str, weightd_socket: str,
         "weightd": {
             "socket_path": weightd_socket,
         },
+        # KV page capacities: residentd fails closed (INVALID_ARGUMENT)
+        # when kv_physical < max_active_sequences or kv_logical <
+        # resident_sequence_capacity (model_serving_adapter.c runtime-
+        # limits check) — zeros do NOT mean "bind nothing" here. The honest
+        # bound is the resident capacity times the adapter's
+        # kv_pages_per_sequence (64 pages x 64 tokens = the 4096-token
+        # per-sequence ceiling the seam already commits to).
         "runtime_limits": {
             "max_inflight_submissions": 16,
             "max_active_sequences": 16,
             "max_input_rows": 16,
             "resident_sequence_capacity": 16,
-            "kv_logical_page_capacity": 0,
-            "kv_physical_page_capacity": 0,
+            "kv_logical_page_capacity": 16 * KV_PAGES_PER_SEQUENCE,
+            "kv_physical_page_capacity": 16 * KV_PAGES_PER_SEQUENCE,
         },
         "nodes": nodes,
     }

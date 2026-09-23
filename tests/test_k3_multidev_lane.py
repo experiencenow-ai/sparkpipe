@@ -61,8 +61,19 @@ def deployment_gates(deployment, runtime_root, socket, failures):
     check(deployment["weightd"]["socket_path"] == socket, failures,
           "weightd socket path must be the shared socket")
     limits = deployment["runtime_limits"]
+    # residentd's runtime-limits check fails closed on zeros: kv_physical
+    # >= max_active_sequences and kv_logical >= resident_sequence_capacity.
+    # k3's honest bound: resident capacity x the adapter's kv_pages per
+    # sequence (the per-sequence token ceiling the seam commits to).
+    expected_pages = limits["resident_sequence_capacity"] * lane.KV_PAGES_PER_SEQUENCE
     for key in ("kv_logical_page_capacity", "kv_physical_page_capacity"):
-        check(limits[key] == 0, failures, f"{key} must stay 0 for k3")
+        check(limits[key] == expected_pages, failures,
+              f"{key} must equal resident_capacity x kv_pages "
+              f"({expected_pages}), got {limits[key]}")
+    check(limits["kv_physical_page_capacity"] >= limits["max_active_sequences"],
+          failures, "kv_physical_page_capacity must cover max_active_sequences")
+    check(limits["kv_logical_page_capacity"] >= limits["resident_sequence_capacity"],
+          failures, "kv_logical_page_capacity must cover resident capacity")
     nodes = deployment["nodes"]
     check(len(nodes) == 16, failures, f"expected 16 nodes, got {len(nodes)}")
     endpoints = set()
@@ -109,7 +120,9 @@ def adapter_gates(config, rank, failures, per_host_ports):
     peers = collective["peers"]
     check(len(peers) == 2, failures, f"{host}: expected 2 STEP peers")
     for peer_index, partner in ((0, tp ^ 1), (1, tp ^ 2)):
-        expected = (f"spark{HEX[stage * 4 + partner]}:"
+        # peers are numeric IPv4 literals: SparkTpCollectiveCreate
+        # validates with inet_pton and rejects hostnames outright
+        expected = (f"{lane.HOST_ADDRESSES[f'spark{HEX[stage * 4 + partner]}']}:"
                     f"{lane.TP_COLLECTIVE_PORT + partner}")
         check(peers[peer_index] == expected, failures,
               f"{host}: STEP peer {peer_index} {peers[peer_index]} != {expected}")

@@ -146,7 +146,7 @@
    "default_nodes": "spark0-sparkf",
    "ports": {
     "control": 23096,
-    "collective": 53096,
+    "collective": 53200,
     "transport": 64096
    },
    "status": "cpu-validated",
@@ -170,6 +170,26 @@
    },
    "status": "weights-arrived",
    "charter": "Weights visible on /mnt/model-warm: mimo-v2.6-pro-rl, mimo-v2.6-flash-rl, mimo-v2.6-distill-qwen-9b (+ docs). Census -> family facts -> driver module -> stagepack -> CPU reference -> wrapper. Pattern precedent: model-families/mimo25 + the minimax packer (wave 2). Quality law applies: quantized experts + full-resolution spine, no requantization."
+  },
+  {
+   "lane": 8,
+   "driver": "laguna",
+   "families": [
+    "laguna"
+   ],
+   "owner": "dev-lane8",
+   "branch": "lane/laguna-tokens",
+   "topology": "TP8xPP2",
+   "default_nodes": "spark0-sparkf",
+   "ports": {
+    "control": 23128,
+    "collective": 53128,
+    "transport": 64128,
+    "session": 23680
+   },
+   "status": "packs-verified",
+   "charter": "laguna-s-2.1.bf16.tp8pp2 placed 16/16 (operator prep2/ACC-2, Sep 17; decimal-global-rank pack names on hex hosts - stage1.rank10.lgsp on sparka); v2 .experts sidecars generated per pack (M2 census: model-families/laguna/smoke_experts.json, both byte bases). M1+M2 (#1143) and M3 warm receipt (#1157) merged; three-number receipt banked fleet-wide (daemon-cold 835ms-1.5s, warm-daemon preload 18-20ms, steady 20-22ms). First resident attach (attach-011) waits on the 16-lane mesh bump + fleet restart wave (SPARK_WEIGHTD_MESH_MAX_LANES=8 rejects lane 8 today; deterministic lane pin rides the attach-fix series), then tools/laguna_multidev_decode.sh first tokens, then small-B*. Lane-job device budget = the 6400 MiB lane default until the first resident measurement (pack bytes ride the operator arena; weightd is exempt from admission double-counts).",
+   "source": "PR #1143 + #1157 (M1-M3); lane entry backfilled at the attach-fix series"
   },
   {
    "lane": 9,
@@ -197,10 +217,6 @@
   }
  ],
  "rotation_queue": [
-  {
-   "driver": "laguna",
-   "reason": "mixed-codec per-layer lands via #1076; lane opens on next free slot"
-  },
   {
    "driver": "minimax",
    "reason": "text-tower driver under review in #1080; diffusion stage design shared with qwen-image"

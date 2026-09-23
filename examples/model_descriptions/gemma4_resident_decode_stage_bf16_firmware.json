@@ -2,7 +2,7 @@
     "schema_version": 1,
     "model": {
         "id": "gemma4.31b.resident-decode-stage-firmware",
-        "revision": "h5376-l60-swa1024-f1of6-v262144-v1"
+        "revision": "842da3794eaa0b77d5f08bae87a17459d91ff475"
     },
     "metadata": {
         "architecture": "gemma4_resident_decode_stage",
@@ -11,7 +11,9 @@
             "status": "in bring-up; first serving arm is shared-socket lane 6 (TP16 packs verified on NVMe, tools/gemma4_stagepack.py receipts)",
             "disclosed_source": [
                 "google/gemma-4-31b-it warm snapshot, contract source_revision 842da3794eaa0b77d5f08bae87a17459d91ff475"
-            ]
+            ],
+            "revision_note": "model.revision is the contract source_revision (the value the module and adapter embed via GEMMA4_MODEL_REVISION); the serving-adapter template compares it against the driver contract at adapter_initialize - the previous h-string driver revision caused target_mismatch at launch (gemma4-tp16-launch-8). The h-string remains as module geometry documentation in metadata.",
+            "model_id_note": "model.id is SPARK_GEMMA4_MODEL_DRIVER_MODEL_ID - the qwen38-common request contract passes it as driver_model_id and the template compares against the driver descriptor."
         },
         "module_geometry": {
             "hidden_dimension": 5376,

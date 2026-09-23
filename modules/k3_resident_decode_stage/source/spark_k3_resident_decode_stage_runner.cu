@@ -246,12 +246,126 @@ typedef struct SparkK3RunnerState
 	uint32_t *context_length;
 	uint32_t *sequence_of_row;
 	uint32_t *kda_state_index;
+	/* M3 lazy-stray accounting (opt-in: SPARK_K3_STRAY_WSET names the
+	 * preload head .wset; every routed (layer, expert) selection the
+	 * runner demands is checked against it and the receipt prints at
+	 * destroy — the measured stray rate to compare with the manifest's
+	 * pinned head_selection_coverage). */
+	uint8_t *stray_head_bits;
+	uint8_t *stray_seen_bits;
+	uint64_t stray_selections;
+	uint64_t stray_count;
+	uint32_t stray_head_keys;
 	cudaStream_t stream;
 	uint32_t max_rows;
 	uint32_t max_context;
 	uint32_t multiprocessors;
 	uint64_t kv_page_bytes;
 } SparkK3RunnerState;
+
+/* Bit index over the full-model (layer, expert) key space; the head .wset
+ * holds full-model pairs (the census basis), of which only this rank's
+ * PP stage can ever route. */
+#define K3_STRAY_BIT_INDEX(layer, expert) \
+	((uint64_t)(layer) * K3_EXPERTS + (uint64_t)(expert))
+#define K3_STRAY_BIT_BYTES \
+	((K3_STRAY_BIT_INDEX(K3_LAYERS, 0u) + 7u) / 8u)
+
+static void SparkK3RunnerStrayAccount(
+	SparkK3RunnerState *state,
+	const SparkWeightdExpertKey *keys, uint32_t count)
+{
+	uint32_t index;
+	if ( state == 0 || state->stray_head_bits == 0 || keys == 0 )
+		return;
+	for ( index = 0u; index < count; ++index )
+	{
+		uint64_t bit;
+		uint8_t mask;
+		if ( keys[index].layer >= K3_LAYERS ||
+			keys[index].expert >= K3_EXPERTS )
+			continue;
+		bit = K3_STRAY_BIT_INDEX(keys[index].layer, keys[index].expert);
+		mask = (uint8_t)(1u << (bit & 7u));
+		state->stray_selections++;
+		if ( (state->stray_head_bits[bit >> 3] & mask) == 0u )
+		{
+			state->stray_count++;
+			state->stray_seen_bits[bit >> 3] |= mask;
+		}
+	}
+}
+
+static void SparkK3RunnerStrayLoad(SparkK3RunnerState *state)
+{
+	const char *path = getenv("SPARK_K3_STRAY_WSET");
+	FILE *input;
+	uint32_t pair[2];
+	uint32_t loaded = 0u;
+	if ( path == 0 || path[0] == '\0' )
+		return;
+	state->stray_head_bits = (uint8_t *)calloc(K3_STRAY_BIT_BYTES, 1u);
+	state->stray_seen_bits = (uint8_t *)calloc(K3_STRAY_BIT_BYTES, 1u);
+	if ( state->stray_head_bits == 0 || state->stray_seen_bits == 0 )
+	{
+		free(state->stray_head_bits);
+		free(state->stray_seen_bits);
+		state->stray_head_bits = 0;
+		state->stray_seen_bits = 0;
+		fprintf(stderr, "sparkpipe_k3: stray accounting disabled "
+			"(allocation failed)\n");
+		return;
+	}
+	input = fopen(path, "rb");
+	if ( input == 0 )
+	{
+		fprintf(stderr, "sparkpipe_k3: stray accounting disabled "
+			"(cannot open SPARK_K3_STRAY_WSET=%s)\n", path);
+		free(state->stray_head_bits);
+		free(state->stray_seen_bits);
+		state->stray_head_bits = 0;
+		state->stray_seen_bits = 0;
+		return;
+	}
+	while ( fread(pair, 1u, sizeof(pair), input) == sizeof(pair) )
+	{
+		uint64_t bit;
+		if ( pair[0] >= K3_LAYERS || pair[1] >= K3_EXPERTS )
+			continue;
+		bit = K3_STRAY_BIT_INDEX(pair[0], pair[1]);
+		state->stray_head_bits[bit >> 3] |= (uint8_t)(1u << (bit & 7u));
+		loaded++;
+	}
+	(void)fclose(input);
+	state->stray_head_keys = loaded;
+	fprintf(stderr, "sparkpipe_k3: stray accounting armed head_keys=%u "
+		"wset=%s\n", loaded, path);
+}
+
+static void SparkK3RunnerStrayReport(const SparkK3RunnerState *state)
+{
+	uint64_t unique = 0u;
+	uint32_t index;
+	if ( state == 0 || state->stray_head_bits == 0 )
+		return;
+	if ( state->stray_seen_bits != 0 )
+		for ( index = 0u; index < K3_STRAY_BIT_BYTES; ++index )
+		{
+			uint8_t word = state->stray_seen_bits[index];
+			while ( word != 0u )
+			{
+				unique += word & 1u;
+				word >>= 1;
+			}
+		}
+	fprintf(stderr, "K3-STRAY-RECEIPT selections=%llu strays=%llu "
+		"stray_rate=%.4f unique_stray_pairs=%llu head_keys=%u\n",
+		(unsigned long long)state->stray_selections,
+		(unsigned long long)state->stray_count,
+		state->stray_selections != 0u ?
+			(double)state->stray_count / (double)state->stray_selections : 0.0,
+		(unsigned long long)unique, state->stray_head_keys);
+}
 
 static SparkK3RunnerTpContext *K3RunnerTpContextAcquire(
 	SparkK3RunnerState *state)
@@ -527,7 +641,7 @@ static SparkStatus SparkK3ManifestCheck(const SparkWeightdManifest *manifest,
 		manifest->range_count < manifest->group_count )
 		SPARK_FAIL(SPARK_STATUS_PARSE_ERROR);
 	for ( layer = pack->config.first_layer;
-		layer < pack->config.first_layer + pack->config.total_layers;
+		layer < pack->config.first_layer + pack->config.layers;
 		++layer )
 	{
 		char name[SPARK_K3_PACK_MAX_NAME_BYTES];
@@ -546,10 +660,15 @@ static SparkStatus SparkK3ManifestCheck(const SparkWeightdManifest *manifest,
 			SPARK_FAIL(SPARK_STATUS_PARSE_ERROR);
 		if ( !have_w1 )
 			continue;
+		/* per-expert divisibility per tensor only: k3's w1/w2 expert
+		 * geometries differ (intermediate 6144 vs 3072 halves the w2
+		 * span), so demanding equal per-expert bytes rejects the real
+		 * deployed manifests — measured: w1 2924544 vs w2 1462272
+		 * bytes/expert on every rank pack (first-launch find #7, the
+		 * lazy-attach manifest check). Each range is still validated
+		 * against ITS tensor's span below. */
 		if ( w1.bytes % pack->config.experts != 0u ||
-			w2.bytes % pack->config.experts != 0u ||
-			w1.bytes / pack->config.experts !=
-				w2.bytes / pack->config.experts )
+			w2.bytes % pack->config.experts != 0u )
 			SPARK_FAIL(SPARK_STATUS_PARSE_ERROR);
 		for ( expert = 0u; expert < pack->config.experts; ++expert )
 		{
@@ -641,6 +760,7 @@ static int32_t SparkK3RunnerLazyAcquire(void *context, uint32_t layer,
 		SPARK_WEIGHTD_LEASE_GROUPS_MAX, &count);
 	if ( status != SPARK_STATUS_OK )
 		return status;
+	SparkK3RunnerStrayAccount(state, keys, count);
 	status = SparkWeightdMapAcquire(map, keys, count,
 		&state->lease_identifier, SPARK_WEIGHTD_ATTACH_TIMEOUT_DEFAULT_NS);
 	if ( state->lease_identifier != 0u )
@@ -721,6 +841,7 @@ SparkStatus SparkK3StageRunnerInitialize(
 	memset(runner, 0, sizeof(*runner));
 	state = new SparkK3RunnerState;
 	memset(state, 0, sizeof(*state));
+	SparkK3RunnerStrayLoad(state);
 	{
 		uint32_t pool_index;
 		for (pool_index = 0u;
@@ -865,36 +986,50 @@ SparkStatus SparkK3StageRunnerInitialize(
 			delete state;
 			SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
 		}
-		for ( routed = state->module.pack.config.first_layer;
-			routed < state->module.pack.config.first_layer +
-				state->module.pack.config.total_layers; ++routed )
+		/* the slice bound is config.layers (this rank pack's stage
+		 * slice), NOT config.total_layers (the whole model): a stage-0
+		 * pack holds layers 0..23 of 93, and layer 0 is dense (no
+		 * expert tensors). Skip dense layers like the manifest check
+		 * does; every layer that HAS experts inside the slice must
+		 * load both spans (first-launch find #8). */
 		{
-			SparkK3PackEntry w1;
-			SparkK3PackEntry w2;
-			char name[SPARK_K3_PACK_MAX_NAME_BYTES];
-			snprintf(name, sizeof(name),
-				"model.layers.%u.expert_w1_weight", routed);
-			if ( SparkK3PackLoadEntry(&state->module.pack, name, &w1) !=
-				SPARK_STATUS_OK )
-				break;
-			snprintf(name, sizeof(name),
-				"model.layers.%u.expert_w2_weight", routed);
-			if ( SparkK3PackLoadEntry(&state->module.pack, name, &w2) !=
-				SPARK_STATUS_OK )
-				break;
-			state->layer_w1_offset[routed] =
-				state->module.pack.payload_base + w1.payload_offset;
-			state->layer_w2_offset[routed] =
-				state->module.pack.payload_base + w2.payload_offset;
-		}
-		if ( routed != state->module.pack.config.first_layer +
-			state->module.pack.config.total_layers )
-		{
-			SparkK3DispatchDestroy(&state->dispatch);
-			SparkK3ModuleDestroy(&state->module);
-			runner->private_state = 0;
-			delete state;
-			SPARK_FAIL(SPARK_STATUS_PARSE_ERROR);
+			uint32_t routed_layers = 0u;
+			for ( routed = state->module.pack.config.first_layer;
+				routed < state->module.pack.config.first_layer +
+					state->module.pack.config.layers; ++routed )
+			{
+				SparkK3PackEntry w1;
+				SparkK3PackEntry w2;
+				int have_w1;
+				int have_w2;
+				char name[SPARK_K3_PACK_MAX_NAME_BYTES];
+				snprintf(name, sizeof(name),
+					"model.layers.%u.expert_w1_weight", routed);
+				have_w1 = SparkK3PackLoadEntry(&state->module.pack,
+					name, &w1) == SPARK_STATUS_OK;
+				snprintf(name, sizeof(name),
+					"model.layers.%u.expert_w2_weight", routed);
+				have_w2 = SparkK3PackLoadEntry(&state->module.pack,
+					name, &w2) == SPARK_STATUS_OK;
+				if ( have_w1 != have_w2 )
+					break;
+				if ( !have_w1 )
+					continue;
+				state->layer_w1_offset[routed] =
+					state->module.pack.payload_base + w1.payload_offset;
+				state->layer_w2_offset[routed] =
+					state->module.pack.payload_base + w2.payload_offset;
+				routed_layers++;
+			}
+			if ( routed != state->module.pack.config.first_layer +
+				state->module.pack.config.layers || routed_layers == 0u )
+			{
+				SparkK3DispatchDestroy(&state->dispatch);
+				SparkK3ModuleDestroy(&state->module);
+				runner->private_state = 0;
+				delete state;
+				SPARK_FAIL(SPARK_STATUS_PARSE_ERROR);
+			}
 		}
 	}
 	if ( SparkK3PackLoadEntry(&state->module.pack,"model.embed_tokens.weight",&entry) == 0 &&
@@ -1290,6 +1425,13 @@ void SparkK3StageRunnerDestroy(SparkK3StageRunner *runner)
 	if ( runner == 0 || runner->private_state == 0 )
 		return;
 	state = (SparkK3RunnerState *)runner->private_state;
+	/* the M3 stray receipt prints on every teardown path, including
+	 * partial ones (early returns below) — the counters are the point */
+	SparkK3RunnerStrayReport(state);
+	free(state->stray_head_bits);
+	free(state->stray_seen_bits);
+	state->stray_head_bits = 0;
+	state->stray_seen_bits = 0;
 	if ( state->device_collective_created != 0 )
 	{
 		SparkTpDeviceCollectiveDestroy(&state->device_collective);

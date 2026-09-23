@@ -2,7 +2,7 @@
 """Lane-6 gemma4-31b TP16 shared-socket deployment contracts.
 
 Validates tools/gemma4_tp16_gen_deployment.py output against the lane 6
-port blocks (control 23096-23111, collective 53096-53111, transport
+port blocks (control 23096-23111, collective 53200-53215, transport
 64096-64111; tools/devcycle/lane_assignments.json) and the adapter's exact
 configuration members, then exercises tools/gemma4_tp16_shared_socket.sh
 end to end in --dry-run against a synthetic checkout: layout, pack sidecar
@@ -29,7 +29,7 @@ WRAPPER = REPOSITORY / "tools/gemma4_tp16_shared_socket.sh"
 
 RANKS = 16
 LANE_CONTROL_BASE, LANE_CONTROL_END = 23096, 23111
-LANE_COLLECTIVE_BASE, LANE_COLLECTIVE_END = 53096, 53111
+LANE_COLLECTIVE_BASE, LANE_COLLECTIVE_END = 53200, 53215
 LANE_TRANSPORT_BASE, LANE_TRANSPORT_END = 64096, 64111
 MODEL_REVISION = "842da3794eaa0b77d5f08bae87a17459d91ff475"
 ADAPTER_MEMBERS = {"schema_version", "model_revision", "stage_pack_path",
@@ -59,6 +59,9 @@ def test_generator(output: Path) -> dict:
     check(deployment["schema_version"] == 2, "model_resident schema_version")
     check(deployment["coordinator_rank_index"] == 0, "coordinator rank")
     check(deployment["eos_token_ids"] == [1, 106, 50], "eos token ids")
+    limits = deployment["runtime_limits"]
+    check(limits["max_inflight_submissions"] == 1, "inflight within adapter cap")
+    check(limits["max_input_rows"] <= 512, "input rows within adapter cap")
     check(deployment["adapter"]["shared_object_path"] == "lib/model_serving_adapter.so",
           "adapter path")
     check(deployment["driver"]["shared_object_path"] == "stages/stage_000/model_driver.so",
@@ -73,7 +76,7 @@ def test_generator(output: Path) -> dict:
     check(len(nodes) == RANKS, "node count")
     for node in nodes:
         rank = node["rank_index"]
-        check(node["stage_index"] == 0, f"rank {rank} stage index")
+        check(node["stage_index"] == rank, f"rank {rank} stage index (unique rank/stage pairs)")
         check(node["node_target"] == "cuda.sm121.gemma4.31b.resident_decode_stage.bf16",
               f"rank {rank} node target")
         check(node["runtime_root"] == "${SPARK_QUEUE_RUNTIME_ROOT}",
@@ -175,6 +178,7 @@ def test_wrapper(deployment_tree: Path, temporary: Path) -> None:
     check(PACK_SIDECAR.match(sidecars[0].read_text()) is not None,
           "sidecar names exactly its pack")
     check((root / "config/stage.json").exists(), "stage config materialized")
+    check((root / "kv").is_dir(), "kv backing directory materialized (residentd requires a real dir)")
     wrapper_source = WRAPPER.read_text()
     check("SPARK_WEIGHTD_PACK_SHA256" in wrapper_source and
           "SPARK_WEIGHTD_ATTACH=1" in wrapper_source and
