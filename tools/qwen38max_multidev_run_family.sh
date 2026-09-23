@@ -268,7 +268,7 @@ else
   bash "$CHECKOUT/tools/qwen38max_multidev_experts_manifest.sh" "$PRIVATE_PACK"
 fi
 CACHED_DIGEST="$DEPLOYED_PACK.sha256"
-if [ -r "$CACHED_DIGEST" ] && [ "$(wc -c < "$CACHED_DIGEST")" -ge 65 ] && \
+if [ -r "$CACHED_DIGEST" ] && [ "$(wc -c < "$CACHED_DIGEST")" -ge 64 ] && \
    grep -Eq '^[0-9a-f]{64}([ \t].*)?$' "$CACHED_DIGEST"; then
   head -c 64 "$CACHED_DIGEST" > "$ROOT/packs/pack.sha256"
 else
@@ -284,8 +284,11 @@ else
     [ "$RECEIPT_SHA" = "$(cat "$ROOT/packs/pack.sha256")" ] ||
       fail "pack digest disagrees with its emission receipt: $DEPLOYED_PACK"
   fi
-  # Best-effort cache beside the deployed pack for later attempts.
-  ( set -c; umask 022
+  # Best-effort cache beside the deployed pack for later attempts. The
+  # cache is the BARE 64-hex digest (validated -ge 64 above); noclobber
+  # is set -C - bash rejects lowercase -c, so the write never ran and
+  # every attempt re-hashed the 14 GB pack (the attach-f xtrace find).
+  ( set -C; umask 022
     head -c 64 "$ROOT/packs/pack.sha256" > "$CACHED_DIGEST.tmp.$$" 2>/dev/null \
       && mv "$CACHED_DIGEST.tmp.$$" "$CACHED_DIGEST" 2>/dev/null ) || true
 fi
