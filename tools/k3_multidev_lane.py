@@ -85,6 +85,22 @@ NODE_TARGET = "cuda.sm121.k3.resident_decode_stage.linear_bf16.expert_mxfp4.kv_b
 DEFAULT_KV_BACKING_BYTES = 8 * 1024 * 1024 * 1024
 KV_PAGES_PER_SEQUENCE = 64   # adapter_config default; x SPARK_K3_KV_PAGE_SLOTS (64) tokens
 
+# The batch engine refuses a deployment with no EOS tokens (SCHEMA_ERROR at
+# SparkModelBatchValidateConfiguration — cold14: status=6, tokens=0, the
+# request never reached the tensors; adapter_ops stayed 0). Single source of
+# truth is the authoritative contract, the same record the compiled driver's
+# K3_EOS_TOKEN is generated from (tools/generate_k3_contract.py). Never
+# hardcode the id here; fail closed if the contract cannot provide it.
+CONTRACT = json.loads((Path(__file__).resolve().parents[1] /
+                       "model_contracts/k3_authoritative.json").read_text())
+try:
+    K3_EOS_TOKEN_IDS = [int(CONTRACT["tokens"]["end_of_text"])]
+except (KeyError, TypeError, ValueError):
+    raise SystemExit("k3 contract missing tokens.end_of_text; refusing to emit "
+                     "a deployment the batch engine would reject")
+if K3_EOS_TOKEN_IDS[0] <= 0:
+    raise SystemExit("k3 contract tokens.end_of_text must be a positive id")
+
 
 def host_of(rank: int) -> str:
     return HOSTS[rank]
@@ -189,6 +205,9 @@ def resident_deployment(runtime_root: str, weightd_socket: str,
         })
     return {
         "schema_version": 2,
+        # EOS stop tokens are mandatory for the batch engine (count >= 1);
+        # sourced from the authoritative k3 contract above.
+        "eos_token_ids": K3_EOS_TOKEN_IDS,
         "coordinator_rank_index": 0,
         "adapter": {
             "shared_object_path": "lib/libk3_serving_adapter.so",
