@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "50112292bcec285df163278a36553eed0be4f15344c8b655de1fbe3f9d8287bb",
-      "size_bytes": 128297
+      "sha256": "6d94da2b68c9dd1c142e74796df29a7d6d4d04425e1f6f1a05b33ed15eec2e89",
+      "size_bytes": 131775
     },
     {
       "path": "Makefile.rej",
@@ -8453,13 +8453,13 @@
     },
     {
       "path": "tests/fixtures/laguna_serving_adapter_config.json",
-      "sha256": "4b0dfabb7f470ee0ad1aca633e6d85d32b78763622722cb60e4a55c5c53859fa",
-      "size_bytes": 896
+      "sha256": "f7d73e9f0dff05775e2a14c6c1664bda5ba3a0c5440cd06c9d61c971d82d071d",
+      "size_bytes": 3650
     },
     {
       "path": "tests/fixtures/laguna_serving_adapter_driver.c",
-      "sha256": "a3b5bd3f05956d03f7e62cb9c998c18ba663724f642fc780e9cf7efe11ea4422",
-      "size_bytes": 9433
+      "sha256": "2e51400e50db33d9082b7ded35d29c7bdb5c4c30bbb4627bcd82a4375fb9f216",
+      "size_bytes": 9647
     },
     {
       "path": "tests/fixtures/ling_serving_adapter_config.json",
@@ -9858,8 +9858,8 @@
     },
     {
       "path": "tests/test_laguna_serving_adapter.c",
-      "sha256": "0e2e1cab7918c403e3ee9ea1561ed05e2fb66e391068eca68c815679bbd35619",
-      "size_bytes": 13318
+      "sha256": "1e463b2855cc255cc1b8657f1b5c2b6a9b6c6a5345319b5e69b9b5f6be8941de",
+      "size_bytes": 13816
     },
     {
       "path": "tests/test_laguna_smoke_experts.py",
@@ -17085,5 +17085,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80776636
+  "total_bytes": 80783580
 }
