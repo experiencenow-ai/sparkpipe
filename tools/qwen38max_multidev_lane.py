@@ -12,7 +12,7 @@ Topology: TP16 single stage, 16 world ranks over spark0..sparkf. Logical
 rank = index in --nodes; the mesh map is the identity permutation
 (SPARK_TP_MESH_RANKS=0,...,15), so rank i lives on spark{hex(i)} and its
 pack is the OPERATOR-PLACED set (fleet inventory, Sep 12-15):
-/home/{host}/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank{i}.sp
+/home/{host}/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank{i:x}.sp
 with .experts + .receipt.json sidecars - grep the fleet pack inventory
 before any warm read (the operator's expectation IS the map).
 
@@ -82,7 +82,10 @@ MESH_RANKS = ",".join(str(i) for i in range(WORLD))
 MODEL_REVISION = "d2dc35658bcf77e66643428cb52e774cc3b5bd29"
 NODE_TARGET = "cuda.sm121.qwen38.resident_decode_stage.fp8"
 
-DEPLOYED_PACK_TEMPLATE = "/home/{host}/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank{rank}.sp"
+# Placed-set pack names carry the HEX rank suffix (ranka..rankf for ranks
+# 10-15, matching host names spark0..sparkf — the operator placement
+# convention; decimal rank10..15 would miss on 6/16 nodes).
+DEPLOYED_PACK_TEMPLATE = "/home/{host}/sparkdata/qwenmax.nvfp4.tp16/packs/qwenmax.nvfp4.tp16.rank{rank:x}.sp"
 DEFAULT_KV_BACKING_BYTES = 8 * 1024 * 1024 * 1024
 DEFAULT_KV_PAGE_CAPACITY = 16 * ((32768 + 63) // 64)
 
@@ -100,7 +103,7 @@ def stage_config(rank: int) -> dict:
     return {
         "schema_version": 1,
         "model_revision": MODEL_REVISION,
-        "stage_pack_path": "packs/qwenmax.nvfp4.tp16.rank%d.sp" % rank,
+        "stage_pack_path": "packs/qwenmax.nvfp4.tp16.rank%x.sp" % rank,
         "max_sequence_positions": 4096,
         "tp_degree": TP,
     }
@@ -168,36 +171,123 @@ def render(rank: int, runtime_root: str, weightd_socket: str,
     }
 
 
-def budgets(source: str) -> int:
-    """Emit 'expert_pool_bytes spine_bytes' (per-node, tp-sharded).
+POOLS_MANIFEST_NAME = "smoke_experts_pools.json"
 
-    The arena-side sizing record from the census manifest: the wrapper
-    consumes this to default QMAX_EXPERT_POOL_BYTES/QMAX_SPINE_BUDGET_BYTES
-    without any queue-cmd env syntax.
+
+def pack_spine_allocation(pack: str) -> int:
+    """Measure one rank pack's spine allocation exactly as the lazy tier
+    sizes it (runtime/spark_weightd_manifest.c build_spine): the spans
+    BETWEEN expert ranges, each padded to a cumulative 256-byte
+    alignment. The naive spine/nodes division under-declares every rank
+    because the spine holds REPLICATED tensors (embeddings, norms, head)
+    that do not shard across TP ranks (rank 0 measures 14,761,125,376 B
+    against a 9,420,097,264 B /16 budget - the r12p publish failure).
+    """
+    import struct
+    sidecar_path = pack + ".experts"
+    sidecar = open(sidecar_path, "rb").read()
+    if sidecar[:4] != b"WEPX":
+        raise SystemExit("budgets: bad sidecar magic in %s" % sidecar_path)
+    count = struct.unpack_from("<I", sidecar, 8)[0]
+    if len(sidecar) < 16 + count * 48:
+        raise SystemExit("budgets: truncated sidecar %s" % sidecar_path)
+    ranges = []
+    for i in range(count):
+        off, size = struct.unpack_from("<QQ", sidecar, 16 + i * 48 + 16)
+        ranges.append((off, size))
+    ranges.sort()
+    pack_bytes = os.path.getsize(pack)
+    cursor = 0
+    allocation = 0
+    spans = 0
+    for offset, size in ranges:
+        if offset > cursor:
+            padding = (cursor - allocation) & 255
+            allocation += padding + (offset - cursor)
+            spans += 1
+        cursor = offset + size
+    if pack_bytes > cursor:
+        padding = (cursor - allocation) & 255
+        allocation += padding + (pack_bytes - cursor)
+        spans += 1
+    if spans == 0 or allocation == 0:
+        raise SystemExit("budgets: %s has no spine spans" % sidecar_path)
+    # +255: the lazy tier's budget check is (allocation + 255) > budget
+    # (lazy_spine_load reserves alignment headroom on top of the aligned
+    # allocation - r13p4 failed every node by exactly 255 bytes).
+    return allocation + 255
+
+
+def budgets(source: str, rank: int, pack: str = None) -> int:
+    """Emit 'expert_pool_bytes raw_bytes spine_bytes' for ONE rank.
+
+    The pool default is the CHUNK-BASIS working-set size for this exact
+    rank from the pools manifest (model-families/qwen38_max/
+    smoke_experts_pools.json): the 2 MiB chunk-union over every sidecar
+    span of every smoke expert placed on the rank's pack - the same
+    arithmetic the weightd lazy tier materializes at (VmmReserve:
+    GRANULARITY_MINIMUM with a 2 MiB floor, runtime/spark_weightd.c).
+    Raw division of the census bytes (sum/16) under-declares every rank
+    (this family measures 1.40x-1.44x; lane 5's 2.15x and lane 0's 5.17x
+    are their families' factors, not ours). The raw per-rank number is
+    emitted second so receipts can carry BOTH bases. The spine default is
+    MEASURED from this rank's placed pack (--pack; the exact lazy-tier
+    arithmetic including replicated, non-sharded spine tensors); without
+    a pack it falls back to the raw spine/nodes division, which
+    under-declares replicated spines and must only size pin-all tiers.
     """
     document = json.load(open(source, encoding="utf-8"))
     nodes = int(document["nodes"])
     if document.get("expert_shard") != "tp" or nodes < 1:
         raise SystemExit("budgets need a tp-sharded manifest with nodes >= 1")
-    pool = -(-sum(int(e["bytes"]) for e in document["experts"]) // nodes)
-    spine = -(-int(document["spine_bytes"]) // nodes)
-    print(f"{pool} {spine}")
+    if rank is None or not 0 <= rank < nodes:
+        raise SystemExit("budgets need --rank in 0..%d" % (nodes - 1,))
+    pools_path = os.path.join(os.path.dirname(os.path.abspath(source)),
+                              POOLS_MANIFEST_NAME)
+    try:
+        pools = json.load(open(pools_path, encoding="utf-8"))
+        chunked = int(pools["per_rank"][str(rank)])
+        raw = int(pools["per_rank_raw"][str(rank)])
+    except (OSError, ValueError, KeyError) as error:
+        raise SystemExit(
+            "budgets need %s with per_rank/per_rank_raw for rank %d "
+            "(chunk-basis sizing record; missing key: %s)"
+            % (pools_path, rank, error))
+    if pack is not None:
+        spine = pack_spine_allocation(pack)
+    else:
+        spine = -(-int(document["spine_bytes"]) // nodes)
+    print(f"{chunked} {raw} {spine}")
     return 0
 
 
-def emit_wset(source: str, output: str) -> int:
+def emit_wset(source: str, output: str, rank: int = None) -> int:
     """Materialize the smoke-expert working set as a .wset binary.
 
     Raw little-endian (layer u32, expert u32) pairs, deduplicated and
     sorted - the format tools/weightd_warm.c --wset validates against the
     pack manifest. Source: model-families/qwen38_max/smoke_experts.json
     (machine-generated; PR #1085 census receipt).
+
+    --rank N keeps only THIS rank's shard of the census: the packs are
+    TP16 rank shards (global expert windows of 512/16), and weightd_warm
+    rejects keys absent from the node's own pack manifest - the whole-
+    census wset spans all 16 packs and is valid on none. Rank 0 filters
+    to 104 keys (the pools manifest's per_rank_experts count for rank 0).
     """
     document = json.load(open(source, encoding="utf-8"))
     if document.get("family") != "qwen38_max":
         raise SystemExit("wset source is not the qwen38_max manifest")
+    nodes = int(document.get("nodes") or 0)
     pairs = sorted({(int(e["layer"]), int(e["expert"]))
                     for e in document["experts"]})
+    if rank is not None:
+        if nodes < 1:
+            raise SystemExit("wset rank filter needs a sharded manifest")
+        routed = int(document.get("routed_expert_count") or 512)
+        window = max(1, routed // nodes)
+        pairs = [(layer, expert) for layer, expert in pairs
+                 if expert // window == rank]
     with open(output, "wb") as handle:
         for layer, expert in pairs:
             handle.write(layer.to_bytes(4, "little"))
@@ -213,13 +303,18 @@ def main() -> int:
     parser.add_argument("--weightd-socket")
     parser.add_argument("--output-dir")
     parser.add_argument("--rank", type=int)
+    parser.add_argument("--pack", metavar="PACK",
+                        help="with --budgets: measure the spine default from "
+                             "this rank pack's .experts sidecar (the exact "
+                             "lazy-tier allocation; requires the placed pack)")
     parser.add_argument("--kv-backing-bytes", type=int,
                         default=DEFAULT_KV_BACKING_BYTES)
     parser.add_argument("--emit-wset", metavar="OUTPUT",
                         help="write the smoke-expert .wset and exit")
     parser.add_argument("--budgets", metavar="MANIFEST",
-                        help="print 'expert_pool_bytes spine_bytes' "
-                             "(per-node, tp-sharded) and exit")
+                        help="print 'expert_pool_bytes raw_bytes spine_bytes' "
+                             "for --rank (chunk-basis pool from the sibling "
+                             "pools manifest) and exit")
     parser.add_argument("--wset-source", default=os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "model-families", "qwen38_max", "smoke_experts.json"))
@@ -229,9 +324,9 @@ def main() -> int:
     arguments = parser.parse_args()
 
     if arguments.budgets:
-        return budgets(arguments.budgets)
+        return budgets(arguments.budgets, arguments.rank, arguments.pack)
     if arguments.emit_wset:
-        return emit_wset(arguments.wset_source, arguments.emit_wset)
+        return emit_wset(arguments.wset_source, arguments.emit_wset, arguments.rank)
 
     missing = [name for name, value in (
         ("--runtime-root", arguments.runtime_root),

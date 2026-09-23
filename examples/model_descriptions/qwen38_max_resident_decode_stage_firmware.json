@@ -74,7 +74,7 @@
           "operations": [
             {
               "name": "qwen38_max_resident_decode_stage",
-              "module": "spark.qwen38.resident_decode_stage.fp8",
+              "module": "spark.qwen38.resident_decode_stage.fp8.h8192.l92.gdn69.e512k10.v1",
               "configuration": {
                 "qualification_status": "GPU_VALIDATED",
                 "production_ready": false,
