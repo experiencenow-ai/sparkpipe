@@ -27,7 +27,11 @@ lane contract:
      contract: attempt id, job namespace, size/rank bounds and
      queue-reserved port membership all fail closed before any
      filesystem work, and a fully reserved lane reaches the
-     shared-socket liveness check.
+     shared-socket liveness check;
+  8. the deployment runtime limits sit inside the family adapter
+     descriptor caps (max_inflight 1), and the firmware description
+     carries the adapter's driver model id and the pinned source
+     revision (the adapter_initialize identity contract).
 """
 import json
 import os
@@ -74,6 +78,10 @@ def deployment_gates(deployment, runtime_root, socket, failures):
     check(deployment["transport"]["control_port_base"]
           == lane.TRANSPORT_BASE, failures, "transport base inside lane")
     limits = deployment["runtime_limits"]
+    check(limits["max_inflight_submissions"] == 1, failures,
+          "max_inflight_submissions must be 1 (the SparkQwen38MaxServing "
+          "descriptor cap; the loader rejects above at deployment_validation, "
+          "model_serving_adapter.c:232 - the attach-r15j lesson)")
     check(limits["kv_logical_page_capacity"] > 0
           and limits["kv_physical_page_capacity"] > 0, failures,
           "kv page capacities must be positive (family pool law)")
@@ -110,9 +118,36 @@ def stage_gates(adapter, rank, failures):
     check(adapter["model_revision"] == lane.MODEL_REVISION, failures,
           "pinned model revision")
     check(adapter["stage_pack_path"]
-          == f"packs/qwenmax.nvfp4.tp16.rank{rank}.sp", failures,
-          f"rank pack path at {rank}")
+          == f"packs/qwenmax.nvfp4.tp16.rank{rank:x}.sp", failures,
+          f"rank pack path at {rank} (HEX rank suffix - decimal rank10..15 "
+          "miss 6/16 nodes)")
     check(adapter["max_sequence_positions"] > 0, failures, "positions cap")
+
+
+def firmware_identity_gates(failures):
+    """The adapter_initialize identity contract (serving_adapter_template
+    compares the driver descriptor against the family request): the
+    firmware description the driver compiles must carry the adapter's
+    driver model id and the pinned source revision - the h-string /
+    vendor-style values failed loader equality for gemma4 (launches 8/9)
+    and were the latent half of attach-r15j."""
+    import re
+    adapter_source = (ROOT / "modules/qwen38_max_resident_decode_stage"
+                      "/source/spark_qwen38_max_serving_adapter.c").read_text()
+    match = re.search(r"define\s+SPARK_QWEN38_MAX_SERVING_DRIVER_MODEL_ID"
+                      r'[\s\\]*"([^"]+)"', adapter_source)
+    driver_model_id = match.group(1) if match else ""
+    check(bool(driver_model_id), failures,
+          "adapter driver model id must be a plain string literal")
+    firmware = json.load(open(
+        ROOT / "examples/model_descriptions"
+        "/qwen38_max_resident_decode_stage_firmware.json"))
+    check(firmware["model"]["id"] == driver_model_id, failures,
+          "firmware model.id must equal the adapter's driver model id "
+          "(adapter_initialize identity compare)")
+    check(firmware["model"]["revision"] == lane.MODEL_REVISION, failures,
+          "firmware model.revision must equal the pinned source revision "
+          "(adapter_initialize identity compare)")
 
 
 def main() -> int:
@@ -135,6 +170,9 @@ def main() -> int:
     # Mesh map identity.
     check(lane.MESH_RANKS == ",".join(str(i) for i in range(16)), failures,
           "identity mesh permutation")
+
+    # Firmware description identity pair (adapter_initialize contract).
+    firmware_identity_gates(failures)
 
     # Generator CLI: --check reproduces byte for byte; bad inputs fail closed.
     with tempfile.TemporaryDirectory() as tmp:

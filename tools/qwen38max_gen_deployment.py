@@ -109,8 +109,13 @@ def resident_deployment():
         "weightd": {
             "socket_path": "/tmp/spark_weightd.sock",
         },
+        # Caps from the family adapter descriptor: max_inflight is 1
+        # (SparkQwen38MaxServingDescriptor) - the loader rejects anything
+        # above at deployment_validation (model_serving_adapter.c:232, the
+        # attach-r15j / gemma4 launch-6 lesson; 4 was inherited from the
+        # GLM TP16 template).
         "runtime_limits": {
-            "max_inflight_submissions": 4,
+            "max_inflight_submissions": 1,
             "max_active_sequences": 16,
             "max_input_rows": 16,
             "resident_sequence_capacity": 16,
