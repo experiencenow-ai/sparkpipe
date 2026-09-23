@@ -142,8 +142,8 @@ def stage_gates(adapter, rank, codec, failures):
     check(adapter["expert_weight_codec"] == codec, failures,
           f"codec member matches the arm at rank {rank}")
     check(adapter["stage_pack_path"]
-          == f"packs/ling.{codec}.tp16.rank{rank}.sp", failures,
-          f"rank pack path at {rank}")
+          == f"packs/ling.{codec}.tp16.rank{rank:x}.sp", failures,
+          f"rank pack path at {rank} (hex-named packs)")
     check(adapter["tp_degree"] == 16 and adapter["tp_rank"] == rank,
           failures, f"tp degree/rank at {rank}")
     check(adapter["max_sequence_positions"] > 0
@@ -284,8 +284,44 @@ def main() -> int:
             check(proc.returncode != 0 and not wset.exists(), failures,
                   "wset hook must fail closed without the committed manifest")
 
+        # The warm shard splitter: the committed head exceeds the
+        # client's 512-key lease cap on every rank (chunk-union 16), so
+        # the warm path must split into <=512-key shards whose union is
+        # exactly the manifest list.
+        wset_source = ROOT / "model-families/ling/smoke-ling-v1.wset"
+        if wset_source.is_file():
+            shards = Path(tmp) / "smoke"
+            proc = subprocess.run(
+                [sys.executable,
+                 str(ROOT / "tools/ling_wset_split.py"),
+                 str(wset_source), str(shards)],
+                capture_output=True, text=True, env=env)
+            check(proc.returncode == 0, failures,
+                  f"wset split: {proc.stderr}")
+            listed = [line.split() for line in
+                      proc.stdout.splitlines() if line.strip()]
+            check(len(listed) >= 1, failures, "wset split emitted shards")
+            combined = []
+            for path_text, count_text in listed:
+                shard = Path(path_text)
+                check(int(count_text) <= 512, failures,
+                      f"shard {shard.name} exceeds the 512-key cap")
+                raw = shard.read_bytes()
+                check(len(raw) == int(count_text) * 8, failures,
+                      f"shard {shard.name} size mismatch")
+                combined.extend(struct.iter_unpack("<II", raw))
+            original = list(struct.iter_unpack(
+                "<II", wset_source.read_bytes()))
+            check(sorted(set(combined)) == sorted(original), failures,
+                  "shard union must equal the committed wset exactly")
+            check(len(combined) == len(set(combined)), failures,
+                  "shards must not overlap")
+
     # Wrapper parses (bash -n) and holds the template contract text.
-    for script in ("tools/ling_multidev_run_family.sh",):
+    for script in ("tools/ling_multidev_run_family.sh",
+                   "tools/ling_multidev_build.sh",
+                   "tools/devcycle/ling_warm_receipt.sh",
+                   "tools/devcycle/ling_decode_receipt.sh"):
         path = ROOT / script
         proc = subprocess.run(["bash", "-n", str(path)],
                               capture_output=True, text=True)
@@ -298,7 +334,8 @@ def main() -> int:
                   "53000 + 16 * LANE", "23000 + 16 * LANE", "64000 + 16 * LANE",
                   "23168 + 64 * LANE", "SESSION_BASE",
                   "LING_EXPERT_POOL_BYTES", "LING_SPINE_BUDGET_BYTES",
-                  "0x58504557", "ling_resident_decode_stage"):
+                  "0x58504557", "ling_resident_decode_stage",
+                  "--family ling"):
         check(token in wrapper, failures, f"wrapper missing {token}")
     for legacy in LEGACY_TOKENS:
         check(legacy not in wrapper, failures,
