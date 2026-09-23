@@ -113,5 +113,6 @@ adapter:
 		source/spark_minimax_serving_adapter.c \
 		$(REPOSITORY_ROOT)/build/libsparkpipe_runtime.a \
 		$(REPOSITORY_ROOT)/build/libsparkpipe_model_common.a \
-		$(REPOSITORY_ROOT)/build/libsparkpipe_core.a -ldl -pthread \
+		$(REPOSITORY_ROOT)/build/libsparkpipe_core.a \
+		-L"$(CUDA_HOME)/lib64" -lcudart -ldl -pthread \
 		-o "$(ADAPTER_LIBRARY)"
