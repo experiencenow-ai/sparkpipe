@@ -285,7 +285,13 @@ extern "C" const SparkHiddenTransportInterface *SparkHiddenTransportGetInterface
          * are NOT implemented here; declaring them to satisfy a
          * mis-wired required mask would be a lie. The mask bug is fixed
          * at the contract site instead (node/model_residentd.c). */
+        /* + POLL_DESCRIPTORS: the module implements get_poll_descriptors
+         * (zero descriptors — a pure-RDMA-mesh session), and residentd's
+         * serve loop requires the transport session to support the poll
+         * descriptor query (SessionCanUsePollDescriptors -> NOT_FOUND ->
+         * clean exit, find #12). Claiming an implemented capability. */
         SPARK_HIDDEN_TRANSPORT_REQUIRED_SPARK_HOST_RDMA_CAPS |
+        SPARK_HIDDEN_TRANSPORT_CAP_POLL_DESCRIPTORS |
         SPARK_HIDDEN_TRANSPORT_CAP_PERSISTENT_RECEIVE_CREDITS;
 #endif
     spark_hidden_spark_host_rdma_interface.initialize =

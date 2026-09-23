@@ -1,5 +1,5 @@
 {
-  "file_count": 3403,
+  "file_count": 3404,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -8003,8 +8003,8 @@
     },
     {
       "path": "ring/transport/rdma.cu",
-      "sha256": "5540ef5af4c210548af131286bb6d7d1ee24ab23f1dbee67e6d0ea77635e17f3",
-      "size_bytes": 12078
+      "sha256": "48e788959ddbf8a7ab0f29c667cfa1dfd984ee9ee21705b696a879bc9655f11b",
+      "size_bytes": 12502
     },
     {
       "path": "ring/transport/rdma_control.c",
@@ -11162,6 +11162,11 @@
       "size_bytes": 2242
     },
     {
+      "path": "tools/devcycle/minimax_multidev_decode.sh",
+      "sha256": "5717c61b99fe4f6d806ca943ae4ce9fac330a7f19ed9556a505881dd3fa0136e",
+      "size_bytes": 3885
+    },
+    {
       "path": "tools/devcycle/preflight_pro.sh",
       "sha256": "76006ab575b8b7647697d0e4acf9315e9c94e014588515cb36db1035699ab2ab",
       "size_bytes": 2608
@@ -11203,8 +11208,8 @@
     },
     {
       "path": "tools/devcycle/run-minimax-family-job.sh",
-      "sha256": "568d20ef2731aa3220dfbdf90c2ce91e58dc2f8e04b9f1514d58881e8d964eea",
-      "size_bytes": 14280
+      "sha256": "f42680db70c609c825e0631ceede05b75f48cb29c3df3a2fef4382777bb64e81",
+      "size_bytes": 14634
     },
     {
       "path": "tools/devcycle/show_node_context.py",
@@ -17020,5 +17025,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80668155
+  "total_bytes": 80672818
 }
