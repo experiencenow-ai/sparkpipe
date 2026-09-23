@@ -1,5 +1,5 @@
 {
-  "file_count": 3415,
+  "file_count": 3416,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -5168,8 +5168,8 @@
     },
     {
       "path": "modules/gemma4_resident_decode_stage/Makefile",
-      "sha256": "c3daa27eb770ab7f59708d410ba155b4a12dea08da1c92ee956caab2d38df508",
-      "size_bytes": 5383
+      "sha256": "0405dac85d046bc49f403cc37249926f263119c69f85be05381832f2405aa033",
+      "size_bytes": 5419
     },
     {
       "path": "modules/gemma4_resident_decode_stage/Makefile.moe",
@@ -9270,6 +9270,11 @@
       "path": "tests/test_gemm_tile_k_fallback.c",
       "sha256": "0ebea2475cf133c2c5535689683d48ff2def132aae995e17ded981a7642ac589",
       "size_bytes": 1497
+    },
+    {
+      "path": "tests/test_gemma4_adapter_selfcontained.py",
+      "sha256": "0c1c358f8fcb530884c0eaf8a777450c63249e3195aa3ae002fa206903088bc0",
+      "size_bytes": 1747
     },
     {
       "path": "tests/test_gemma4_defines.c",
@@ -17080,5 +17085,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80768068
+  "total_bytes": 80769851
 }
