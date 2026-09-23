@@ -150,7 +150,9 @@ HOST="spark$(printf '%x' "$RANK")"
 $(hostname); --nodes order must stay identical to the mesh map ($MESH_RANKS)"
 
 CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
-DEPLOYED_PACK="/home/$HOST/sparkdata/$ARM/packs/$ARM.rank$RANK.sp"
+# ling rank packs are HEX-named (rankb, not rank11): the stagepack
+# canonical rule names the file after the spark node letter.
+DEPLOYED_PACK="/home/$HOST/sparkdata/$ARM/packs/$ARM.rank$(printf '%x' "$RANK").sp"
 [ -f "$DEPLOYED_PACK" ] || fail "deployed rank pack missing: $DEPLOYED_PACK \
 (operator-placed set; grep the fleet pack inventory before any warm read)"
 
@@ -268,12 +270,30 @@ if [ -n "${LING_WORKING_SET:-}" ]; then
   WSET="$ROOT/smoke.wset"
   python3 "$CHECKOUT/tools/ling_multidev_lane.py" --emit-wset "$WSET"
   REVISION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["model_revision"])' "$ROOT/config/adapter.json")"
-  "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
-    "$(cat "$ROOT/packs/pack.sha256")" "$REVISION" "$WORLD" \
-    --wset "$WSET" 300 > "$ROOT/warm.log" 2>&1
-  grep -q "WSET-WARM keys=" "$ROOT/warm.log" ||
-    fail "working set warm failed (see $ROOT/warm.log)"
+  # --family ling pins the module tag so the warm keys the SAME arena
+  # the residentd attaches to (identity equality; PR #1146). The head
+  # exceeds the client's 512-key lease cap on every rank (chunk-union
+  # 16: all layers per rank pack), so warm the shard sequence through
+  # the same socket/arena.
+  python3 "$CHECKOUT/tools/ling_wset_split.py" "$WSET" "$ROOT/smoke" \
+    > "$ROOT/smoke.shards"
+  : > "$ROOT/warm.log"
+  while read -r shard _keys; do
+    SPARK_WEIGHTD_EXPERT_POOL_BYTES="$LING_EXPERT_POOL_BYTES" \
+      "$ROOT/bin/weightd_warm" "$SOCKET" "$PRIVATE_PACK" \
+      "$(cat "$ROOT/packs/pack.sha256")" "$REVISION" "$WORLD" \
+      --family ling --wset "$shard" 300 >> "$ROOT/warm.log" 2>&1 ||
+      fail "working set warm failed on $shard (see $ROOT/warm.log)"
+  done < "$ROOT/smoke.shards"
+  [ "$(grep -c "WSET-WARM keys=" "$ROOT/warm.log")" = "$(wc -l < "$ROOT/smoke.shards")" ] ||
+    fail "working set warm incomplete (see $ROOT/warm.log)"
 fi
+
+# Publish the private runtime root for same-lane follow-on jobs (the
+# decode receipt on the coordinator rank needs deployment.json/config):
+# a per-attempt pointer plus a stable latest symlink, both under /tmp.
+echo "$ROOT" > "/tmp/ling-lane9-root.$ATTEMPT"
+ln -sfn "$ROOT" /tmp/ling-lane9-root-latest
 
 # ----------------------------- RESIDENT LAUNCH -------------------------------
 
