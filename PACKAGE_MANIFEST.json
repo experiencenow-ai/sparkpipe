@@ -1,5 +1,5 @@
 {
-  "file_count": 3414,
+  "file_count": 3419,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "50112292bcec285df163278a36553eed0be4f15344c8b655de1fbe3f9d8287bb",
-      "size_bytes": 128297
+      "sha256": "6d94da2b68c9dd1c142e74796df29a7d6d4d04425e1f6f1a05b33ed15eec2e89",
+      "size_bytes": 131775
     },
     {
       "path": "Makefile.rej",
@@ -5168,8 +5168,8 @@
     },
     {
       "path": "modules/gemma4_resident_decode_stage/Makefile",
-      "sha256": "c3daa27eb770ab7f59708d410ba155b4a12dea08da1c92ee956caab2d38df508",
-      "size_bytes": 5383
+      "sha256": "0405dac85d046bc49f403cc37249926f263119c69f85be05381832f2405aa033",
+      "size_bytes": 5419
     },
     {
       "path": "modules/gemma4_resident_decode_stage/Makefile.moe",
@@ -5193,8 +5193,8 @@
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_resident_decode_stage_module.c",
-      "sha256": "70520e79a45b90dfcb3db38332b6dacc8f4049619bd41609c506b7f4cd1c7f97",
-      "size_bytes": 89342
+      "sha256": "caaf354e9a0df5adbd3c8dc452e18e70879ec97df2853bdfed6a6410acfe9c9f",
+      "size_bytes": 89397
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_serving_adapter.c",
@@ -5723,8 +5723,8 @@
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_serving_adapter.c",
-      "sha256": "325d70d0fae1ece01432fabcf6207765644f11440dd4344b2a2b3c8994ab5eb4",
-      "size_bytes": 44208
+      "sha256": "8964b7964cae40ea0adecb22fcb27018e518e508ee68e7e2e15f5315541aac0e",
+      "size_bytes": 44786
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_stagepack_format.h",
@@ -5878,8 +5878,8 @@
     },
     {
       "path": "modules/minimax_resident_decode_stage/source/spark_minimax_resident_decode_stage_module.c",
-      "sha256": "eccb7bcc714690966f22d56c8099bcdaa68251689dd02fa93244f0dfba3745fb",
-      "size_bytes": 79577
+      "sha256": "3e992f6e5531ca557995a6fd00033044cae589efa3668892756e0d16bfaab265",
+      "size_bytes": 81814
     },
     {
       "path": "modules/minimax_resident_decode_stage/source/spark_minimax_serving_adapter.c",
@@ -8452,6 +8452,16 @@
       "size_bytes": 3876
     },
     {
+      "path": "tests/fixtures/laguna_serving_adapter_config.json",
+      "sha256": "f7d73e9f0dff05775e2a14c6c1664bda5ba3a0c5440cd06c9d61c971d82d071d",
+      "size_bytes": 3650
+    },
+    {
+      "path": "tests/fixtures/laguna_serving_adapter_driver.c",
+      "sha256": "2e51400e50db33d9082b7ded35d29c7bdb5c4c30bbb4627bcd82a4375fb9f216",
+      "size_bytes": 9647
+    },
+    {
       "path": "tests/fixtures/ling_serving_adapter_config.json",
       "sha256": "cdf4c57486057b8e64c0df9d17a2f63314065bd9aac2eb7bd601eef276288773",
       "size_bytes": 1278
@@ -9272,9 +9282,19 @@
       "size_bytes": 1497
     },
     {
+      "path": "tests/test_gemma4_adapter_selfcontained.py",
+      "sha256": "0c1c358f8fcb530884c0eaf8a777450c63249e3195aa3ae002fa206903088bc0",
+      "size_bytes": 1747
+    },
+    {
       "path": "tests/test_gemma4_defines.c",
       "sha256": "01e7c07237e6ef247622b065f65b1780e8fb995d0c133202209a018d9af1b79a",
       "size_bytes": 10400
+    },
+    {
+      "path": "tests/test_gemma4_layer_scalar_coverage.py",
+      "sha256": "370ccc4f54808930318b2256870018f51e1eee22ca2eccd2be8d44be2725fd14",
+      "size_bytes": 3616
     },
     {
       "path": "tests/test_gemma4_model_header.py",
@@ -9845,6 +9865,11 @@
       "path": "tests/test_laguna_multidev_lane.py",
       "sha256": "4eac72e54626bc136410823a0b9036f48b04a2b5bd11ac39cd18f8e5f8ac41f5",
       "size_bytes": 22350
+    },
+    {
+      "path": "tests/test_laguna_serving_adapter.c",
+      "sha256": "1e463b2855cc255cc1b8657f1b5c2b6a9b6c6a5345319b5e69b9b5f6be8941de",
+      "size_bytes": 13816
     },
     {
       "path": "tests/test_laguna_smoke_experts.py",
@@ -17075,5 +17100,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80766556
+  "total_bytes": 80805416
 }

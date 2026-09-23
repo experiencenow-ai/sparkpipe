@@ -130,6 +130,7 @@ typedef struct SparkMinimaxModuleState
 	uint32_t *lane_block_counts;
 	uint64_t *lane_context_tokens;
 	uint32_t blocks_per_lane;
+	uint64_t reset_generation;
 } SparkMinimaxModuleState;
 
 extern cudaError_t SparkMinimaxConfigureCudaKernels(void);
@@ -1262,6 +1263,51 @@ static SparkStatus SparkMinimaxModuleExecuteFrame(void *module_state,SparkModelD
 	SPARK_RETURN(status);
 }
 
+static SparkStatus SparkMinimaxModuleReset(
+	SparkMinimaxModuleState *state,
+	const SparkModelDriverAdmissionRequest *request)
+{
+	uint32_t slots[SPARK_MINIMAX_RESIDENT_DECODE_STAGE_MAX_PIPELINE_SLOT_COUNT];
+	uint32_t lane;
+	uint32_t retained;
+	uint32_t index;
+	cudaError_t drain;
+	SparkStatus status;
+	if ( SparkModelDriverAdmissionRequestIsValid(request) == 0u )
+		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	if ( request->control_generation <= state->reset_generation )
+		return(SPARK_STATUS_OK);
+	for (index=0u; index<state->pipeline_slot_count; index++)
+		slots[index] = index;
+	status = SparkStageModuleIndexSetClaim(state->slot_states,state->pipeline_slot_count,slots,state->pipeline_slot_count);
+	if ( status != SPARK_STATUS_OK )
+		return(status);
+	for (index=0u; index<state->pipeline_slot_count; index++)
+	{
+		if ( state->slots[index].cuda_stream == 0 )
+			continue;
+		drain = cudaStreamSynchronize((cudaStream_t)state->slots[index].cuda_stream);
+		if ( drain != cudaSuccess )
+		{
+			(void)SparkStageModuleCudaStatus(SPARK_MINIMAX_MODULE_TAG,drain,"reset_stream_drain");
+			return(SPARK_STATUS_PENDING);
+		}
+	}
+	for (lane=0u; lane<state->max_active_sequence_count; lane++)
+		SparkMinimaxModuleReleaseLane(state,lane);
+	retained = 0u;
+	for (lane=0u; lane<state->max_active_sequence_count; lane++)
+		retained += state->lane_block_counts[lane];
+	if ( retained != 0u || state->free_block_count != state->kv_block_count )
+		SPARK_FAIL(SPARK_STATUS_INTERNAL_ERROR);
+	if ( cudaMemcpy(state->device_block_counts,state->lane_block_counts,
+		(size_t)((uint64_t)state->max_active_sequence_count * sizeof(uint32_t)),
+		cudaMemcpyHostToDevice) != cudaSuccess )
+		return(SparkStageModuleCudaStatus(SPARK_MINIMAX_MODULE_TAG,cudaGetLastError(),"reset_block_counts_upload"));
+	state->reset_generation = request->control_generation;
+	return(SPARK_STATUS_OK);
+}
+
 static SparkStatus SparkMinimaxModuleAdmit(
 	void *module_state,
 	const SparkModelDriverAdmissionRequest *request,
@@ -1271,6 +1317,17 @@ static SparkStatus SparkMinimaxModuleAdmit(
 	SparkAdmissionPolicyTable table;
 	uint32_t available_slot_count;
 	SparkStatus status;
+	if ( request->admission_flags == SPARK_MODEL_DRIVER_ADMISSION_FLAG_RESET )
+	{
+		SparkModelDriverInitializeAdmissionDecision(decision);
+		status = SparkMinimaxModuleReset(state,request);
+		if ( status == SPARK_STATUS_OK )
+		{
+			decision->accepted = 1u;
+			decision->rejection_reason = SPARK_MODEL_DRIVER_ADMISSION_ACCEPTED;
+		}
+		SPARK_RETURN(status);
+	}
 	available_slot_count = SparkStageModuleSlotCountFree(
 		state->slot_states,
 		state->pipeline_slot_count);
