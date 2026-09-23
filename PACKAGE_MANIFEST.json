@@ -1,5 +1,5 @@
 {
-  "file_count": 3416,
+  "file_count": 3419,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "50112292bcec285df163278a36553eed0be4f15344c8b655de1fbe3f9d8287bb",
-      "size_bytes": 128297
+      "sha256": "6d94da2b68c9dd1c142e74796df29a7d6d4d04425e1f6f1a05b33ed15eec2e89",
+      "size_bytes": 131775
     },
     {
       "path": "Makefile.rej",
@@ -5723,8 +5723,8 @@
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_serving_adapter.c",
-      "sha256": "325d70d0fae1ece01432fabcf6207765644f11440dd4344b2a2b3c8994ab5eb4",
-      "size_bytes": 44208
+      "sha256": "8964b7964cae40ea0adecb22fcb27018e518e508ee68e7e2e15f5315541aac0e",
+      "size_bytes": 44786
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_stagepack_format.h",
@@ -8452,6 +8452,16 @@
       "size_bytes": 3876
     },
     {
+      "path": "tests/fixtures/laguna_serving_adapter_config.json",
+      "sha256": "f7d73e9f0dff05775e2a14c6c1664bda5ba3a0c5440cd06c9d61c971d82d071d",
+      "size_bytes": 3650
+    },
+    {
+      "path": "tests/fixtures/laguna_serving_adapter_driver.c",
+      "sha256": "2e51400e50db33d9082b7ded35d29c7bdb5c4c30bbb4627bcd82a4375fb9f216",
+      "size_bytes": 9647
+    },
+    {
       "path": "tests/fixtures/ling_serving_adapter_config.json",
       "sha256": "cdf4c57486057b8e64c0df9d17a2f63314065bd9aac2eb7bd601eef276288773",
       "size_bytes": 1278
@@ -9855,6 +9865,11 @@
       "path": "tests/test_laguna_multidev_lane.py",
       "sha256": "4eac72e54626bc136410823a0b9036f48b04a2b5bd11ac39cd18f8e5f8ac41f5",
       "size_bytes": 22350
+    },
+    {
+      "path": "tests/test_laguna_serving_adapter.c",
+      "sha256": "1e463b2855cc255cc1b8657f1b5c2b6a9b6c6a5345319b5e69b9b5f6be8941de",
+      "size_bytes": 13816
     },
     {
       "path": "tests/test_laguna_smoke_experts.py",
@@ -17085,5 +17100,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80778636
+  "total_bytes": 80809805
 }
