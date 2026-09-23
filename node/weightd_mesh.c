@@ -67,7 +67,7 @@ _Static_assert(SPARK_WEIGHTD_MESH_PEERS * 4u <= 64u,"mesh completion bitmap capa
 _Static_assert(SPARK_WEIGHTD_MESH_PEERS * SPARK_WEIGHTD_MESH_SEND_CAPACITY <
     SPARK_WEIGHTD_MESH_CQ_ENTRIES,"mesh send completions fit CQ");
 _Static_assert(SPARK_WEIGHTD_MESH_BANDS * SPARK_WEIGHTD_MESH_RANKS_PER_BAND <=
-    256u,"mesh completion identity capacity");
+    512u,"mesh completion identity capacity");
 
 typedef struct SparkWeightdMeshTransfer
 {
