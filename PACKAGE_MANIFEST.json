@@ -1,5 +1,5 @@
 {
-  "file_count": 3413,
+  "file_count": 3416,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -5723,8 +5723,8 @@
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_serving_adapter.c",
-      "sha256": "325d70d0fae1ece01432fabcf6207765644f11440dd4344b2a2b3c8994ab5eb4",
-      "size_bytes": 44208
+      "sha256": "8964b7964cae40ea0adecb22fcb27018e518e508ee68e7e2e15f5315541aac0e",
+      "size_bytes": 44786
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_stagepack_format.h",
@@ -8452,6 +8452,16 @@
       "size_bytes": 3876
     },
     {
+      "path": "tests/fixtures/laguna_serving_adapter_config.json",
+      "sha256": "4b0dfabb7f470ee0ad1aca633e6d85d32b78763622722cb60e4a55c5c53859fa",
+      "size_bytes": 896
+    },
+    {
+      "path": "tests/fixtures/laguna_serving_adapter_driver.c",
+      "sha256": "a3b5bd3f05956d03f7e62cb9c998c18ba663724f642fc780e9cf7efe11ea4422",
+      "size_bytes": 9433
+    },
+    {
       "path": "tests/fixtures/ling_serving_adapter_config.json",
       "sha256": "cdf4c57486057b8e64c0df9d17a2f63314065bd9aac2eb7bd601eef276288773",
       "size_bytes": 1278
@@ -9845,6 +9855,11 @@
       "path": "tests/test_laguna_multidev_lane.py",
       "sha256": "4eac72e54626bc136410823a0b9036f48b04a2b5bd11ac39cd18f8e5f8ac41f5",
       "size_bytes": 22350
+    },
+    {
+      "path": "tests/test_laguna_serving_adapter.c",
+      "sha256": "0e2e1cab7918c403e3ee9ea1561ed05e2fb66e391068eca68c815679bbd35619",
+      "size_bytes": 13318
     },
     {
       "path": "tests/test_laguna_smoke_experts.py",
@@ -17070,5 +17085,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80752411
+  "total_bytes": 80776636
 }
