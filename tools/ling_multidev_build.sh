@@ -150,7 +150,7 @@ ldd -r "$BUILD_DRIVER/stages/stage_000/model_driver.so" 2>&1 \
   && { echo "driver link has unresolved symbols" >&2; exit 1; } || true
 
 STAGE="$FIRMWARE_ROOT.new.$$"
-rm -rf "$STAGE"
+rm -rf "$FIRMWARE_ROOT".new.* "$STAGE"
 mkdir -p "$STAGE"
 install -m 0755 "$CHECKOUT/build/sparkpipe_model_residentd" "$STAGE/"
 install -m 0755 "$CHECKOUT/build/sparkpipe_model_api" "$STAGE/"
@@ -167,6 +167,11 @@ printf 'module=%s\nbucket=%s\n' "$MODULE_ID_BUCKETED" "$BUCKET" \
     sparkpipe_model_api weightd_warm \
     model_serving_adapter.so model_driver.so hidden_transport.so \
     > SHA256SUMS )
-rm -rf "$BUILD_DRIVER" "$LANE_FIRMWARE"
+rm -rf "$BUILD_DRIVER" "$LANE_FIRMWARE" "$FIRMWARE_ROOT.old"
+[ -d "$FIRMWARE_ROOT" ] && mv "$FIRMWARE_ROOT" "$FIRMWARE_ROOT.old"
 mv "$STAGE" "$FIRMWARE_ROOT"
+[ "$(cat "$FIRMWARE_ROOT/SOURCE_COMMIT")" = "$COMMIT" ] || {
+  echo "publish verification failed: $FIRMWARE_ROOT/SOURCE_COMMIT" >&2
+  exit 1
+}
 echo "ling-$FAMILY-lane$LANE build: firmware at $FIRMWARE_ROOT commit $COMMIT codec $EXPERT_CODEC bucket $BUCKET"
