@@ -37,11 +37,24 @@
 #define SPARK_QWEN38_MAX_SERVING_TARGET \
 	"cuda.sm121.qwen38.resident_decode_stage.fp8"
 #define SPARK_QWEN38_MAX_SERVING_PROGRAM_NAME "resident_decode"
-/* Single-stage whole-model serving: one stage carries all layers (the
-   16 was the TP4-PP4 pipeline shape; the descriptor checks reject
-   zero-layer stages, so the stale count failed validation at every
-   stage past 0). */
-#define SPARK_QWEN38_MAX_SERVING_STAGE_COUNT 1u
+/* TP16 transport-stage convention (the GLM/gemma4 TP16 shape): the
+	   deployment carries 16 nodes with stage_index = world rank, and the
+	   loader requires descriptor stage_count == deployment node_count
+	   (model_resident_deployment.c:615; the attach-b target_mismatch).
+	   Every rank is one parallel group executing the whole model with
+	   tensor-sharded weights: parallel_group_size 16, PP degree 1, all
+	   16 stage entries carry the full layer count. */
+#define SPARK_QWEN38_MAX_SERVING_STAGE_COUNT 16u
+#define SPARK_QWEN38_MAX_SERVING_PARALLEL_GROUP_SIZE 16u
+#define SPARK_QWEN38_MAX_SERVING_STAGE_LAYER_LIST \
+	SPARK_QWEN38_MAX_MODEL_LAYER_COUNT,SPARK_QWEN38_MAX_MODEL_LAYER_COUNT, \
+	SPARK_QWEN38_MAX_MODEL_LAYER_COUNT,SPARK_QWEN38_MAX_MODEL_LAYER_COUNT, \
+	SPARK_QWEN38_MAX_MODEL_LAYER_COUNT,SPARK_QWEN38_MAX_MODEL_LAYER_COUNT, \
+	SPARK_QWEN38_MAX_MODEL_LAYER_COUNT,SPARK_QWEN38_MAX_MODEL_LAYER_COUNT, \
+	SPARK_QWEN38_MAX_MODEL_LAYER_COUNT,SPARK_QWEN38_MAX_MODEL_LAYER_COUNT, \
+	SPARK_QWEN38_MAX_MODEL_LAYER_COUNT,SPARK_QWEN38_MAX_MODEL_LAYER_COUNT, \
+	SPARK_QWEN38_MAX_MODEL_LAYER_COUNT,SPARK_QWEN38_MAX_MODEL_LAYER_COUNT, \
+	SPARK_QWEN38_MAX_MODEL_LAYER_COUNT,SPARK_QWEN38_MAX_MODEL_LAYER_COUNT
 #define SPARK_QWEN38_MAX_SERVING_DEFAULT_TP_DEGREE 4u
 #define SPARK_QWEN38_MAX_SERVING_MAX_PP_STAGE_COUNT 4u
 #define SPARK_QWEN38_MAX_SERVING_MAX_SEQUENCE_POSITIONS_CAP \
@@ -359,12 +372,19 @@ static const SparkModelServingAdapterDescriptor SparkQwen38MaxServingDescriptor 
 		QWEN38_CONTRACT_SHA256),
 	/* SPECULATION pairs with a nonzero speculative-token budget
 	   (SparkDescriptorCheckSpeculationPairing); this family runs
-	   MTP_LAYER_COUNT=0 today, so the flag rides the MTP count. */
+	   MTP_LAYER_COUNT=0 today, so the flag rides the MTP count.
+	   PARALLEL_FANOUT|HIDDEN_TRANSPORT pairs with HYBRID_TP_PP
+	   (SparkDescriptorCheckParallelTransportHybridPairing): the 16
+	   tensor-parallel ranks are one parallel group (group size 16,
+	   PP degree 1), each stage entry the full layer count. */
 	.capability_flags = SPARK_SERVING_ADAPTER_CAPABILITY_CHAIN(
 		SPARK_MODEL_SERVING_ADAPTER_CAPABILITY_HIDDEN_TRANSPORT |
+		SPARK_MODEL_SERVING_ADAPTER_CAPABILITY_PARALLEL_FANOUT |
+		SPARK_MODEL_SERVING_ADAPTER_CAPABILITY_HYBRID_TP_PP |
 		(SPARK_QWEN38_MAX_MODEL_MTP_LAYER_COUNT != 0
 			? SPARK_MODEL_SERVING_ADAPTER_CAPABILITY_SPECULATION
 			: 0u)),
+	.parallel_group_size = SPARK_QWEN38_MAX_SERVING_PARALLEL_GROUP_SIZE,
 	.stage_count = SPARK_QWEN38_MAX_SERVING_STAGE_COUNT,
 	.layer_count = SPARK_QWEN38_MAX_MODEL_LAYER_COUNT,
 	.boundary_format = SPARK_MODEL_SERVING_BOUNDARY_FORMAT_BF16,
@@ -380,9 +400,10 @@ static const SparkModelServingAdapterDescriptor SparkQwen38MaxServingDescriptor 
 	.max_output_token_count = SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_MAX_ACTIVE_SEQUENCE_COUNT,
 	.max_speculative_token_count = SPARK_QWEN38_MAX_MODEL_MTP_LAYER_COUNT,
 	.cache_block_token_count = SPARK_QWEN38_MAX_RESIDENT_DECODE_STAGE_KV_BLOCK_TOKENS,
-	/* single-stage whole-model layout: all LAYER_COUNT layers in stage 0
-	   (SparkDescriptorCheckStageLayerTotals rejects zero stage counts). */
-	.stage_layer_counts = {SPARK_QWEN38_MAX_MODEL_LAYER_COUNT,0u,0u,0u},
+	/* every transport stage carries the whole model (tensor-sharded
+	   weights); the hybrid totals check reads one group of 16 equal
+	   entries summing (per group) to the layer count. */
+	.stage_layer_counts = {SPARK_QWEN38_MAX_SERVING_STAGE_LAYER_LIST},
 	.minimum_efficient_submission_row_count = 0u
 };
 

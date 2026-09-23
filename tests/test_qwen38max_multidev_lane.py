@@ -171,8 +171,22 @@ def main() -> int:
     check(lane.MESH_RANKS == ",".join(str(i) for i in range(16)), failures,
           "identity mesh permutation")
 
+    import re
+    adapter_source = (ROOT / "modules/qwen38_max_resident_decode_stage"
+                      "/source/spark_qwen38_max_serving_adapter.c").read_text()
+
     # Firmware description identity pair (adapter_initialize contract).
     firmware_identity_gates(failures)
+
+    # Transport-stage shape: the loader requires descriptor stage_count ==
+    # deployment node_count (model_resident_deployment.c:615; the attach-b
+    # target_mismatch when the descriptor carried the PP-era count 1).
+    stage_count = re.search(r"define\s+SPARK_QWEN38_MAX_SERVING_STAGE_COUNT"
+                            r"\s+(\d+)u", adapter_source)
+    check(stage_count is not None
+          and int(stage_count.group(1)) == lane.WORLD, failures,
+          "adapter stage_count must equal the 16-node TP16 deployment "
+          "(loader equality at ValidateForAdapter)")
 
     # Generator CLI: --check reproduces byte for byte; bad inputs fail closed.
     with tempfile.TemporaryDirectory() as tmp:
