@@ -6083,8 +6083,8 @@
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/source/spark_qwen38_max_serving_adapter.c",
-      "sha256": "5a93b19e758b67d52145e132bedee786cc4eb5efaf050bd10b890b03f4e8fbaf",
-      "size_bytes": 19799
+      "sha256": "bfb67a89aa463145cd779cf68a6e6983f8c1d1e36d6180d1dff4844b6035f7d4",
+      "size_bytes": 21210
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/source/spark_qwen38_max_stagepack_format.h",
@@ -10278,8 +10278,8 @@
     },
     {
       "path": "tests/test_qwen38max_multidev_lane.py",
-      "sha256": "d02b6d26808a8a90f1019e7f2ce74edb425068363d3c3d7a2aa1b301c0537be0",
-      "size_bytes": 12501
+      "sha256": "fda8b1072b56b564f5425ee95b2cbf8137403adeb6be0346992ed273dd4a09de",
+      "size_bytes": 13249
     },
     {
       "path": "tests/test_qwen38max_tp16_rank_verify.py",
@@ -17100,5 +17100,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80809805
+  "total_bytes": 80811964
 }
