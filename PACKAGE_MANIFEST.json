@@ -1,5 +1,5 @@
 {
-  "file_count": 3416,
+  "file_count": 3419,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -5168,8 +5168,8 @@
     },
     {
       "path": "modules/gemma4_resident_decode_stage/Makefile",
-      "sha256": "c3daa27eb770ab7f59708d410ba155b4a12dea08da1c92ee956caab2d38df508",
-      "size_bytes": 5383
+      "sha256": "0405dac85d046bc49f403cc37249926f263119c69f85be05381832f2405aa033",
+      "size_bytes": 5419
     },
     {
       "path": "modules/gemma4_resident_decode_stage/Makefile.moe",
@@ -5193,8 +5193,8 @@
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_resident_decode_stage_module.c",
-      "sha256": "70520e79a45b90dfcb3db38332b6dacc8f4049619bd41609c506b7f4cd1c7f97",
-      "size_bytes": 89342
+      "sha256": "caaf354e9a0df5adbd3c8dc452e18e70879ec97df2853bdfed6a6410acfe9c9f",
+      "size_bytes": 89397
     },
     {
       "path": "modules/gemma4_resident_decode_stage/source/spark_gemma4_serving_adapter.c",
@@ -5853,8 +5853,8 @@
     },
     {
       "path": "modules/minimax_resident_decode_stage/Makefile",
-      "sha256": "dafb4a6cbc130b34630288be4c0a90682d94c699479f1bede30bf54a75868902",
-      "size_bytes": 5443
+      "sha256": "c7fb5774838ba4184bfba4d7dd2138275903d3374b998cc275ed5af50093ef0e",
+      "size_bytes": 5479
     },
     {
       "path": "modules/minimax_resident_decode_stage/include/sparkpipe/spark_minimax_model.h",
@@ -9282,9 +9282,19 @@
       "size_bytes": 1497
     },
     {
+      "path": "tests/test_gemma4_adapter_selfcontained.py",
+      "sha256": "0c1c358f8fcb530884c0eaf8a777450c63249e3195aa3ae002fa206903088bc0",
+      "size_bytes": 1747
+    },
+    {
       "path": "tests/test_gemma4_defines.c",
       "sha256": "01e7c07237e6ef247622b065f65b1780e8fb995d0c133202209a018d9af1b79a",
       "size_bytes": 10400
+    },
+    {
+      "path": "tests/test_gemma4_layer_scalar_coverage.py",
+      "sha256": "370ccc4f54808930318b2256870018f51e1eee22ca2eccd2be8d44be2725fd14",
+      "size_bytes": 3616
     },
     {
       "path": "tests/test_gemma4_model_header.py",
@@ -9708,8 +9718,8 @@
     },
     {
       "path": "tests/test_k3_multidev_lane.py",
-      "sha256": "956ae53fca3abb9cc9eea68c29b7e6099966b8ef4c5b0493c45494f78b1e0e72",
-      "size_bytes": 13706
+      "sha256": "1ce2a9dced931e0d2722e8de5d0cff784f3db3d14938bb9ed126a37c19e12f28",
+      "size_bytes": 14340
     },
     {
       "path": "tests/test_k3_pack.py",
@@ -10090,6 +10100,11 @@
       "path": "tests/test_model_serving_architecture.py",
       "sha256": "66980520b5a47b241b4a9f79ab578b8263aadc8c34a2abf8bd26c232f2da3cdd",
       "size_bytes": 36643
+    },
+    {
+      "path": "tests/test_module_build_release_adapter_gate.py",
+      "sha256": "8d0c54a19d6348749aa731bd95212a948d743a1af98979fe04c4a82aa92557fd",
+      "size_bytes": 4711
     },
     {
       "path": "tests/test_module_library.c",
@@ -11243,8 +11258,8 @@
     },
     {
       "path": "tools/devcycle/run-minimax-family-job.sh",
-      "sha256": "f42680db70c609c825e0631ceede05b75f48cb29c3df3a2fef4382777bb64e81",
-      "size_bytes": 14634
+      "sha256": "7a5677eed79c881fe5e8f40d0510b4649bc1423b4148232dec4f1d657833a305",
+      "size_bytes": 19882
     },
     {
       "path": "tools/devcycle/show_node_context.py",
@@ -12423,8 +12438,8 @@
     },
     {
       "path": "tools/k3_multidev_lane.py",
-      "sha256": "1b9c7391abdf2be275f14fe819c5fc4693cc24dca5d8c0f3ec7765c8bd20b1eb",
-      "size_bytes": 12044
+      "sha256": "f83ecf51ad9d5b78a95fc3c23163318549be02767c2a41bcdc7d2d2eb5c1621c",
+      "size_bytes": 13174
     },
     {
       "path": "tools/k3_multidev_run_family.sh",
@@ -12743,8 +12758,8 @@
     },
     {
       "path": "tools/module_build_release.sh",
-      "sha256": "011581415a39c4e0a6738e6859c3c3eba18224d20a95622a003450a95f0dc1d1",
-      "size_bytes": 5256
+      "sha256": "82ef4520a16f892c0ae45a46d9c584525440201f14dbed040d3a7ecd7577e3c6",
+      "size_bytes": 5483
     },
     {
       "path": "tools/mtp_strip_audit.py",
@@ -17085,5 +17100,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80783580
+  "total_bytes": 80801020
 }
