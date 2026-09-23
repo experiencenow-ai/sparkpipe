@@ -70,6 +70,10 @@ include_flags=(
 	-I"${repository_root}/modules/dsv4_resident_decode_stage/source"
 	-I"${repository_root}/modules/qwen38_27b_resident_decode_stage/include"
 	-I"${repository_root}/modules/qwen38_27b_resident_decode_stage/source"
+	-I"${repository_root}/modules/minimax_resident_decode_stage/include"
+	-I"${repository_root}/modules/minimax_resident_decode_stage/source"
+	-I"${repository_root}/model-families/minimax/include"
+	-I"${repository_root}/model-families/minimax/include/sparkpipe"
 )
 object_flags=(
 	-std=c++17
@@ -156,6 +160,13 @@ compile_cuda \
 	-include "${qwen38_27b_model_header}" \
 	-DSPARK_QWEN38_27B_MODULE_BUILD=1
 
+minimax_model_header="${repository_root}/modules/minimax_resident_decode_stage/include/sparkpipe/spark_minimax_model.h"
+compile_cuda \
+	modules/minimax_resident_decode_stage/source/spark_minimax_resident_decode_stage_cuda.cu \
+	minimax_resident_decode_stage \
+	-include "${minimax_model_header}" \
+	-DSPARK_MINIMAX_MODULE_BUILD=1
+
 # GLM 5.3 Flash uses the glm5_next implementation, separate from glm52.
 make -C "${repository_root}" -j2 build/glm5_next_driver_probe \
 	CUDA_HOME="$(dirname "$(dirname "$(command -v "${nvcc_binary}")")")" \
@@ -229,6 +240,16 @@ make -C "${repository_root}/modules/dsv4_resident_decode_stage" \
 	CUDA_ARCH=sm_121a \
 	>> "${output_directory}/logs/dsv4-archive.txt" 2>&1
 
+make -C "${repository_root}/modules/minimax_resident_decode_stage" clean \
+	NVCC="${nvcc_binary}" \
+	CUDA_ARCH=sm_121a \
+	> "${output_directory}/logs/minimax-archive.txt" 2>&1
+make -C "${repository_root}/modules/minimax_resident_decode_stage" \
+	-j2 archive \
+	NVCC="${nvcc_binary}" \
+	CUDA_ARCH=sm_121a \
+	>> "${output_directory}/logs/minimax-archive.txt" 2>&1
+
 while IFS= read -r -d '' object_file; do
 	elf_listing="$(cuobjdump --list-elf "${object_file}" 2>/dev/null || true)"
 	if [[ -n "${elf_listing}" ]] && ! grep -q 'sm_121a' <<<"${elf_listing}"; then
@@ -239,6 +260,7 @@ done < <(find \
 	"${output_directory}/objects" \
 	"${repository_root}/build/modules/glm52_resident_decode_stage" \
 	"${repository_root}/build/modules/dsv4_resident_decode_stage" \
+	"${repository_root}/build/modules/minimax_resident_decode_stage" \
 	-type f -name '*.o' -print0)
 
 for object_file in "${output_directory}"/objects/*.o; do
