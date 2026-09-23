@@ -1,5 +1,5 @@
 {
-  "file_count": 3416,
+  "file_count": 3419,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -73,8 +73,8 @@
     },
     {
       "path": "Makefile",
-      "sha256": "50112292bcec285df163278a36553eed0be4f15344c8b655de1fbe3f9d8287bb",
-      "size_bytes": 128297
+      "sha256": "6d94da2b68c9dd1c142e74796df29a7d6d4d04425e1f6f1a05b33ed15eec2e89",
+      "size_bytes": 131775
     },
     {
       "path": "Makefile.rej",
@@ -5723,8 +5723,8 @@
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_serving_adapter.c",
-      "sha256": "325d70d0fae1ece01432fabcf6207765644f11440dd4344b2a2b3c8994ab5eb4",
-      "size_bytes": 44208
+      "sha256": "8964b7964cae40ea0adecb22fcb27018e518e508ee68e7e2e15f5315541aac0e",
+      "size_bytes": 44786
     },
     {
       "path": "modules/laguna_resident_decode_stage/source/spark_laguna_stagepack_format.h",
@@ -5878,8 +5878,8 @@
     },
     {
       "path": "modules/minimax_resident_decode_stage/source/spark_minimax_resident_decode_stage_module.c",
-      "sha256": "eccb7bcc714690966f22d56c8099bcdaa68251689dd02fa93244f0dfba3745fb",
-      "size_bytes": 79577
+      "sha256": "3e992f6e5531ca557995a6fd00033044cae589efa3668892756e0d16bfaab265",
+      "size_bytes": 81814
     },
     {
       "path": "modules/minimax_resident_decode_stage/source/spark_minimax_serving_adapter.c",
@@ -6083,8 +6083,8 @@
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/source/spark_qwen38_max_serving_adapter.c",
-      "sha256": "5a93b19e758b67d52145e132bedee786cc4eb5efaf050bd10b890b03f4e8fbaf",
-      "size_bytes": 19799
+      "sha256": "bfb67a89aa463145cd779cf68a6e6983f8c1d1e36d6180d1dff4844b6035f7d4",
+      "size_bytes": 21210
     },
     {
       "path": "modules/qwen38_max_resident_decode_stage/source/spark_qwen38_max_stagepack_format.h",
@@ -8452,6 +8452,16 @@
       "size_bytes": 3876
     },
     {
+      "path": "tests/fixtures/laguna_serving_adapter_config.json",
+      "sha256": "f7d73e9f0dff05775e2a14c6c1664bda5ba3a0c5440cd06c9d61c971d82d071d",
+      "size_bytes": 3650
+    },
+    {
+      "path": "tests/fixtures/laguna_serving_adapter_driver.c",
+      "sha256": "2e51400e50db33d9082b7ded35d29c7bdb5c4c30bbb4627bcd82a4375fb9f216",
+      "size_bytes": 9647
+    },
+    {
       "path": "tests/fixtures/ling_serving_adapter_config.json",
       "sha256": "cdf4c57486057b8e64c0df9d17a2f63314065bd9aac2eb7bd601eef276288773",
       "size_bytes": 1278
@@ -9857,6 +9867,11 @@
       "size_bytes": 22350
     },
     {
+      "path": "tests/test_laguna_serving_adapter.c",
+      "sha256": "1e463b2855cc255cc1b8657f1b5c2b6a9b6c6a5345319b5e69b9b5f6be8941de",
+      "size_bytes": 13816
+    },
+    {
       "path": "tests/test_laguna_smoke_experts.py",
       "sha256": "758ab6f41711200dd6443eee3e2524100d299397236e32bc18aaa1110bea67f6",
       "size_bytes": 11391
@@ -10263,8 +10278,8 @@
     },
     {
       "path": "tests/test_qwen38max_multidev_lane.py",
-      "sha256": "d02b6d26808a8a90f1019e7f2ce74edb425068363d3c3d7a2aa1b301c0537be0",
-      "size_bytes": 12501
+      "sha256": "fda8b1072b56b564f5425ee95b2cbf8137403adeb6be0346992ed273dd4a09de",
+      "size_bytes": 13249
     },
     {
       "path": "tests/test_qwen38max_tp16_rank_verify.py",
@@ -13173,8 +13188,8 @@
     },
     {
       "path": "tools/qwen38max_multidev_run_family.sh",
-      "sha256": "a27978003ab8e5b1dc4561f5b029e0a29c82dab88558b4645a6caaebc68cf28a",
-      "size_bytes": 17949
+      "sha256": "6fb6ad8b303eeb994bb1c70c4f0f7e6794e8ede25e8b144bb61bcdb3f97e7d98",
+      "size_bytes": 18166
     },
     {
       "path": "tools/qwen38max_multidev_warm_probe.sh",
@@ -17085,5 +17100,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80769851
+  "total_bytes": 80805633
 }
