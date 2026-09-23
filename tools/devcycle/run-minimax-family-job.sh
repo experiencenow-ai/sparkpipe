@@ -285,7 +285,12 @@ export SPARK_MINIMAX_STAGE_TP_SESSION_PORTS="$SESSION_MATRIX"
 
 export SPARK_WEIGHTD_ATTACH=1
 export SPARK_WEIGHTD_SOCKET="$WEIGHTD_SOCKET"
-export SPARK_WEIGHTD_LANE="$LANE"
+# The weightd MESH LANE id space is 0..7 (SPARK_WEIGHTD_MESH_MAX_LANES) and
+# is distinct from the lane-10 PORT index: the dense module takes the env
+# acquire path (no lazy pack to borrow a lane from), and the daemon binds a
+# lane profile (degree-4 physical ranks 8,9,10,11) on first reservation.
+MESH_LANE_ID="${MINIMAX_WEIGHTD_MESH_LANE:-7}"
+export SPARK_WEIGHTD_LANE="$MESH_LANE_ID"
 export SPARK_TP_MESH_RANKS="$MESH_RANKS"
 export LD_LIBRARY_PATH="$EXEC_PREFIX/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 for entry in "${FAMILY_ENV[@]}"; do
