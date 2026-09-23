@@ -43,6 +43,13 @@ MODULE_ADDITIONAL_HOST_SOURCES = \
 # eagerly: the previous in-Makefile contract digest ran $(shell sha256sum
 # $(REPOSITORY_ROOT)/...) at parse time - before the include - which pinned
 # an EMPTY contract sha into every artifact (build-r2 attempt 1c1077ce).
+# The serving-adapter request contract must carry the model-description
+# sha the driver compile embeds (serving_adapter_template.c compares both
+# sides at adapter_initialize; the qwen38-common default passes the
+# package contract sha, which can never match a driver built from a
+# separate firmware description - the gemma4 launch-9 lesson). CURDIR is
+# a make builtin, so this stays eager-safe under the REPOSITORY_ROOT law.
+QWEN38_MAX_MODEL_DESCRIPTION_SHA256 := $(shell sha256sum $(CURDIR)/../../examples/model_descriptions/qwen38_max_resident_decode_stage_firmware.json 2>/dev/null | awk '{print $$1}')
 MTP_LAYER_COUNT ?= 0
 MODULE_COMPILE_FLAGS := \
 	-DSPARK_QWEN38_MAX_MODULE_BUILD=1 \
@@ -151,6 +158,7 @@ adapter:
 	$(CC) $(CFLAGS) $(MODULE_POSIX_FLAGS) -fPIC -shared \
 		-I$(REPOSITORY_ROOT)/src -I"$(CUDA_HOME)/include" $(MODULE_INCLUDE_FLAGS) \
 		$(MODULE_COMPILE_FLAGS) \
+		-DQWEN38_MAX_MODEL_DESCRIPTION_SHA256=\"$(QWEN38_MAX_MODEL_DESCRIPTION_SHA256)\" \
 		source/spark_qwen38_max_serving_adapter.c \
 		$(REPOSITORY_ROOT)/build/libsparkpipe_runtime.a \
 		$(REPOSITORY_ROOT)/build/libsparkpipe_model_common.a \

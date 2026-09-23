@@ -24,6 +24,9 @@
 #ifndef QWEN38_CONTRACT_SHA256
 #error "QWEN38_CONTRACT_SHA256 must identify the exact package contract"
 #endif
+#ifndef QWEN38_MAX_MODEL_DESCRIPTION_SHA256
+#error "QWEN38_MAX_MODEL_DESCRIPTION_SHA256 must identify the firmware model description the driver compiles"
+#endif
 
 #define SPARK_QWEN38_MAX_SERVING_ADAPTER_ID \
 	"spark.qwen38.serving-adapter.tp4-pp4.v1"
@@ -459,5 +462,15 @@ static SparkStatus SparkQwen38MaxServingReset(void *adapter_state,uint64_t contr
 #define SPARK_QWEN38_SERVING_ADAPTER_PREFETCH SparkQwen38MaxServingPrefetch
 #define SPARK_QWEN38_SERVING_ADAPTER_RESOLVE_PREFETCH SparkQwen38MaxServingResolvePrefetch
 #define SPARK_QWEN38_SERVING_ADAPTER_RESET SparkQwen38MaxServingReset
+
+/* The driver-request contract's model_description_sha256 must equal the
+   FIRMWARE model-description FILE's sha (the driver compile embeds
+   description->source_sha256 = sha of that file) - not the package
+   contract sha the qwen38-common default passes. This family's firmware
+   description and package contract are separate files, so the request
+   overrides through the #1166 hook (the gemma4 launches-8/9/10 lesson;
+   the remaining latent half of the attach-r15j identity gap). */
+#define SPARK_QWEN38_SERVING_ADAPTER_DRIVER_DESCRIPTION_SHA256 \
+	QWEN38_MAX_MODEL_DESCRIPTION_SHA256
 
 #include "sparkpipe/spark_qwen38_pp_serving_adapter_common.h"
