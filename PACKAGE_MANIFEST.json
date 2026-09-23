@@ -1,5 +1,5 @@
 {
-  "file_count": 3413,
+  "file_count": 3414,
   "files": [
     {
       "path": ".dsv4pro_binary_cache/spark3/bin/sparkpipe_model_batch",
@@ -5853,8 +5853,8 @@
     },
     {
       "path": "modules/minimax_resident_decode_stage/Makefile",
-      "sha256": "dafb4a6cbc130b34630288be4c0a90682d94c699479f1bede30bf54a75868902",
-      "size_bytes": 5443
+      "sha256": "c7fb5774838ba4184bfba4d7dd2138275903d3374b998cc275ed5af50093ef0e",
+      "size_bytes": 5479
     },
     {
       "path": "modules/minimax_resident_decode_stage/include/sparkpipe/spark_minimax_model.h",
@@ -10077,6 +10077,11 @@
       "size_bytes": 36643
     },
     {
+      "path": "tests/test_module_build_release_adapter_gate.py",
+      "sha256": "8d0c54a19d6348749aa731bd95212a948d743a1af98979fe04c4a82aa92557fd",
+      "size_bytes": 4711
+    },
+    {
       "path": "tests/test_module_library.c",
       "sha256": "e8862b6d528bd62e07d9999dfc6cd974ce1a47cef98efd7b6e87e10c3e727a27",
       "size_bytes": 15866
@@ -11228,8 +11233,8 @@
     },
     {
       "path": "tools/devcycle/run-minimax-family-job.sh",
-      "sha256": "f42680db70c609c825e0631ceede05b75f48cb29c3df3a2fef4382777bb64e81",
-      "size_bytes": 14634
+      "sha256": "7a5677eed79c881fe5e8f40d0510b4649bc1423b4148232dec4f1d657833a305",
+      "size_bytes": 19882
     },
     {
       "path": "tools/devcycle/show_node_context.py",
@@ -12728,8 +12733,8 @@
     },
     {
       "path": "tools/module_build_release.sh",
-      "sha256": "011581415a39c4e0a6738e6859c3c3eba18224d20a95622a003450a95f0dc1d1",
-      "size_bytes": 5256
+      "sha256": "82ef4520a16f892c0ae45a46d9c584525440201f14dbed040d3a7ecd7577e3c6",
+      "size_bytes": 5483
     },
     {
       "path": "tools/mtp_strip_audit.py",
@@ -17070,5 +17075,5 @@
   "inventory_policy": "tools/package_inventory.py:v2",
   "manifest_schema": 2,
   "package_kind": "sparkpipe_source",
-  "total_bytes": 80752411
+  "total_bytes": 80762633
 }
