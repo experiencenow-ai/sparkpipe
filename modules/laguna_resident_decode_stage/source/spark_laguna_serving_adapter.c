@@ -606,12 +606,24 @@ static SparkStatus SparkLagunaServingValidateBoundaries(
 	const SparkLagunaServingState *state,
 	const SparkModelServingSubmission *submission)
 {
-	uint64_t boundary_bytes;
-	boundary_bytes = (uint64_t)submission->row_count * SPARK_LAGUNA_RESIDENT_DECODE_STAGE_BOUNDARY_ELEMENT_COUNT * SPARK_LAGUNA_RESIDENT_DECODE_STAGE_BOUNDARY_ELEMENT_BYTES;
-	if ( submission->hidden_input_address != 0 || submission->hidden_input_bytes != 0u || submission->hidden_output_address != 0 || submission->hidden_output_bytes != 0u || submission->boundary_sideband_input_address != 0 || submission->boundary_sideband_input_bytes != 0u || submission->boundary_sideband_output_address != 0 || submission->boundary_sideband_output_bytes != 0u )
-		SPARK_FAIL(SPARK_STATUS_CAPACITY_EXCEEDED);
-	(void)boundary_bytes;
-	(void)state;
+	uint32_t pp_stage;
+	/* The hidden-transport fields are bound by the residentd route AFTER
+	   submission validation, per the rank plan the pipeline runtime
+	   derives from the descriptor's boundary geometry - the raw submit
+	   path structurally cannot carry them, so the adapter must not
+	   demand them here (the qwen38/dsv4 common-header pattern: the
+	   common validator owns pointer/bytes pairing, the runtime owns
+	   stage geometry). The 011d rank-11 abort (CAPACITY_EXCEEDED at
+	   submission validation) was this function requiring a hidden
+	   input on the second pipeline stage before the route bind filled
+	   it; the boundary_bytes placeholder never guarded a real contract.
+	   Keep laguna's own stage derivation as the hybrid TP8xPP2
+	   topology guard and reject sideband on the raw path. */
+	pp_stage = state->stage_index / SPARK_LAGUNA_SERVING_TP_DEGREE;
+	if ( pp_stage >= SPARK_LAGUNA_SERVING_PIPELINE_STAGES )
+		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
+	if ( submission->boundary_sideband_input_address != 0 || submission->boundary_sideband_input_bytes != 0u || submission->boundary_sideband_output_address != 0 || submission->boundary_sideband_output_bytes != 0u )
+		SPARK_FAIL(SPARK_STATUS_INVALID_ARGUMENT);
 	return(SPARK_STATUS_OK);
 }
 
